@@ -16,7 +16,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 # get defaults for GCC
-include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 
 # message("CMAKE_C_COMPILER = ${CMAKE_C_COMPILER}")
 # message("CMAKE_CXX_COMPILER = ${CMAKE_CXX_COMPILER}")

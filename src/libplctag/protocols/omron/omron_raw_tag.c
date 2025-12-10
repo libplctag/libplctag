@@ -97,7 +97,7 @@ static struct tag_vtable_t omron_raw_tag_vtable = {(tag_vtable_func)omron_tag_ab
 
 
 int omron_setup_raw_tag(omron_tag_p tag) {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "Starting.");
 
     /* set up raw tag. */
     tag->special_tag = 1;
@@ -107,11 +107,11 @@ int omron_setup_raw_tag(omron_tag_p tag) {
 
     tag->byte_order = &omron_njnx_tag_byte_order;
 
-    pdebug(DEBUG_DETAIL, "Setting vtable to %p.", &omron_raw_tag_vtable);
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "Setting vtable to %p.", &omron_raw_tag_vtable);
 
     tag->vtable = &omron_raw_tag_vtable;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -120,13 +120,13 @@ int omron_setup_raw_tag(omron_tag_p tag) {
 int raw_tag_tickler(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, "Starting.");
 
     rc = omron_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        pdebug(DEBUG_WARN, "Something started a read on a raw tag.  This is not supported!");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Something started a read on a raw tag.  This is not supported!");
         tag->read_in_progress = 0;
         tag->read_in_flight = 0;
 
@@ -144,16 +144,16 @@ int raw_tag_tickler(omron_tag_p tag) {
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->write_in_progress) {
-            pdebug(DEBUG_DETAIL, "Write complete.");
+            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "Write complete.");
             tag->write_complete = 1;
         }
 
-        pdebug(DEBUG_SPEW, "Done.");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, "Done.");
 
         return rc;
     }
 
-    pdebug(DEBUG_SPEW, "Done.  No operation in progress.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, "Done.  No operation in progress.");
 
     return tag->status;
 }
@@ -171,15 +171,15 @@ int raw_tag_tickler(omron_tag_p tag) {
 int raw_tag_write_start(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Starting");
 
     if(tag->read_in_progress) {
-        pdebug(DEBUG_WARN, "Raw tag found with a read in flight!");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Raw tag found with a read in flight!");
         return PLCTAG_ERR_BAD_STATUS;
     }
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_WARN, "Read or write operation already in flight!");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Read or write operation already in flight!");
         return PLCTAG_ERR_BUSY;
     }
 
@@ -193,13 +193,13 @@ int raw_tag_write_start(omron_tag_p tag) {
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to build write request!");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Unable to build write request!");
         tag->write_in_progress = 0;
 
         return rc;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -216,7 +216,7 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
     eip_cip_co_resp *cip_resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, "Starting.");
 
     /* the request reference is valid. */
 
@@ -239,11 +239,11 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
 
             mem_copy(tag->data, data_start, data_size);
         } else {
-            pdebug(DEBUG_WARN, "Unable to reallocate tag data buffer!");
+            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Unable to reallocate tag data buffer!");
             rc = PLCTAG_ERR_NO_MEM;
         }
     } else {
-        pdebug(DEBUG_WARN, "Write failed!");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Write failed!");
 
         tag->offset = 0;
     }
@@ -251,7 +251,7 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
     /* clean up the request. */
     omron_tag_abort(tag);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -268,7 +268,7 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
     eip_cip_uc_resp *cip_resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Starting.");
 
     /* the request reference is valid. */
 
@@ -291,11 +291,11 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
 
             mem_copy(tag->data, data_start, data_size);
         } else {
-            pdebug(DEBUG_WARN, "Unable to reallocate tag data buffer!");
+            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Unable to reallocate tag data buffer!");
             rc = PLCTAG_ERR_NO_MEM;
         }
     } else {
-        pdebug(DEBUG_WARN, "Write failed!");
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Write failed!");
 
         tag->offset = 0;
     }
@@ -303,7 +303,7 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
     /* clean up the request. */
     omron_tag_abort(tag);
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -315,17 +315,17 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     uint8_t *data = NULL;
     omron_request_p req = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
     rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
     if(tag->size > conn_get_max_payload(tag->conn)) {
-        pdebug(DEBUG_WARN, "Amount to write exceeds negotiated conn size %d!", conn_get_max_payload(tag->conn));
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Amount to write exceeds negotiated conn size %d!", conn_get_max_payload(tag->conn));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -372,8 +372,8 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     rc = conn_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -381,7 +381,7 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     /* save the request for later */
     tag->req = req;
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -395,12 +395,12 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     uint8_t *embed_end = NULL;
     omron_request_p req = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
     rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
@@ -491,8 +491,8 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     rc = conn_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -500,7 +500,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     /* save the request for later */
     tag->req = req;
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, "Done");
 
     return PLCTAG_STATUS_OK;
 }

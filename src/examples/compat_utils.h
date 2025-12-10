@@ -66,7 +66,7 @@ typedef pthread_cond_t compat_cond_t;
 
 #    define WIN32_LEAN_AND_MEAN
 
-#    include <Windows.h>
+#    include <windows.h>
 
 #    include <time.h>
 
@@ -134,6 +134,21 @@ extern int compat_mutex_timedlock(compat_mutex_t *mtx, const uint32_t timeout_du
 extern int compat_mutex_trylock(compat_mutex_t *mutex);
 extern int compat_mutex_unlock(compat_mutex_t *mutex);
 extern int compat_mutex_destroy(compat_mutex_t *mutex);
+
+
+/* atomic operations */
+
+typedef struct { volatile int32_t value; } compat_atomic_int32_t;
+typedef struct { volatile int64_t value; } compat_atomic_int64_t;
+
+extern int32_t compat_atomic_load_int32(compat_atomic_int32_t *atomic);
+extern void compat_atomic_store_int32(compat_atomic_int32_t *atomic, int32_t value);
+extern int32_t compat_atomic_add_int32(compat_atomic_int32_t *atomic, int32_t delta);
+extern int32_t compat_atomic_inc_int32(compat_atomic_int32_t *atomic);
+
+extern int64_t compat_atomic_load_int64(compat_atomic_int64_t *atomic);
+extern void compat_atomic_store_int64(compat_atomic_int64_t *atomic, int64_t value);
+extern int64_t compat_atomic_add_int64(compat_atomic_int64_t *atomic, int64_t delta);
 
 
 /* condition variables */

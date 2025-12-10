@@ -46,6 +46,9 @@
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 
+/* Track active session handler threads for proper shutdown synchronization */
+static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
+
 #define MAX_REQUESTS (400)
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
@@ -150,12 +153,12 @@ int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
 
     if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
     if((sessions = vector_create(25, 5)) == NULL) {
-        pdebug(DEBUG_ERROR, "Unable to create session vector!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, "Unable to create session vector!");
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -165,16 +168,20 @@ int session_startup(void) {
 
 void session_teardown(void) {
     int remaining_sessions = 0;
+    int64_t start_time = 0;
+    int64_t timeout_ms = 5000;
+    int active_count = 0;
+    int64_t elapsed = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     /* flag all open sessions for termination */
-    pdebug(DEBUG_INFO, "Marking all open sessions for termination.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Marking all open sessions for termination.");
 
     if(session_mutex) {
         critical_block(session_mutex) {
             if(sessions == NULL) {
-                pdebug(DEBUG_INFO, "Session list is already destroyed.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Session list is already destroyed.");
 
                 break;
             }
@@ -190,10 +197,10 @@ void session_teardown(void) {
     }
 
     /* flag the whole library shutting down. */
-    pdebug(DEBUG_INFO, "Setting library shutdown flag.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Setting library shutdown flag.");
 
     if(sessions && session_mutex) {
-        pdebug(DEBUG_DETAIL, "Waiting for sessions to terminate.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Waiting for sessions to terminate.");
 
         while(1) {
             critical_block(session_mutex) { remaining_sessions = vector_length(sessions); }
@@ -206,21 +213,44 @@ void session_teardown(void) {
             }
         }
 
-        pdebug(DEBUG_DETAIL, "Sessions all terminated.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Sessions all terminated.");
 
         vector_destroy(sessions);
 
         sessions = NULL;
     }
 
-    pdebug(DEBUG_DETAIL, "Destroying session mutex.");
+    /* Wait for all active session handler threads to complete.
+     * Use an atomic counter to track active handlers.
+     * Wait up to 5 seconds (5000 ms) with 20ms polling intervals.
+     */
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Waiting for session handler threads to complete.");
+    start_time = time_ms();
+
+    while((active_count = atomic_get_int32(&session_handlers_active)) > 0) {
+        elapsed = time_ms() - start_time;
+
+        if(elapsed >= timeout_ms) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Timeout waiting for %d session handler threads to complete.", active_count);
+            break;
+        }
+
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Waiting for %d session handler threads to complete. Elapsed: %" PRId64 "ms", active_count, elapsed);
+        sleep_ms(20);
+    }
+
+    if(active_count == 0) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "All session handler threads completed.");
+    }
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Destroying session mutex.");
 
     if(session_mutex) {
         mutex_destroy((mutex_p *)&session_mutex);
         session_mutex = NULL;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 }
 
 
@@ -259,13 +289,13 @@ int session_get_max_payload(ab_session_p session) {
     int result = 0;
 
     if(!session) {
-        pdebug(DEBUG_WARN, "Called with null session pointer!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Called with null session pointer!");
         return 0;
     }
 
     critical_block(session->session_mutex) { result = GET_MAX_PAYLOAD_SIZE(session); }
 
-    pdebug(DEBUG_DETAIL, "max payload size is %d bytes.", result);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "max payload size is %d bytes.", result);
 
     return result;
 }
@@ -274,7 +304,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
     int result = 0;
 
     if(!session) {
-        pdebug(DEBUG_WARN, "Called with null session pointer!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Called with null session pointer!");
         return 0;
     }
 
@@ -282,7 +312,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
         result = max_payload_size;
 
-        pdebug(DEBUG_DETAIL, "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
                session->max_payload_size, session->fo_conn_size, session->fo_ex_conn_size, max_payload_size);
 
         // Account for CPF data item overhead
@@ -294,10 +324,10 @@ int session_get_available_cip_payload_space(ab_session_p session) {
         }
     }
     if(result < 0) {
-        pdebug(DEBUG_WARN, "Available payload space is negative (%d bytes)! This should not happen!", result);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Available payload space is negative (%d bytes)! This should not happen!", result);
         result = 0;
     } else {
-        pdebug(DEBUG_INFO, "Available payload space is %d bytes.", result);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Available payload space is %d bytes.", result);
     }
 
     return result;
@@ -319,11 +349,11 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
-    pdebug(DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting");
 
     auto_disconnect_timeout_ms = attr_get_int(attribs, "auto_disconnect_ms", INT_MAX);
     if(auto_disconnect_timeout_ms != INT_MAX) {
-        pdebug(DEBUG_DETAIL, "Setting auto-disconnect after %dms.", auto_disconnect_timeout_ms);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Setting auto-disconnect after %dms.", auto_disconnect_timeout_ms);
         auto_disconnect_enabled = 1;
     }
 
@@ -343,7 +373,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
         }
 
         if(session == AB_SESSION_NULL) {
-            pdebug(DEBUG_DETAIL, "Creating new session.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Creating new session.");
 
             switch(plc_type) {
                 case AB_PLC_PLC5:
@@ -375,22 +405,22 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
                     //     connection_group_id); break;
 
                 default:
-                    pdebug(DEBUG_WARN, "Unknown PLC type %d!", plc_type);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unknown PLC type %d!", plc_type);
                     session = NULL;
                     break;
             }
 
             if(session == AB_SESSION_NULL) {
-                pdebug(DEBUG_WARN, "unable to create or find a session!");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
                 session->auto_disconnect_enabled = auto_disconnect_enabled;
                 session->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
 
                 /* see if we have an attribute set for forcing the use of the older ForwardOpen */
-                pdebug(DEBUG_DETAIL, "Passed attribute to prohibit use of extended ForwardOpen is %d.",
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Passed attribute to prohibit use of extended ForwardOpen is %d.",
                        only_use_old_forward_open);
-                pdebug(DEBUG_DETAIL, "Existing attribute to prohibit use of extended ForwardOpen is %d.",
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Existing attribute to prohibit use of extended ForwardOpen is %d.",
                        session->only_use_old_forward_open);
                 session->only_use_old_forward_open = (session->only_use_old_forward_open ? 1 : only_use_old_forward_open);
 
@@ -407,7 +437,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
                 session->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
             }
 
-            pdebug(DEBUG_DETAIL, "Reusing existing session.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Reusing existing session.");
         }
     }
 
@@ -419,7 +449,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
     if(new_session) {
         rc = session_init(session);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "rc:dec: Releasing session reference.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc:dec: Releasing session reference.");
             rc_dec(session);
             session = AB_SESSION_NULL;
         } else {
@@ -431,14 +461,14 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
     /* store it into the tag */
     *tag_session = session;
 
-    pdebug(DEBUG_DETAIL, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done");
 
     return rc;
 }
 
 
 int add_session_unsafe(ab_session_p session) {
-    pdebug(DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting");
 
     if(!session) { return PLCTAG_ERR_NULL_PTR; }
 
@@ -446,7 +476,7 @@ int add_session_unsafe(ab_session_p session) {
 
     session->on_list = 1;
 
-    pdebug(DEBUG_DETAIL, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -455,31 +485,35 @@ int add_session_unsafe(ab_session_p session) {
 int add_session(ab_session_p s) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting.");
 
     critical_block(session_mutex) { rc = add_session_unsafe(s); }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done.");
 
     return rc;
 }
 
 
 int remove_session_unsafe(ab_session_p session) {
-    pdebug(DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting");
 
     if(!session || !sessions) { return 0; }
 
     for(int i = 0; i < vector_length(sessions); i++) {
         ab_session_p tmp = vector_get(sessions, i);
 
+        /* FIXME potential ABA problem here */
         if(tmp == session) {
             vector_remove(sessions, i);
             break;
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done");
+    /* no longer on the list */
+    session->on_list = 0;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -487,13 +521,15 @@ int remove_session_unsafe(ab_session_p session) {
 int remove_session(ab_session_p s) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting.");
 
     if(s->on_list) {
         critical_block(session_mutex) { rc = remove_session_unsafe(s); }
+    } else {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Session not on list, skipping removal.");
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -506,12 +542,12 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
     if(session->failed) { return 0; }
 
     if(!str_length(host)) {
-        pdebug(DEBUG_WARN, "New session host is NULL or zero length!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "New session host is NULL or zero length!");
         return 0;
     }
 
     if(!str_length(session->host)) {
-        pdebug(DEBUG_WARN, "Session host is NULL or zero length!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Session host is NULL or zero length!");
         return 0;
     }
 
@@ -528,7 +564,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int
         ab_session_p session = vector_get(sessions, i);
 
         /* is this session in the process of destruction? */
-        pdebug(DEBUG_DETAIL, "rc_inc: Acquiring session reference.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc_inc: Acquiring session reference.");
         session = rc_inc(session);
         if(session) {
             if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)) {
@@ -546,7 +582,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int
 ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         session =
@@ -557,11 +593,11 @@ ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int 
             session->fo_ex_conn_size = 0;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create PLC/5 session!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create PLC/5 session!");
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -570,7 +606,7 @@ ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int 
 ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         session =
@@ -581,11 +617,11 @@ ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *
             session->fo_ex_conn_size = 0;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create SLC 500 session!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create SLC 500 session!");
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -594,7 +630,7 @@ ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *
 ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         session =
@@ -605,11 +641,11 @@ ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int 
             session->fo_ex_conn_size = 0;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create Micrologix session!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create Micrologix session!");
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -618,7 +654,7 @@ ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int 
 ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         session =
@@ -629,11 +665,11 @@ ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *
             session->fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create *Logix session!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create *Logix session!");
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -642,7 +678,7 @@ ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *
 ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         session = session_create_unsafe(MAX_CIP_LGX_PCCC_MSG_SIZE, true, host, path, AB_PLC_LGX_PCCC, use_connected_msg,
@@ -653,11 +689,11 @@ ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, 
             session->fo_ex_conn_size = 0;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create Micrologix session!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create Micrologix session!");
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -666,7 +702,7 @@ ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, 
 ab_session_p create_micro800_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         session = session_create_unsafe(MAX_CIP_MICRO800_MSG_SIZE_EX, true, host, path, AB_PLC_MICRO800, use_connected_msg,
@@ -677,11 +713,11 @@ ab_session_p create_micro800_session_unsafe(const char *host, const char *path, 
             session->fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create Micrologix session!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create Micro800 session!");
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -707,12 +743,12 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     int is_dhp = 0;
     uint16_t dhp_dest = 0;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
     if(*use_connected_msg) {
-        pdebug(DEBUG_DETAIL, "Session should use connected messaging.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Session should use connected messaging.");
     } else {
-        pdebug(DEBUG_DETAIL, "Session should not use connected messaging.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Session should not use connected messaging.");
     }
 
     /* add in space for the data buffer. */
@@ -740,7 +776,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     /* encode the path */
     rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
         return NULL;
     }
 
@@ -748,15 +784,14 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     total_allocation_size += (size_t)tmp_conn_path_size;
 
     /* allocate the session struct and the buffer in the same allocation. */
-    pdebug(
-        DEBUG_DETAIL,
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL,
         "Allocating %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
         total_allocation_size, (data_buffer_is_static ? data_buffer_capacity : 0), str_length(host) + 1,
         (path_offset == 0 ? 0 : str_length(path) + 1), tmp_conn_path_size);
 
     session = (ab_session_p)rc_alloc((int)total_allocation_size, session_destroy);
     if(!session) {
-        pdebug(DEBUG_WARN, "Error allocating new session!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error allocating new session!");
         return AB_SESSION_NULL;
     }
 
@@ -772,8 +807,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     } else {
         session->data = (uint8_t *)mem_alloc((int)data_buffer_capacity);
         if(session->data == NULL) {
-            pdebug(DEBUG_WARN, "Unable to allocate the connection data buffer!");
-            pdebug(DEBUG_DETAIL, "rc:dec: Releasing session reference.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to allocate the connection data buffer!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc:dec: Releasing session reference.");
             return rc_dec(session);
         }
     }
@@ -803,8 +838,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 
     session->requests = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
     if(!session->requests) {
-        pdebug(DEBUG_WARN, "Unable to allocate vector for requests!");
-        pdebug(DEBUG_DETAIL, "rc:dec: Releasing session reference.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to allocate vector for requests!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc:dec: Releasing session reference.");
         rc_dec(session);
         return NULL;
     }
@@ -821,7 +856,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     session->is_dhp = is_dhp;
     session->dhp_dest = dhp_dest;
 
-    pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
     session->connection_group_id = connection_group_id;
 
     /*
@@ -839,7 +874,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     /* add the new session to the list. */
     add_session_unsafe(session);
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done");
 
     return session;
 }
@@ -854,29 +889,29 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 int session_init(ab_session_p session) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     /* create the session mutex. */
     if((rc = mutex_create(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create session mutex!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create session mutex!");
         session->failed = 1;
         return rc;
     }
 
     /* create the session condition variable. */
     if((rc = cond_create(&(session->session_wait_cond))) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create session condition var!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create session condition var!");
         session->failed = 1;
         return rc;
     }
 
     if((rc = thread_create((thread_p *)&(session->handler_thread), session_handler, 32 * 1024, session)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create session thread!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create session thread!");
         session->failed = 1;
         return rc;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -893,24 +928,24 @@ int session_open_socket(ab_session_p session) {
     char **server_port = NULL;
     int port = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create socket for session!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to create socket for session!");
         return rc;
     }
 
     server_port = str_split(session->host, ":");
     if(!server_port) {
-        pdebug(DEBUG_WARN, "Unable to split server and port string!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to split server and port string!");
         return PLCTAG_ERR_BAD_CONFIG;
     }
 
     if(server_port[0] == NULL) {
-        pdebug(DEBUG_WARN, "Server string is malformed or empty!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Server string is malformed or empty!");
         mem_free(server_port);
         return PLCTAG_ERR_BAD_CONFIG;
     }
@@ -918,29 +953,29 @@ int session_open_socket(ab_session_p session) {
     if(server_port[1] != NULL) {
         rc = str_to_int(server_port[1], &port);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to extract port number from server string \"%s\"!", session->host);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to extract port number from server string \"%s\"!", session->host);
             mem_free(server_port);
             return PLCTAG_ERR_BAD_CONFIG;
         }
 
-        pdebug(DEBUG_DETAIL, "Using special port %d.", port);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Using special port %d.", port);
     } else {
         port = AB_EIP_DEFAULT_PORT;
 
-        pdebug(DEBUG_DETAIL, "Using default port %d.", port);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Using default port %d.", port);
     }
 
     rc = socket_connect_tcp_start(session->sock, server_port[0], port);
 
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_WARN, "Unable to connect socket for session!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to connect socket for session!");
         mem_free(server_port);
         return rc;
     }
 
     if(server_port) { mem_free(server_port); }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -951,7 +986,7 @@ int session_register(ab_session_p session) {
     eip_encap *resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     /*
      * clear the session data.
@@ -987,14 +1022,14 @@ int session_register(ab_session_p session) {
 
     rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error sending session registration request %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error sending session registration request %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
     /* get the response from the gateway */
     rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error receiving session registration response %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error receiving session registration response %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1003,12 +1038,12 @@ int session_register(ab_session_p session) {
 
     /* check the response status */
     if(le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
-        pdebug(DEBUG_WARN, "EIP unexpected response packet type: %d!", resp->encap_command);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "EIP unexpected response packet type: %d!", resp->encap_command);
         return PLCTAG_ERR_BAD_DATA;
     }
 
     if(le2h32(resp->encap_status) != AB_EIP_OK) {
-        pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(resp->encap_status));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(resp->encap_status));
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -1018,7 +1053,7 @@ int session_register(ab_session_p session) {
      */
     session->session_handle = le2h32(resp->encap_session_handle);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1027,18 +1062,18 @@ int session_register(ab_session_p session) {
 int session_unregister(ab_session_p session) {
     (void)session;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     /* nothing to do, perhaps. */
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 int session_close_socket(ab_session_p session) {
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     if(session->sock) {
         socket_close(session->sock);
@@ -1046,7 +1081,7 @@ int session_close_socket(ab_session_p session) {
         session->sock = NULL;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1055,10 +1090,10 @@ int session_close_socket(ab_session_p session) {
 void session_destroy(void *session_arg) {
     ab_session_p session = session_arg;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     if(!session) {
-        pdebug(DEBUG_WARN, "Session ptr is null!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Session ptr is null!");
 
         return;
     }
@@ -1066,7 +1101,7 @@ void session_destroy(void *session_arg) {
     /* so remove the session from the list so no one else can reference it. */
     remove_session(session);
 
-    pdebug(DEBUG_INFO, "Session sent %" PRId64 " packets.", session->packet_count);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Session sent %" PRId64 " packets.", session->packet_count);
 
     /* terminate the session thread first. */
     session->terminating = 1;
@@ -1075,7 +1110,7 @@ void session_destroy(void *session_arg) {
     if(session->session_wait_cond) { cond_signal(session->session_wait_cond); }
 
     /* get rid of the handler thread. */
-    pdebug(DEBUG_DETAIL, "Destroying session thread.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Destroying session thread.");
     if(session->handler_thread) {
         /* this cannot be guarded by the mutex since the session thread also locks it. */
         thread_join(session->handler_thread);
@@ -1110,7 +1145,7 @@ void session_destroy(void *session_arg) {
         /* release all the requests that are in the queue. */
         if(session->requests) {
             for(int i = 0; i < vector_length(session->requests); i++) {
-                pdebug(DEBUG_DETAIL, "rc_dec: Releasing request reference.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc_dec: Releasing request reference.");
                 rc_dec(vector_get(session->requests, i));
             }
 
@@ -1120,14 +1155,14 @@ void session_destroy(void *session_arg) {
     }
 
     /* we are done with the condition variable, finally destroy it. */
-    pdebug(DEBUG_DETAIL, "Destroying session condition variable.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Destroying session condition variable.");
     if(session->session_wait_cond) {
         cond_destroy(&(session->session_wait_cond));
         session->session_wait_cond = NULL;
     }
 
     /* we are done with the mutex, finally destroy it. */
-    pdebug(DEBUG_DETAIL, "Destroying session mutex.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Destroying session mutex.");
     if(session->session_mutex) {
         mutex_destroy(&(session->session_mutex));
         session->session_mutex = NULL;
@@ -1137,7 +1172,7 @@ void session_destroy(void *session_arg) {
 
     /* these are all allocated in one large block. */
 
-    // pdebug(DEBUG_DETAIL, "Cleaning up allocated memory for paths and host name.");
+    // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Cleaning up allocated memory for paths and host name.");
     // if(session->conn_path) {
     //     mem_free(session->conn_path);
     //     session->conn_path = NULL;
@@ -1153,7 +1188,7 @@ void session_destroy(void *session_arg) {
     //     session->host = NULL;
     // }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return;
 }
@@ -1167,19 +1202,19 @@ void session_destroy(void *session_arg) {
 int session_add_request(ab_session_p session, ab_request_p req) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting. session=%p, req=%p", session, req);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting. session=%p, req=%p", session, req);
 
     critical_block(session->session_mutex) {
         if(!session) {
-            pdebug(DEBUG_WARN, "Session is null!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Session is null!");
             return PLCTAG_ERR_NULL_PTR;
         }
 
-        pdebug(DEBUG_DETAIL, "rc_inc: Acquiring request reference.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc_inc: Acquiring request reference.");
         req = rc_inc(req);
 
         if(!req) {
-            pdebug(DEBUG_WARN, "Request is either null or in the process of being deleted.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Request is either null or in the process of being deleted.");
             return PLCTAG_ERR_NULL_PTR;
         }
 
@@ -1190,7 +1225,7 @@ int session_add_request(ab_session_p session, ab_request_p req) {
     /* wake up the session thread because we added something to process. */
     cond_signal(session->session_wait_cond);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -1204,7 +1239,7 @@ int64_t calc_retry_time(unsigned int retry_count) {
 
     result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
 
-    pdebug(DEBUG_DETAIL, "Retry count %u for retry time delay of %" PRId64 "ms.", retry_count, result);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Retry count %u for retry time delay of %" PRId64 "ms.", retry_count, result);
 
     return result;
 }
@@ -1244,9 +1279,12 @@ THREAD_FUNC(session_handler) {
     int auto_disconnect = 0;
 
 
-    pdebug(DEBUG_INFO, "Starting thread for session %p", session);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting thread for session %p", session);
 
-    while(!session->terminating && !atomic_get_bool(&library_terminating)) {
+    /* Increment the count of active session handlers */
+    atomic_add_int32(&session_handlers_active, 1);
+
+    while(!session->terminating && atomic_get_bool(&lib_active)) {
         now = time_ms();
 
         /* how long should we wait if nothing wakes us? */
@@ -1259,30 +1297,30 @@ THREAD_FUNC(session_handler) {
          * This keeps the overall memory usage lower.
          */
 
-        pdebug(DEBUG_SPEW, "Critical block.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Critical block.");
         critical_block(session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
         switch(state) {
             case SESSION_OPEN_SOCKET_START:
-                pdebug(DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_START state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_START state.");
 
                 /* we must connect to the gateway*/
                 rc = session_open_socket(session);
                 if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                    pdebug(DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_CLOSE_SOCKET;
                 } else {
                     if(rc == PLCTAG_STATUS_OK) {
                         /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
                         auto_disconnect_time = now + SESSION_DISCONNECT_TIMEOUT;
 
-                        pdebug(DEBUG_DETAIL, "Connect complete immediately, going to state SESSION_REGISTER.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Connect complete immediately, going to state SESSION_REGISTER.");
 
                         state = SESSION_REGISTER;
 
                         retry_count = 0;
                     } else {
-                        pdebug(DEBUG_DETAIL, "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
 
                         state = SESSION_OPEN_SOCKET_WAIT;
                     }
@@ -1294,24 +1332,24 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_OPEN_SOCKET_WAIT:
-                pdebug(DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_WAIT state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_WAIT state.");
 
                 /* we must connect to the gateway */
                 rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
                 if(rc == PLCTAG_STATUS_OK) {
                     /* connected! */
-                    pdebug(DEBUG_INFO, "Socket connection succeeded.");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Socket connection succeeded.");
 
                     /* calculate the disconnect time. */
                     auto_disconnect_time = now + SESSION_DISCONNECT_TIMEOUT;
 
                     state = SESSION_REGISTER;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
-                    pdebug(DEBUG_DETAIL, "Still waiting for connection to succeed.");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Still waiting for connection to succeed.");
 
                     /* don't wait more.  The TCP connect check will wait in select(). */
                 } else {
-                    pdebug(DEBUG_WARN, "Session connect failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Session connect failed %s!", plc_tag_decode_error(rc));
 
                     state = SESSION_CLOSE_SOCKET;
                 }
@@ -1322,10 +1360,10 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_REGISTER:
-                pdebug(DEBUG_DETAIL, "in SESSION_REGISTER state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_REGISTER state.");
 
                 if((rc = session_register(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "session registration failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "session registration failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_CLOSE_SOCKET;
                 } else {
                     retry_wait_ms = RETRY_WAIT_INITIAL_MS;
@@ -1340,61 +1378,61 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_SEND_FORWARD_OPEN:
-                pdebug(DEBUG_DETAIL, "in SESSION_SEND_FORWARD_OPEN state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_SEND_FORWARD_OPEN state.");
 
                 if((rc = send_forward_open_request(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_UNREGISTER;
                 } else {
                     retry_wait_ms = RETRY_WAIT_INITIAL_MS;
 
-                    pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
                     state = SESSION_RECEIVE_FORWARD_OPEN;
                 }
                 cond_signal(session->session_wait_cond);
                 break;
 
             case SESSION_RECEIVE_FORWARD_OPEN:
-                pdebug(DEBUG_DETAIL, "in SESSION_RECEIVE_FORWARD_OPEN state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_RECEIVE_FORWARD_OPEN state.");
 
                 if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
                     if(rc == PLCTAG_ERR_DUPLICATE) {
-                        pdebug(DEBUG_DETAIL, "Duplicate connection error received, trying again with different connection ID.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Duplicate connection error received, trying again with different connection ID.");
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else if(rc == PLCTAG_ERR_TOO_LARGE) {
-                        pdebug(DEBUG_DETAIL, "Requested packet size too large, retrying with smaller size.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Requested packet size too large, retrying with smaller size.");
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else if(rc == PLCTAG_ERR_UNSUPPORTED && !session->only_use_old_forward_open) {
                         /* if we got an unsupported error and we are trying with ForwardOpenEx, then try the old command. */
-                        pdebug(DEBUG_DETAIL, "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
                         session->only_use_old_forward_open = 1;
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else {
-                        pdebug(DEBUG_WARN, "Receive Forward Open failed %s!", plc_tag_decode_error(rc));
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Receive Forward Open failed %s!", plc_tag_decode_error(rc));
                         state = SESSION_UNREGISTER;
                     }
                 } else {
                     retry_wait_ms = RETRY_WAIT_INITIAL_MS;
-                    pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                     state = SESSION_IDLE;
                 }
                 cond_signal(session->session_wait_cond);
                 break;
 
             case SESSION_IDLE:
-                pdebug(DEBUG_DETAIL, "in SESSION_IDLE state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_IDLE state.");
 
                 /* if there is work to do, make sure we do not disconnect. */
                 critical_block(session->session_mutex) {
                     int num_reqs = vector_length(session->requests);
                     if(num_reqs > 0) {
-                        pdebug(DEBUG_DETAIL, "There are %d requests pending before cleanup and sending.", num_reqs);
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "There are %d requests pending before cleanup and sending.", num_reqs);
                         auto_disconnect_time = now + SESSION_DISCONNECT_TIMEOUT;
                     }
                 }
 
                 if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Error while processing requests %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error while processing requests %s!", plc_tag_decode_error(rc));
                     if(session->use_connected_msg) {
                         state = SESSION_DISCONNECT;
                     } else {
@@ -1406,7 +1444,7 @@ THREAD_FUNC(session_handler) {
 
                 /* check if we should disconnect */
                 if(auto_disconnect_time < now) {
-                    pdebug(DEBUG_DETAIL, "Disconnecting due to inactivity.");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Disconnecting due to inactivity.");
 
                     auto_disconnect = 1;
 
@@ -1422,7 +1460,7 @@ THREAD_FUNC(session_handler) {
                 critical_block(session->session_mutex) {
                     int num_reqs = vector_length(session->requests);
                     if(num_reqs > 0) {
-                        pdebug(DEBUG_DETAIL, "There are %d requests still pending after abort purge and sending.", num_reqs);
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "There are %d requests still pending after abort purge and sending.", num_reqs);
                         cond_signal(session->session_wait_cond);
                     }
                 }
@@ -1430,10 +1468,10 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_DISCONNECT:
-                pdebug(DEBUG_DETAIL, "in SESSION_DISCONNECT state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_DISCONNECT state.");
 
                 if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Forward close failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Forward close failed %s!", plc_tag_decode_error(rc));
                 }
 
                 state = SESSION_UNREGISTER;
@@ -1441,10 +1479,10 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_UNREGISTER:
-                pdebug(DEBUG_DETAIL, "in SESSION_UNREGISTER state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_UNREGISTER state.");
 
                 if((rc = session_unregister(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Unregistering session failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unregistering session failed %s!", plc_tag_decode_error(rc));
                 }
 
                 state = SESSION_CLOSE_SOCKET;
@@ -1452,10 +1490,10 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_CLOSE_SOCKET:
-                pdebug(DEBUG_DETAIL, "in SESSION_CLOSE_SOCKET state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_CLOSE_SOCKET state.");
 
                 if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Closing session socket failed %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Closing session socket failed %s!", plc_tag_decode_error(rc));
                 }
 
                 if(auto_disconnect) {
@@ -1467,13 +1505,13 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_START_RETRY:
-                pdebug(DEBUG_DETAIL, "in SESSION_START_RETRY state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_START_RETRY state.");
 
                 /* FIXME - make this a tag attribute. */
                 timeout_time = now + calc_retry_time(retry_count);
                 retry_count++;
 
-                pdebug(DEBUG_DETAIL, "Waiting %dms before trying to reconnect.", (int)(retry_wait_ms));
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Waiting %dms before trying to reconnect.", (int)(retry_wait_ms));
 
                 /* start waiting. */
                 state = SESSION_WAIT_RETRY;
@@ -1482,29 +1520,29 @@ THREAD_FUNC(session_handler) {
                 break;
 
             case SESSION_WAIT_RETRY:
-                pdebug(DEBUG_DETAIL, "in SESSION_WAIT_RETRY state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_WAIT_RETRY state.");
 
                 if(timeout_time < now) {
-                    pdebug(DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET_START.");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET_START.");
                     state = SESSION_OPEN_SOCKET_START;
                     cond_signal(session->session_wait_cond);
                 } else {
-                    pdebug(DEBUG_DETAIL, "Wait not complete, still %dms to go.", (int)(timeout_time - now));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Wait not complete, still %dms to go.", (int)(timeout_time - now));
                 }
 
                 break;
 
             case SESSION_WAIT_RECONNECT:
                 /* wait for at least one request to queue before reconnecting. */
-                pdebug(DEBUG_DETAIL, "in SESSION_WAIT_RECONNECT state.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_WAIT_RECONNECT state.");
 
                 auto_disconnect = 0;
 
                 /* if there is work to do, reconnect.. */
-                pdebug(DEBUG_SPEW, "Critical block.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Critical block.");
                 critical_block(session->session_mutex) {
                     if(vector_length(session->requests) > 0) {
-                        pdebug(DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
 
                         state = SESSION_OPEN_SOCKET_START;
                         cond_signal(session->session_wait_cond);
@@ -1515,7 +1553,7 @@ THREAD_FUNC(session_handler) {
 
 
             default:
-                pdebug(DEBUG_ERROR, "Unknown state %d!", state);
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, "Unknown state %d!", state);
 
                 /* FIXME - this logic is not complete.  We might be here without
                  * a connected session or a registered session. */
@@ -1537,7 +1575,7 @@ THREAD_FUNC(session_handler) {
             int64_t time_left = wait_until_time - now;
 
             if(time_left > 0) {
-                pdebug(DEBUG_DETAIL, "Waiting up to %" PRId64 "ms for something to happen.", time_left);
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Waiting up to %" PRId64 "ms for something to happen.", time_left);
                 cond_wait(session->session_wait_cond, (int)time_left);
             }
         }
@@ -1547,6 +1585,9 @@ THREAD_FUNC(session_handler) {
      * One last time before we exit.
      */
     critical_block(session->session_mutex) { purge_aborted_requests_unsafe(session); }
+
+    /* Decrement the count of active session handlers */
+    atomic_add_int32(&session_handlers_active, -1);
 
     THREAD_RETURN(0);
 }
@@ -1559,7 +1600,7 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
     int purge_count = 0;
     ab_request_p request = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Starting.");
 
     /* remove the aborted requests. */
     for(int i = 0; i < vector_length(session->requests); i++) {
@@ -1575,14 +1616,14 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
             /* set the debug tag to the owning tag. */
             debug_set_tag_id(request->tag_id);
 
-            pdebug(DEBUG_DETAIL, "Session thread releasing aborted request %p.", request);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Session thread releasing aborted request %p.", request);
 
             request->status = PLCTAG_ERR_ABORT;
             request->request_size = 0;
             request->resp_received = 1;
 
             /* release our hold on it. */
-            pdebug(DEBUG_DETAIL, "rc_dec: Releasing request reference.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc_dec: Releasing request reference.");
             rc_dec(request);
 
             /* vector size has changed, back up one. */
@@ -1590,9 +1631,9 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
         }
     }
 
-    if(purge_count > 0) { pdebug(DEBUG_DETAIL, "Removed %d aborted requests.", purge_count); }
+    if(purge_count > 0) { pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Removed %d aborted requests.", purge_count); }
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Done.");
 
     return purge_count;
 }
@@ -1607,14 +1648,14 @@ int process_requests(ab_session_p session) {
 
     debug_set_tag_id(0);
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Starting.");
 
     if(!session) {
-        pdebug(DEBUG_WARN, "Null session pointer!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Null session pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    pdebug(DEBUG_SPEW, "Checking for requests to process.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Checking for requests to process.");
 
     rc = PLCTAG_STATUS_OK;
     request = NULL;
@@ -1625,10 +1666,10 @@ int process_requests(ab_session_p session) {
     critical_block(session->session_mutex) {
         int available_payload = session_get_available_cip_payload_space(session);
 
-        pdebug(DEBUG_DETAIL, "Available payload space is %d bytes.", available_payload);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Available payload space is %d bytes.", available_payload);
 
         // FIXME - no logging in a mutex!
-        // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
+        // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
         /* is there anything to do? */
         if(vector_length(session->requests)) {
@@ -1703,11 +1744,11 @@ int process_requests(ab_session_p session) {
                     }
                     /* If first request is not packable, we stop here (only the first request is packed) */
                 } else {
-                    pdebug(DEBUG_WARN, "First request size %d exceeds remaining space %d, cannot process any requests.",
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "First request size %d exceeds remaining space %d, cannot process any requests.",
                            first_request_size, remaining_space);
                 }
             } else {
-                pdebug(DEBUG_DETAIL, "All requests in queue were aborted, nothing to do.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "All requests in queue were aborted, nothing to do.");
             }
         }
     }
@@ -1717,32 +1758,32 @@ int process_requests(ab_session_p session) {
 
     if(num_bundled_requests > 0) {
 
-        pdebug(DEBUG_INFO, "%d requests to process.", num_bundled_requests);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "%d requests to process.", num_bundled_requests);
 
         do {
             /* copy and pack the requests into the session buffer. */
             /* FIXME - pack_requests() only returns PLCTAG_STATUS_OK */
             rc = pack_requests(session, bundled_requests, num_bundled_requests);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error while packing requests, %s!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error while packing requests, %s!", plc_tag_decode_error(rc));
                 break;
             }
 
             /* fill in all the necessary parts to the request. */
             if((rc = prepare_request(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to prepare request, %s!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to prepare request, %s!", plc_tag_decode_error(rc));
                 break;
             }
 
             /* send the request */
             if((rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error sending packet %s!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error sending packet %s!", plc_tag_decode_error(rc));
                 break;
             }
 
             /* wait for the response */
             if((rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error receiving packet response %s!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error receiving packet response %s!", plc_tag_decode_error(rc));
                 break;
             }
 
@@ -1762,12 +1803,12 @@ int process_requests(ab_session_p session) {
 
                     multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
 
-                    pdebug(DEBUG_INFO, "Received unconnected packet with session sequence ID %llx", resp->encap_sender_context);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Received unconnected packet with session sequence ID %llx", resp->encap_sender_context);
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
                         rc = decode_cip_error_code(&(resp->status));
-                        pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
 
@@ -1776,7 +1817,7 @@ int process_requests(ab_session_p session) {
 
                     /* check the passed UDI data item size against what we really got. */
                     if((size_t)udi_item_length != response_size) {
-                        pdebug(DEBUG_WARN,
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN,
                                "Incorrectly constructed response! UDI data length field is %zu but actual size is %zu!",
                                (size_t)udi_item_length, response_size);
 
@@ -1791,25 +1832,27 @@ int process_requests(ab_session_p session) {
 
                     multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
 
-                    pdebug(DEBUG_INFO, "Received connected packet with connection ID %x and sequence ID %u(%x)",
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Received connected packet with connection ID %x and sequence ID %u(%x)",
                            le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Response status=%u", resp->status);
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Received CIP error %s (%s).", decode_cip_error_long(&resp->status), decode_cip_error_short(&resp->status));
                         rc = decode_cip_error_code(&(resp->status));
-                        pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
 
                     response_overhead = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - session->data);
                     response_size = (size_t)session->data_size - response_overhead;
 
-                    pdebug(DEBUG_DETAIL, "response_overhead=%zu", response_overhead);
-                    pdebug(DEBUG_DETAIL, "response_size=%zu", response_size);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "response_overhead=%zu", response_overhead);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "response_size=%zu", response_size);
 
                     /* check the passed CDI data item size against what we really got. */
                     if((size_t)cdi_item_length != response_size) {
-                        pdebug(DEBUG_WARN,
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN,
                                "Incorrectly constructed response! CDI data length field is %zu but actual size is %zu!",
                                (size_t)cdi_item_length, response_size);
 
@@ -1817,7 +1860,7 @@ int process_requests(ab_session_p session) {
                         break;
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Unexpected EIP packet type, %04x!",
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unexpected EIP packet type, %04x!",
                            le2h16(((eip_encap *)(session->data))->encap_command));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
@@ -1827,22 +1870,22 @@ int process_requests(ab_session_p session) {
                 if(le2h16(multi_resp->request_count) == num_bundled_requests) {
                     size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - session->data);
 
-                    pdebug(DEBUG_DETAIL, "offset_base=%zu", offset_base);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "offset_base=%zu", offset_base);
 
                     /* check all the offsets */
                     for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
                         size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
 
-                        pdebug(DEBUG_DETAIL, "Response %d starts at byte offset %zu", resp_offset);
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Response %d starts at byte offset %zu", resp_offset);
 
                         if(resp_offset >= (size_t)session->data_size) {
-                            pdebug(DEBUG_WARN, "Response %d has offset %zu which is outside the session data!", resp_offset);
+                            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Response %d has offset %zu which is outside the session data!", resp_offset);
                             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
                             break;
                         }
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
                            (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
@@ -1852,22 +1895,22 @@ int process_requests(ab_session_p session) {
                 if(le2h16(multi_resp->request_count) == num_bundled_requests) {
                     size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - session->data);
 
-                    pdebug(DEBUG_DETAIL, "offset_base=%zu", offset_base);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "offset_base=%zu", offset_base);
 
                     /* check all the offsets */
                     for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
                         size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
 
-                        pdebug(DEBUG_DETAIL, "Response %d starts at byte offset %zu", resp_offset);
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Response %d starts at byte offset %zu", resp_offset);
 
                         if(resp_offset >= (size_t)session->data_size) {
-                            pdebug(DEBUG_WARN, "Response %d has offset %zu which is outside the session data!", resp_offset);
+                            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Response %d has offset %zu which is outside the session data!", resp_offset);
                             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
                             break;
                         }
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
                            (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
@@ -1875,7 +1918,7 @@ int process_requests(ab_session_p session) {
             }
 
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Got error %s when processing incoming response(s)!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Got error %s when processing incoming response(s)!", plc_tag_decode_error(rc));
                 break;
             }
 
@@ -1885,12 +1928,12 @@ int process_requests(ab_session_p session) {
 
                 rc = unpack_response(session, bundled_requests[i], i);
                 if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Unable to unpack response!");
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to unpack response!");
                     break;
                 }
 
                 /* release our reference */
-                pdebug(DEBUG_DETAIL, "rc_dec: Releasing request reference.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "rc_dec: Releasing request reference.");
                 bundled_requests[i] = rc_dec(bundled_requests[i]);
             }
 
@@ -1899,9 +1942,9 @@ int process_requests(ab_session_p session) {
 
         /* problem? push the requests back on the queue. */
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error sending or receiving requests!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error sending or receiving requests!");
 
-            pdebug(DEBUG_INFO, "Pushing %d requests back into the queue.", num_bundled_requests);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Pushing %d requests back into the queue.", num_bundled_requests);
 
             for(int i = num_bundled_requests - 1; i >= 0; i--) {
                 if(bundled_requests[i]) { vector_insert(session->requests, 0, bundled_requests[i]); }
@@ -1914,7 +1957,7 @@ int process_requests(ab_session_p session) {
 
     debug_set_tag_id(0);
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1928,7 +1971,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
     uint8_t *pkt_end = NULL;
     int new_eip_len = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     /* clear out the request data. */
     mem_set(request->data, 0, request->request_capacity);
@@ -1937,32 +1980,32 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
     if(packed_resp->reply_service != (AB_EIP_CMD_CIP_MULTI | AB_EIP_CMD_CIP_OK)) {
         /* copy the data back into the request buffer. */
         new_eip_len = (int)session->data_size;
-        pdebug(DEBUG_INFO, "Got single response packet.  Copying %d bytes unchanged.", new_eip_len);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Got single response packet.  Copying %d bytes unchanged.", new_eip_len);
 
         if(new_eip_len > request->request_capacity) {
             int request_capacity = 0;
 
-            pdebug(DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->session_mutex) {
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
                 // FIXME - no logging in a mutex!
-                // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+                // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
 
                 request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
             if(new_eip_len > request_capacity) {
-                pdebug(DEBUG_WARN, "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len,
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len,
                        request_capacity);
                 return PLCTAG_ERR_TOO_LARGE;
             }
 
             rc = session_request_increase_buffer(request, request_capacity);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to increase request buffer size to %d bytes!", request_capacity);
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to increase request buffer size to %d bytes!", request_capacity);
                 return rc;
             }
         }
@@ -1974,9 +2017,9 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
         int pkt_len = 0;
 
         /* this is a packed response. */
-        pdebug(DEBUG_INFO, "Got multiple response packet, subpacket %d", sub_packet);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Got multiple response packet, subpacket %d", sub_packet);
 
-        pdebug(DEBUG_INFO, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[sub_packet]));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[sub_packet]));
 
         pkt_start = ((uint8_t *)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet]));
 
@@ -1995,27 +2038,27 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
         if(new_eip_len > request->request_capacity) {
             int request_capacity = 0;
 
-            pdebug(DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->session_mutex) {
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
                 // FIXME: no logging in a mutex!
-                // pdebug(DEBUG_DETAIL, "max payload size %d", max_payload_size);
+                // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "max payload size %d", max_payload_size);
 
                 request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
             if(new_eip_len > request_capacity) {
-                pdebug(DEBUG_WARN, "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len,
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len,
                        request_capacity);
                 return PLCTAG_ERR_TOO_LARGE;
             }
 
             rc = session_request_increase_buffer(request, request_capacity);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to increase request buffer size to %d bytes!", request_capacity);
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to increase request buffer size to %d bytes!", request_capacity);
                 return rc;
             }
         }
@@ -2039,8 +2082,8 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
         unpacked_resp->encap_length = h2le16((uint16_t)(new_eip_len - (uint16_t)sizeof(eip_encap)));
     }
 
-    pdebug(DEBUG_INFO, "Unpacked packet:");
-    pdebug_dump_bytes(DEBUG_INFO, request->data, new_eip_len);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Unpacked packet:");
+    pdebug_dump_bytes(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, request->data, new_eip_len);
 
     /* notify the reading thread that the request is ready */
     spin_block(&request->lock) {
@@ -2049,7 +2092,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
         request->resp_received = 1;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -2059,10 +2102,10 @@ int get_payload_size(ab_request_p request) {
     int request_data_size = 0;
     eip_encap *header = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting.");
 
     if(!request || !request->data || request->request_size <= 0) {
-        pdebug(DEBUG_WARN, "Null request pointer or empty request data!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Null request pointer or empty request data!");
         return INT_MAX;
     }
 
@@ -2079,29 +2122,29 @@ int get_payload_size(ab_request_p request) {
 
         /* get length of embedded command */
         uint16_t cip_packet_size = le2h16(uc_req->cpf_udi_item_length);
-        pdebug(DEBUG_DETAIL, "Unconnected request packet size is %d bytes.", cip_packet_size);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Unconnected request packet size is %d bytes.", cip_packet_size);
 
         request_data_size = (int)le2h16(uc_req->cpf_udi_item_length);
 
-        pdebug(DEBUG_DETAIL, "Unconnected request data size is %d bytes.", request_data_size);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Unconnected request data size is %d bytes.", request_data_size);
 
         /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
         ptrdiff_t cal_req_size = (ptrdiff_t)(request->request_size) - (((uint8_t *)(&uc_req->cpf_udi_item_length) + 2) - request->data);
-        pdebug(DEBUG_DETAIL, "Calculated request size is %td bytes.", cal_req_size);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Calculated request size is %td bytes.", cal_req_size);
 
         if(cal_req_size < 0) {
-            pdebug(DEBUG_WARN, "Calculated request size is negative, something is wrong!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Calculated request size is negative, something is wrong!");
             request_data_size = 0;
         } else if((uint16_t)cal_req_size != request_data_size) {
-            pdebug(DEBUG_WARN, "Calculated request size %td does not match the request data size %d!",
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Calculated request size %td does not match the request data size %d!",
                    cal_req_size, request_data_size);
         }
     } else {
-        pdebug(DEBUG_DETAIL, "Not a supported type EIP packet type %d to get the payload size.", le2h16(header->encap_command));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Not a supported type EIP packet type %d to get the payload size.", le2h16(header->encap_command));
         request_data_size = INT_MAX;
     }
 
-    pdebug(DEBUG_DETAIL, "Done, payload size: %d bytes.", request_data_size);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done, payload size: %d bytes.", request_data_size);
 
     return request_data_size;
 }
@@ -2119,7 +2162,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     uint8_t *first_pkt_data = NULL;
     uint8_t *next_pkt_data = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     debug_set_tag_id(requests[0]->tag_id);
 
@@ -2129,7 +2172,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 
     /* special case the case where there is just one request. */
     if(num_requests == 1) {
-        pdebug(DEBUG_INFO, "Only one request, so done.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Only one request, so done.");
 
         debug_set_tag_id(0);
 
@@ -2141,7 +2184,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     header_size =
         (int)(sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests)); /* offsets for each request. */
 
-    pdebug(DEBUG_INFO, "header size %d", header_size);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "header size %d", header_size);
 
     packed_req = (eip_cip_co_req *)(session->data);
 
@@ -2149,7 +2192,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     pkt_start = (uint8_t *)(&packed_req->cpf_conn_seq_num) + sizeof(packed_req->cpf_conn_seq_num);
     pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
 
-    pdebug(DEBUG_INFO, "packet 0 is of length %d.", pkt_len);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "packet 0 is of length %d.", pkt_len);
 
     /* point to where we want the current packet to start. */
     first_pkt_data = pkt_start + header_size;
@@ -2188,7 +2231,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
         pkt_start = (uint8_t *)(&new_req->cpf_conn_seq_num) + sizeof(new_req->cpf_conn_seq_num);
         pkt_len = (int)le2h16(new_req->cpf_cdi_item_length) - (int)sizeof(new_req->cpf_conn_seq_num);
 
-        pdebug(DEBUG_INFO, "packet %d is of length %d.", i, pkt_len);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "packet %d is of length %d.", i, pkt_len);
 
         /* copy the request into the session buffer. */
         mem_copy(next_pkt_data, pkt_start, pkt_len);
@@ -2209,7 +2252,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 
     debug_set_tag_id(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -2219,14 +2262,14 @@ int prepare_request(ab_session_p session) {
     eip_encap *encap = NULL;
     int payload_size = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     encap = (eip_encap *)(session->data);
     payload_size = (int)session->data_size - (int)sizeof(eip_encap);
 
     /* FIXME - why is this check here? Haven't we checked this up the call chain? */
     if(!session) {
-        pdebug(DEBUG_WARN, "Called with null session!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Called with null session!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -2247,11 +2290,11 @@ int prepare_request(ab_session_p session) {
         // request->session_seq_id = session->session_seq_id;
         encap->encap_sender_context = h2le64(session->session_seq_id); /* link up the request seq ID and the packet seq ID */
 
-        pdebug(DEBUG_INFO, "Preparing unconnected packet with session sequence ID %llx", session->session_seq_id);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Preparing unconnected packet with session sequence ID %llx", session->session_seq_id);
     } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
         eip_cip_co_req *conn_req = (eip_cip_co_req *)(session->data);
 
-        pdebug(DEBUG_DETAIL, "cpf_targ_conn_id=%x", session->targ_connection_id);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "cpf_targ_conn_id=%x", session->targ_connection_id);
 
         /* set up the connection information */
         conn_req->cpf_targ_conn_id = h2le32(session->targ_connection_id);
@@ -2259,18 +2302,18 @@ int prepare_request(ab_session_p session) {
         session->conn_seq_num++;
         conn_req->cpf_conn_seq_num = h2le16(session->conn_seq_num);
 
-        pdebug(DEBUG_INFO, "Preparing connected packet with connection ID %x and sequence ID %u(%x)", session->orig_connection_id,
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Preparing connected packet with connection ID %x and sequence ID %u(%x)", session->orig_connection_id,
                session->conn_seq_num, session->conn_seq_num);
     } else {
-        pdebug(DEBUG_WARN, "Unsupported packet type %x!", le2h16(encap->encap_command));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unsupported packet type %x!", le2h16(encap->encap_command));
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     /* display the data */
-    pdebug(DEBUG_INFO, "Prepared packet of size %d", session->data_size);
-    pdebug_dump_bytes(DEBUG_INFO, session->data, (int)session->data_size);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Prepared packet of size %d", session->data_size);
+    pdebug_dump_bytes(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, session->data, (int)session->data_size);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -2280,10 +2323,10 @@ int send_eip_request(ab_session_p session, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     if(!session) {
-        pdebug(DEBUG_WARN, "Session pointer is null.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Session pointer is null.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -2293,8 +2336,8 @@ int send_eip_request(ab_session_p session, int timeout) {
         timeout_time = INT64_MAX;
     }
 
-    pdebug(DEBUG_INFO, "Sending packet of size %d", session->data_size);
-    pdebug_dump_bytes(DEBUG_INFO, session->data, (int)(session->data_size));
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Sending packet of size %d", session->data_size);
+    pdebug_dump_bytes(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, session->data, (int)(session->data_size));
 
     session->data_offset = 0;
     session->packet_count++;
@@ -2308,7 +2351,7 @@ int send_eip_request(ab_session_p session, int timeout) {
             session->data_offset += (uint32_t)rc;
         } else {
             if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_DETAIL, "Socket not yet ready to write.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Socket not yet ready to write.");
                 rc = 0;
             }
         }
@@ -2320,21 +2363,21 @@ int send_eip_request(ab_session_p session, int timeout) {
     } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size && timeout_time > time_ms());
 
     if(session->terminating) {
-        pdebug(DEBUG_WARN, "Session is terminating.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Session is terminating.");
         return PLCTAG_ERR_ABORT;
     }
 
     if(rc < 0) {
-        pdebug(DEBUG_WARN, "Error, %d, writing socket!", rc);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error, %d, writing socket!", rc);
         return rc;
     }
 
     if(timeout_time <= time_ms()) {
-        pdebug(DEBUG_WARN, "Timed out waiting to send data!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Timed out waiting to send data!");
         return PLCTAG_ERR_TIMEOUT;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -2352,10 +2395,10 @@ int recv_eip_response(ab_session_p session, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     if(!session) {
-        pdebug(DEBUG_WARN, "Called with null session!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Called with null session!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -2384,29 +2427,29 @@ int recv_eip_response(ab_session_p session, int timeout) {
                 data_needed = (uint32_t)(sizeof(eip_encap) + le2h16(((eip_encap *)(session->data))->encap_length));
 
                 if(data_needed > session->data_capacity) {
-                    pdebug(DEBUG_WARN, "Packet response (%d) is larger than possible buffer size (%d)!", data_needed,
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Packet response (%d) is larger than possible buffer size (%d)!", data_needed,
                            session->data_capacity);
                     return PLCTAG_ERR_TOO_LARGE;
                 }
             }
         } else {
             if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_DETAIL, "Socket not yet ready to read.");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Socket not yet ready to read.");
             } else {
                 /* error! */
-                pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error reading socket! rc=%d", rc);
                 return rc;
             }
         }
     } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
 
     if(session->terminating) {
-        pdebug(DEBUG_INFO, "Session is terminating, returning...");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Session is terminating, returning...");
         return PLCTAG_ERR_ABORT;
     }
 
     if(timeout_time <= time_ms()) {
-        pdebug(DEBUG_WARN, "Timed out waiting for data to read!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Timed out waiting for data to read!");
         return PLCTAG_ERR_TIMEOUT;
     }
 
@@ -2415,14 +2458,14 @@ int recv_eip_response(ab_session_p session, int timeout) {
 
     rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
 
-    pdebug_dump_bytes(DEBUG_INFO, session->data, (int)(session->data_offset));
+    pdebug_dump_bytes(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, session->data, (int)(session->data_offset));
 
     /* check status. */
     if(le2h32(((eip_encap *)(session->data))->encap_status) != AB_EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -2431,23 +2474,23 @@ int recv_eip_response(ab_session_p session, int timeout) {
 int perform_forward_close(ab_session_p session) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting.");
 
     do {
         rc = send_forward_close_req(session);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Sending forward close failed, %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Sending forward close failed, %s!", plc_tag_decode_error(rc));
             break;
         }
 
         rc = recv_forward_close_resp(session);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Forward close response not received, %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Forward close response not received, %s!", plc_tag_decode_error(rc));
             break;
         }
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -2457,9 +2500,9 @@ int send_forward_open_request(ab_session_p session) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t max_payload;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
-    pdebug(DEBUG_DETAIL, "Flag prohibiting use of extended ForwardOpen is %d.", session->only_use_old_forward_open);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Flag prohibiting use of extended ForwardOpen is %d.", session->only_use_old_forward_open);
 
     max_payload = (uint16_t)(session->only_use_old_forward_open ? session->fo_conn_size : session->fo_ex_conn_size);
 
@@ -2468,7 +2511,7 @@ int send_forward_open_request(ab_session_p session) {
         ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload :
                                                                                            session->max_payload_guess);
 
-    pdebug(DEBUG_DETAIL, "Set Forward Open maximum payload size guess to %d bytes.", session->max_payload_guess);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Set Forward Open maximum payload size guess to %d bytes.", session->max_payload_guess);
 
     if(session->only_use_old_forward_open) {
         rc = send_old_forward_open_request(session);
@@ -2476,7 +2519,7 @@ int send_forward_open_request(ab_session_p session) {
         rc = send_extended_forward_open_request(session);
     }
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -2487,7 +2530,7 @@ int send_old_forward_open_request(ab_session_p session) {
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
     mem_set(session->data, 0, (int)(sizeof(*fo) + session->conn_path_size));
 
@@ -2567,7 +2610,7 @@ int send_old_forward_open_request(ab_session_p session) {
 
     rc = send_eip_request(session, 0);
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -2579,7 +2622,7 @@ int send_extended_forward_open_request(ab_session_p session) {
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
     mem_set(session->data, 0, (int)(sizeof(*fo) + session->conn_path_size));
 
@@ -2642,7 +2685,7 @@ int send_extended_forward_open_request(ab_session_p session) {
 
     rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -2652,11 +2695,11 @@ int receive_forward_open_response(ab_session_p session) {
     eip_forward_open_response_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
     rc = recv_eip_response(session, 0);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to receive Forward Open response.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to receive Forward Open response.");
         return rc;
     }
 
@@ -2664,23 +2707,23 @@ int receive_forward_open_response(ab_session_p session) {
 
     do {
         if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", fo_resp->encap_status);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "EIP command failed, response code: %d", fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "Forward Open command failed, response code: %s (%d)",
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Forward Open command failed, response code: %s (%d)",
                    decode_cip_error_short(&fo_resp->general_status), fo_resp->general_status);
             if(fo_resp->general_status == AB_CIP_ERR_UNSUPPORTED_SERVICE) {
                 /* this type of command is not supported! */
-                pdebug(DEBUG_WARN, "Received CIP command unsupported error from the PLC!");
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Received CIP command unsupported error from the PLC!");
                 rc = PLCTAG_ERR_UNSUPPORTED;
             } else {
                 rc = PLCTAG_ERR_REMOTE_ERR;
@@ -2692,19 +2735,19 @@ int receive_forward_open_response(ab_session_p session) {
                     uint16_t supported_size = (uint16_t)((uint16_t)data[3] | (uint16_t)((uint16_t)data[4] << (uint16_t)8));
 
                     if(extended_status == 0x109) { /* MAGIC */
-                        pdebug(DEBUG_WARN, "Error from forward open request, unsupported size, but size %d is supported.",
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error from forward open request, unsupported size, but size %d is supported.",
                                supported_size);
                         session->max_payload_guess = supported_size;
                         rc = PLCTAG_ERR_TOO_LARGE;
                     } else if(extended_status == 0x100) { /* MAGIC */
-                        pdebug(DEBUG_WARN, "Error from forward open request, duplicate connection ID.  Need to try again.");
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Error from forward open request, duplicate connection ID.  Need to try again.");
                         rc = PLCTAG_ERR_DUPLICATE;
                     } else {
-                        pdebug(DEBUG_WARN, "CIP extended error %s (%s)!", decode_cip_error_short(&fo_resp->general_status),
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "CIP extended error %s (%s)!", decode_cip_error_short(&fo_resp->general_status),
                                decode_cip_error_long(&fo_resp->general_status));
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "CIP error code %s (%s)!", decode_cip_error_short(&fo_resp->general_status),
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "CIP error code %s (%s)!", decode_cip_error_short(&fo_resp->general_status),
                            decode_cip_error_long(&fo_resp->general_status));
                 }
             }
@@ -2718,13 +2761,13 @@ int receive_forward_open_response(ab_session_p session) {
 
         session->max_payload_size = session->max_payload_guess;
 
-        pdebug(DEBUG_INFO, "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
                session->orig_connection_id, session->targ_connection_id, session->max_payload_size);
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -2735,7 +2778,7 @@ int send_forward_close_req(ab_session_p session) {
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
     fc = (eip_forward_close_req_t *)(session->data);
 
@@ -2747,8 +2790,8 @@ int send_forward_close_req(ab_session_p session) {
     data += session->conn_path_size;
 
     /* FIXME DEBUG */
-    pdebug(DEBUG_DETAIL, "Forward Close connection path:");
-    pdebug_dump_bytes(DEBUG_DETAIL, session->conn_path, session->conn_path_size);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Forward Close connection path:");
+    pdebug_dump_bytes(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, session->conn_path, session->conn_path_size);
 
     /* fill in the static parts */
 
@@ -2789,7 +2832,7 @@ int send_forward_close_req(ab_session_p session) {
 
     rc = send_eip_request(session, 100);
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -2799,11 +2842,11 @@ int recv_forward_close_resp(ab_session_p session) {
     eip_forward_close_resp_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Starting");
 
     rc = recv_eip_response(session, 150);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to receive Forward Close response, %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to receive Forward Close response, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -2811,29 +2854,29 @@ int recv_forward_close_resp(ab_session_p session) {
 
     do {
         if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", fo_resp->encap_status);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "EIP command failed, response code: %d", fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "Forward Close command failed, response code: %d", fo_resp->general_status);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Forward Close command failed, response code: %d", fo_resp->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        pdebug(DEBUG_INFO, "Connection close succeeded.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Connection close succeeded.");
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -2849,16 +2892,16 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
         int available_payload = session_get_available_cip_payload_space(session);
 
         // FIXME: no logging in a mutex!
-        // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
+        // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
         request_capacity = (size_t)(available_payload + EIP_CIP_PREFIX_SIZE);
     }
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting.");
 
     buffer = (uint8_t *)mem_alloc((int)request_capacity);
     if(!buffer) {
-        pdebug(DEBUG_WARN, "Unable to allocate request buffer!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to allocate request buffer!");
         *req = NULL;
         return PLCTAG_ERR_NO_MEM;
     }
@@ -2877,7 +2920,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
         *req = res;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -2892,7 +2935,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
 void request_destroy(void *req_arg) {
     ab_request_p req = req_arg;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting.");
 
     req->abort_request = 1;
 
@@ -2901,7 +2944,7 @@ void request_destroy(void *req_arg) {
         req->data = NULL;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done.");
 }
 
 
@@ -2909,11 +2952,11 @@ int session_request_increase_buffer(ab_request_p request, int new_capacity) {
     uint8_t *old_buffer = NULL;
     uint8_t *new_buffer = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Starting.");
 
     new_buffer = (uint8_t *)mem_alloc(new_capacity);
     if(!new_buffer) {
-        pdebug(DEBUG_WARN, "Unable to allocate larger request buffer!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, "Unable to allocate larger request buffer!");
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -2925,7 +2968,7 @@ int session_request_increase_buffer(ab_request_p request, int new_capacity) {
 
     mem_free(old_buffer);
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }

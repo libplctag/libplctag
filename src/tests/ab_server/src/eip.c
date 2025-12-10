@@ -33,9 +33,10 @@
 
 #include "eip.h"
 #include "cpf.h"
+#include "err.h"
 #include "slice.h"
-#include "tcp_server.h"
 #include "utils.h"
+#include "log.h"
 #include <stdlib.h>
 
 #define EIP_REGISTER_SESSION ((uint16_t)0x0065)
@@ -64,13 +65,18 @@ static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip
 
 
 slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
+    log_info("eip_dispatch_request(): raw_output size = %zu, server_to_client_max_packet = %zu", slice_len(raw_output), plc->server_to_client_max_packet);
+
     slice_s output = slice_from_slice(raw_output, 0, plc->server_to_client_max_packet);
+
+    log_info("eip_dispatch_request(): output size = %zu", slice_len(output));
+
     slice_s response = slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE);
 
     eip_header_s header;
 
-    info("eip_dispatch_request(): got packet:");
-    slice_dump(input);
+    log_info("eip_dispatch_request(): got packet:");
+    log_info_slice(input);
 
     /* unpack header. */
     header.command = slice_get_uint16_le(input, 0);
@@ -82,8 +88,8 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
     /* sanity checks */
     if(slice_len(input) != (size_t)(header.length + EIP_HEADER_SIZE)) {
-        info("Illegal EIP packet.   Length should be %d but is %d!", header.length + EIP_HEADER_SIZE, slice_len(input));
-        return slice_make_err(TCP_SERVER_BAD_REQUEST);
+        log_info("Illegal EIP packet.   Length should be %d but is %d!", header.length + EIP_HEADER_SIZE, slice_len(input));
+        return slice_make_err(ERR_TCP_BAD_REQUEST);
     }
 
     /* dispatch the request */
@@ -109,7 +115,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
                                             slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
-        default: response = slice_make_err(TCP_SERVER_UNSUPPORTED); break;
+        default: response = slice_make_err(ERR_TCP_UNSUPPORTED); break;
     }
 
     if(!slice_has_err(response)) {
@@ -123,9 +129,9 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
         /* The payload is already in place. */
         return slice_from_slice(output, 0, EIP_HEADER_SIZE + slice_len(response));
-    } else if(slice_get_err(response) == TCP_SERVER_DONE) {
+    } else if(slice_get_err(response) == ERR_TCP_DONE) {
         /* just pass this through, normally not an error. */
-        info("Done with connection.");
+        log_info("Done with connection.");
 
         return response;
     } else {
@@ -155,35 +161,35 @@ slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s
 
     /* session_handle must be zero. */
     if(header->session_handle != (uint32_t)0) {
-        info("Request failed sanity check: request session handle is %u but should be zero.", header->session_handle);
+        log_info("Request failed sanity check: request session handle is %u but should be zero.", header->session_handle);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* session status must be zero. */
     if(header->status != (uint32_t)0) {
-        info("Request failed sanity check: request status is %u but should be zero.", header->status);
+        log_info("Request failed sanity check: request status is %u but should be zero.", header->status);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* session sender plc must be zero. */
     if(header->sender_context != (uint64_t)0) {
-        info("Request failed sanity check: request sender context should be zero.");
+        log_info("Request failed sanity check: request sender context should be zero.");
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* session options must be zero. */
     if(header->options != (uint32_t)0) {
-        info("Request failed sanity check: request options is %u but should be zero.", header->options);
+        log_info("Request failed sanity check: request options is %u but should be zero.", header->options);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* EIP version must be 1. */
     if(register_request.eip_version != EIP_VERSION) {
-        info("Request failed sanity check: request EIP version is %u but should be %u.", register_request.eip_version,
+        log_info("Request failed sanity check: request EIP version is %u but should be %u.", register_request.eip_version,
              EIP_VERSION);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
@@ -191,7 +197,7 @@ slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s
 
     /* Session request option flags must be zero. */
     if(register_request.option_flags != (uint16_t)0) {
-        info("Request failed sanity check: request option flags field is %u but should be zero.", register_request.option_flags);
+        log_info("Request failed sanity check: request option flags field is %u but should be zero.", register_request.option_flags);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
@@ -213,7 +219,7 @@ slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header
     (void)header;
 
     if(header->session_handle == plc->session_handle) {
-        return slice_make_err(TCP_SERVER_DONE);
+        return slice_make_err(ERR_TCP_DONE);
     } else {
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }

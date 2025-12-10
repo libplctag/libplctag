@@ -43,11 +43,11 @@
  * ARM systems.  Possibly Power too.  YMMV.
  */
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 11)
+#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
 
 #    ifdef _WIN32
 #       define WIN32_LEAN_AND_MEAN
-#       include <Windows.h>
+#       include <windows.h>
 #    endif
 
 void atomic_init_bool(atomic_bool *a, bool new_val) { *a = new_val; }
@@ -137,7 +137,9 @@ bool atomic_get_bool(atomic_bool *a) { return atomic_load(a); }
 bool atomic_set_bool(atomic_bool *a, bool new_val) { return atomic_exchange(a, new_val); }
 
 bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val) {
-    return atomic_compare_exchange_strong(a, &old_val, new_val);
+    bool expected = old_val;
+    atomic_compare_exchange_strong(a, &expected, new_val);
+    return expected;
 }
 
 void atomic_init_int32(atomic_int32_t *a, int32_t new_val) { atomic_init(a, new_val); }
@@ -149,7 +151,9 @@ int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val) { return atomic_exc
 int32_t atomic_add_int32(atomic_int32_t *a, int32_t other) { return atomic_fetch_add(a, other); }
 
 int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val) {
-    return atomic_compare_exchange_strong(a, &old_val, new_val);
+    int32_t expected = old_val;
+    atomic_compare_exchange_strong(a, &expected, new_val);
+    return expected;
 }
 
 void atomic_init_int64(atomic_int64_t *a, int64_t new_val) { atomic_init(a, new_val); }
@@ -161,7 +165,9 @@ int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val) { return atomic_exc
 int64_t atomic_add_int64(atomic_int64_t *a, int64_t other) { return atomic_fetch_add(a, other); }
 
 int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val) {
-    return atomic_compare_exchange_strong(a, &old_val, new_val);
+    int64_t expected = old_val;
+    atomic_compare_exchange_strong(a, &expected, new_val);
+    return expected;
 }
 
 #endif

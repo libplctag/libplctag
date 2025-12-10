@@ -43,6 +43,7 @@
 #include "compat_utils.h"
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,8 +54,14 @@
 #define DATA_TIMEOUT (5000)
 #define TAG_CREATE_TIMEOUT (5000)
 #define RETRY_TIMEOUT (10000)
+#define TEST_RUNTIME_MS (30000)
 
 #define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59:1502&path=0&elem_count=2&name=hr10"
+
+
+typedef struct {
+    int read_count;
+} tag_stats_t;
 
 
 void usage(void) {
@@ -80,6 +87,7 @@ static int wait_for_tags(int32_t *tags, int32_t *statuses, int num_tags, int tim
 int main(int argc, char **argv) {
     int32_t *tags = NULL;
     int *statuses = NULL;
+    tag_stats_t *stats = NULL;
     int num_tags = 0;
     int rc = PLCTAG_STATUS_OK;
     int i = 0;
@@ -89,6 +97,7 @@ int main(int argc, char **argv) {
     int64_t min_ms = INT64_MAX;
     int64_t max_ms = 0;
     int64_t iteration = 1;
+    int64_t end_time_ms = TEST_RUNTIME_MS + compat_time_ms();
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -126,6 +135,15 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error allocating status array!\n");
         free(tags);
+        exit(PLCTAG_ERR_NO_MEM);
+    }
+
+    stats = calloc((size_t)(unsigned int)num_tags, sizeof(*stats));
+    if(!stats) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error allocating stats array!\n");
+        free(tags);
+        free(statuses);
         exit(PLCTAG_ERR_NO_MEM);
     }
 
@@ -171,7 +189,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creation of %d tags took %dms.\n", num_tags, (int)(end - start));
 
     /* read in a loop until ^C pressed */
-    while(!done) {
+    while(!done && compat_time_ms() < end_time_ms) {
         start = compat_time_ms();
 
         rc = read_tags(tags, statuses, num_tags, DATA_TIMEOUT);
@@ -208,9 +226,6 @@ int main(int argc, char **argv) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
-
-        /* test */
-        // thrd_sleep_ms(5);
 
         iteration++;
     }

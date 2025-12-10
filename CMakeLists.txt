@@ -33,7 +33,7 @@
 set(CMAKE_VERBOSE_MAKEFILE On)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required (VERSION 3.15)
 cmake_policy(SET CMP0054 NEW)
 
 # debugging help
@@ -59,7 +59,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project version
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 12)
+set (libplctag_VERSION_PATCH 13)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -69,7 +69,6 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
-set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "DEPRECATED: No longer used. Modbus server is now built with BUILD_TESTS.")
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
 set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 
@@ -120,6 +119,7 @@ if(BUILD_EXAMPLES)
 endif(BUILD_EXAMPLES)
 
 if(BUILD_TESTS)
+   enable_testing()
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 endif(BUILD_TESTS)
 
@@ -145,12 +145,6 @@ endif(BUILD_TESTS)
 
 # Generate files from templates
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
-
-# Note: ci.yml no longer needs to be generated from a template.
-# The CI workflow now extracts the version directly from CMakeLists.txt at runtime.
-# if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)  # Only if this is the main project
-#   CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
-# endif()
 
 
 # for installation

@@ -261,6 +261,9 @@ int main(int argc, const char **argv) {
             break;
         }
 
+        /* turn back on logging */
+        plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+
         /* test an abort. */
         printf("Testing abort behavior.\n");
         rc = plc_tag_read(tag, 0);

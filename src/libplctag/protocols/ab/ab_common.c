@@ -57,7 +57,6 @@
 #include <utils/debug.h>
 #include <utils/vector.h>
 
-
 /*
  * Externally visible global variables
  */
@@ -115,16 +114,16 @@ struct tag_vtable_t default_vtable = {default_abort, default_read, default_statu
 int ab_init(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Initializing AB protocol library.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Initializing AB protocol library.");
 
     ab_protocol_terminating = 0;
 
     if((rc = session_startup()) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to initialize session library!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, "Unable to initialize session library!");
         return rc;
     }
 
-    pdebug(DEBUG_INFO, "Finished initializing AB protocol library.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Finished initializing AB protocol library.");
 
     return rc;
 }
@@ -133,10 +132,10 @@ int ab_init(void) {
  * called when the whole program is going to terminate.
  */
 void ab_teardown(void) {
-    pdebug(DEBUG_INFO, "Releasing global AB protocol resources.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Releasing global AB protocol resources.");
 
     if(io_handler_thread) {
-        pdebug(DEBUG_INFO, "Terminating IO thread.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Terminating IO thread.");
         /* signal the IO thread to quit first. */
         ab_protocol_terminating = 1;
 
@@ -144,16 +143,16 @@ void ab_teardown(void) {
         thread_join(io_handler_thread);
         thread_destroy((thread_p *)&io_handler_thread);
     } else {
-        pdebug(DEBUG_INFO, "IO thread already stopped.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "IO thread already stopped.");
     }
 
-    pdebug(DEBUG_INFO, "Freeing session information.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Freeing session information.");
 
     session_teardown();
 
     ab_protocol_terminating = 0;
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Done.");
 }
 
 
@@ -163,7 +162,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Starting.");
 
     /* short circuit for split Omron*/
     if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata); }
@@ -175,11 +174,11 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     tag = (ab_tag_p)rc_alloc(sizeof(struct ab_tag_t), (rc_cleanup_func)ab_tag_destroy);
     if(!tag) {
-        pdebug(DEBUG_ERROR, "Unable to allocate memory for AB EIP tag!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, "Unable to allocate memory for AB EIP tag!");
         return (plc_tag_p)NULL;
     }
 
-    pdebug(DEBUG_DETAIL, "tag=%p", tag);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "tag=%p", tag);
 
     /*
      * we got far enough to allocate memory, set the default vtable up
@@ -191,8 +190,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unable to initialize generic tag parts!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
         return (plc_tag_p)NULL;
     }
@@ -204,9 +203,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "CPU type not valid or missing.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "CPU type not valid or missing.");
         /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
         return (plc_tag_p)NULL;
     }
@@ -241,7 +240,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
         case AB_PLC_MICRO800:
             /* we must use connected messaging here. */
-            pdebug(DEBUG_DETAIL, "Micro800 needs connected messaging.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Micro800 needs connected messaging.");
             tag->use_connected_msg = 1;
 
             /* Micro800 cannot pack requests. */
@@ -249,7 +248,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         default:
-            pdebug(DEBUG_WARN, "Unknown PLC type!");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
             return (plc_tag_p)tag;
             break;
@@ -267,17 +266,17 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      * All tags need sessions.  They are the TCP connection to the gateway PLC.
      */
     if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Unable to create session!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Unable to create session!");
         tag->status = PLCTAG_ERR_BAD_GATEWAY;
         return (plc_tag_p)tag;
     }
 
-    pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "using session=%p", tag->session);
 
     /* get the tag data type, or try. */
     rc = get_tag_data_type(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error %s getting tag element data type or handling special tag!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Error %s getting tag element data type or handling special tag!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
         return (plc_tag_p)tag;
     }
@@ -286,16 +285,16 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     switch(tag->plc_type) {
         case AB_PLC_PLC5:
             if(!tag->session->is_dhp) {
-                pdebug(DEBUG_DETAIL, "Setting up PLC/5 tag.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up PLC/5 tag.");
 
                 if(str_length(path)) {
-                    pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
                 }
 
                 tag->use_connected_msg = 0;
                 tag->vtable = &plc5_vtable;
             } else {
-                pdebug(DEBUG_DETAIL, "Setting up PLC/5 via DH+ bridge tag.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up PLC/5 via DH+ bridge tag.");
                 tag->use_connected_msg = 1;
                 tag->vtable = &eip_plc5_dhp_vtable;
             }
@@ -311,14 +310,14 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             if(!tag->session->is_dhp) {
 
                 if(str_length(path)) {
-                    pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
                 }
 
-                pdebug(DEBUG_DETAIL, "Setting up SLC/MicroLogix tag.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up SLC/MicroLogix tag.");
                 tag->use_connected_msg = 0;
                 tag->vtable = &slc_vtable;
             } else {
-                pdebug(DEBUG_DETAIL, "Setting up SLC/MicroLogix via DH+ bridge tag.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up SLC/MicroLogix via DH+ bridge tag.");
                 tag->use_connected_msg = 1;
                 tag->vtable = &eip_slc_dhp_vtable;
             }
@@ -330,7 +329,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         case AB_PLC_LGX_PCCC:
-            pdebug(DEBUG_DETAIL, "Setting up PCCC-mapped Logix tag.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up PCCC-mapped Logix tag.");
             tag->use_connected_msg = 0;
             tag->allow_packing = 0;
             tag->vtable = &lgx_pccc_vtable;
@@ -341,24 +340,24 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         case AB_PLC_LGX:
-            pdebug(DEBUG_DETAIL, "Setting up Logix tag.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up Logix tag.");
 
             /* Logix tags need a path. */
             if(path == NULL && tag->plc_type == AB_PLC_LGX) {
-                pdebug(DEBUG_WARN, "A path is required for Logix-class PLCs!");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "A path is required for Logix-class PLCs!");
                 tag->status = PLCTAG_ERR_BAD_PARAM;
                 return (plc_tag_p)tag;
             }
 
             /* if we did not fill in the byte order elsewhere, fill it in now. */
             if(!tag->byte_order) {
-                pdebug(DEBUG_DETAIL, "Using default Logix byte order.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Using default Logix byte order.");
                 tag->byte_order = &logix_tag_byte_order;
             }
 
             /* if this was not filled in elsewhere default to Logix */
             if(tag->vtable == &default_vtable || !tag->vtable) {
-                pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting default Logix vtable.");
                 tag->vtable = &eip_cip_vtable;
             }
 
@@ -370,19 +369,19 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         case AB_PLC_MICRO800:
-            pdebug(DEBUG_DETAIL, "Setting up Micro8X0 tag.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up Micro8X0 tag.");
 
-            if(path || str_length(path)) { pdebug(DEBUG_WARN, "A path is not supported for this PLC type."); }
+            if(path || str_length(path)) { pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "A path is not supported for this PLC type."); }
 
             /* if we did not fill in the byte order elsewhere, fill it in now. */
             if(!tag->byte_order) {
-                pdebug(DEBUG_DETAIL, "Using default Micro8x0 byte order.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Using default Micro8x0 byte order.");
                 tag->byte_order = &logix_tag_byte_order;
             }
 
             /* if this was not filled in elsewhere default to generic *Logix */
             if(tag->vtable == &default_vtable || !tag->vtable) {
-                pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting default Logix vtable.");
                 tag->vtable = &eip_cip_vtable;
             }
 
@@ -393,7 +392,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         default:
-            pdebug(DEBUG_WARN, "Unknown PLC type!");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
             return (plc_tag_p)tag;
     }
@@ -424,7 +423,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->size = (tag->elem_count) * (tag->elem_size);
             if(tag->size == 0) {
                 /* failure! Need data_size! */
-                pdebug(DEBUG_WARN, "Tag size is zero!");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Tag size is zero!");
                 tag->status = PLCTAG_ERR_BAD_PARAM;
                 return (plc_tag_p)tag;
             }
@@ -433,7 +432,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->data = (uint8_t *)mem_alloc(tag->size);
 
             if(tag->data == NULL) {
-                pdebug(DEBUG_WARN, "Unable to allocate tag data!");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unable to allocate tag data!");
                 tag->status = PLCTAG_ERR_NO_MEM;
                 return (plc_tag_p)tag;
             }
@@ -445,7 +444,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     if(!tag->special_tag && check_tag_name(tag, attr_get_str(attribs, "name", NULL)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Bad tag name!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Bad tag name!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
     }
@@ -458,20 +457,20 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         /* if this is a PLC that does not need first reads to get the type, then we do not trigger an 
         early read during creation.   We do, however, need to flag that the read is the first one so
         that the created event will be raised. Ugh.  This is a mess. */
-        pdebug(DEBUG_DETAIL, "Kicking off initial read.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Kicking off initial read.");
 
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
     } else {
-        pdebug(DEBUG_DETAIL, "Tag does not need a first read, raising created event.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Tag does not need a first read, raising created event.");
 
         /* force the created event because we do not do an initial read here. */
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
     }
 
-    pdebug(DEBUG_DETAIL, "Using vtable %p.", tag->vtable);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Using vtable %p.", tag->vtable);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Done.");
 
     return (plc_tag_p)tag;
 }
@@ -487,7 +486,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
     const char *tag_name = NULL;
     pccc_addr_t file_addr = {0};
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Starting.");
 
     switch(tag->plc_type) {
         case AB_PLC_PLC5:
@@ -498,7 +497,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
 
             rc = parse_pccc_logical_address(tag_name, &file_addr);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to parse data file %s!", tag_name);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unable to parse data file %s!", tag_name);
                 return rc;
             }
 
@@ -514,47 +513,47 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
             elem_type = attr_get_str(attribs, "elem_type", NULL);
             if(elem_type) {
                 if(str_cmp_i(elem_type, "lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of 64-bit integer.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of 64-bit integer.");
                     tag->elem_size = 8;
                     tag->elem_type = AB_TYPE_INT64;
                 } else if(str_cmp_i(elem_type, "dint") == 0 || str_cmp_i(elem_type, "udint") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of 32-bit integer.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of 32-bit integer.");
                     tag->elem_size = 4;
                     tag->elem_type = AB_TYPE_INT32;
                 } else if(str_cmp_i(elem_type, "int") == 0 || str_cmp_i(elem_type, "uint") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of 16-bit integer.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of 16-bit integer.");
                     tag->elem_size = 2;
                     tag->elem_type = AB_TYPE_INT16;
                 } else if(str_cmp_i(elem_type, "sint") == 0 || str_cmp_i(elem_type, "usint") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of 8-bit integer.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of 8-bit integer.");
                     tag->elem_size = 1;
                     tag->elem_type = AB_TYPE_INT8;
                 } else if(str_cmp_i(elem_type, "bool") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of bit.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of bit.");
                     tag->elem_size = 1;
                     tag->elem_type = AB_TYPE_BOOL;
                 } else if(str_cmp_i(elem_type, "bool array") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of bool array.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of bool array.");
                     tag->elem_size = 4;
                     tag->elem_type = AB_TYPE_BOOL_ARRAY;
                 } else if(str_cmp_i(elem_type, "real") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of 32-bit float.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of 32-bit float.");
                     tag->elem_size = 4;
                     tag->elem_type = AB_TYPE_FLOAT32;
                 } else if(str_cmp_i(elem_type, "lreal") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of 64-bit float.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of 64-bit float.");
                     tag->elem_size = 8;
                     tag->elem_type = AB_TYPE_FLOAT64;
                 } else if(str_cmp_i(elem_type, "string") == 0) {
-                    pdebug(DEBUG_DETAIL, "Fount tag element type of string.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Fount tag element type of string.");
                     tag->elem_size = 88;
                     tag->elem_type = AB_TYPE_STRING;
                 } else if(str_cmp_i(elem_type, "short string") == 0) {
-                    pdebug(DEBUG_DETAIL, "Found tag element type of short string.");
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found tag element type of short string.");
                     tag->elem_size = 256; /* TODO - find the real length */
                     tag->elem_type = AB_TYPE_SHORT_STRING;
                 } else {
-                    pdebug(DEBUG_DETAIL, "Unknown tag type %s", elem_type);
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Unknown tag type %s", elem_type);
                     return PLCTAG_ERR_UNSUPPORTED;
                 }
             } else {
@@ -582,7 +581,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                     } /* else not a special tag. */
 
                     if(special_tag_rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Error parsing tag listing name!");
+                        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Error parsing tag listing name!");
                         return special_tag_rc;
                     }
                 }
@@ -590,12 +589,12 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                 /* if we did not set an element size yet, set one. */
                 if(tag->elem_size == 0) {
                     if(elem_size > 0) {
-                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
+                        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Setting element size to %d.", elem_size);
                         tag->elem_size = elem_size;
                     }
                 } else {
                     if(elem_size > 0) {
-                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
+                        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                     }
                 }
             }
@@ -603,12 +602,12 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
             break;
 
         default:
-            pdebug(DEBUG_WARN, "Unknown PLC type!");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             return PLCTAG_ERR_BAD_DEVICE;
             break;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -617,7 +616,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
 int default_abort(plc_tag_p tag) {
     (void)tag;
 
-    pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
     return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
@@ -626,13 +625,13 @@ int default_abort(plc_tag_p tag) {
 int default_read(plc_tag_p tag) {
     (void)tag;
 
-    pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
     return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
 
 int default_status(plc_tag_p tag) {
-    pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
     if(tag) {
         return tag->status;
@@ -645,7 +644,7 @@ int default_status(plc_tag_p tag) {
 int default_tickler(plc_tag_p tag) {
     (void)tag;
 
-    pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
     return PLCTAG_STATUS_OK;
 }
@@ -654,7 +653,7 @@ int default_tickler(plc_tag_p tag) {
 int default_write(plc_tag_p tag) {
     (void)tag;
 
-    pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
     return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
@@ -666,7 +665,7 @@ int default_write(plc_tag_p tag) {
  */
 
 int ab_tag_abort_request_only(ab_tag_p tag) {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Starting.");
 
     if(tag) {
         ab_request_p req = NULL;
@@ -678,24 +677,24 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
-            pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
             critical_block(tag->api_mutex) {
-                if(req != tag->req) { pdebug(DEBUG_WARN, "Request changed out from underneath us during abort process!"); }
+                if(req != tag->req) { pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Request changed out from underneath us during abort process!"); }
                 tag->req = rc_dec(tag->req);
             }
 
             req = rc_dec(req);
         } else {
-            pdebug(DEBUG_DETAIL, "Called without a request in flight.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Called without a request in flight.");
         }
 
         tag->read_in_progress = 0;
         tag->write_in_progress = 0;
     } else {
-        pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Called with a null tag pointer.");
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -709,24 +708,24 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
  */
 
 int ab_tag_abort_request(ab_tag_p tag) {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Starting.");
 
     if(tag) {
         tag->offset = 0;
 
         ab_tag_abort_request_only(tag);
     } else {
-        pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Called with a null tag pointer.");
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 int ab_tag_abort(ab_tag_p tag) {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Starting.");
 
     if(tag) {
         ab_request_p req = NULL;
@@ -744,11 +743,11 @@ int ab_tag_abort(ab_tag_p tag) {
             tag->status = PLCTAG_ERR_ABORT;
             return tag->status;
         } else {
-            pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Called with a null tag pointer.");
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -788,11 +787,11 @@ int ab_tag_status(ab_tag_p tag) {
 void ab_tag_destroy(ab_tag_p tag) {
     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Starting.");
 
     /* already destroyed? */
     if(!tag) {
-        pdebug(DEBUG_WARN, "Tag pointer is null!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Tag pointer is null!");
 
         return;
     }
@@ -803,14 +802,14 @@ void ab_tag_destroy(ab_tag_p tag) {
     session = tag->session;
 
     /* tags should always have a session.  Release it. */
-    pdebug(DEBUG_DETAIL, "Getting ready to release tag session %p", tag->session);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Getting ready to release tag session %p", tag->session);
     if(session) {
-        pdebug(DEBUG_DETAIL, "Removing tag from session.");
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing session reference of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Removing tag from session.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "rc_dec: Releasing session reference of tag %" PRId32 ".", tag->tag_id);
         rc_dec(session);
         tag->session = NULL;
     } else {
-        pdebug(DEBUG_WARN, "No session pointer!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "No session pointer!");
     }
 
     if(tag->ext_mutex) {
@@ -838,9 +837,9 @@ void ab_tag_destroy(ab_tag_p tag) {
         tag->data = NULL;
     }
 
-    pdebug(DEBUG_INFO, "Finished releasing all tag resources.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Finished releasing all tag resources.");
 
-    pdebug(DEBUG_INFO, "done");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "done");
 }
 
 
@@ -848,7 +847,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
     int res = default_value;
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Starting.");
 
     /* assume we have a match. */
     tag->status = PLCTAG_STATUS_OK;
@@ -869,7 +868,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
                                   // case AB_PLC_OMRON_NJNX:
                 res = (int)(tag->elem_type);
                 break;
-            default: pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type); break;
+            default: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type); break;
         }
     } else if(str_cmp_i(attrib_name, "raw_tag_type_bytes.length") == 0) {
         switch(tag->plc_type) {
@@ -878,10 +877,10 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
                                   // case AB_PLC_OMRON_NJNX:
                 res = (int)(tag->encoded_type_info_size);
                 break;
-            default: pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type); break;
+            default: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type); break;
         }
     } else {
-        pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         tag->status = PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -893,7 +892,7 @@ int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
     (void)attrib_name;
     (void)new_value;
 
-    pdebug(DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
 
     raw_tag->status = PLCTAG_ERR_UNSUPPORTED;
 
@@ -904,7 +903,7 @@ int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t
     int rc = PLCTAG_STATUS_OK;
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Starting.");
 
     /* assume we have a match. */
     tag->status = PLCTAG_STATUS_OK;
@@ -916,11 +915,11 @@ int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t
             case AB_PLC_MICRO800: /* fall through */
                                   // case AB_PLC_OMRON_NJNX:
                 if(tag->encoded_type_info_size > buffer_length) {
-                    pdebug(DEBUG_WARN, "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.",
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.",
                            tag->encoded_type_info_size, buffer_length);
                     rc = PLCTAG_ERR_TOO_SMALL;
                 } else if(tag->encoded_type_info_size <= buffer_length) {
-                    pdebug(DEBUG_INFO, "Tag type info is smaller, %d bytes, than the buffer can hold, %d bytes.",
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Tag type info is smaller, %d bytes, than the buffer can hold, %d bytes.",
                            tag->encoded_type_info_size, buffer_length);
 
                     /* copy the data */
@@ -930,10 +929,10 @@ int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t
                     rc = tag->encoded_type_info_size;
                 }
                 break;
-            default: pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type); break;
+            default: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type); break;
         }
     } else {
-        pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         tag->status = PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -945,32 +944,32 @@ plc_type_t get_plc_type(attr attribs) {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
     if(!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
-        pdebug(DEBUG_DETAIL, "Found PLC/5 PLC.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found PLC/5 PLC.");
         return AB_PLC_PLC5;
     } else if(!str_cmp_i(cpu_type, "slc") || !str_cmp_i(cpu_type, "slc500")) {
-        pdebug(DEBUG_DETAIL, "Found SLC 500 PLC.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found SLC 500 PLC.");
         return AB_PLC_SLC;
     } else if(!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5")
               || !str_cmp_i(cpu_type, "logixplc5") || !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc")
               || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
-        pdebug(DEBUG_DETAIL, "Found Logix-class PLC using PCCC protocol.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found Logix-class PLC using PCCC protocol.");
         return AB_PLC_LGX_PCCC;
     } else if(!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
-        pdebug(DEBUG_DETAIL, "Found Micro8xx PLC.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found Micro8xx PLC.");
         return AB_PLC_MICRO800;
     } else if(!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
-        pdebug(DEBUG_DETAIL, "Found MicroLogix PLC.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found MicroLogix PLC.");
         return AB_PLC_MLGX;
     } else if(!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx")
               || !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") || !str_cmp_i(cpu_type, "logix")) {
-        pdebug(DEBUG_DETAIL, "Found ControlLogix/CompactLogix PLC.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found ControlLogix/CompactLogix PLC.");
         return AB_PLC_LGX;
     } else if(!str_cmp_i(cpu_type, "omron-njnx") || !str_cmp_i(cpu_type, "omron-nj") || !str_cmp_i(cpu_type, "omron-nx")
               || !str_cmp_i(cpu_type, "njnx") || !str_cmp_i(cpu_type, "nx1p2")) {
-        pdebug(DEBUG_DETAIL, "Found OMRON NJ/NX Series PLC.");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found OMRON NJ/NX Series PLC.");
         return AB_PLC_OMRON_NJNX;
     } else {
-        pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported device type: %s", cpu_type);
 
         return AB_PLC_NONE;
     }
@@ -994,7 +993,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
     pccc_addr_t pccc_address;
 
     if(!name) {
-        pdebug(DEBUG_WARN, "No tag name parameter found!");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "No tag name parameter found!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -1005,19 +1004,19 @@ int check_tag_name(ab_tag_p tag, const char *name) {
         case AB_PLC_PLC5:
         case AB_PLC_LGX_PCCC:
             if((rc = parse_pccc_logical_address(name, &pccc_address))) {
-                pdebug(DEBUG_WARN, "Parse of PCCC-style tag name %s failed!", name);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Parse of PCCC-style tag name %s failed!", name);
                 return rc;
             }
 
             if(pccc_address.is_bit) {
                 tag->is_bit = 1;
                 tag->bit = (int)(unsigned int)pccc_address.bit;
-                pdebug(DEBUG_DETAIL, "PLC/5 address references bit %d.", tag->bit);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "PLC/5 address references bit %d.", tag->bit);
             }
 
             if((rc = plc5_encode_address(tag->encoded_name, &(tag->encoded_name_size), MAX_TAG_NAME, &pccc_address))
                != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Encoding of PLC/5-style tag name %s failed!", name);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Encoding of PLC/5-style tag name %s failed!", name);
                 return rc;
             }
 
@@ -1026,19 +1025,19 @@ int check_tag_name(ab_tag_p tag, const char *name) {
         case AB_PLC_SLC:
         case AB_PLC_MLGX:
             if((rc = parse_pccc_logical_address(name, &pccc_address))) {
-                pdebug(DEBUG_WARN, "Parse of PCCC-style tag name %s failed!", name);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Parse of PCCC-style tag name %s failed!", name);
                 return rc;
             }
 
             if(pccc_address.is_bit) {
                 tag->is_bit = 1;
                 tag->bit = (int)(unsigned int)pccc_address.bit;
-                pdebug(DEBUG_DETAIL, "SLC/Micrologix address references bit %d.", tag->bit);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "SLC/Micrologix address references bit %d.", tag->bit);
             }
 
             if((rc = slc_encode_address(tag->encoded_name, &(tag->encoded_name_size), MAX_TAG_NAME, &pccc_address))
                != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Encoding of SLC-style tag name %s failed!", name);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Encoding of SLC-style tag name %s failed!", name);
                 return rc;
             }
 
@@ -1048,7 +1047,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
         case AB_PLC_LGX:
             // case AB_PLC_OMRON_NJNX:
             if((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
 
                 return rc;
             }
@@ -1057,7 +1056,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
 
         default:
             /* how would we get here? */
-            pdebug(DEBUG_WARN, "unsupported PLC type %d", tag->plc_type);
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "unsupported PLC type %d", tag->plc_type);
 
             return PLCTAG_ERR_BAD_PARAM;
 
@@ -1086,17 +1085,18 @@ int check_request_status(ab_tag_p tag) {
     ab_request_p request = NULL;
     eip_encap *eip_header = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    /* check early for null pointers */
+    if(!tag) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Called with null tag pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+    
+    debug_set_tag_id(tag->tag_id);
 
     do {
-        if(!tag) {
-            pdebug(DEBUG_WARN, "Called with null tag pointer!");
-            rc = PLCTAG_ERR_NULL_PTR;
-            break;
-        }
-
         /* do we have an abort outstanding? */
         if(atomic_get_bool(&tag->abort_requested)) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Abort requested on tag %" PRId32 ".", tag->tag_id);
             ab_tag_abort_request(tag);
             atomic_set_bool(&tag->abort_requested, false);
             rc = PLCTAG_ERR_ABORT;
@@ -1115,7 +1115,7 @@ int check_request_status(ab_tag_p tag) {
                 tag->write_in_progress = 0;
                 tag->offset = 0;
 
-                pdebug(DEBUG_WARN, "A request was in progress, but no request in flight!");
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "A request was in progress, but no request in flight!");
             }
 
             rc = PLCTAG_STATUS_OK;
@@ -1131,6 +1131,7 @@ int check_request_status(ab_tag_p tag) {
 
             /* check to see if it was an abort on the session side. */
             if(request->status != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Request completed with error status %s.", plc_tag_decode_error(request->status));
                 rc = request->status;
                 break;
             }
@@ -1141,7 +1142,7 @@ int check_request_status(ab_tag_p tag) {
 
         /* check the length */
         if((request->request_size < 0) || (size_t)request->request_size < sizeof(*eip_header)) {
-            pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Insufficient data returned for even an EIP header!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
@@ -1149,18 +1150,18 @@ int check_request_status(ab_tag_p tag) {
         eip_header = (eip_encap *)(request->data);
 
         if(le2h32(eip_header->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         switch(le2h16(eip_header->encap_command)) {
-            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_SPEW, "Received a connected send EIP packet."); break;
-            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_SPEW, "Received an unconnected send EIP packet."); break;
+            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Received a connected send EIP packet."); break;
+            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Received an unconnected send EIP packet."); break;
             default:
-                pdebug(DEBUG_WARN, "Request pointer %p, header pointer %p.", request, eip_header);
-                pdebug(DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
-                pdebug_dump_bytes(DEBUG_WARN, request->data, request->request_size);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Request pointer %p, header pointer %p.", request, eip_header);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
+                pdebug_dump_bytes(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, request->data, request->request_size);
 
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
@@ -1174,12 +1175,15 @@ int check_request_status(ab_tag_p tag) {
         /* the request is dead, from session side. */
         ab_tag_abort(tag);
 
-        pdebug(DEBUG_INFO, "Response not OK with status %s.", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
-    tag->status = (int8_t)rc;
+    /* FIXME - This is not correct */
+    // tag->status = (int8_t)rc;
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Done with tag status %s.", plc_tag_decode_error(rc));
+
+    debug_set_tag_id(0);
 
     return rc;
 }

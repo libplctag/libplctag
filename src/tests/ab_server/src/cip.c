@@ -37,6 +37,7 @@
 #include "plc.h"
 #include "slice.h"
 #include "utils.h"
+#include "log.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -109,15 +110,14 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 
 #define CIP_TAG_MAX_INDEXES ((uint32_t)3) /* should double check for OMRON */
 
+#define MAX_SUB_PACKETS ((uint16_t)1000) /* maximum number of sub-packets in a multi-service request */
 
-// typedef struct {
-//     uint8_t service_code;   /* why is the operation code _before_ the path? */
-//     uint8_t path_size;      /* size in 16-bit words of the path */
-//     slice_s path;           /* store this in a slice to avoid copying */
-// } cip_header_s;
+#define CIP_MINIMAL_RESPONSE_SIZE ((size_t)6) /* four bytes for header plus 2 for optional extended status. */
 
 
-static slice_s make_cip_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
+
+
+static slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
 
 static slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                    plc_s *plc);
@@ -126,6 +126,8 @@ static slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_pat
 static slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                    plc_s *plc);
 static slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
+                                    plc_s *plc);
+static slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                     plc_s *plc);
 
 static bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service_path, slice_s *cip_service_payload);
@@ -141,21 +143,25 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     slice_s cip_service_path = {0};
     slice_s cip_service_payload = {0};
 
-    info("Got packet:");
-    slice_dump(input);
+    log_info("Got packet:");
+    log_info_slice(input);
 
     if(!parse_cip_request(input, &cip_service, &cip_service_path, &cip_service_payload)) {
-        info("Unable to parse CIP request!");
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Unable to parse CIP request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
-    info("CIP Service: %02x", cip_service);
-    info("CIP Path:");
-    slice_dump(cip_service_path);
-    info("CIP Payload:");
-    slice_dump(cip_service_payload);
+    log_info("CIP Service: %02x", cip_service);
+    log_info("CIP Path:");
+    log_info_slice(cip_service_path);
+    log_info("CIP Payload:");
+    log_info_slice(cip_service_payload);
 
     switch(cip_service) {
+        case CIP_SRV_MULTI:
+            return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc);
+            break;
+
         case CIP_SRV_FORWARD_OPEN:
         case CIP_SRV_FORWARD_OPEN_EX:
             return handle_forward_open(cip_service, cip_service_path, cip_service_payload, output, plc);
@@ -177,8 +183,156 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
 
         case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
 
-        default: return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
+        default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
     }
+}
+
+
+/* 
+ * Handle multi-service requests (service 0x0a)
+ * 
+ * We have to unpack and dispatch each sub-request, then repack the responses.
+ */
+slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
+                             plc_s *plc) {
+    uint16_t service_count = 0;
+    size_t i = 0;
+
+    (void)cip_service_path; /* static for multi-service requests, but we should really check it. */
+
+    size_t output_offset = 0;
+    
+    log_info("Processing Multi-Service request");
+    
+    /* Phase 1: Parse request structure */
+    if(slice_len(cip_service_payload) < 2) {
+        log_info("Multi-service payload too small for service count");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+    
+    service_count = slice_get_uint16_le(cip_service_payload, 0);
+    
+    log_info("Multi-service request contains %d services", service_count);
+    
+    if(service_count == 0 || service_count > MAX_SUB_PACKETS) {
+        log_info("Invalid service count: %d", service_count);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+    
+    /* Need space for offsets array */
+    if(slice_len(cip_service_payload) < (size_t)(2 + service_count * 2)) {
+        log_info("Multi-service payload too small for offset array");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+    
+    /* calculate the overhead of the multi-response payload */
+    size_t multi_response_overhead = 4                                              /* CIP response header size */
+                                    + sizeof(uint16_t)                              /* service count */
+                                    + (service_count * sizeof(uint16_t));           /* offsets array */
+
+    /* do we have room? Guess using a minimal response size for all requests */
+    if(slice_len(output) < (multi_response_overhead + (service_count * CIP_MINIMAL_RESPONSE_SIZE))) {
+        log_info("Output buffer too small for multi-response header");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+
+    /* start the offset at the beginning of the first response */
+    output_offset = multi_response_overhead;
+
+    /* calculate the offset from the response count word */
+    size_t offset_from_response_count =  sizeof(uint16_t)                       /* service count */
+                                    + (service_count * sizeof(uint16_t));  /* offsets array */
+
+
+    /* calculate the maximum slice of the multi-response payload */
+    slice_s multi_response_payload = slice_from_slice(output, output_offset, slice_len(output) - output_offset);
+
+    log_info("Response payload starts at offset %zu", output_offset);
+    log_info("Response payload length: %zu", slice_len(multi_response_payload));
+
+    /* Track if any sub-response has an error status */
+    bool any_error = false;
+
+    /* Phase 3: Process each request */
+    for(i = 0; i < service_count; i++) {
+        /* calculate the slice of the request */
+        uint16_t request_offset = slice_get_uint16_le(cip_service_payload, 2 + (i * 2));
+        /* Offsets are from the start of the multi-service payload (byte 0) */
+        size_t request_start = request_offset;
+        size_t next_request_start = (i + 1 < service_count) 
+            ? slice_get_uint16_le(cip_service_payload, 2 + (i + 1) * 2)
+            : slice_len(cip_service_payload);
+        
+        if(request_start >= slice_len(cip_service_payload)) {
+            log_info("Request %zu offset %u is out of bounds", i, request_offset);
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        /* Validate that offsets are in ascending order */
+        if(request_start >= next_request_start) {
+            log_info("Request %zu has invalid offset range: start=%zu >= next=%zu", i, request_start, next_request_start);
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        /* Extract the individual request - it's a complete CIP request */
+        slice_s request = slice_from_slice(cip_service_payload, request_start, next_request_start - request_start);
+
+        /* determine the maximum possible response size for this request */
+        slice_s response_output = slice_from_slice(output, output_offset, (slice_len(output) - (output_offset + ((service_count - i) * CIP_MINIMAL_RESPONSE_SIZE))));
+
+        log_info("Response output slice starts at offset %zu with length %zu", output_offset, slice_len(response_output));
+
+        log_info("Sub-request %zu:", i);
+        log_info_slice(request);
+
+        /* Process the request - each is a complete CIP request */
+        slice_s response = cip_dispatch_request(request, response_output, plc);
+
+        log_info("Sub-request %zu response:", i);
+        log_info_slice(response);
+
+        /* Check the CIP status byte (byte 2) of the response - if non-zero, there's an error */
+        if(!slice_has_err(response) && slice_len(response) > 2) {
+            uint8_t cip_status = slice_get_uint8(response, 2);
+            if(cip_status != CIP_OK) {
+                log_info("Sub-request %zu returned CIP status error: 0x%02x", i, cip_status);
+                any_error = true;
+            }
+        }
+
+        /* fill in the offset array */
+        slice_set_uint16_le(output, 4 + 2 + (i * 2), (uint16_t)offset_from_response_count);
+
+        output_offset += slice_len(response);
+        offset_from_response_count += slice_len(response);
+
+        log_info("Output up to request %zu:", i);
+        log_info_slice(slice_from_slice(output, 0, output_offset));
+    }
+
+    /* Phase 4: Build multi-service response */
+    size_t response_offset_pos = 0;
+
+    /* CIP response header (4 bytes) */
+    slice_set_uint8(output, response_offset_pos++, cip_service | CIP_DONE); /* 0x8a */
+    slice_set_uint8(output, response_offset_pos++, 0); /* reserved */
+    /* Status: 0x1E if any sub-request had an error, else CIP_OK (0x00) */
+    slice_set_uint8(output, response_offset_pos++, any_error ? 0x1E : CIP_OK);
+    slice_set_uint8(output, response_offset_pos++, 0); /* additional status size */
+    
+    /* Multi-service response payload starts after CIP header */
+    size_t multi_payload_start = response_offset_pos;
+
+    log_info("Filled in header:");
+    log_info_slice(slice_from_slice(output, 0, response_offset_pos + 2 + (service_count * 2)));
+    
+    /* Service count */
+    slice_set_uint16_le(output, multi_payload_start, service_count);
+
+    log_info("Multi-service response completed, total size %zu bytes", output_offset);
+    log_info_slice(slice_from_slice(output, 0, output_offset));
+    
+    return slice_from_slice(output, 0, output_offset);
 }
 
 
@@ -214,17 +368,26 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     forward_open_s fo_req = {0};
 
     if(cip_service == CIP_SRV_FORWARD_OPEN) {
-        info("Processing Forward Open request.");
+        log_info("Processing Forward Open request.");
     } else {
-        info("Processing Forward Open Extended request.");
+        log_info("Processing Forward Open Extended request.");
     }
 
+    log_info("CIP service: 0x%02x", cip_service);
+    log_info("CIP Path:");
+    log_info_slice(cip_service_path);
+    log_info("CIP Payload:");
+    log_info_slice(cip_service_payload);
+
+    log_info("output buffer size: %zu", slice_len(output));
+    
+
     if(!slice_match_data_exact(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
-        info("Forward Open service requested from wrong object!");
-        slice_dump(cip_service_path);
-        return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+        log_info("Forward Open service requested from wrong object!");
+        log_info_slice(cip_service_path);
+        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
     } else {
-        info("Forward Open service requested of Connection Manager Object instance 1.");
+        log_info("Forward Open service requested of Connection Manager Object instance 1.");
     }
 
     /* start parsing */
@@ -277,42 +440,42 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* did we run out of bounds? */
     if(offset > slice_len(cip_service_payload)) {
-        info("Not enough Forward Open service data!");
-        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+        log_info("Not enough Forward Open service data!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
 
     /* Get the connection path */
     path_payload = slice_from_slice(cip_service_payload, offset, slice_len(cip_service_payload));
 
-    info("Forward Open path payload:");
-    slice_dump(path_payload);
+    log_info("Forward Open path payload:");
+    log_info_slice(path_payload);
 
     offset = 0;
     if(!extract_cip_path(path_payload, &offset, false, &conn_path_slice)) {
-        info("Unable to extract the connection path from the Forward Open request!");
-        return make_cip_error(output, cip_service, CIP_ERR_PATH_SEGMENT, false, 0);
+        log_info("Unable to extract the connection path from the Forward Open request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_PATH_SEGMENT, false, 0);
     }
 
-    info("Connection path slice:");
-    slice_dump(conn_path_slice);
+    log_info("Connection path slice:");
+    log_info_slice(conn_path_slice);
 
     if(!slice_match_data_exact(conn_path_slice, &(plc->path[0]), plc->path_len)) {
-        slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
+        slice_s plc_path = slice_make(&(plc->path[0]), plc->path_len);
 
-        info("Forward open request path did not match the path for this PLC!");
-        info("FO path:");
-        slice_dump(conn_path_slice);
-        info("PLC path:");
-        slice_dump(plc_path);
+        log_info("Forward open request path did not match the path for this PLC!");
+        log_info("FO path:");
+        log_info_slice(conn_path_slice);
+        log_info("PLC path:");
+        log_info_slice(plc_path);
 
-        return make_cip_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
     }
 
     /* check to see how many refusals we should do. */
     if(plc->reject_fo_count > 0) {
         plc->reject_fo_count--;
-        info("Forward open request being bounced for debugging. %d to go.", plc->reject_fo_count);
-        return make_cip_error(output, cip_service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_DUPLICATE_CONN);
+        log_info("Forward open request being bounced for debugging. %d to go.", plc->reject_fo_count);
+        return make_cip_log_error(output, cip_service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_DUPLICATE_CONN);
     }
 
     /* all good if we got here. */
@@ -365,6 +528,9 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     slice_set_uint8(output, offset, 0);
     offset++;
 
+    log_info("Forward Open response completed, size %zu bytes", offset);
+    log_info_slice(slice_from_slice(output, 0, offset));
+
     return slice_from_slice(output, 0, offset);
 }
 
@@ -390,17 +556,17 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     forward_close_s fc_req = {0};
 
     if(!slice_match_data_exact(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
-        info("Forward Open service requested from wrong object!");
-        slice_dump(cip_service_path);
-        return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+        log_info("Forward Open service requested from wrong object!");
+        log_info_slice(cip_service_path);
+        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
     } else {
-        info("Forward Close service requested of Connection Manager Object instance 1.");
+        log_info("Forward Close service requested of Connection Manager Object instance 1.");
     }
 
     /* minimum length check */
     if(slice_len(cip_service_payload) < CIP_FORWARD_CLOSE_MIN_SIZE) {
         /* FIXME - send back the right error. */
-        return make_cip_error(output, cip_service, (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
+        return make_cip_log_error(output, cip_service, (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
     }
 
     /* get the data. */
@@ -420,8 +586,8 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     /* check the remaining length */
     if(offset >= slice_len(cip_service_payload)) {
         /* FIXME - send back the right error. */
-        info("Forward close request size, %d, too small.   Should be greater than %d!", slice_len(cip_service_payload), offset);
-        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+        log_info("Forward close request size, %d, too small.   Should be greater than %d!", slice_len(cip_service_payload), offset);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
 
     /*
@@ -431,43 +597,43 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
      */
 
     if(!extract_cip_path(cip_service_payload, &offset, true, &conn_path_slice)) {
-        info("Unable to extract the connection path from the Forward Close request!");
-        return make_cip_error(output, cip_service, CIP_ERR_PATH_SEGMENT, false, 0);
+        log_info("Unable to extract the connection path from the Forward Close request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_PATH_SEGMENT, false, 0);
     }
 
-    info("Connection path slice:");
-    slice_dump(conn_path_slice);
+    log_info("Connection path slice:");
+    log_info_slice(conn_path_slice);
 
     if(!slice_match_data_exact(conn_path_slice, &(plc->path[0]), plc->path_len)) {
-        slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
+        slice_s plc_path = slice_make(&(plc->path[0]), plc->path_len);
 
-        info("Forward Cpen request path did not match the path for this PLC!");
-        info("FC path:");
-        slice_dump(conn_path_slice);
-        info("PLC path:");
-        slice_dump(plc_path);
+        log_info("Forward Cpen request path did not match the path for this PLC!");
+        log_info("FC path:");
+        log_info_slice(conn_path_slice);
+        log_info("PLC path:");
+        log_info_slice(plc_path);
 
-        return make_cip_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
     }
 
     /* Check the values we got. */
     if(plc->client_connection_serial_number != fc_req.client_connection_serial_number) {
         /* FIXME - send back the right error. */
-        info("Forward close connection serial number, %x, did not match the connection serial number originally passed, %x!",
+        log_info("Forward close connection serial number, %x, did not match the connection serial number originally passed, %x!",
              fc_req.client_connection_serial_number, plc->client_connection_serial_number);
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
     if(plc->client_vendor_id != fc_req.client_vendor_id) {
         /* FIXME - send back the right error. */
-        info("Forward Close client vendor ID, %x, did not match the client vendor ID originally passed, %x!",
+        log_info("Forward Close client vendor ID, %x, did not match the client vendor ID originally passed, %x!",
              fc_req.client_vendor_id, plc->client_vendor_id);
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
     if(plc->client_serial_number != fc_req.client_serial_number) {
         /* FIXME - send back the right error. */
-        info("Forward close client serial number, %x, did not match the client serial number originally passed, %x!",
+        log_info("Forward close client serial number, %x, did not match the client serial number originally passed, %x!",
              fc_req.client_serial_number, plc->client_serial_number);
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     /* now process the FClose and respond. */
@@ -519,31 +685,34 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* what service are we handling? */
     if(cip_service == CIP_SRV_READ_NAMED_TAG) {
-        info("Processing Read Named Tag request.");
+        log_info("Processing Read Named Tag request.");
         required_request_payload_size = CIP_READ_PAYLOAD_MIN_SIZE;
     } else {
-        info("Processing Read Named Tag Fragmented request.");
+        log_info("Processing Read Named Tag Fragmented request.");
         required_request_payload_size = CIP_READ_FRAG_PAYLOAD_MIN_SIZE;
     }
 
     /* OMRON only supports un-fragmented reads. */
     if(plc->plc_type == PLC_OMRON && cip_service != CIP_SRV_READ_NAMED_TAG) {
-        info("Omron PLCs do not support fragmented read CIP service!");
-        return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+        log_info("Omron PLCs do not support fragmented read CIP service!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
     /* check the payload size */
     if(slice_len(cip_service_payload) < required_request_payload_size) {
-        info("Insufficient data in the CIP read request payload!");
-        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+        log_info("Insufficient data in the CIP read request payload!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
 
     /* try to get the tag and indexes from the tag path. */
     if(!parse_tag_path(cip_service_path, plc, &tag, &num_indexes, &(indexes[0]))) {
-        info("Unable to parse tag path:");
-        slice_dump(cip_service_path);
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Unable to parse tag path:");
+        log_info_slice(cip_service_path);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
+    
+    /* Record request arrival time for latency tracking */
+    atomic_store_int64(&tag->last_request_time_us, util_time_us());
 
     /* get the element count and the optional request byte offset. */
     parse_offset = 0;
@@ -557,17 +726,17 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     }
 
     if(parse_offset != slice_len(cip_service_payload)) {
-        info("Extra data in the CIP read request payload!");
-        slice_dump(cip_service_payload);
-        return make_cip_error(output, cip_service, CIP_ERR_TOO_MUCH_DATA, false, 0);
+        log_info("Extra data in the CIP read request payload!");
+        log_info_slice(cip_service_payload);
+        return make_cip_log_error(output, cip_service, CIP_ERR_TOO_MUCH_DATA, false, 0);
     }
 
     /* get the starting offset of the request, checks against tag size. */
     if(!calculate_request_start_and_end_offsets(tag, num_indexes, indexes, request_element_count, &request_start_byte_offset,
                                                 &request_end_byte_offset)) {
-        info("Unable to calculate the starting offset of the read request!");
+        log_info("Unable to calculate the starting offset of the read request!");
         // FIXME - need other error.
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     /* bump the start offset by the amount we may have already read. */
@@ -575,8 +744,8 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* check the byte offsets */
     if(request_start_byte_offset > request_end_byte_offset) {
-        info("Invalid byte offsets in the read request!");
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Invalid byte offsets in the read request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     /* what is the minimum amount of data we can send back without breaking an atomic base type? */
@@ -589,8 +758,8 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* check the payload space.  */
     if(slice_len(output) < (CIP_RESPONSE_HEADER_SIZE + CIP_RESPONSE_TYPE_INFO_SIZE + min_data_element_size)) {
-        info("Insufficient space in the output buffer for the response!");
-        return make_cip_error(output, cip_service, CIP_ERR_FRAG, false, 0);
+        log_info("Insufficient space in the output buffer for the response!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_FRAG, false, 0);
     }
 
     /* peel off space for the header and type info and payload. */
@@ -601,9 +770,9 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* make sure we have enough space for at least one element. */
     if(slice_len(cip_response_payload_slice) < min_data_element_size) {
-        info("Insufficient space in the output buffer for the response payload!");
+        log_info("Insufficient space in the output buffer for the response payload!");
         // FIXME - need other error.
-        return make_cip_error(output, cip_service, CIP_ERR_EXTENDED, true, CIP_ERR_EX_TOO_LONG);
+        return make_cip_log_error(output, cip_service, CIP_ERR_EXTENDED, true, CIP_ERR_EX_TOO_LONG);
     }
 
     /* we have payload space so how much can we copy? */
@@ -620,18 +789,18 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     /* copy the data into the response payload. */
     critical_block(tag->data_mutex) {
         if(!slice_copy_data_in(cip_response_payload_slice, tag->data + request_start_byte_offset, copy_size)) {
-            info("Unable to copy the data into the response payload!");
+            log_info("Unable to copy the data into the response payload!");
             // FIXME - need other error.
             cip_err = CIP_ERR_INVALID_PARAM;
             break;
         }
     }
 
-    if(cip_err != CIP_OK) { return make_cip_error(output, cip_service, cip_err, false, 0); }
+    if(cip_err != CIP_OK) { return make_cip_log_error(output, cip_service, cip_err, false, 0); }
 
     /* did we fragment? */
     if(request_start_byte_offset + copy_size < request_end_byte_offset) {
-        info("Need to fragment read request.");
+        log_info("Need to fragment read request.");
         needs_fragmentation = true;
     }
 
@@ -643,6 +812,30 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* fill in the tag data type */
     slice_set_uint16_le(cip_response_type_info_slice, 0, tag->tag_type);
+    
+    /* Calculate and record request latency */
+    int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
+    if (request_start > 0) {
+        int64_t latency = util_time_us() - request_start;
+        atomic_inc_int32(&tag->request_count);
+        atomic_load_int64(&tag->total_latency_us);  /* Need atomic add, use workaround */
+        
+        /* Update min latency */
+        int64_t current_min = atomic_load_int64(&tag->min_latency_us);
+        if (current_min == 0 || latency < current_min) {
+            atomic_store_int64(&tag->min_latency_us, latency);
+        }
+        
+        /* Update max latency */
+        int64_t current_max = atomic_load_int64(&tag->max_latency_us);
+        if (latency > current_max) {
+            atomic_store_int64(&tag->max_latency_us, latency);
+        }
+        
+        /* Add to total - not perfectly atomic but good enough for statistics */
+        int64_t total = atomic_load_int64(&tag->total_latency_us);
+        atomic_store_int64(&tag->total_latency_us, total + latency);
+    }
 
     /* return the slice used */
     return slice_from_slice(output, 0,
@@ -672,44 +865,47 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 
     /* what service are we handling? */
     if(cip_service == CIP_SRV_WRITE_NAMED_TAG) {
-        info("Processing Write Named Tag request.");
+        log_info("Processing Write Named Tag request.");
         required_request_payload_size = CIP_WRITE_PAYLOAD_MIN_SIZE;
     } else {
-        info("Processing Write Named Tag Fragmented request.");
+        log_info("Processing Write Named Tag Fragmented request.");
         required_request_payload_size = CIP_WRITE_FRAG_PAYLOAD_MIN_SIZE;
     }
 
     /* OMRON only supports un-fragmented reads. */
     if(plc->plc_type == PLC_OMRON && cip_service != CIP_SRV_WRITE_NAMED_TAG) {
-        info("Omron PLCs do not support fragmented write CIP service!");
-        return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+        log_info("Omron PLCs do not support fragmented write CIP service!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
     /* we need the tag to do more calculations and checks */
     if(!parse_tag_path(cip_service_path, plc, &tag, &num_indexes, &(indexes[0]))) {
-        info("Unable to parse tag path:");
-        slice_dump(cip_service_path);
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Unable to parse tag path:");
+        log_info_slice(cip_service_path);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
+    
+    /* Record request arrival time for latency tracking */
+    atomic_store_int64(&tag->last_request_time_us, util_time_us());
 
     /* are the number of indexes correct? */
     if(num_indexes > 0 && num_indexes != tag->num_dimensions) {
-        info("Wrong number of indexes passed.   Must be zero or %zu indexes.", tag->num_dimensions);
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Wrong number of indexes passed.   Must be zero or %zu indexes.", tag->num_dimensions);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     /* check the payload size */
     if(slice_len(cip_service_payload) < required_request_payload_size) {
-        info("Insufficient data in the CIP read request payload!");
-        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+        log_info("Insufficient data in the CIP read request payload!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
 
     request_element_type = slice_get_uint16_le(cip_service_payload, parse_offset);
     parse_offset += 2;
 
     if(request_element_type != tag->tag_type) {
-        info("Request element type does not match tag type!");
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Request element type does not match tag type!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     /* get the element count and the optional request byte offset. */
@@ -731,9 +927,9 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     /* get the starting offset of the request, and checks tag size. */
     if(!calculate_request_start_and_end_offsets(tag, num_indexes, indexes, request_element_count, &request_start_byte_offset,
                                                 &request_end_byte_offset)) {
-        info("Unable to calculate the starting or ending offset of the write request!");
+        log_info("Unable to calculate the starting or ending offset of the write request!");
         // FIXME - need other error.
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     /* what is the actual starting byte offset for this specific request which might be a fragment. */
@@ -741,20 +937,20 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 
     /* Make sure we are not trying to write too much. */
     if((slice_len(write_request_payload_slice) + request_start_byte_offset) > request_end_byte_offset) {
-        info("Too much data in the write request!");
-        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        log_info("Too much data in the write request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     critical_block(tag->data_mutex) {
         if(!slice_copy_data_out(tag->data + request_start_byte_offset, request_end_byte_offset - request_start_byte_offset,
                                 write_request_payload_slice)) {
-            info("Unable to copy the data into the tag!");
+            log_info("Unable to copy the data into the tag!");
             cip_err = CIP_ERR_INVALID_PARAM;
             break;
         }
     }
 
-    if(cip_err != CIP_OK) { return make_cip_error(output, cip_service, cip_err, false, 0); }
+    if(cip_err != CIP_OK) { return make_cip_log_error(output, cip_service, cip_err, false, 0); }
 
     /* peel off space for the header */
     cip_response_header_slice = slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE);
@@ -773,13 +969,36 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     slice_set_uint8(cip_response_header_slice, 1, 0); /* reserved */
     slice_set_uint8(cip_response_header_slice, 2, CIP_OK); /* status */
     slice_set_uint8(cip_response_header_slice, 3, 0); /* no extended error */
+    
+    /* Calculate and record request latency */
+    int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
+    if (request_start > 0) {
+        int64_t latency = util_time_us() - request_start;
+        atomic_inc_int32(&tag->request_count);
+        
+        /* Update min latency */
+        int64_t current_min = atomic_load_int64(&tag->min_latency_us);
+        if (current_min == 0 || latency < current_min) {
+            atomic_store_int64(&tag->min_latency_us, latency);
+        }
+        
+        /* Update max latency */
+        int64_t current_max = atomic_load_int64(&tag->max_latency_us);
+        if (latency > current_max) {
+            atomic_store_int64(&tag->max_latency_us, latency);
+        }
+        
+        /* Add to total - not perfectly atomic but good enough for statistics */
+        int64_t total = atomic_load_int64(&tag->total_latency_us);
+        atomic_store_int64(&tag->total_latency_us, total + latency);
+    }
 
     /* return the remaining output space */
     return cip_response_header_slice;
 }
 
 
-slice_s make_cip_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error) {
+slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error) {
     size_t result_size = 0;
 
     slice_set_uint8(output, 0, cip_cmd | CIP_DONE);
@@ -810,7 +1029,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
 
     /* Check if the tag path is long enough to contain the segment marker and name length */
     if(slice_len(tag_path) < CIP_MIN_TAG_PATH_SIZE) {
-        info("Tag path is too short to contain segment marker and name length!");
+        log_info("Tag path is too short to contain segment marker and name length!");
         return false;
     }
 
@@ -818,7 +1037,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     segment_marker = slice_get_uint8(tag_path, offset);
     offset++;
     if(segment_marker != CIP_SYMBOLIC_SEGMENT_MARKER) {
-        info("Expected symbolic segment marker but found %x!", segment_marker);
+        log_info("Expected symbolic segment marker but found %x!", segment_marker);
         return false;
     }
 
@@ -826,7 +1045,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     name_len = slice_get_uint8(tag_path, offset);
     offset++;
     if(name_len + offset > slice_len(tag_path)) {
-        info("Name length %d exceeds remaining tag path length %d!", name_len, slice_len(tag_path) - offset);
+        log_info("Name length %d exceeds remaining tag path length %d!", name_len, slice_len(tag_path) - offset);
         return false;
     }
 
@@ -842,7 +1061,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
 
     while(*tag) {
         if(slice_match_string_exact(tag_name_slice, (*tag)->name)) {
-            info("Found tag %s", (*tag)->name);
+            log_info("Found tag %s", (*tag)->name);
             break;
         }
 
@@ -850,7 +1069,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     }
 
     if(!*tag) {
-        info("Tag %.*s not found!", slice_len(tag_name_slice), (const char *)(tag_name_slice.data));
+        log_info("Tag %.*s not found!", slice_len(tag_name_slice), (const char *)(tag_name_slice.data));
         return false;
     }
 
@@ -865,26 +1084,26 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
             case 0x28:        // Single byte value
                 offset += 1;  // skip segment type
                 indexes[*num_indexes] = (uint32_t)slice_get_uint8(tag_path, offset);
-                info("Numeric segment: %u", indexes[*num_indexes]);
+                log_info("Numeric segment: %u", indexes[*num_indexes]);
                 offset += 1;
                 break;
 
             case 0x29:        // Two byte value
                 offset += 2;  // skip segment type and padding
                 indexes[*num_indexes] = (uint32_t)slice_get_uint16_le(tag_path, offset);
-                info("Numeric segment: %u", indexes[*num_indexes]);
+                log_info("Numeric segment: %u", indexes[*num_indexes]);
                 offset += 2;
                 break;
 
             case 0x2A:        // Four byte value
                 offset += 2;  // skip segment type and padding
                 indexes[*num_indexes] = (uint32_t)slice_get_uint32_le(tag_path, offset);
-                info("Numeric segment: %u", indexes[*num_indexes]);
+                log_info("Numeric segment: %u", indexes[*num_indexes]);
                 offset += 4;
                 break;
 
             default:
-                info("Unexpected numeric segment marker %x at position %zu!", segment_type, offset);
+                log_info("Unexpected numeric segment marker %x at position %zu!", segment_type, offset);
                 return false;
                 break;
         }
@@ -892,14 +1111,14 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
         (*num_indexes)++;
 
         if(*num_indexes > max_indexes) {
-            info("More numeric segments, %zu, than expected, %zu!", *num_indexes, max_indexes);
+            log_info("More numeric segments, %zu, than expected, %zu!", *num_indexes, max_indexes);
             return false;
         }
     }
 
     /* the only valid number of indexes is zero or the number of dimensions in the tag. */
     if(*num_indexes != 0 && *num_indexes != (*tag)->num_dimensions) {
-        info("Required zero or %zu numeric segments, but only found %zu!", (*tag)->num_dimensions, (size_t)*num_indexes);
+        log_info("Required zero or %zu numeric segments, but only found %zu!", (*tag)->num_dimensions, (size_t)*num_indexes);
         return false;
     }
 
@@ -912,7 +1131,7 @@ bool extract_cip_path(slice_s input, size_t *offset, bool padded, slice_s *outpu
 
     /* Check if the input slice is long enough to contain the path length and path */
     if(slice_len(input) < ((*offset) + (padded ? 2 : 1))) {
-        info("CIP path is too short to contain path length and path!");
+        log_info("CIP path is too short to contain path length and path!");
         return false;
     }
 
@@ -920,7 +1139,7 @@ bool extract_cip_path(slice_s input, size_t *offset, bool padded, slice_s *outpu
     path_len = slice_get_uint8(input, (*offset));
     (*offset)++;
     if(path_len == 0) {
-        info("CIP path length is zero!");
+        log_info("CIP path length is zero!");
         return false;
     }
 
@@ -928,7 +1147,7 @@ bool extract_cip_path(slice_s input, size_t *offset, bool padded, slice_s *outpu
 
     /* Check if the input slice is long enough to contain the path */
     if(slice_len(input) < ((*offset) + (path_len * 2))) {
-        info("CIP path is too short to contain the specified path length %u!", path_len * 2);
+        log_info("CIP path is too short to contain the specified path length %u!", path_len * 2);
         return false;
     }
 
@@ -960,7 +1179,7 @@ bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexe
     /* check index bounds */
     for(size_t index = 0; index < num_indexes; index++) {
         if(indexes[index] >= tag->dimensions[index]) {
-            info("Index %zu out of bounds for dimension %zu.", (size_t)indexes[index], index);
+            log_info("Index %zu out of bounds for dimension %zu.", (size_t)indexes[index], index);
             return false;
         }
     }
@@ -979,14 +1198,14 @@ bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexe
             break;
 
         default:
-            info("Too many indexes!");
+            log_info("Too many indexes!");
             return false;
             break;
     }
 
     /* probably not needed, but just in case */
     if(element_offset >= total_elements) {
-        info("Element offset %d exceeds total elements %d!", element_offset, total_elements);
+        log_info("Element offset %d exceeds total elements %d!", element_offset, total_elements);
         return false;
     }
 
@@ -998,18 +1217,18 @@ bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexe
     *request_start_byte_offset = element_offset * tag->elem_size;
     *request_end_byte_offset = *request_start_byte_offset + (request_element_count * tag->elem_size);
 
-    info("Request start byte offset: %d", *request_start_byte_offset);
-    info("Request end byte offset: %d", *request_end_byte_offset);
+    log_info("Request start byte offset: %d", *request_start_byte_offset);
+    log_info("Request end byte offset: %d", *request_end_byte_offset);
 
     /* Check if the start offset exceeds the total size of the tag */
     if(*request_start_byte_offset > tag_size) {
-        info("Request start byte offset %d exceeds total tag size %zu", (size_t)*request_start_byte_offset, tag_size);
+        log_info("Request start byte offset %d exceeds total tag size %zu", (size_t)*request_start_byte_offset, tag_size);
         return false;
     }
 
     /* Check if the end offset exceeds the total size of the tag */
     if(*request_end_byte_offset > tag_size) {
-        info("Request end byte offset %d exceeds total tag size %zu", (size_t)*request_end_byte_offset, tag_size);
+        log_info("Request end byte offset %d exceeds total tag size %zu", (size_t)*request_end_byte_offset, tag_size);
         return false;
     }
 
@@ -1024,7 +1243,7 @@ bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service
 
     /* Check if the input slice is long enough to contain the service code and path size */
     if(slice_len(input) < CIP_MIN_REQUEST_SIZE) {
-        info("CIP request is too short to contain service code and path size!");
+        log_info("CIP request is too short to contain service code and path size!");
         return false;
     }
 
@@ -1034,7 +1253,7 @@ bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service
 
     /* extract the service path slice */
     if(!extract_cip_path(input, &offset, false, cip_service_path)) {
-        info("Unable to extract CIP service path!");
+        log_info("Unable to extract CIP service path!");
         return false;
     }
 
