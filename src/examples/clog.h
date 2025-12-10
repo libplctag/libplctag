@@ -69,8 +69,12 @@
 #include <time.h>
 
 #ifdef _WIN32
+#define _CRT_NONSTDC_NO_DEPRECATE
 #include <io.h>
 #include <windows.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #else
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -242,6 +246,10 @@ int clog_set_fmt(int id, const char *fmt);
 /*
  * No need to read below this point.
  */
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4996)
+#endif
 
 /*
  * Portability stuff.
@@ -491,7 +499,6 @@ _clog_format(const struct clog *logger, char buf[], size_t buf_size,
 
 #ifdef _WIN32
     SYSTEMTIME st;
-    FILETIME ft;
     GetSystemTime(&st);
     /* Calculate microseconds from milliseconds */
     usec = st.wMilliseconds * 1000;
@@ -606,7 +613,7 @@ _clog_log(const char *sfile, int sline, enum clog_level level,
             }
             return;
         }
-        result = (int)write(logger->fd, message, strlen(message));
+        result = (int)write(logger->fd, message, (unsigned int)strlen(message));
         if (result == -1) {
             _clog_err("Unable to write to log file: %s\n", strerror(errno));
         }
