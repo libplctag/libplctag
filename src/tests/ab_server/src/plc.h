@@ -36,6 +36,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "compat.h"
 #include "mutex.h"
 
 typedef uint16_t tag_type_t;
@@ -76,6 +77,13 @@ struct tag_def_s {
        and types) are expected to be created once, in a single thread. From then on those fields
        are expected to be read-only (even if by multiple threads). */
     mutex_p data_mutex;
+    
+    /* Fairness tracking - per-request latency statistics */
+    atomic_int32_t request_count;
+    atomic_int64_t total_latency_us;     /* sum of all request latencies in microseconds */
+    atomic_int64_t min_latency_us;       /* minimum request latency */
+    atomic_int64_t max_latency_us;       /* maximum request latency */
+    atomic_int64_t last_request_time_us; /* timestamp when request arrived */
 };
 
 typedef struct tag_def_s tag_def_s;
@@ -90,7 +98,7 @@ typedef enum {
 } plc_type_t;
 
 /* Define the context that is passed around. */
-typedef struct {
+typedef struct plc_s {
     plc_type_t plc_type;
     const char* port_str;
     uint8_t path[20];

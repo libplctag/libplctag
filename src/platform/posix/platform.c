@@ -43,6 +43,7 @@
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <platform.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -84,7 +85,7 @@
  */
 extern void *mem_alloc(int size) {
     if(size <= 0) {
-        pdebug(DEBUG_WARN, "Allocation size must be greater than zero bytes!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Allocation size must be greater than zero bytes!");
         return NULL;
     }
 
@@ -101,7 +102,7 @@ extern void *mem_alloc(int size) {
  */
 extern void *mem_realloc(void *orig, int size) {
     if(size <= 0) {
-        pdebug(DEBUG_WARN, "New allocation size must be greater than zero bytes!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "New allocation size must be greater than zero bytes!");
         return NULL;
     }
 
@@ -127,12 +128,12 @@ extern void mem_free(const void *mem) {
  */
 extern void mem_set(void *dest, int c, int size) {
     if(!dest) {
-        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Destination pointer is NULL!");
         return;
     }
 
     if(size <= 0) {
-        pdebug(DEBUG_WARN, "Size to set must be a positive number!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Size to set must be a positive number!");
         return;
     }
 
@@ -148,17 +149,17 @@ extern void mem_set(void *dest, int c, int size) {
  */
 extern void mem_copy(void *dest, void *src, int size) {
     if(!dest) {
-        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Destination pointer is NULL!");
         return;
     }
 
     if(!src) {
-        pdebug(DEBUG_WARN, "Source pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Source pointer is NULL!");
         return;
     }
 
     if(size < 0) {
-        pdebug(DEBUG_WARN, "Size to copy must be a positive number!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Size to copy must be a positive number!");
         return;
     }
 
@@ -179,17 +180,17 @@ extern void mem_copy(void *dest, void *src, int size) {
  */
 extern void mem_move(void *dest, void *src, int size) {
     if(!dest) {
-        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Destination pointer is NULL!");
         return;
     }
 
     if(!src) {
-        pdebug(DEBUG_WARN, "Source pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Source pointer is NULL!");
         return;
     }
 
     if(size < 0) {
-        pdebug(DEBUG_WARN, "Size to move must be a positive number!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Size to move must be a positive number!");
         return;
     }
 
@@ -248,7 +249,7 @@ extern int str_cmp(const char *first, const char *second) {
 
     if(first_zero) {
         if(second_zero) {
-            pdebug(DEBUG_DETAIL, "NULL or zero length strings passed.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "NULL or zero length strings passed.");
             return 0;
         } else {
             /* first is "less" than second. */
@@ -281,7 +282,7 @@ extern int str_cmp_i(const char *first, const char *second) {
 
     if(first_zero) {
         if(second_zero) {
-            pdebug(DEBUG_DETAIL, "NULL or zero length strings passed.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "NULL or zero length strings passed.");
             return 0;
         } else {
             /* first is "less" than second. */
@@ -313,18 +314,18 @@ extern int str_cmp_i_n(const char *first, const char *second, int count) {
     int second_zero = !str_length(second);
 
     if(count < 0) {
-        pdebug(DEBUG_WARN, "Illegal negative count!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Illegal negative count!");
         return -1;
     }
 
     if(count == 0) {
-        pdebug(DEBUG_DETAIL, "Called with comparison count of zero!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Called with comparison count of zero!");
         return 0;
     }
 
     if(first_zero) {
         if(second_zero) {
-            pdebug(DEBUG_DETAIL, "NULL or zero length strings passed.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "NULL or zero length strings passed.");
             return 0;
         } else {
             /* first is "less" than second. */
@@ -356,12 +357,12 @@ extern char *str_str_cmp_i(const char *haystack, const char *needle) {
     int needle_zero = !str_length(needle);
 
     if(haystack_zero) {
-        pdebug(DEBUG_DETAIL, "Haystack string is NULL or zero length.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Haystack string is NULL or zero length.");
         return NULL;
     }
 
     if(needle_zero) {
-        pdebug(DEBUG_DETAIL, "Needle string is NULL or zero length.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Needle string is NULL or zero length.");
         return NULL;
     }
 
@@ -376,17 +377,17 @@ extern char *str_str_cmp_i(const char *haystack, const char *needle) {
  */
 extern int str_copy(char *dst, int dst_size, const char *src) {
     if(!dst) {
-        pdebug(DEBUG_WARN, "Destination string pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Destination string pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!src) {
-        pdebug(DEBUG_WARN, "Source string pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Source string pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(dst_size <= 0) {
-        pdebug(DEBUG_WARN, "Destination size is negative or zero!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Destination size is negative or zero!");
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -437,7 +438,7 @@ extern int str_to_int(const char *str, int *val) {
     tmp_val = strtol(str, &endptr, 0);
 
     if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        pdebug(DEBUG_WARN, "strtol returned %ld with errno %d", tmp_val, errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "strtol returned %ld with errno %d", tmp_val, errno);
         return -1;
     }
 
@@ -551,7 +552,7 @@ char *str_concat_impl(int num_args, ...) {
 
     result = mem_alloc(total_length);
     if(!result) {
-        pdebug(DEBUG_ERROR, "Unable to allocate new string buffer!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Unable to allocate new string buffer!");
         return NULL;
     }
 
@@ -583,14 +584,14 @@ struct mutex_t {
 int mutex_create(mutex_p *m) {
     pthread_mutexattr_t mutex_attribs;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
-    if(*m) { pdebug(DEBUG_WARN, "Called with non-NULL pointer!"); }
+    if(*m) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Called with non-NULL pointer!"); }
 
     *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
 
     if(!*m) {
-        pdebug(DEBUG_ERROR, "null mutex pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -602,7 +603,7 @@ int mutex_create(mutex_p *m) {
         pthread_mutexattr_destroy(&mutex_attribs);
         mem_free(*m);
         *m = NULL;
-        pdebug(DEBUG_ERROR, "Error initializing mutex.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error initializing mutex.");
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
@@ -610,24 +611,24 @@ int mutex_create(mutex_p *m) {
 
     pthread_mutexattr_destroy(&mutex_attribs);
 
-    pdebug(DEBUG_DETAIL, "Done creating mutex %p.", *m);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done creating mutex %p.", *m);
 
     return PLCTAG_STATUS_OK;
 }
 
 
 int mutex_lock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_SPEW, "locking mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "locking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        pdebug(DEBUG_WARN, "null mutex pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
     if(pthread_mutex_lock(&(m->p_mutex))) {
-        pdebug(DEBUG_WARN, "error locking mutex.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "error locking mutex.");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
@@ -636,57 +637,57 @@ int mutex_lock_impl(const char *func, int line, mutex_p m) {
 
 
 int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_SPEW, "trying to lock mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "trying to lock mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        pdebug(DEBUG_WARN, "null mutex pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
     if(pthread_mutex_trylock(&(m->p_mutex))) {
-        pdebug(DEBUG_SPEW, "error locking mutex.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "error locking mutex.");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    /*pdebug(DEBUG_DETAIL,"Done.");*/
+    /*pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL,"Done.");*/
 
     return PLCTAG_STATUS_OK;
 }
 
 
 int mutex_unlock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_SPEW, "unlocking mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "unlocking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        pdebug(DEBUG_WARN, "null mutex pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
     if(pthread_mutex_unlock(&(m->p_mutex))) {
-        pdebug(DEBUG_WARN, "error unlocking mutex.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "error unlocking mutex.");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    // pdebug(DEBUG_SPEW,"Done.");
+    // pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 int mutex_destroy(mutex_p *m) {
-    pdebug(DEBUG_DETAIL, "Starting to destroy mutex %p.", m);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting to destroy mutex %p.", m);
 
     if(!m || !*m) {
-        pdebug(DEBUG_WARN, "null mutex pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(pthread_mutex_destroy(&((*m)->p_mutex))) {
-        pdebug(DEBUG_WARN, "error while attempting to destroy mutex.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "error while attempting to destroy mutex.");
         return PLCTAG_ERR_MUTEX_DESTROY;
     }
 
@@ -694,7 +695,7 @@ int mutex_destroy(mutex_p *m) {
 
     *m = NULL;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -719,29 +720,29 @@ struct thread_t {
  */
 
 extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg) {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
-    pdebug(DEBUG_DETAIL, "Warning: ignoring stacksize (%d) parameter.", stacksize);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Warning: ignoring stacksize (%d) parameter.", stacksize);
 
     if(!t) {
-        pdebug(DEBUG_WARN, "null thread pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
 
     if(!*t) {
-        pdebug(DEBUG_ERROR, "Failed to allocate memory for thread.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Failed to allocate memory for thread.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* create a pthread.  0 means success. */
     if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
-        pdebug(DEBUG_ERROR, "error creating thread.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "error creating thread.");
         return PLCTAG_ERR_THREAD_CREATE;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -780,20 +781,29 @@ void thread_kill(thread_p t) {
 
 int thread_join(thread_p t) {
     void *unused;
+    int64_t join_start_time = 0;
+    int join_result = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!t) {
-        pdebug(DEBUG_WARN, "null thread pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(pthread_join(t->p_thread, &unused)) {
-        pdebug(DEBUG_ERROR, "Error joining thread.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "About to join thread %p.", (void *)t->p_thread);
+    join_start_time = time_ms();
+
+    join_result = pthread_join(t->p_thread, &unused);
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Thread join completed after %" PRId64 "ms. Result: %d", (time_ms() - join_start_time), join_result);
+
+    if(join_result) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error joining thread.");
         return PLCTAG_ERR_THREAD_JOIN;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -819,10 +829,10 @@ extern int thread_detach(void) {
  * question must be dead first!
  */
 extern int thread_destroy(thread_p *t) {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!t || !*t) {
-        pdebug(DEBUG_WARN, "null thread pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -830,7 +840,7 @@ extern int thread_destroy(thread_p *t) {
 
     *t = NULL;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -889,32 +899,32 @@ int cond_create(cond_p *c) {
     int rc = PLCTAG_STATUS_OK;
     cond_p tmp_cond = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!c) {
-        pdebug(DEBUG_WARN, "Null pointer to condition var pointer!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Null pointer to condition var pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(*c) { pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?"); }
+    if(*c) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?"); }
 
     /* clear the output first. */
     *c = NULL;
 
     tmp_cond = mem_alloc((int)(unsigned int)sizeof(*tmp_cond));
     if(!tmp_cond) {
-        pdebug(DEBUG_WARN, "Unable to allocate new condition var!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to allocate new condition var!");
         return PLCTAG_ERR_NO_MEM;
     }
 
     if(pthread_mutex_init(&(tmp_cond->mutex), NULL)) {
-        pdebug(DEBUG_WARN, "Unable to initialize pthread mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to initialize pthread mutex!");
         mem_free(tmp_cond);
         return PLCTAG_ERR_CREATE;
     }
 
     if(pthread_cond_init(&(tmp_cond->cond), NULL)) {
-        pdebug(DEBUG_WARN, "Unable to initialize pthread condition var!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to initialize pthread condition var!");
         pthread_mutex_destroy(&(tmp_cond->mutex));
         mem_free(tmp_cond);
         return PLCTAG_ERR_CREATE;
@@ -924,7 +934,7 @@ int cond_create(cond_p *c) {
 
     *c = tmp_cond;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -936,20 +946,20 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
     int64_t end_time = start_time + timeout_ms;
     struct timespec timeout;
 
-    pdebug(DEBUG_SPEW, "Starting. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Starting. Called from %s:%d.", func, line_num);
 
     if(!c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(timeout_ms <= 0) {
-        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms, func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms, func, line_num);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     if(pthread_mutex_lock(&(c->mutex))) {
-        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to lock mutex!");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
@@ -964,47 +974,47 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
     while(!c->flag) {
         int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
 
-        pdebug(DEBUG_SPEW, "Waiting for %" PRId64 "ms.", time_left);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Waiting for %" PRId64 "ms.", time_left);
 
         if(time_left > 0) {
             int wait_rc = 0;
 
             wait_rc = pthread_cond_timedwait(&(c->cond), &(c->mutex), &timeout);
             if(wait_rc == ETIMEDOUT) {
-                pdebug(DEBUG_SPEW, "Timeout response from condition var wait.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Timeout response from condition var wait.");
                 rc = PLCTAG_ERR_TIMEOUT;
                 break;
             } else if(wait_rc != 0) {
-                pdebug(DEBUG_WARN, "Error %d waiting on condition variable!", errno);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d waiting on condition variable!", errno);
                 rc = PLCTAG_ERR_BAD_STATUS;
                 break;
             } else {
                 /* we might need to wait again. could be a spurious wake up. */
-                pdebug(DEBUG_SPEW, "Condition var wait returned.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Condition var wait returned.");
                 rc = PLCTAG_STATUS_OK;
             }
         } else {
-            pdebug(DEBUG_DETAIL, "Timed out.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Timed out.");
             rc = PLCTAG_ERR_TIMEOUT;
             break;
         }
     }
 
     if(c->flag) {
-        pdebug(DEBUG_SPEW, "Condition var signaled for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Condition var signaled for call at %s:%d.", func, line_num);
 
         /* clear the flag now that we've responded. */
         c->flag = 0;
     } else {
-        pdebug(DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
     }
 
     if(pthread_mutex_unlock(&(c->mutex))) {
-        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    pdebug(DEBUG_SPEW, "Done for call at %s:%d.", func, line_num);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1013,31 +1023,31 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
 int cond_signal_impl(const char *func, int line_num, cond_p c) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
 
     if(!c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(pthread_mutex_lock(&(c->mutex))) {
-        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to lock mutex!");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
     c->flag = 1;
 
     if(pthread_cond_signal(&(c->cond))) {
-        pdebug(DEBUG_WARN, "Signal of condition var returned error %d in call at %s:%d!", errno, func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Signal of condition var returned error %d in call at %s:%d!", errno, func, line_num);
         rc = PLCTAG_ERR_BAD_STATUS;
     }
 
     if(pthread_mutex_unlock(&(c->mutex))) {
-        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    pdebug(DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1046,26 +1056,26 @@ int cond_signal_impl(const char *func, int line_num, cond_p c) {
 int cond_clear_impl(const char *func, int line_num, cond_p c) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
 
     if(!c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(pthread_mutex_lock(&(c->mutex))) {
-        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to lock mutex!");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
     c->flag = 0;
 
     if(pthread_mutex_unlock(&(c->mutex))) {
-        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    pdebug(DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1074,10 +1084,10 @@ int cond_clear_impl(const char *func, int line_num, cond_p c) {
 int cond_destroy(cond_p *c) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!c || !*c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Condition var pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1088,7 +1098,7 @@ int cond_destroy(cond_p *c) {
 
     *c = NULL;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -1108,7 +1118,6 @@ struct sock_t {
     int wake_read_fd;
     int wake_write_fd;
     int port;
-    int is_open;
 };
 
 
@@ -1119,17 +1128,17 @@ static int sock_create_event_wakeup_channel(sock_p sock);
 extern int socket_create(sock_p *s) {
     int32_t rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!s) {
-        pdebug(DEBUG_WARN, "null socket pointer.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "null socket pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     *s = (sock_p)mem_alloc(sizeof(struct sock_t));
 
     if(!*s) {
-        pdebug(DEBUG_ERROR, "Failed to allocate memory for socket.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Failed to allocate memory for socket.");
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -1137,14 +1146,14 @@ extern int socket_create(sock_p *s) {
     (*s)->wake_read_fd = INVALID_SOCKET;
     (*s)->wake_write_fd = INVALID_SOCKET;
 
-    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Setting up wake pipe.");
     rc = sock_create_event_wakeup_channel((*s));
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1160,17 +1169,18 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     int done = 0;
     int fd;
     int flags;
-    struct timeval timeout;  /* used for timing out connections etc. */
     struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "socket() created fd=%d", fd);
+
     /* check for errors */
     if(fd < 0) {
-        pdebug(DEBUG_ERROR, "Socket creation failed, errno: %d", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Socket creation failed, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1179,7 +1189,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt))) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket reuse option, errno: %d", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting socket reuse option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1187,25 +1197,17 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
     if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 #endif
 
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
-
-    if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout))) {
-        close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket receive timeout option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
-
-    if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout))) {
-        close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket set timeout option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
+    /* NOTE: We do NOT set SO_RCVTIMEO or SO_SNDTIMEO here because:
+     * 1. We use non-blocking mode with select() for timeout handling
+     * 2. SO_RCVTIMEO + non-blocking mode can cause select() to not report readability correctly
+     * 3. select() provides finer control over timeout behavior than SO_RCVTIMEO/SO_SNDTIMEO
+     * Instead, timeout handling is done via select() in socket_wait_event() and socket_read()
+     */
 
     /* abort the connection immediately upon close. */
     so_linger.l_onoff = 1;
@@ -1213,14 +1215,14 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     if(setsockopt(fd, SOL_SOCKET, SO_LINGER, (char *)&so_linger, sizeof(so_linger))) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket close linger option, errno: %d", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting socket close linger option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
     /* make the socket non-blocking. */
     flags = fcntl(fd, F_GETFL, 0);
     if(flags < 0) {
-        pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
         close(fd);
         return PLCTAG_ERR_OPEN;
     }
@@ -1229,8 +1231,16 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     flags |= O_NONBLOCK;
 
     if(fcntl(fd, F_SETFL, flags) < 0) {
-        pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
         close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    /* set no delay for TCP connections.  Send immediately. */
+    sock_opt = 1;
+    if(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&sock_opt, sizeof(sock_opt))) {
+        close(fd);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting TCP_NODELAY option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1238,7 +1248,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     /* try a numeric IP address conversion first. */
     if(inet_pton(AF_INET, host, (struct in_addr *)ips) > 0) {
-        pdebug(DEBUG_DETAIL, "Found numeric IP address: %s", host);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Found numeric IP address: %s", host);
         num_ips = 1;
     } else {
         struct addrinfo hints;
@@ -1253,7 +1263,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         hints.ai_family = AF_INET;       /* IP V4 only */
 
         if((rc = getaddrinfo(host, NULL, &hints, &res_head)) != 0) {
-            pdebug(DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
 
             if(res_head) { freeaddrinfo(res_head); }
 
@@ -1270,10 +1280,10 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         freeaddrinfo(res_head);
     }
 
-    // pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    // pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Setting up wake pipe.");
     // rc = sock_create_event_wakeup_channel(s);
     // if(rc != PLCTAG_STATUS_OK) {
-    //     pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+    //     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
     //     return rc;
     // }
 
@@ -1294,23 +1304,23 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         /* try each IP until we run out or get a connection started. */
         gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
-        pdebug(DEBUG_DETAIL, "Attempting to connect to %s:%d", inet_ntoa(*((struct in_addr *)&ips[i])), port);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Attempting to connect to %s:%d", inet_ntoa(*((struct in_addr *)&ips[i])), port);
 
         /* this is done non-blocking. Could be interrupted, so restart if needed.*/
         do { rc = connect(fd, (struct sockaddr *)&gw_addr, sizeof(gw_addr)); } while(rc < 0 && errno == EINTR);
 
         if(rc == 0) {
             /* instantly connected. */
-            pdebug(DEBUG_DETAIL, "Connected instantly to %s:%d.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Connected instantly to %s:%d.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_OK;
         } else if(rc < 0 && (errno == EINPROGRESS)) {
             /* the connection has started. */
-            pdebug(DEBUG_DETAIL, "Started connecting to %s:%d successfully.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Started connecting to %s:%d successfully.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_PENDING;
         } else {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s:%d failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])), port,
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Attempt to connect to %s:%d failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])), port,
                    errno);
             i++;
         }
@@ -1318,7 +1328,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     if(!done) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Unable to connect to any gateway host IP address!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Unable to connect to any gateway host IP address!");
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1326,9 +1336,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     s->fd = fd;
     s->port = port;
 
-    s->is_open = 1;
-
-    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
 }
@@ -1343,10 +1351,10 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     socklen_t sock_err_len = (socklen_t)(sizeof(sock_err));
 
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!sock) {
-        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Null socket pointer passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1358,103 +1366,118 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 
     FD_SET(sock->fd, &write_set);
 
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d", sock->fd, timeout_ms);
     select_rc = select(sock->fd + 1, NULL, &write_set, NULL, &tv);
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d", select_rc, FD_ISSET(sock->fd, &write_set));
 
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_DETAIL, "Socket is probably connected.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Socket is probably connected.");
         } else {
-            pdebug(DEBUG_WARN, "select() returned but socket is not connected!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned but socket is not connected!");
             return PLCTAG_ERR_BAD_REPLY;
         }
     } else if(select_rc == 0) {
-        pdebug(DEBUG_DETAIL, "Socket connection not done yet.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Socket connection not done yet.");
         return PLCTAG_ERR_TIMEOUT;
     } else {
-        pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned status %d!", select_rc);
 
         switch(errno) {
             case EBADF: /* bad file descriptor */
-                pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Bad file descriptor used in select()!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case EINTR: /* signal was caught, this should not happen! */
-                pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "A signal was caught in select() and this should not happen!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(
-                    DEBUG_WARN,
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN,
                     "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ENOMEM: /* No mem for internal tables. */
-                pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Insufficient memory for select() to run!");
                 return PLCTAG_ERR_NO_MEM;
                 break;
 
             default:
-                pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected socket err %d!", errno);
                 return PLCTAG_ERR_OPEN;
                 break;
         }
     }
 
     /* now make absolutely sure that the connection is ready. */
+    /* Use getsockopt to check socket connection status (standard POSIX method) */
     rc = getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
     if(rc == 0) {
         /* sock_err has the error. */
         switch(sock_err) {
-            case 0: pdebug(DEBUG_DETAIL, "No error, socket is connected."); break;
+            case 0: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "No error, socket is connected."); break;
 
             case EBADF:
-                pdebug(DEBUG_WARN, "Socket fd is not valid!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket fd is not valid!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case EFAULT:
-                pdebug(DEBUG_WARN, "The address passed to getsockopt() is not a valid user address!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The address passed to getsockopt() is not a valid user address!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case EINVAL:
-                pdebug(DEBUG_WARN, "The size of the socket error result is invalid!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The size of the socket error result is invalid!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ENOPROTOOPT:
-                pdebug(DEBUG_WARN, "The option SO_ERROR is not understood at the SOL_SOCKET level!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The option SO_ERROR is not understood at the SOL_SOCKET level!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ENOTSOCK:
-                pdebug(DEBUG_WARN, "The FD is not a socket!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The FD is not a socket!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ECONNREFUSED:
-                pdebug(DEBUG_WARN, "Connection refused!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Connection refused!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
             default:
-                pdebug(DEBUG_WARN, "Unexpected error %d returned!", sock_err);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected error %d returned!", sock_err);
                 return PLCTAG_ERR_OPEN;
                 break;
         }
     } else {
-        pdebug(DEBUG_WARN, "Error %d getting socket connection status!", errno);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d getting socket connection status!", errno);
         return PLCTAG_ERR_OPEN;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
+
+static inline void log_event_bits(const char *prefix, int bits) {
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL,
+           "%s events=0x%x: %s%s%s%s%s%s",
+           prefix, bits,
+           (bits & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "",
+           (bits & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "",
+           (bits & SOCK_EVENT_CONNECT) ? "CONNECT " : "",
+           (bits & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "",
+           (bits & SOCK_EVENT_ERROR) ? "ERROR " : "",
+           (bits & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
+}
 
 int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     int result = SOCK_EVENT_NONE;
@@ -1464,26 +1487,21 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     int max_fd = 0;
     int num_sockets = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Starting.");
 
     if(!sock) {
-        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Null socket pointer passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!sock->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
-    }
-
     if(timeout_ms < 0) {
-        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be zero or positive!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     /* check if the mask is empty */
     if(events == 0) {
-        pdebug(DEBUG_WARN, "Passed event mask is empty!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Passed event mask is empty!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -1492,19 +1510,41 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     FD_ZERO(&write_set);
     FD_ZERO(&err_set);
 
-    /* calculate the maximum fd */
-    max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
+    /* add the wake fd - defensive check for valid socket */
+    if(sock->wake_read_fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Wake socket is invalid, cannot wait for events!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
 
-    /* add the wake fd */
     FD_SET(sock->wake_read_fd, &read_set);
 
-    /* we always want to know about errors. */
-    FD_SET(sock->fd, &err_set);
+    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
+    if(sock->fd != INVALID_SOCKET) {
+        /* calculate the maximum fd */
+        max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
 
-    /* add more depending on the mask. */
-    if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
+        /* we always want to know about errors. */
+        FD_SET(sock->fd, &err_set);
 
-    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
+        /* add more depending on the mask. */
+        if(events & SOCK_EVENT_CAN_READ) {
+            FD_SET(sock->fd, &read_set);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
+        }
+
+        if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
+            FD_SET(sock->fd, &write_set);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
+        }
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Main socket fd=%d is valid, max_fd=%d, wake_read_fd=%d", sock->fd, max_fd, sock->wake_read_fd);
+    } else {
+        /* Main socket invalid or closed - only wake socket will be monitored (valid for reconnection/idle) */
+        max_fd = sock->wake_read_fd;
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Main socket is INVALID, using only wake_read_fd=%d", sock->wake_read_fd);
+    }
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events, max_fd, sock->fd, timeout_ms);
 
     /* calculate the timeout. */
     if(timeout_ms > 0) {
@@ -1513,87 +1553,146 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         tv.tv_sec = (time_t)(timeout_ms / 1000);
         tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
 
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
     } else {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "calling select with infinite timeout");
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
     }
 
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "select() returned num_sockets=%d for sock->fd=%d",
+           num_sockets, sock->fd);
+
     if(num_sockets == 0) {
         result |= (events & SOCK_EVENT_TIMEOUT);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "select() timed out, returning TIMEOUT event");
     } else if(num_sockets > 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "num_sockets (%d) > 0, checking ready fds. sock->fd=%d, wake_read_fd=%d", num_sockets, sock->fd, sock->wake_read_fd);
+
         /* was there a wake up? */
-        if(FD_ISSET(sock->wake_read_fd, &read_set)) {
+        int wake_isset = FD_ISSET(sock->wake_read_fd, &read_set);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "FD_ISSET(wake_read_fd=%d, read_set)=%d", sock->wake_read_fd, wake_isset);
+        if(wake_isset) {
             char buf[32];
 
             /* empty the socket. */
             while((int)read(sock->wake_read_fd, &buf[0], sizeof(buf)) > 0) {}
 
-            pdebug(DEBUG_DETAIL, "Socket woken up.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
         }
 
-        /* is read ready for the main fd? */
-        if(FD_ISSET(sock->fd, &read_set)) {
+        /* is read ready for the main fd? Guard against INVALID_SOCKET (-1) which causes undefined behavior in FD_ISSET */
+        int read_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &read_set) : 0;
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "FD_ISSET(sock->fd=%d, read_set)=%d", sock->fd, read_isset);
+
+        if(sock->fd != INVALID_SOCKET && read_isset) {
             char buf;
             int byte_read = 0;
 
             byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
 
-            if(byte_read) {
-                pdebug(DEBUG_DETAIL, "Socket can read.");
+            if(byte_read > 0) {
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can read.");
                 result |= (events & SOCK_EVENT_CAN_READ);
-            } else {
-                pdebug(DEBUG_DETAIL, "Socket disconnected.");
+            } else if(byte_read == 0) {
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket disconnected (recv returned 0).");
                 result |= (events & SOCK_EVENT_DISCONNECT);
+            } else {
+                if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                    /* Don't report anything, will wait for next event */
+                } else {
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket recv error: %d", errno);
+                    result |= (events & SOCK_EVENT_DISCONNECT);
+                }
             }
         }
 
-        /* is write ready for the main fd? */
-        if(FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_DETAIL, "Socket can write or just connected.");
+        /* is write ready for the main fd? Guard against INVALID_SOCKET (-1) */
+        int write_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &write_set) : 0;
+
+        if(sock->fd != INVALID_SOCKET && write_isset) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
         }
 
-        /* is there an error? */
-        if(FD_ISSET(sock->fd, &err_set)) {
-            pdebug(DEBUG_DETAIL, "Socket has error!");
-            result |= (events & SOCK_EVENT_ERROR);
+        /* is there an error? Guard against INVALID_SOCKET (-1) */
+        int err_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &err_set) : 0;
+
+        if(sock->fd != INVALID_SOCKET && err_isset) {
+            /* On some platforms, FD_ISSET on err_set can return true spuriously.
+             * Verify the error is real by checking SO_ERROR. */
+            int sock_error = 0;
+            socklen_t sock_error_len = sizeof(sock_error);
+
+            if(getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_error, &sock_error_len) == 0) {
+                if(sock_error != 0) {
+                    /* There's a real socket error */
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket has real error %d!", sock_error);
+                    result |= (events & SOCK_EVENT_ERROR);
+                } else {
+                    /* FD_ISSET was spurious - there's no actual error */
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                }
+            } else {
+                /* Failed to get socket error state, assume there's an error */
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Failed to check socket error state, treating as error.");
+                result |= (events & SOCK_EVENT_ERROR);
+            }
         }
+
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "After all checks, result=0x%x", result);
     } else {
         /* error */
-        pdebug(DEBUG_WARN, "select() returned status %d!", num_sockets);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned status %d!", num_sockets);
 
         switch(errno) {
             case EBADF: /* bad file descriptor */
-                pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Bad file descriptor used in select()!");
                 return PLCTAG_ERR_BAD_PARAM;
                 break;
 
             case EINTR: /* signal was caught, this should not happen! */
-                pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "A signal was caught in select() and this should not happen!");
                 return PLCTAG_ERR_BAD_CONFIG;
                 break;
 
             case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(
-                    DEBUG_WARN,
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN,
                     "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                 return PLCTAG_ERR_BAD_PARAM;
                 break;
 
             case ENOMEM: /* No mem for internal tables. */
-                pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Insufficient memory for select() to run!");
                 return PLCTAG_ERR_NO_MEM;
                 break;
 
             default:
-                pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected socket err %d!", errno);
                 return PLCTAG_ERR_BAD_STATUS;
                 break;
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done.");
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: Final result=0x%x before return, TIMEOUT bit=%d, events=0x%x",
+           result, (result & SOCK_EVENT_TIMEOUT) ? 1 : 0, events);
+    log_event_bits("socket_wait_event: result", result);
+    log_event_bits("socket_wait_event: requested_events", events);
+
+    /* Log result at INFO level for visibility */
+    if(result != SOCK_EVENT_NONE) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "fd=%d returning events=0x%x (requested=0x%x) %s%s%s%s%s%s",
+               sock->fd, result, events,
+               (result & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "",
+               (result & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "",
+               (result & SOCK_EVENT_CONNECT) ? "CONNECT " : "",
+               (result & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "",
+               (result & SOCK_EVENT_ERROR) ? "ERROR " : "",
+               (result & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
+    }
 
     return result;
 }
@@ -1603,16 +1702,20 @@ int socket_wake(sock_p sock) {
     int rc = PLCTAG_STATUS_OK;
     const char dummy_data[] = "Dummy data.";
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Starting.");
 
     if(!sock) {
-        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Null socket pointer passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!sock->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
+    /* The wake pipe is independent of the TCP connection state.
+     * Write to the wake pipe to interrupt the handler thread's select() call.
+     * This works regardless of whether the TCP connection is open.
+     * Check that the wake pipe is valid before writing to it. */
+    if(sock->wake_write_fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Wake pipe not yet initialized, skipping wake.");
+        return PLCTAG_STATUS_OK;
     }
 
     // rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
@@ -1626,11 +1729,30 @@ int socket_wake(sock_p sock) {
     if(rc >= 0) {
         rc = PLCTAG_STATUS_OK;
     } else {
-        pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+        int err = errno;
+
+        /* If the write failed with EAGAIN/EWOULDBLOCK, the wake pipe is full.
+         * This means a wake is already pending, so return success. */
+        if(err == EAGAIN || err == EWOULDBLOCK) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Wake pipe full (EAGAIN/EWOULDBLOCK), wake already pending.");
+            return PLCTAG_STATUS_OK;
+        }
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, err);
+
+        /* If the write failed with EBADF (bad file descriptor), the wake pipe
+         * has been closed. Mark it as invalid and return success so the system
+         * can proceed. The next wake attempt will skip due to INVALID_SOCKET check. */
+        if(err == EBADF) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Wake pipe closed (EBADF), marking as invalid.");
+            sock->wake_write_fd = INVALID_SOCKET;
+            return PLCTAG_STATUS_OK;
+        }
+
         return PLCTAG_ERR_WRITE;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -1639,25 +1761,25 @@ int socket_wake(sock_p sock) {
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Starting.");
 
     if(!s) {
-        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!buf) {
-        pdebug(DEBUG_WARN, "Buffer pointer is null!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
+    if(s->fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
     }
 
     if(timeout_ms < 0) {
-        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be zero or positive!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -1668,19 +1790,27 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
     /* The socket is non-blocking. */
     rc = (int)read(s->fd, buf, (size_t)size);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "read() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
+
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             if(timeout_ms > 0) {
-                pdebug(DEBUG_DETAIL, "Immediate read attempt did not succeed, now wait for select().");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Would block, will wait for select() on fd=%d", s->fd);
             } else {
-                pdebug(DEBUG_DETAIL, "Read resulted in no data.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Read resulted in no data.");
             }
 
             rc = 0;
         } else {
-            pdebug(DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket read error: rc=%d, errno=%d (%s)", rc, errno, strerror(errno));
             return PLCTAG_ERR_READ;
         }
+    } else if(rc == 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Connection closed by peer (read returned 0) on fd=%d", s->fd);
+    } else if(rc > 0 && rc < size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Partial read on fd=%d: read %d of %d bytes", s->fd, rc, size);
+    } else if(rc == size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Complete read on fd=%d: read all %d bytes", s->fd, size);
     }
 
     /* only wait if we have a timeout and no error and no data. */
@@ -1699,42 +1829,41 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         select_rc = select(s->fd + 1, &read_set, NULL, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
-                pdebug(DEBUG_DETAIL, "Socket can read data.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can read data.");
             } else {
-                pdebug(DEBUG_WARN, "select() returned but socket is not ready to read data!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned but socket is not ready to read data!");
                 return PLCTAG_ERR_BAD_REPLY;
             }
         } else if(select_rc == 0) {
-            pdebug(DEBUG_DETAIL, "Socket read timed out.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket read timed out.");
             return PLCTAG_ERR_TIMEOUT;
         } else {
-            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned status %d!", select_rc);
 
             switch(errno) {
                 case EBADF: /* bad file descriptor */
-                    pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Bad file descriptor used in select()!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
                 case EINTR: /* signal was caught, this should not happen! */
-                    pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "A signal was caught in select() and this should not happen!");
                     return PLCTAG_ERR_BAD_CONFIG;
                     break;
 
                 case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(
-                        DEBUG_WARN,
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN,
                         "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
                 case ENOMEM: /* No mem for internal tables. */
-                    pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Insufficient memory for select() to run!");
                     return PLCTAG_ERR_NO_MEM;
                     break;
 
                 default:
-                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected socket err %d!", errno);
                     return PLCTAG_ERR_BAD_STATUS;
                     break;
             }
@@ -1744,16 +1873,16 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         rc = (int)read(s->fd, buf, (size_t)size);
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                pdebug(DEBUG_DETAIL, "No data read.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "No data read.");
                 rc = 0;
             } else {
-                pdebug(DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
                 return PLCTAG_ERR_READ;
             }
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done: result %d.", rc);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done: result %d.", rc);
 
     return rc;
 }
@@ -1762,25 +1891,25 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Starting.");
 
     if(!s) {
-        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!buf) {
-        pdebug(DEBUG_WARN, "Buffer pointer is null!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
+    if(s->fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_WRITE;
     }
 
     if(timeout_ms < 0) {
-        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be zero or positive!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -1792,21 +1921,30 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
      * call select().
      */
 
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "About to write %d bytes on fd=%d", size, s->fd);
+
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
     rc = (int)write(s->fd, buf, (size_t)size);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "write() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #else
     /* on Linux, we use MSG_NOSIGNAL */
     rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "send() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #endif
 
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Would block, no immediate data written on fd=%d", s->fd);
             rc = 0;
         } else {
-            pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error: rc=%d, errno=%d (%s)", rc, errno, strerror(errno));
             return PLCTAG_ERR_WRITE;
         }
+    } else if(rc > 0 && rc < size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Partial write on fd=%d: wrote %d of %d bytes", s->fd, rc, size);
+    } else if(rc == size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Complete write on fd=%d: wrote all %d bytes", s->fd, size);
     }
 
     /* only wait if we have a timeout and no error and wrote no data. */
@@ -1825,68 +1963,74 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         select_rc = select(s->fd + 1, NULL, &write_set, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {
-                pdebug(DEBUG_DETAIL, "Socket can write data.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can write data.");
             } else {
-                pdebug(DEBUG_WARN, "select() returned but socket is not ready to write data!");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned but socket is not ready to write data!");
                 return PLCTAG_ERR_BAD_REPLY;
             }
         } else if(select_rc == 0) {
-            pdebug(DEBUG_DETAIL, "Socket write timed out.");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket write timed out.");
             return PLCTAG_ERR_TIMEOUT;
         } else {
-            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned status %d!", select_rc);
 
             switch(errno) {
                 case EBADF: /* bad file descriptor */
-                    pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Bad file descriptor used in select()!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
                 case EINTR: /* signal was caught, this should not happen! */
-                    pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "A signal was caught in select() and this should not happen!");
                     return PLCTAG_ERR_BAD_CONFIG;
                     break;
 
                 case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(
-                        DEBUG_WARN,
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN,
                         "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
                 case ENOMEM: /* No mem for internal tables. */
-                    pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Insufficient memory for select() to run!");
                     return PLCTAG_ERR_NO_MEM;
                     break;
 
                 default:
-                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected socket err %d!", errno);
                     return PLCTAG_ERR_BAD_STATUS;
                     break;
             }
         }
 
         /* select() passed and said we can write, so try. */
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "select() indicated fd=%d ready for write, attempting write", s->fd);
 #ifdef BSD_OS_TYPE
         /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
         rc = (int)write(s->fd, buf, (size_t)size);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), write() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #else
         /* on Linux, we use MSG_NOSIGNAL */
         rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), send() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #endif
 
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                pdebug(DEBUG_DETAIL, "No data written.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "After select(), still would block on fd=%d", s->fd);
                 rc = 0;
             } else {
-                pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error after select: rc=%d, errno=%d (%s)", rc, errno, strerror(errno));
                 return PLCTAG_ERR_WRITE;
             }
+        } else if(rc > 0 && rc < size) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), partial write on fd=%d: wrote %d of %d bytes", s->fd, rc, size);
+        } else if(rc == size) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), complete write on fd=%d: wrote all %d bytes", s->fd, size);
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done: result = %d.", rc);
 
     return rc;
 }
@@ -1895,47 +2039,47 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 int socket_close(sock_p s) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Starting.");
 
     if(!s) {
-        pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(s->fd != INVALID_SOCKET) {
         if(close(s->fd)) {
-            pdebug(DEBUG_WARN, "Error closing socket!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error closing socket fd=%d!", s->fd);
             rc = PLCTAG_ERR_CLOSE;
+        } else {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Closed socket fd=%d", s->fd);
         }
 
         s->fd = INVALID_SOCKET;
     }
 
-    s->is_open = 0;
-
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Done.");
 
     return rc;
 }
 
 
 int socket_destroy(sock_p *s) {
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Starting.");
 
     if(!s || !*s) {
-        pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* close the wake sockets */
     if((*s)->wake_read_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_read_fd)) { pdebug(DEBUG_WARN, "Error closing read wake socket!"); }
+        if(close((*s)->wake_read_fd)) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error closing read wake socket!"); }
 
         (*s)->wake_read_fd = INVALID_SOCKET;
     }
 
     if((*s)->wake_write_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_write_fd)) { pdebug(DEBUG_WARN, "Error closing write wake socket!"); }
+        if(close((*s)->wake_write_fd)) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error closing write wake socket!"); }
 
         (*s)->wake_write_fd = INVALID_SOCKET;
     }
@@ -1946,7 +2090,7 @@ int socket_destroy(sock_p *s) {
 
     *s = NULL;
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1960,37 +2104,37 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     int sock_opt = 1;
 #endif
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Starting.");
 
     do {
         /* open the pipe for waking the select wait. */
         // if(pipe(wake_fds)) {
         if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
-            pdebug(DEBUG_WARN, "Unable to open waker pipe!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to open waker pipe!");
             switch(errno) {
-                case EAFNOSUPPORT: pdebug(DEBUG_WARN, "The specified addresss family is not supported on this machine!"); break;
+                case EAFNOSUPPORT: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The specified addresss family is not supported on this machine!"); break;
 
                 case EFAULT:
-                    pdebug(DEBUG_WARN, "The address socket_vector does not specify a valid part of the process address space.");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The address socket_vector does not specify a valid part of the process address space.");
                     break;
 
-                case EMFILE: pdebug(DEBUG_WARN, "No more file descriptors are available for this process."); break;
+                case EMFILE: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "No more file descriptors are available for this process."); break;
 
-                case ENFILE: pdebug(DEBUG_WARN, "No more file descriptors are available for the system."); break;
+                case ENFILE: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "No more file descriptors are available for the system."); break;
 
                 case ENOBUFS:
-                    pdebug(DEBUG_WARN, "Insufficient resources were available in the system to perform the operation.");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Insufficient resources were available in the system to perform the operation.");
                     break;
 
-                case ENOMEM: pdebug(DEBUG_WARN, "Insufficient memory was available to fulfill the request."); break;
+                case ENOMEM: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Insufficient memory was available to fulfill the request."); break;
 
-                case EOPNOTSUPP: pdebug(DEBUG_WARN, "The specified protocol does not support creation of socket pairs."); break;
+                case EOPNOTSUPP: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The specified protocol does not support creation of socket pairs."); break;
 
-                case EPROTONOSUPPORT: pdebug(DEBUG_WARN, "The specified protocol is not supported on this machine."); break;
+                case EPROTONOSUPPORT: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The specified protocol is not supported on this machine."); break;
 
-                case EPROTOTYPE: pdebug(DEBUG_WARN, "The socket type is not supported by the protocol."); break;
+                case EPROTOTYPE: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The socket type is not supported by the protocol."); break;
 
-                default: pdebug(DEBUG_WARN, "Unexpected error %d!", errno); break;
+                default: pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected error %d!", errno); break;
             }
 
             rc = PLCTAG_ERR_BAD_REPLY;
@@ -2000,13 +2144,13 @@ int sock_create_event_wakeup_channel(sock_p sock) {
 #ifdef BSD_OS_TYPE
         /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
         if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-            pdebug(DEBUG_ERROR, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
             rc = PLCTAG_ERR_OPEN;
             break;
         }
 
         if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-            pdebug(DEBUG_ERROR, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
             rc = PLCTAG_ERR_OPEN;
             break;
         }
@@ -2014,7 +2158,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
 
         /* make the read pipe fd non-blocking. */
         if((flags = fcntl(wake_fds[0], F_GETFL)) < 0) {
-            pdebug(DEBUG_WARN, "Unable to get flags of read socket fd!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to get flags of read socket fd!");
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -2023,14 +2167,14 @@ int sock_create_event_wakeup_channel(sock_p sock) {
         flags |= O_NONBLOCK;
 
         if(fcntl(wake_fds[0], F_SETFL, flags) < 0) {
-            pdebug(DEBUG_WARN, "Unable to set flags of read socket fd!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to set flags of read socket fd!");
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
         /* make the write pipe fd non-blocking. */
         if((flags = fcntl(wake_fds[1], F_GETFL)) < 0) {
-            pdebug(DEBUG_WARN, "Unable to get flags of write socket fd!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to get flags of write socket fd!");
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -2039,7 +2183,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
         flags |= O_NONBLOCK;
 
         if(fcntl(wake_fds[1], F_SETFL, flags) < 0) {
-            pdebug(DEBUG_WARN, "Unable to set flags of write socket fd!");
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to set flags of write socket fd!");
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -2049,7 +2193,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to open waker socket!");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unable to open waker socket!");
 
         if(wake_fds[0] != INVALID_SOCKET) {
             close(wake_fds[0]);
@@ -2061,7 +2205,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
             wake_fds[1] = INVALID_SOCKET;
         }
     } else {
-        pdebug(DEBUG_INFO, "Done.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Done.");
     }
 
     return rc;
@@ -2088,7 +2232,7 @@ int sleep_ms(int ms) {
     int rc = PLCTAG_STATUS_OK;
 
     if(ms < 0) {
-        pdebug(DEBUG_WARN, "called with negative time %d!", ms);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "called with negative time %d!", ms);
         return PLCTAG_ERR_BAD_PARAM;
     }
 

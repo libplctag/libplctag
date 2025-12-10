@@ -41,7 +41,7 @@
 #include <time.h>
 
 #if defined(IS_WINDOWS)
-#    include <Windows.h>
+#    include <windows.h>
 #else
 /* assume it is POSIX of some sort... */
 #    include <signal.h>
@@ -55,6 +55,7 @@
 #include "tcp_server.h"
 #include "utils.h"
 #include "mutex.h"
+#include "log.h"
 
 static void usage(void);
 static void process_args(int argc, const char **argv, plc_s *plc);
@@ -75,33 +76,33 @@ int WINAPI CtrlHandler(DWORD fdwCtrlType) {
     switch(fdwCtrlType) {
             // Handle the CTRL-C signal.
         case CTRL_C_EVENT:
-            info("^C event");
+            log_info("^C event");
             done = 1;
             return TRUE;
 
             // CTRL-CLOSE: confirm that the user wants to exit.
         case CTRL_CLOSE_EVENT:
-            info("Close event");
+            log_info("Close event");
             done = 1;
             return TRUE;
 
             // Pass other signals to the next handler.
         case CTRL_BREAK_EVENT:
-            info("^Break event");
+            log_info("^Break event");
             done = 1;
             return TRUE;
 
         case CTRL_LOGOFF_EVENT:
-            info("Logoff event");
+            log_info("Logoff event");
             done = 1;
             return TRUE;
 
         case CTRL_SHUTDOWN_EVENT:
-            info("Shutdown event");
+            log_info("Shutdown event");
             done = 1;
             return TRUE;
 
-        default: info("Default Event: %d", fdwCtrlType); return FALSE;
+        default: log_info("Default Event: %d", fdwCtrlType); return FALSE;
     }
 }
 
@@ -145,7 +146,7 @@ int main(int argc, const char **argv) {
     /* set up handler for ^C etc. */
     setup_break_handler();
 
-    debug_off();
+    log_set_level(LOG_LEVEL_DETAIL);
 
     /* clear out context to make sure we do not get gremlins */
     // NOLINTNEXTLINE
@@ -160,6 +161,9 @@ int main(int argc, const char **argv) {
     server = tcp_server_create("0.0.0.0", (plc.port_str ? plc.port_str : "44818"), request_handler, &plc, sizeof(plc));
 
     tcp_server_start(server, &done);
+
+    /* Dump fairness statistics before shutdown */
+    dump_fairness_stats(&plc);
 
     tcp_server_destroy(server);
 
@@ -346,14 +350,14 @@ void process_args(int argc, const char **argv, plc_s *plc) {
 
         if(strncmp(argv[i], "--reject_fo=", 12) == 0) {
             if(plc) {
-                info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
+                log_info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
                 plc->reject_fo_count = atoi(&argv[i][12]);
             }
         }
 
         if(strncmp(argv[i], "--delay=", 8) == 0) {
             if(plc) {
-                info("Setting response delay to %dms.", atoi(&argv[i][8]));
+                log_info("Setting response delay to %dms.", atoi(&argv[i][8]));
                 plc->response_delay = atoi(&argv[i][8]);
             }
         }
@@ -387,7 +391,7 @@ void parse_path(const char *path_str, plc_s *plc) {
         plc->path[0] = (uint8_t)tmp_path[0];
         plc->path[1] = (uint8_t)tmp_path[1];
 
-        info("Processed path %d,%d.", plc->path[0], plc->path[1]);
+        log_info("Processed path %d,%d.", plc->path[0], plc->path[1]);
     } else {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error processing path \"%s\"!  Path must be two numbers separated by a comma.\n", path_str);
@@ -417,19 +421,19 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     size_t start = 0;
     size_t len = 0;
 
-    info("Starting.");
+    log_info("Starting.");
 
     if(!tag) {
-        error("Unable to allocate memory for new tag!");
+        log_error("Unable to allocate memory for new tag!");
         return;
     }
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
     /* try to match the two parts of a tag definition string. */
 
-    info("Match data file.");
+    log_info("Match data file.");
 
     /* first match the data file. */
     start = 0;
@@ -444,27 +448,27 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
 
         /* check data file for a match. */
         if(str_cmp_i(data_file_name, "B3") == 0) {
-            info("Found B3 data file.");
+            log_info("Found B3 data file.");
             tag->tag_type = TAG_PCCC_TYPE_BIT;
             tag->elem_size = 2;
             tag->data_file_num = 3;
         } else if(str_cmp_i(data_file_name, "N7") == 0) {
-            info("Found N7 data file.");
+            log_info("Found N7 data file.");
             tag->tag_type = TAG_PCCC_TYPE_INT;
             tag->elem_size = 2;
             tag->data_file_num = 7;
         } else if(str_cmp_i(data_file_name, "F8") == 0) {
-            info("Found F8 data file.");
+            log_info("Found F8 data file.");
             tag->tag_type = TAG_PCCC_TYPE_REAL;
             tag->elem_size = 4;
             tag->data_file_num = 8;
         } else if(str_cmp_i(data_file_name, "ST18") == 0) {
-            info("Found ST18 data file.");
+            log_info("Found ST18 data file.");
             tag->tag_type = TAG_PCCC_TYPE_STRING;
             tag->elem_size = 84;
             tag->data_file_num = 18;
         } else if(str_cmp_i(data_file_name, "L19") == 0) {
-            info("Found L19 data file.");
+            log_info("Found L19 data file.");
             tag->tag_type = TAG_PCCC_TYPE_DINT;
             tag->elem_size = 4;
             tag->data_file_num = 19;
@@ -540,7 +544,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
+    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -549,7 +553,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         exit(1);
     }
 
-    info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type,
+    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
          tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
 
     /* add the tag to the list. */
@@ -585,16 +589,16 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     size_t len = 0;
 
     if(!tag) {
-        error("Unable to allocate memory for new tag!");
+        log_error("Unable to allocate memory for new tag!");
         return;
     }
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
 
     /* try to match the three parts of a tag definition string. */
@@ -740,7 +744,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
+    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -749,7 +753,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         exit(1);
     }
 
-    info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type,
+    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
          tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
 
     /* add the tag to the list. */

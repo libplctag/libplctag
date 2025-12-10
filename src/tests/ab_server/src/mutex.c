@@ -49,6 +49,7 @@
 #include "memory.h"
 #include "mutex.h"
 #include "utils.h"
+#include "log.h"
 
 
 struct mutex_t {
@@ -66,14 +67,14 @@ int mutex_create(mutex_p *m) {
     pthread_mutexattr_t mutex_attribs;
 #endif
 
-    info("DETAIL: Starting.");
+    log_info("DETAIL: Starting.");
 
-    if(*m) { info("WARN: Called with non-NULL pointer!"); }
+    if(*m) { log_info("WARN: Called with non-NULL pointer!"); }
 
     *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
 
     if(!*m) {
-        error("ERROR: null mutex pointer.");
+        log_error("ERROR: null mutex pointer.");
         return MUTEX_ERR_NULL_PTR;
     }
 
@@ -94,7 +95,7 @@ int mutex_create(mutex_p *m) {
 #endif
         mem_free(*m);
         *m = NULL;
-        error("ERROR: Error initializing mutex.");
+        log_error("ERROR: Error initializing mutex.");
         return MUTEX_ERR_MUTEX_INIT;
     }
 
@@ -105,7 +106,7 @@ int mutex_create(mutex_p *m) {
     pthread_mutexattr_destroy(&mutex_attribs);
 #endif
 
-    info("DETAIL: Done creating mutex %p.", *m);
+    log_info("DETAIL: Done creating mutex %p.", *m);
 
     return MUTEX_STATUS_OK;
 }
@@ -117,10 +118,10 @@ int mutex_lock_impl(const char *func, int line, mutex_p m) {
 #else
 #endif
 
-    info("SPEW: locking mutex %p, called from %s:%d.", m, func, line);
+    log_info("SPEW: locking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        info("WARN: null mutex pointer.");
+        log_info("WARN: null mutex pointer.");
         return MUTEX_ERR_NULL_PTR;
     }
 
@@ -131,12 +132,12 @@ int mutex_lock_impl(const char *func, int line, mutex_p m) {
     while(dwWaitResult != WAIT_OBJECT_0) { dwWaitResult = WaitForSingleObject(m->h_mutex, INFINITE); }
 #else
     if(pthread_mutex_lock(&(m->p_mutex))) {
-        info("WARN: error locking mutex.");
+        log_info("WARN: error locking mutex.");
         return MUTEX_ERR_MUTEX_LOCK;
     }
 #endif
 
-    // info("SPEW: Done.");
+    // log_info("SPEW: Done.");
 
     return MUTEX_STATUS_OK;
 }
@@ -148,10 +149,10 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
 #else
 #endif
 
-    info("SPEW: trying to lock mutex %p, called from %s:%d.", m, func, line);
+    log_info("SPEW: trying to lock mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        info("WARN: null mutex pointer.");
+        log_info("WARN: null mutex pointer.");
         return MUTEX_ERR_NULL_PTR;
     }
 
@@ -163,22 +164,22 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
 #else
     if(pthread_mutex_trylock(&(m->p_mutex))) {
 #endif
-        info("SPEW: error locking mutex.");
+        log_info("SPEW: error locking mutex.");
         return MUTEX_ERR_MUTEX_LOCK;
     }
     /* else, we got the lock */
 
-    /*info("DETAIL: Done.");*/
+    /*log_info("DETAIL: Done.");*/
 
     return MUTEX_STATUS_OK;
 }
 
 
 int mutex_unlock_impl(const char *func, int line, mutex_p m) {
-    info("SPEW: unlocking mutex %p, called from %s:%d.", m, func, line);
+    log_info("SPEW: unlocking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        info("WARN: null mutex pointer.");
+        log_info("WARN: null mutex pointer.");
         return MUTEX_ERR_NULL_PTR;
     }
 
@@ -189,21 +190,21 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m) {
 #else
     if(pthread_mutex_unlock(&(m->p_mutex))) {
 #endif
-        info("WARN: error unlocking mutex.");
+        log_info("WARN: error unlocking mutex.");
         return MUTEX_ERR_MUTEX_UNLOCK;
     }
 
-    // info("SPEW: Done.");
+    // log_info("SPEW: Done.");
 
     return MUTEX_STATUS_OK;
 }
 
 
 int mutex_destroy(mutex_p *m) {
-    info("DETAIL: Starting to destroy mutex %p.", m);
+    log_info("DETAIL: Starting to destroy mutex %p.", m);
 
     if(!m || !*m) {
-        info("WARN: null mutex pointer.");
+        log_info("WARN: null mutex pointer.");
         return MUTEX_ERR_NULL_PTR;
     }
 
@@ -211,7 +212,7 @@ int mutex_destroy(mutex_p *m) {
     CloseHandle((*m)->h_mutex);
 #else
     if(pthread_mutex_destroy(&((*m)->p_mutex))) {
-        info("WARN: error while attempting to destroy mutex.");
+        log_info("WARN: error while attempting to destroy mutex.");
         return MUTEX_ERR_MUTEX_DESTROY;
     }
 #endif
@@ -220,7 +221,7 @@ int mutex_destroy(mutex_p *m) {
 
     *m = NULL;
 
-    info("DETAIL: Done.");
+    log_info("DETAIL: Done.");
 
     return MUTEX_STATUS_OK;
 }

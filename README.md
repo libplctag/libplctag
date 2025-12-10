@@ -1,8 +1,10 @@
 # libplctag - a C library for PLC communication
 
 - [libplctag - a C library for PLC communication](#libplctag---a-c-library-for-plc-communication)
+  - [What is libplctag?](#what-is-libplctag)
+  - [Tier One Platforms](#tier-one-platforms)
   - [WARNING - DISCLAIMER](#warning---disclaimer)
-  - [Get It](#get-it)
+  - [Get It!](#get-it)
   - [Features](#features)
     - [High Level Features](#high-level-features)
     - [Detailed Features](#detailed-features)
@@ -23,21 +25,32 @@
   - [Attributions and Trademarks](#attributions-and-trademarks)
   - [End Note](#end-note)
 
-|   OS   | Architecture/CPU | Version |  64-bit   | 32-bit    |
-|   --:  |         :-:      |   :-:   |    :-:    |    :-:    |
-|Ubuntu  |   x86, Arm       | 18.04   | Supported | Supported |
-|Windows |   x86, Arm       |10 (Server 19) | Supported | Supported |
-|macOS   |   x86, Arm       |  11  | Supported | Not Supported |
-
-|  Latest Release Version | Latest CI Status |
-|     :-:     |       :-:        |
-| ![Latest Release](https://img.shields.io/github/v/release/libplctag/libplctag) | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+## What is libplctag?
 
 **libplctag** is an open source C library for Linux, Windows and macOS using **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
-Current Stable Version: 2.6
+| **Latest Stable Release:** |
+|             :-:            | 
+| ![Latest Release](https://img.shields.io/github/v/release/libplctag/libplctag) |
 
-Old Stable Version: 2.5
+## Tier One Platforms
+
+These are OS/compiler combinations that are fully tested with each release:
+
+| **OS**       | **OS Version** | **Compiler**    | **Compiler Version** | **Architecture** | **Status** |
+|    :-:       |    :-:         |    :-:          |    :-:               |        :-:       | :-         |
+| Alpine Linux | v3.23.0-62     | GCC             | 15.2.0               | x86-64           | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Alpine Linux | v3.23.0-62     | GCC             | 15.2.0               | Aarch64          | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| macOS        | 14             | Apple-Clang     | 17.0.0               | x86-64           | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| macOS        | 15             | Apple-Clang     | 17.0.0               | Aarch64          | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Ubuntu Linux | 24.04          | GCC             | 13.3.0               | x86-64           | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Ubuntu Linux | 24.04          | GCC-musl        | 13.3.0               | x86-64           | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Ubuntu Linux | 24.04          | GCC             | 13.3.0               | Aarch64          | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Ubuntu Linux | 24.04          | GCC             | 13.3.0               | x86              | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Windows      | 11 (Server 22) | MSVC            | 19.44.35221.0        | x86-64           | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Windows      | 11 (Server 22) | MSVC            | 19.44.35221.0        | x86              | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Windows      | 11 (Server 22) | MSVC            | 19.44.35221.0        | Aarch64          | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
+| Windows      | 11 (Server 22) | MinGW-GCC.      | 14.2.0               | x86-64           | ![Release branch CI status](https://github.com/libplctag/libplctag/actions/workflows/ci.yml/badge.svg?branch=release) |
 
 ## WARNING - DISCLAIMER
 
@@ -47,9 +60,9 @@ We make no claims or warrants about the suitability of this code for any purpose
 
 Be careful!
 
-## Get It
+## Get It!
 
-Do you know what you want already?  Download it from the [releases page](https://github.com/libplctag/libplctag/releases)!
+Download it from the [releases page](https://github.com/libplctag/libplctag/releases)!
 
 ## Features
 
@@ -84,7 +97,9 @@ Do you know what you want already?  Download it from the [releases page](https:/
 - support for older Rockwell/Allen-Bradley such as PLC-5 PLCs (Ethernet upgraded to support Ethernet/IP), SLC 500 and MicroLogix with Ethernet via CIP.
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
+  - read/write of 32-bit integer (L data file) on Micrologix.
   - read/write of arrays of the above (arrays not tested on SLC 500).
+  - read/write single bits for B and N data files.
 - support for older Rockwell/Allen-Bradley PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module) such as PLC/5, SLC 500 and MicroLogix.
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
@@ -103,8 +118,8 @@ Do you know what you want already?  Download it from the [releases page](https:/
 - CMake build system for better cross-platform support on Windows, Linux and macOS.
   - Native CMake support is present in recent versions of Microsoft Visual Studio.
 - Semantic versioning used and supported with specific library APIs for compatibility and feature checking.
-- C library has no dependencies apart from libc (and pthreads on some platforms).
-- Binary releases built for Ubuntu 18.04, macOS 10.15 and Windows 10.  All 64-bit, with 32-bit binary releases for Windows and Ubuntu.
+- C library has no dependencies apart from libc, or musl, and pthreads on some platforms.
+- Binary release for all Tier 1 platforms as well as Linux (Ubuntu/Debian) Arm v6 and Arm v7-hf.
 - RaspberryPi supported. Both Linux and Windows IoT-based (some effort required to configure Visual Studio to build).
 
 ### Alternate Programming Languages
@@ -133,7 +148,7 @@ The code for the core library is at [libplctag](https://github.com/libplctag/lib
 
 If you want pre-built binaries, we have them available on the [releases](https://github.com/libplctag/libplctag/releases) page.   Just pick the one you want and download the ZIP file for your system.   We have 32 and 64-bit builds for x86 Linux and Windows and 64-bit builds for x86-64 macOS.
 
-Go to the main project at the [libplctag organization](https://github.com/libplctag) to see the other wrappers.   We are in a state of transition right now as we move more alternate language wrappers into the GitHub organization.
+Go to the main project at the [libplctag organization](https://github.com/libplctag) to see the other wrappers.
 
 ### Example Code
 

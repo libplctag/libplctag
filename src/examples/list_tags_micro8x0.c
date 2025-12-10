@@ -419,7 +419,7 @@ char *setup_tag_string(int argc, char **argv) {
         fprintf(stderr, "Using tag string \"%s\".\n", tag_string);
     }
 
-    return strdup(tag_string);
+    return compat_strdup(tag_string);
 }
 
 
@@ -615,6 +615,7 @@ void print_element_type(uint16_t element_type) {
         const char *type = NULL;
 
         switch(atomic_type) {
+            case 0xC0: type = "DT: Date and time. 64-bit storage; units are in microseconds."; break;
             case 0xC1: type = "BOOL: Boolean value"; break;
             case 0xC2: type = "SINT: Signed 8-bit integer value"; break;
             case 0xC3: type = "INT: Signed 16-bit integer value"; break;
@@ -645,6 +646,7 @@ void print_element_type(uint16_t element_type) {
             case 0xDC: type = "CIP path segment(s)"; break;
             case 0xDD: type = "Engineering units"; break;
             case 0xDE: type = "International character string (encoding?)"; break;
+            case 0xDF: type = "LTIME: Long duration of time. 64-bit storage; units are in nanoseconds."; break;
         }
 
         if(type) {

@@ -7,14 +7,22 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Source files
+# Note: Uses coro_net instead of fsm and reactor
 set(SOURCES
     modbus_server.c
-    logger.c
-    socket_utils.c
-    config.c
     register_storage.c
     modbus_protocol.c
+    ../utils/buf.c
+    ../utils/err.c
+    ../utils/log.c
+    ../utils/args.c
+    ../utils/utils.c
+    ../utils/coro_net.c
+    ../utils/socket.c
 )
+
+# Include directories
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../utils)
 
 # Create executable
 add_executable(modbus_server ${SOURCES})
@@ -23,7 +31,7 @@ add_executable(modbus_server ${SOURCES})
 if(WIN32)
     # Windows requires Winsock2
     target_link_libraries(modbus_server ws2_32)
-    
+
     # Suppress Windows-specific warnings
     target_compile_definitions(modbus_server PRIVATE
         _CRT_SECURE_NO_WARNINGS
@@ -38,6 +46,10 @@ elseif(UNIX)
             target_link_libraries(modbus_server ${RT_LIBRARY})
         endif()
     endif()
+
+    # Link math library (logging and protocol may use math functions)
+    # Math functions are in libm on Unix but in the C runtime on Windows
+    target_link_libraries(modbus_server m)
 endif()
 
 # Compiler-specific warnings
@@ -69,3 +81,7 @@ endif()
 install(TARGETS modbus_server
     RUNTIME DESTINATION bin
 )
+
+# CMakeLists.txt for src/tests/test_utils/
+
+enable_testing()

@@ -36,9 +36,11 @@
 #include <stdint.h>
 #include "compat.h"
 #include "slice.h"
+#include "log.h"
 
 extern int util_sleep_ms(int ms);
 extern int64_t util_time_ms(void);
+extern int64_t util_time_us(void);
 
 extern void system_yield(void);
 
@@ -54,5 +56,24 @@ extern void error_impl(const char *func, int line, const char *templ, ...);
 extern void info_impl(const char *func, int line, const char *templ, ...);
 extern void slice_dump(slice_s s);
 
+/* new logging API slice functions */
+extern void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s);
+
+#define log_error_slice(s)  do { if((LOG_LEVEL_ERROR) <= log_get_level()) \
+                                  log_slice_impl_func(__func__, __LINE__, LOG_LEVEL_ERROR, (s)); } while(0)
+#define log_warn_slice(s)   do { if((LOG_LEVEL_WARN) <= log_get_level()) \
+                                  log_slice_impl_func(__func__, __LINE__, LOG_LEVEL_WARN, (s)); } while(0)
+#define log_info_slice(s)   do { if((LOG_LEVEL_INFO) <= log_get_level()) \
+                                  log_slice_impl_func(__func__, __LINE__, LOG_LEVEL_INFO, (s)); } while(0)
+#define log_detail_slice(s) do { if((LOG_LEVEL_DETAIL) <= log_get_level()) \
+                                  log_slice_impl_func(__func__, __LINE__, LOG_LEVEL_DETAIL, (s)); } while(0)
+#define log_spew_slice(s)   do { if((LOG_LEVEL_SPEW) <= log_get_level()) \
+                                  log_slice_impl_func(__func__, __LINE__, LOG_LEVEL_SPEW, (s)); } while(0)
+
 #define RANDOM_U64_ERROR (UINT64_MAX)
 extern uint64_t random_u64(uint64_t upper_bound);
+
+/* Fairness tracking */
+struct plc_s;
+struct tag_def_s;
+extern void dump_fairness_stats(struct plc_s *plc);

@@ -33,10 +33,6 @@
 
 #pragma once
 
-#define RESULT_DEF(NAME, OK_TYPE) typedef struct { OK_TYPE val; int err; } NAME;        \
-static inline NAME NAME ## _err(int err) { return (NAME){ .err = err}; }                \
-static inline NAME NAME ## _val(OK_TYPE val) { return (NAME){ .val = val, .err = 0}; }  \
-static inline int NAME ## _get_err(NAME result) { return result.err; }                  \
-static inline OK_TYPE NAME ## _get_val(NAME result) { return result.val; }              \
-static inline bool NAME ## _is_err(NAME result) { return (result.err != 0); }           \
-static inline bool NAME ## _is_val(NAME result) { return (result.err == 0); }
+#include "plc.h"
+
+extern void dump_fairness_stats(plc_s *plc);

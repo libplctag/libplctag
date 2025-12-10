@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,46 +33,65 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef CONFIG_H
-#define CONFIG_H
 
-#include <stdbool.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define MAX_LISTEN_ENDPOINTS 10
-#define DEFAULT_REGISTER_COUNT 100
+#include <stdarg.h>
+#include <stdint.h>
 
-/* Listening endpoint */
-typedef struct {
-    char host[64];
-    int port;
-} listen_endpoint_t;
+typedef enum {
+    LOG_LEVEL_NONE = 0,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_WARN,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_DETAIL,
+    LOG_LEVEL_SPEW,
 
-/* Server configuration */
-typedef struct {
-    /* Listening endpoints */
-    listen_endpoint_t listen_endpoints[MAX_LISTEN_ENDPOINTS];
-    int num_listen_endpoints;
-    
-    /* Register counts */
-    int num_coils;
-    int num_discrete_inputs;
-    int num_holding_registers;
-    int num_input_registers;
-    
-    /* Debug mode */
-    bool debug;
-} server_config_t;
+    LOG_LEVEL_END
+} log_level_t;
 
-/* Initialize configuration with defaults */
-void config_init(server_config_t *config);
+/**
+ * @brief Get the current log level.
+ *
+ * @return log_level_t
+ */
+log_level_t log_get_level(void);
 
-/* Parse command line arguments */
-bool config_parse_args(server_config_t *config, int argc, char **argv);
+/**
+ * @brief Set the current log level.
+ *
+ * @param level New log level
+ * @return log_level_t Previous log level
+ */
+log_level_t log_set_level(log_level_t level);
 
-/* Print usage information */
-void config_print_usage(const char *program_name);
+/**
+ * @brief Log a message.
+ *
+ * @param func name of the function in which the log is generated
+ * @param line_num line number in the source file
+ * @param lvl log level
+ * @param templ format string for the log message
+ * @param ... additional arguments for the format string
+ */
+void log_impl(const char *func, int line_num, log_level_t lvl, const char *templ, ...);
 
-/* Validate configuration */
-bool config_validate(const server_config_t *config);
+/* helper macros */
 
-#endif /* CONFIG_H */
+#define log_error(...)   do { if((LOG_LEVEL_ERROR) <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_ERROR, __VA_ARGS__); } while(0)
+#define log_warn(...)    do { if((LOG_LEVEL_WARN)  <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_WARN,  __VA_ARGS__); } while(0)
+#define log_info(...)    do { if((LOG_LEVEL_INFO)  <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_INFO,  __VA_ARGS__); } while(0)
+#define log_detail(...)  do { if((LOG_LEVEL_DETAIL)<= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_DETAIL,__VA_ARGS__); } while(0)
+#define log_spew(...)    do { if((LOG_LEVEL_SPEW)  <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_SPEW,  __VA_ARGS__); } while(0)
+
+
+#ifdef __cplusplus
+}
+#endif

@@ -33,48 +33,65 @@
 
 #pragma once
 
-#include <platform.h>
 #include <stdbool.h>
 #include <stdint.h>
 
+/*
+ * Atomic utility functions.
+ *
+ * All compare-and-set functions return the ORIGINAL value.
+ * If the returned value equals the expected value, the swap succeeded.
+ */
 
+#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 11)
+/* Non-C11 atomics path (Windows and older compilers) */
 
-#define ATOMIC_INT_STATIC_INIT {0}
-
-#ifdef WIN32
-typedef volatile uint16_t atomic_bool;
+#ifdef _WIN32
+typedef volatile short atomic_bool;
 #else
 typedef volatile bool atomic_bool;
 #endif
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
 
+#define ATOMIC_INT_STATIC_INIT (0)
+#define ATOMIC_BOOL_STATIC_INIT (false)
 
-#else /* C11 atomics are supported. */
+#else
+
+/* C11 atomics path */
 
 #include <stdatomic.h>
 
-typedef _Atomic(bool) atomic_bool;
-typedef _Atomic(int32_t) atomic_int32_t;
-typedef _Atomic(int64_t) atomic_int64_t;
+typedef _Atomic bool atomic_bool;
+typedef _Atomic int32_t atomic_int32_t;
+typedef _Atomic int64_t atomic_int64_t;
+
+#define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
+#define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
 
 #endif
 
-extern void atomic_init_bool(atomic_bool *a, bool new_val);
-extern bool atomic_get_bool(atomic_bool *a);
-extern bool atomic_set_bool(atomic_bool *a, bool new_val);
-extern bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
+/* Function declarations - implementations are in atomic_utils.c */
 
-extern void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
-extern int32_t atomic_get_int32(atomic_int32_t *a);
-extern int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
-extern int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
-extern int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
+/* bool */
+void atomic_init_bool(atomic_bool *a, bool new_val);
+bool atomic_get_bool(atomic_bool *a);
+bool atomic_set_bool(atomic_bool *a, bool new_val);
+bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
 
-extern void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
-extern int64_t atomic_get_int64(atomic_int64_t *a);
-extern int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
-extern int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
-extern int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
+/* int32 */
+void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
+int32_t atomic_get_int32(atomic_int32_t *a);
+int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
+int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
+int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
+
+/* int64 */
+void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
+int64_t atomic_get_int64(atomic_int64_t *a);
+int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
+int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
+int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
+

@@ -31,379 +31,849 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "config.h"
-#include "logger.h"
-#include "socket_utils.h"
-#include "register_storage.h"
-#include "modbus_protocol.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <inttypes.h>
+#include <math.h>
 
-#ifndef _WIN32
-#include <poll.h>
-#else
-#include <winsock2.h>
-/* Define nfds_t for Windows if not already defined */
-#ifndef nfds_t
-typedef unsigned int nfds_t;
-#endif
-#endif
-
-/* Client connection states */
-typedef enum {
-    CLIENT_STATE_READING_HEADER,
-    CLIENT_STATE_READING_BODY,
-    CLIENT_STATE_PROCESSING,
-    CLIENT_STATE_WRITING_RESPONSE
-} client_state_t;
-
-/* Client connection structure */
-typedef struct {
-    socket_t socket;
-    client_state_t state;
-    uint8_t recv_buffer[MODBUS_MAX_ADU_SIZE];
-    int recv_offset;
-    int expected_length;
-    uint8_t send_buffer[MODBUS_MAX_ADU_SIZE];
-    int send_length;
-    int send_offset;
-    char client_info[64];
-} client_connection_t;
-
-#define MAX_CLIENTS 100
-
-/* Global variables for signal handling */
-static volatile sig_atomic_t g_running = 1;
-
-static void signal_handler(int signum) {
-    (void)signum;
-    g_running = 0;
-}
-
-static void setup_signal_handlers(void) {
 #ifdef _WIN32
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #endif
-}
 
-static void close_client(client_connection_t *client) {
-    if (client->socket != INVALID_SOCKET_VALUE) {
-        log_info("Closing connection to %s", client->client_info);
-        socket_close(client->socket);
-        client->socket = INVALID_SOCKET_VALUE;
-    }
-}
+#include "modbus_protocol.h"
+#include "register_storage.h"
+#include "coro_net.h"
+#include "socket.h"
+#include "log.h"
+#include "err.h"
+#include "buf.h"
+#include "args.h"
+#include "utils.h"
 
-static bool accept_new_client(socket_t listener_socket,
-                              client_connection_t *clients,
-                              int max_clients) {
-    char client_info[64];
-    socket_t client_socket = socket_accept(listener_socket, client_info, 
-                                           sizeof(client_info));
-    
-    if (client_socket == INVALID_SOCKET_VALUE) {
-        return false;
-    }
-    
-    /* Find empty slot */
-    for (int i = 0; i < max_clients; i++) {
-        if (clients[i].socket == INVALID_SOCKET_VALUE) {
-            clients[i].socket = client_socket;
-            clients[i].state = CLIENT_STATE_READING_HEADER;
-            clients[i].recv_offset = 0;
-            clients[i].expected_length = MBAP_HEADER_SIZE;
-            clients[i].send_offset = 0;
-            clients[i].send_length = 0;
-            strncpy(clients[i].client_info, client_info, sizeof(clients[i].client_info) - 1);
-            clients[i].client_info[sizeof(clients[i].client_info) - 1] = '\0';
-            
-            log_info("Accepted connection from %s", client_info);
-            return true;
-        }
-    }
-    
-    log_warn("Max clients reached, rejecting connection from %s", client_info);
-    socket_close(client_socket);
-    return false;
-}
+/* ============================================================================
+ * Forward Declarations and Constants
+ * ============================================================================ */
 
-static void handle_client_read(client_connection_t *client,
-                               register_storage_t *storage) {
-    int to_read = client->expected_length - client->recv_offset;
-    int n = socket_recv(client->socket, 
-                       &client->recv_buffer[client->recv_offset],
-                       to_read);
-    
-    if (n <= 0) {
-        if (n < 0) {
-            log_debug("Receive error from %s", client->client_info);
-        }
-        close_client(client);
-        return;
-    }
-    
-    client->recv_offset += n;
-    
-    /* Check if we completed this phase */
-    if (client->recv_offset >= client->expected_length) {
-        if (client->state == CLIENT_STATE_READING_HEADER) {
-            /* Parse header to determine body length */
-            mbap_header_t header;
-            if (!modbus_parse_mbap_header(client->recv_buffer, client->recv_offset, &header)) {
-                log_debug("Invalid MBAP header from %s", client->client_info);
-                close_client(client);
-                return;
-            }
-            
-            /* Now read the PDU (length field includes unit_id which is already in header) */
-            client->expected_length = MBAP_HEADER_SIZE + header.length - 1;
-            
-            if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
-                log_debug("PDU too large (%d bytes) from %s", 
-                         client->expected_length, client->client_info);
-                close_client(client);
-                return;
-            }
-            
-            if (client->recv_offset < client->expected_length) {
-                client->state = CLIENT_STATE_READING_BODY;
-            } else {
-                /* Header included the complete request */
-                client->state = CLIENT_STATE_PROCESSING;
-            }
-        } else if (client->state == CLIENT_STATE_READING_BODY) {
-            client->state = CLIENT_STATE_PROCESSING;
-        }
-    }
-    
-    /* Process complete request */
-    if (client->state == CLIENT_STATE_PROCESSING) {
-        modbus_message_t request;
-        if (!modbus_parse_request(client->recv_buffer, client->recv_offset, &request)) {
-            log_debug("Failed to parse request from %s", client->client_info);
-            close_client(client);
-            return;
-        }
-        
-        log_dump_bytes("Request", client->recv_buffer, (size_t)client->recv_offset);
-        
-        client->send_length = modbus_process_request(&request, storage,
-                                                     client->send_buffer,
-                                                     MODBUS_MAX_ADU_SIZE);
-        
-        if (client->send_length < 0) {
-            log_error("Failed to process request from %s", client->client_info);
-            close_client(client);
-            return;
-        }
+typedef struct server_ctx_s server_ctx_t;
+typedef struct modbus_client_s modbus_client_t;
 
-        log_dump_bytes("Response", client->send_buffer, (size_t)client->send_length);
+#define MODBUS_RECV_BUFFER_SIZE 512
+#define MODBUS_SEND_BUFFER_SIZE 512
 
-        client->send_offset = 0;
-        client->state = CLIENT_STATE_WRITING_RESPONSE;
-    }
-}
+/* Histogram bucket boundaries (in microseconds) */
+#define HIST_BUCKET_COUNT 8
+static const int64_t hist_boundaries[HIST_BUCKET_COUNT] = {
+    100,    /* 0-100us */
+    500,    /* 100-500us */
+    1000,   /* 500us-1ms */
+    2000,   /* 1-2ms */
+    5000,   /* 2-5ms */
+    10000,  /* 5-10ms */
+    50000,  /* 10-50ms */
+    INT64_MAX  /* >50ms */
+};
 
-static void handle_client_write(client_connection_t *client) {
-    int to_write = client->send_length - client->send_offset;
-    int n = socket_send(client->socket,
-                       &client->send_buffer[client->send_offset],
-                       to_write);
-    
-    if (n <= 0) {
-        if (n < 0) {
-            log_debug("Send error to %s", client->client_info);
-        }
-        close_client(client);
-        return;
-    }
-    
-    client->send_offset += n;
-    
-    if (client->send_offset >= client->send_length) {
-        /* Response sent, prepare for next request */
-        client->state = CLIENT_STATE_READING_HEADER;
-        client->recv_offset = 0;
-        client->expected_length = MBAP_HEADER_SIZE;
-        client->send_offset = 0;
-        client->send_length = 0;
+/* Server statistics structure */
+typedef struct {
+    /* Total request count and timing */
+    int64_t total_requests;
+    int64_t total_response_time_us;
+    int64_t total_response_time_sq_us;  /* Sum of squares for std dev */
+    int64_t min_response_time_us;
+    int64_t max_response_time_us;
+
+    /* Per-component timing breakdown */
+    int64_t total_recv_time_us;         /* Total time from recv_start to recv_complete (includes polling) */
+    int64_t total_poll_overhead_us;     /* Time spent waiting for first byte (polling overhead) */
+    int64_t total_actual_io_time_us;    /* Time for actual socket I/O after first byte arrives */
+    int64_t total_process_time_us;
+    int64_t total_send_time_us;
+    int64_t total_overhead_time_us;
+
+    int64_t clients_connected;
+    int64_t clients_disconnected;
+
+    /* Histogram buckets for response time distribution */
+    int64_t hist_buckets[HIST_BUCKET_COUNT];
+} server_stats_t;
+
+/* Per-request timing breakdown */
+typedef struct {
+    int64_t request_start_us;      /* When we start attempting to receive (includes polling) */
+    int64_t first_byte_us;         /* When first byte actually received (key timing point) */
+    int64_t recv_start_us;         /* When recv started */
+    int64_t recv_complete_us;      /* When full request received */
+    int64_t process_start_us;      /* When processing started */
+    int64_t process_complete_us;   /* When processing completed */
+    int64_t send_start_us;         /* When send started */
+    int64_t send_complete_us;      /* When send completed */
+    int64_t total_recv_time_us;    /* Accumulated times for multi-recv scenarios */
+    int64_t total_process_time_us; /* Accumulated times for multi-process scenarios */
+    int64_t total_send_time_us;    /* Accumulated times for multi-send scenarios */
+} request_timing_t;
+
+static server_ctx_t *g_server = NULL;
+
+/* ============================================================================
+ * Server Context
+ * ============================================================================ */
+
+struct server_ctx_s {
+    register_storage_t *storage;
+    coro_net_t *coro_net;
+    volatile int running;
+    int64_t start_time_us;
+    server_stats_t stats;
+};
+
+/* ============================================================================
+ * Modbus Client Context (per connection)
+ * ============================================================================ */
+
+struct modbus_client_s {
+    coro_task_handle_t handle;
+    server_ctx_t *server;
+    uint8_t recv_buffer[MODBUS_RECV_BUFFER_SIZE];
+    uint8_t send_buffer[MODBUS_SEND_BUFFER_SIZE];
+    buf_t recv_buf;
+    buf_t send_buf;
+    mbap_header_t mbap_header;
+    uint16_t expected_pdu_length;
+    request_timing_t timing;
+};
+
+
+/* ============================================================================
+ * Modbus Listener Context (per endpoint)
+ * ============================================================================ */
+
+ struct listener_info_s {
+    coro_task_handle_t handle;
+    server_ctx_t *server;
+    char bind_address[256];
+    uint16_t bind_port;
+    size_t clients_created;
+    size_t clients_closed;
+};
+
+typedef struct listener_info_s listener_info_t;
+
+/* ============================================================================
+ * Statistics Helpers
+ * ============================================================================ */
+
+static const char* hist_bucket_label(int bucket) {
+    switch (bucket) {
+        case 0: return "0-100us";
+        case 1: return "100-500us";
+        case 2: return "500us-1ms";
+        case 3: return "1-2ms";
+        case 4: return "2-5ms";
+        case 5: return "5-10ms";
+        case 6: return "10-50ms";
+        case 7: return ">50ms";
+        default: return "unknown";
     }
 }
 
-int main(int argc, char **argv) {
-    server_config_t config;
-    register_storage_t storage;
-    socket_t listener_sockets[MAX_LISTEN_ENDPOINTS];
-    client_connection_t clients[MAX_CLIENTS];
-    int num_listeners = 0;
-    int rc = EXIT_FAILURE;
-    
-    /* Initialize */
-    memset(listener_sockets, 0, sizeof(listener_sockets));
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        clients[i].socket = INVALID_SOCKET_VALUE;
+static void update_histogram(server_stats_t *stats, int64_t response_time_us) {
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        if (response_time_us <= hist_boundaries[i]) {
+            stats->hist_buckets[i]++;
+            break;
+        }
     }
-    
-    /* Initialize configuration with defaults */
-    config_init(&config);
-    
-    /* Parse configuration */
-    if (!config_parse_args(&config, argc, argv)) {
-        config_print_usage(argv[0]);
-        return EXIT_FAILURE;
+}
+
+
+static void print_statistics(server_ctx_t *server) {
+    if (!server) return;
+
+    int64_t end_time_us = util_time_us();
+    double runtime_sec = (double)(end_time_us - server->start_time_us) / 1000000.0;
+
+    server_stats_t *stats = &server->stats;
+    int64_t total_reqs = stats->total_requests;
+    int64_t total_time = stats->total_response_time_us;
+    int64_t total_time_sq = stats->total_response_time_sq_us;
+    int64_t min_time = stats->min_response_time_us;
+    int64_t max_time = stats->max_response_time_us;
+
+    int64_t total_recv = stats->total_recv_time_us;
+    int64_t total_poll_overhead = stats->total_poll_overhead_us;
+    int64_t total_actual_io = stats->total_actual_io_time_us;
+    int64_t total_process = stats->total_process_time_us;
+    int64_t total_send = stats->total_send_time_us;
+    int64_t total_overhead = stats->total_overhead_time_us;
+
+    /* flush the rest of the log out */
+    fflush(stderr);
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "╔══════════════════════════════════════════════════════════════════╗\n");
+    fprintf(stderr, "║        MODBUS SERVER (COROUTINE) PERFORMANCE STATISTICS          ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║ Runtime: %.2f seconds                                            \n", runtime_sec);
+    fprintf(stderr, "║ Total requests: %" PRId64 "                                              \n", (long long)total_reqs);
+    if (runtime_sec > 0) {
+        fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n", (double)total_reqs / (double)runtime_sec);
     }
-    
-    if (config.num_listen_endpoints == 0) {
-        log_error("No listen endpoints specified");
-        config_print_usage(argv[0]);
-        return EXIT_FAILURE;
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║                       CLIENT STATISTICS                          ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║ Clients connected:    %" PRId64 "                                     \n", (long long)stats->clients_connected);
+    fprintf(stderr, "║ Clients disconnected: %" PRId64 "                                     \n", (long long)stats->clients_disconnected);
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║                     RESPONSE TIME SUMMARY                        ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+
+    if (total_reqs > 0) {
+        double mean = (double)total_time / (double)total_reqs;
+        double variance = ((double)total_time_sq / (double)total_reqs) - (mean * mean);
+        double stddev = variance > 0 ? sqrt(variance) : 0.0;
+
+        fprintf(stderr, "║ Average:  %8.2f us                                            \n", mean);
+        fprintf(stderr, "║ Std Dev:  %8.2f us                                            \n", stddev);
+        fprintf(stderr, "║ Minimum:  %8lld us                                            \n", (long long)min_time);
+        fprintf(stderr, "║ Maximum:  %8lld us                                            \n", (long long)max_time);
+
+        fprintf(stderr, "╠══════════════════════════════════════════════════════════════╣\n");
+        fprintf(stderr, "║                    LATENCY BREAKDOWN (avg)                       ║\n");
+        fprintf(stderr, "╠══════════════════════════════════════════════════════════════╣\n");
+
+        double avg_recv = (double)total_recv / (double)total_reqs;
+        double avg_process = (double)total_process / (double)total_reqs;
+        double avg_send = (double)total_send / (double)total_reqs;
+        double avg_overhead = (double)total_overhead / (double)total_reqs;
+        double total_avg = avg_recv + avg_process + avg_send + avg_overhead;
+
+        double avg_poll_overhead = (double)total_poll_overhead / (double)total_reqs;
+        double avg_actual_io = (double)total_actual_io / (double)total_reqs;
+
+        fprintf(stderr, "║  Recv (socket):   %8.2f us (%5.1f%%)                           \n", avg_recv, total_avg > 0 ? (avg_recv / total_avg) * 100 : 0);
+        fprintf(stderr, "║    - Poll overhead: %6.2f us (%5.1f%% of recv)                  \n", avg_poll_overhead, avg_recv > 0 ? (avg_poll_overhead / avg_recv) * 100 : 0);
+        fprintf(stderr, "║    - Actual I/O:    %6.2f us (%5.1f%% of recv)                  \n", avg_actual_io, avg_recv > 0 ? (avg_actual_io / avg_recv) * 100 : 0);
+        fprintf(stderr, "║  Process (modbus):%8.2f us (%5.1f%%)                           \n", avg_process, total_avg > 0 ? (avg_process / total_avg) * 100 : 0);
+        fprintf(stderr, "║  Send (socket):   %8.2f us (%5.1f%%)                           \n", avg_send, total_avg > 0 ? (avg_send / total_avg) * 100 : 0);
+        fprintf(stderr, "║  Overhead (coro): %8.2f us (%5.1f%%)                           \n", avg_overhead, total_avg > 0 ? (avg_overhead / total_avg) * 100 : 0);
     }
-    
-    /* Initialize logger with debug flag from config */
-    logger_set_debug(config.debug);
-    
-    /* Initialize sockets */
-    if (!socket_init()) {
-        log_error("Failed to initialize sockets");
-        return EXIT_FAILURE;
+
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║                  RESPONSE TIME HISTOGRAM                         ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+
+    int64_t max_bucket = 0;
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        int64_t count = stats->hist_buckets[i];
+        if (count > max_bucket) max_bucket = count;
     }
-    
-    /* Setup signal handlers */
-    setup_signal_handlers();
-    
-    /* Initialize register storage */
-    if (!register_storage_init(&storage,
-                               config.num_coils,
-                               config.num_discrete_inputs,
-                               config.num_holding_registers,
-                               config.num_input_registers)) {
-        log_error("Failed to initialize register storage");
-        goto cleanup;
+
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        int64_t count = stats->hist_buckets[i];
+        double pct = total_reqs > 0 ? (double)count / (double)total_reqs * 100 : 0;
+        int bar_len = max_bucket > 0 ? (int)((double)count / (double)max_bucket * 30) : 0;
+
+        fprintf(stderr, "║  %-12s │", hist_bucket_label(i));
+        for (int j = 0; j < bar_len; j++) fprintf(stderr, "█");
+        for (int j = bar_len; j < 30; j++) fprintf(stderr, " ");
+        fprintf(stderr, "│ %6lld (%5.1f%%)\n", (long long)count, pct);
     }
+
+    fprintf(stderr, "╚══════════════════════════════════════════════════════════════════╝\n");
+    fflush(stderr);
+}
+
+/* ============================================================================
+ * Signal Handling
+ * ============================================================================ */
+
+static void signal_handler(void) {
+    if (g_server) {
+        g_server->running = 0;
+        coro_stop(g_server->coro_net);
+    }
+}
+
+/* ============================================================================
+ * Client Coroutine Handler
+ * ============================================================================ */
+
+static util_err_t modbus_frame_check(buf_t *buf, void *context) {
+    (void)context;  /* unused */
     
-    /* Create listener sockets */
-    for (int i = 0; i < config.num_listen_endpoints; i++) {
-        listener_sockets[num_listeners] = socket_create_listener(
-            config.listen_endpoints[i].host,
-            config.listen_endpoints[i].port
+    pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Checking for complete Modbus frame");
+    /* Check if we have enough data for the MBAP header */
+    if (buf_read_size(buf) < MBAP_HEADER_SIZE) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Not enough data for MBAP header");
+        return UTIL_EAGAIN;
+    }
+
+    /* make local copy of buffer */
+    buf_t header_buf = *buf;
+
+    /* Peek at the length field in the MBAP header */
+    uint16_t length = 0;
+    buf_read_advance(&header_buf, 4); /* Skip Transaction ID and Protocol ID */
+
+    if (!buf_read_u16_be(&header_buf, "length", &length)) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Failed to read length field from MBAP header");
+        return buf_get_error(&header_buf);
+    }
+
+    /* Total required size is MBAP header + length field - 1 for the unit byte */
+    if (buf_read_size(buf) < (MBAP_HEADER_SIZE + length - 1)) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Not enough data for complete Modbus frame");
+        return UTIL_EAGAIN;
+    }
+
+    return UTIL_OK;
+}
+
+
+static void client_handler(coro_task_handle_t handle, socket_t fd, void *context) {
+    modbus_client_t *client = (modbus_client_t *)context;
+    uint8_t function_code;
+    util_err_t err;
+
+    (void)fd;  /* We have the fd in the handle */
+
+    CORO_START(handle);
+
+    pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler started");
+
+    client->server->stats.clients_connected++;
+
+    while (1) {
+        /* compact the receive buffer */
+        buf_compact(&client->recv_buf);
+
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "%zu bytes space in receive buffer before read", buf_write_size(&client->recv_buf));
+
+        /* Reset timestamps for new request */
+        client->timing.first_byte_us = 0;
+        client->timing.recv_complete_us = 0;
+
+        /* Capture when we start trying to receive (may block waiting for data) */
+        client->timing.recv_start_us = util_time_us();
+
+        /* Read until we get a full frame - macro will set first_byte_us and recv_complete_us */
+        socket_read_yield(handle, &client->recv_buf, modbus_frame_check, NULL,
+                         &client->timing.first_byte_us, &client->timing.recv_complete_us, err);
+
+        /* Request processing start is when data actually arrived (not when we started blocking) */
+        client->timing.request_start_us = client->timing.first_byte_us;
+
+        if(err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Client error %s during APU read", util_err_str(err));
+            break;
+        }
+
+        /* we got at least enough data for a full packet */
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Received complete Modbus request of %zu bytes:", buf_read_size(&client->recv_buf));
+        pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->recv_buf);
+
+        /* get the header info */
+        modbus_parse_mbap_header(&client->recv_buf, &client->mbap_header);
+
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
+              "MBAP Header - Transaction ID: %u, Protocol ID: %u, Length: %u, Unit ID: %u",
+              client->mbap_header.transaction_id,
+              client->mbap_header.protocol_id,
+              client->mbap_header.length,
+              client->mbap_header.unit_id);
+
+        /* FIXME - we should check the unit ID here. */
+
+        /* Extract function code */
+        if (!buf_read_u8(&client->recv_buf, "function_code", &function_code)) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to read function code");
+            break;
+        }
+
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Processing function code 0x%02x", function_code);
+        /* Capture process start time */
+        client->timing.process_start_us = util_time_us();
+
+        /* Reset send buffer and generate response */
+        buf_reset(&client->send_buf);
+        err = modbus_process_request(
+            function_code,
+            &client->recv_buf,
+            &client->send_buf,
+            &client->mbap_header,
+            client->server->storage
         );
-        
-        if (listener_sockets[num_listeners] == INVALID_SOCKET_VALUE) {
-            log_error("Failed to create listener on %s:%d",
-                     config.listen_endpoints[i].host,
-                     config.listen_endpoints[i].port);
-            goto cleanup;
+
+        /* Capture process complete time */
+        client->timing.process_complete_us = util_time_us();
+
+        if (err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Request processing failed");
+
+            modbus_build_exception_response(
+                &client->send_buf,
+                &client->mbap_header,
+                function_code,
+                err
+            );
+        } else {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Request processed successfully");
         }
-        
-        num_listeners++;
+
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
+        pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
+
+        /* Capture send start time */
+        client->timing.send_start_us = util_time_us();
+
+        /* Send response */
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
+        socket_write_yield(handle, &client->send_buf, err);
+        if(err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
+        }
+
+        /* Capture send complete time and calculate statistics */
+        client->timing.send_complete_us = util_time_us();
+
+        /* Calculate response time and component times
+         * Note: total_response_time excludes poll_overhead (time blocked waiting for data)
+         * It measures pure processing time from when data arrives to when response is sent
+         */
+        int64_t total_response_time = client->timing.send_complete_us - client->timing.request_start_us;
+        int64_t poll_overhead = client->timing.first_byte_us - client->timing.recv_start_us;
+        int64_t actual_io_time = client->timing.recv_complete_us - client->timing.first_byte_us;
+        int64_t recv_time = poll_overhead + actual_io_time;  /* Total receive time including blocking */
+        int64_t process_time = client->timing.process_complete_us - client->timing.process_start_us;
+        int64_t send_time = client->timing.send_complete_us - client->timing.send_start_us;
+        int64_t overhead_time = total_response_time - actual_io_time - process_time - send_time;
+
+        /* Update statistics */
+        server_stats_t *stats = &client->server->stats;
+        stats->total_requests++;
+        stats->total_response_time_us += total_response_time;
+        stats->total_response_time_sq_us += total_response_time * total_response_time;
+        stats->total_recv_time_us += recv_time;
+        stats->total_poll_overhead_us += poll_overhead;
+        stats->total_actual_io_time_us += actual_io_time;
+        stats->total_process_time_us += process_time;
+        stats->total_send_time_us += send_time;
+        stats->total_overhead_time_us += overhead_time;
+
+        if (stats->min_response_time_us == 0 || total_response_time < stats->min_response_time_us) {
+            stats->min_response_time_us = total_response_time;
+        }
+        if (total_response_time > stats->max_response_time_us) {
+            stats->max_response_time_us = total_response_time;
+        }
+
+        update_histogram(stats, total_response_time);
+
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
+              "Request completed: total=%" PRId64 "us, recv=%" PRId64 "us, process=%" PRId64 "us, send=%" PRId64 "us, overhead=%" PRId64 "us",
+              total_response_time, recv_time, process_time, send_time, overhead_time);
+
+        memset(&client->timing, 0, sizeof(client->timing));
     }
-    
-    log_info("Modbus TCP server started");
-    
-    /* Main event loop */
-    while (g_running) {
-        /* Build poll array with parallel client pointer array */
-        struct pollfd fds[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
-        client_connection_t *client_ptrs[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
-        nfds_t nfds = 0;
-        
-        /* Add listener sockets */
-        for (int i = 0; i < num_listeners; i++) {
-            fds[nfds].fd = listener_sockets[i];
-            fds[nfds].events = POLLIN;
-            fds[nfds].revents = 0;
-            client_ptrs[nfds] = NULL;  /* NULL for listener sockets */
-            nfds++;
+
+    pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler closing");
+
+    client->server->stats.clients_disconnected++;
+
+    coro_remove_task(client->handle);
+    socket_close(coro_get_fd(client->handle));
+    free(client);
+
+    CORO_END(handle);
+}
+
+/* ============================================================================
+ * Listener Coroutine Handler
+ * ============================================================================ */
+
+static void listener_handler(coro_task_handle_t handle, socket_t fd, void *context) {
+    listener_info_t *listener = (listener_info_t *)context;
+    socket_t client_fd = 0;
+    socket_address_t client_addr = {0};
+    util_err_t err = UTIL_OK;
+
+    (void)fd;  /* We have the fd in the handle */
+
+    CORO_START(handle);
+
+    pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
+
+    while (listener->server->running) {
+        pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Waiting for incoming connections...");
+        socket_accept_yield(handle, &client_fd, &client_addr, err);
+        if (err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to accept connection");
+            break;
         }
-        
-        /* Add client sockets */
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket != INVALID_SOCKET_VALUE) {
-                fds[nfds].fd = clients[i].socket;
-                fds[nfds].events = 0;
-                
-                if (clients[i].state == CLIENT_STATE_READING_HEADER ||
-                    clients[i].state == CLIENT_STATE_READING_BODY) {
-                    fds[nfds].events |= POLLIN;
-                } else if (clients[i].state == CLIENT_STATE_WRITING_RESPONSE) {
-                    fds[nfds].events |= POLLOUT;
-                }
-                
-                fds[nfds].revents = 0;
-                client_ptrs[nfds] = &clients[i];  /* Store pointer to this client */
-                nfds++;
-            }
+
+        char client_ip[INET6_ADDRSTRLEN];
+        socket_address_get_addr_str(&client_addr, client_ip, sizeof(client_ip));
+        uint16_t client_port = socket_address_get_port(&client_addr);
+        pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Accepted client connection from %s:%u (fd %d)",
+              client_ip, client_port, client_fd);
+
+        /* Create client context */
+        modbus_client_t *client = (modbus_client_t *)calloc(1, sizeof(modbus_client_t));
+        if (!client) {
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to allocate client context");
+            CS_CLOSE(client_fd);
+            continue;
         }
-        
-        /* Wait for events */
-        int poll_rc = poll_wrapper(fds, nfds, 1000);
-        
-        if (poll_rc < 0) {
-            if (!g_running) break;
-            log_error("poll() failed");
-            goto cleanup;
-        }
-        
-        if (poll_rc == 0) {
-            /* Timeout, check running flag */
+
+        client->recv_buf = buf_init(client->recv_buffer, MODBUS_RECV_BUFFER_SIZE);
+        client->send_buf = buf_init(client->send_buffer, MODBUS_SEND_BUFFER_SIZE);
+        client->server = listener->server;
+        client->expected_pdu_length = 0;
+
+        /* Register with event loop */
+        coro_task_handle_t client_handle;
+        err = coro_add_task(&client_handle, client->server->coro_net, client_fd, client_handler, (void *)client);
+        if (err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to add client socket: %s", util_err_str(err));
+            CS_CLOSE(client_fd);
+            free(client);
             continue;
         }
         
-        /* Process listener sockets */
-        for (int i = 0; i < num_listeners; i++) {
-            if (fds[i].revents & POLLIN) {
-                accept_new_client(listener_sockets[i], clients, MAX_CLIENTS);
-            }
-        }
-        
-        /* Process client sockets - use parallel array for direct access */
-        {
-            nfds_t j;
-            for (j = num_listeners; j < nfds; j++) {
-                if (client_ptrs[j] != NULL) {
-                    if (fds[j].revents & (POLLIN | POLLERR | POLLHUP)) {
-                        handle_client_read(client_ptrs[j], &storage);
-                    } else if (fds[j].revents & POLLOUT) {
-                        handle_client_write(client_ptrs[j]);
-                    }
-                }
-            }
-        }
+        client->handle = client_handle;
     }
-    
-    log_info("Shutting down...");
-    rc = EXIT_SUCCESS;
-    
-cleanup:
-    /* Close all client connections */
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i].socket != INVALID_SOCKET_VALUE) {
-            close_client(&clients[i]);
-        }
-    }
-    
-    /* Close listener sockets */
-    for (int i = 0; i < num_listeners; i++) {
-        socket_close(listener_sockets[i]);
-    }
-    
-    /* Cleanup storage */
-    register_storage_cleanup(&storage);
-    
-    /* Cleanup sockets */
-    socket_cleanup();
-    
-    log_info("Server stopped");
-    return rc;
+
+    pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener stopping");
+
+    coro_remove_task(listener->handle);
+    socket_close(coro_get_fd(listener->handle));
+    free(listener);
+
+    CORO_END(handle);
 }
+
+
+/* statistics dumper */
+
+static void stats_dumper(coro_task_handle_t task, socket_t fd_ignored, void *context) {
+    server_ctx_t *server = (server_ctx_t *)context;
+    (void)fd_ignored;
+
+
+    static int64_t last_print_time = 0;
+
+    CORO_START(task);
+
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Statistics dumper started");
+
+    while (server->running) {
+        int64_t now = util_time_ms();
+
+        if(last_print_time + 1000 < now) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Dumping statistics...");
+            last_print_time = now;
+            print_statistics(server);
+
+            fflush(stderr);
+            fflush(stdout);
+        }
+
+        coro_wait_for_event(task, CORO_EVENT_ALWAYS);
+    }
+
+    coro_remove_task(task);
+
+    CORO_END(task);    
+}
+
+/* ============================================================================
+ * Main Entry Point
+ * ============================================================================ */
+
+int main(int argc, char *argv[]) {
+    args_result_t args_result = {0};
+    server_ctx_t server = {0};
+    g_server = &server;
+    server.running = 1;
+
+    /* Initialize socket subsystem */
+    util_err_t socket_err = socket_init();
+    if (socket_err != UTIL_OK) {
+        fprintf(stderr, "Failed to initialize socket subsystem: %s\n", util_err_str(socket_err));
+        return EXIT_FAILURE;
+    }
+
+    args_flag_def_t flags[] = {
+        {
+            "listen",
+            ARGS_TYPE_STRING,
+            ARGS_OPTIONAL,
+            ARGS_MULTIPLE,
+            "server.listen",
+            "Address and port to listen on (address:port)",
+            { .has_default = false }
+        },
+        {
+            "debug",
+            ARGS_TYPE_STRING,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "logging.debug",
+            "Debug level (ERROR, WARN, INFO, DETAIL, SPEW)",
+            { .has_default = true, .value.string_val = "INFO" }
+        },
+        {
+            "coils",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.coils",
+            "Number of coils",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "discrete-inputs",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.discrete_inputs",
+            "Number of discrete inputs",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "holding-registers",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.holding_registers",
+            "Number of holding registers",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "input-registers",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.input_registers",
+            "Number of input registers",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "help",
+            ARGS_TYPE_BOOL,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "general.help",
+            "Show this help message",
+            { .has_default = true, .value.bool_val = false }
+        },
+    };
+    const size_t num_flags = sizeof(flags) / sizeof(flags[0]);
+
+    util_err_t parse_rc = args_parse(argc, (const char **)argv, flags, num_flags, &args_result);
+    if (parse_rc != UTIL_OK) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to parse arguments: %s", args_get_error_detail(&args_result));
+        args_print_help(argv[0], flags, num_flags);
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+
+    if (args_get_bool(&args_result, "help")) {
+        args_print_help(argv[0], flags, num_flags);
+        args_free(&args_result);
+        return EXIT_SUCCESS;
+    }
+
+    const char *debug_level_str = args_get_string(&args_result, "debug");
+    log_level_t log_level = LOG_LEVEL_INFO;
+    if (debug_level_str) {
+        if (strcmp(debug_level_str, "ERROR") == 0) {
+            log_level = LOG_LEVEL_ERROR;
+        } else if (strcmp(debug_level_str, "WARN") == 0) {
+            log_level = LOG_LEVEL_WARN;
+        } else if (strcmp(debug_level_str, "INFO") == 0) {
+            log_level = LOG_LEVEL_INFO;
+        } else if (strcmp(debug_level_str, "DETAIL") == 0) {
+            log_level = LOG_LEVEL_DETAIL;
+        } else if (strcmp(debug_level_str, "SPEW") == 0) {
+            log_level = LOG_LEVEL_SPEW;
+        }
+    }
+    log_set_all_modules(log_level);
+
+    server.start_time_us = util_time_us();
+
+    int64_t coils_val = args_get_int(&args_result, "coils");
+    int64_t di_val = args_get_int(&args_result, "discrete-inputs");
+    int64_t hr_val = args_get_int(&args_result, "holding-registers");
+    int64_t ir_val = args_get_int(&args_result, "input-registers");
+
+    if (coils_val < 0 || coils_val > 65535 ||
+        di_val < 0 || di_val > 65535 ||
+        hr_val < 0 || hr_val > 65535 ||
+        ir_val < 0 || ir_val > 65535) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Register counts must be 0-65535");
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+
+    register_storage_t *temp_storage = register_storage_create(
+        (size_t)coils_val,
+        (size_t)di_val,
+        (size_t)hr_val,
+        (size_t)ir_val
+    );
+    if (!temp_storage) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create storage");
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+    server.storage = temp_storage;
+
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server starting");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Coils: %zu", (size_t)coils_val);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Discrete Inputs: %zu", (size_t)di_val);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Holding Registers: %zu", (size_t)hr_val);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Input Registers: %zu", (size_t)ir_val);
+
+    /* Initialize the coroutine system */
+    util_err_t err = coro_create(&g_server->coro_net, 256);
+    if (err != UTIL_OK) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create coro_net instance: %s", util_err_str(err));
+        return EXIT_FAILURE;
+    }
+
+    /* Set up signal handler for graceful shutdown */
+    util_set_interrupt_handler(signal_handler);
+
+    size_t listen_count = args_get_count(&args_result, "listen");
+    if (listen_count == 0) {
+        listen_count = 1;
+    }
+
+    for (size_t i = 0; i < listen_count; i++) {
+        const char *listen_addr = NULL;
+
+        /* Since listen is ARGS_MULTIPLE, always use args_get_at() */
+        args_value_t val = args_get_at(&args_result, "listen", i);
+        if (val.present) {
+            listen_addr = val.value.string_val;
+        }
+
+        if (!listen_addr) {
+            listen_addr = "127.0.0.1:502";
+        }
+
+        char addr_copy[256];
+        strncpy(addr_copy, listen_addr, sizeof(addr_copy) - 1);
+        addr_copy[sizeof(addr_copy) - 1] = '\0';
+
+        char *colon = strchr(addr_copy, ':');
+        if (!colon) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid address format: %s", listen_addr);
+            args_free(&args_result);
+            register_storage_destroy(temp_storage);
+            return EXIT_FAILURE;
+        }
+
+        *colon = '\0';
+        char *addr_str = addr_copy;
+        uint16_t port = (uint16_t)atoi(colon + 1);
+
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Creating listener on %s:%u", addr_str, port);
+
+        /* Initialize socket address */
+        socket_address_t listen_address;
+        util_err_t addr_err = socket_address_init(&listen_address, addr_str, port);
+        if (addr_err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to initialize socket address: %s", util_err_str(addr_err));
+            args_free(&args_result);
+            register_storage_destroy(temp_storage);
+            return EXIT_FAILURE;
+        }
+
+        /* Create TCP server socket */
+        socket_t listen_fd = socket_create_tcp_server(&listen_address, 128);
+        if (listen_fd == INVALID_SOCKET) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create TCP server on %s:%u: %s",
+                  addr_str, port, util_err_str(socket_get_err()));
+            args_free(&args_result);
+            register_storage_destroy(temp_storage);
+            return EXIT_FAILURE;
+        }
+
+        /* Set socket options */
+        socket_set_reuseaddr(listen_fd, true);
+
+        listener_info_t *listener_info = (listener_info_t *)malloc(sizeof(listener_info_t));
+        if (!listener_info) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to allocate listener info");
+            CS_CLOSE(listen_fd);
+            args_free(&args_result);
+            register_storage_destroy(temp_storage);
+            return EXIT_FAILURE;
+        }
+
+        memset(listener_info, 0, sizeof(listener_info_t));
+        listener_info->server = &server;
+        strncpy(listener_info->bind_address, addr_str, sizeof(listener_info->bind_address) - 1);
+        listener_info->bind_port = port;
+
+        coro_task_handle_t listener_handle;
+        err = coro_add_task(&listener_handle, g_server->coro_net, listen_fd, listener_handler, listener_info);
+        if (err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add listener socket: %s", util_err_str(err));
+            CS_CLOSE(listen_fd);
+            free(listener_info);
+            args_free(&args_result);
+            register_storage_destroy(temp_storage);
+            return EXIT_FAILURE;
+        }
+
+        listener_info->handle = listener_handle;
+    }
+
+    /* Start statistics dumper task */
+    coro_task_handle_t stats_task_handle;
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Adding statistics dumper task to event loop.");
+    err = coro_add_task(&stats_task_handle, g_server->coro_net, CORO_NO_SOCKET, stats_dumper, &server);
+    if (err != UTIL_OK) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add statistics dumper task: %s", util_err_str(err));
+        args_free(&args_result);
+
+        coro_destroy(&(g_server->coro_net));
+        register_storage_destroy(temp_storage);
+        socket_cleanup();
+        return EXIT_FAILURE;
+    }
+
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Starting coroutine event loop");
+    coro_run(&(g_server->coro_net), 50);  /* 50ms tick interval */
+
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server shutting down");
+    coro_destroy(&(g_server->coro_net));
+
+    g_server->coro_net = NULL;
+
+    fflush(stderr);
+
+    print_statistics(&server);
+
+    fflush(stderr);
+
+    args_free(&args_result);
+    register_storage_destroy(temp_storage);
+    socket_cleanup();
+
+    return EXIT_SUCCESS;
+}
+
