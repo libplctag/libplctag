@@ -526,6 +526,18 @@ fi
 
 
 let TEST++
+echo -n "  Test $TEST: connection stress (multiple connections) Modbus... "
+$VALGRIND$TEST_DIR/test_connection_stress --num-threads=200 --tag='protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "$LOG_DIR/${TEST}_modbus_connection_stress_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
 echo -n "  Test $TEST: callback events Modbus... "
 $VALGRIND$TEST_DIR/test_callback_ex_modbus > "$LOG_DIR/${TEST}_test_callback_ex_modbus.log" 2>&1
 if [ $? != 0 ]; then
