@@ -1152,19 +1152,36 @@ jobs:
           git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
           git push origin "v${{ env.VERSION }}"
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ env.VERSION }}"
-          name: ${{ steps.get_pr_details.outputs.pr_title }}
-          body: ${{ steps.get_pr_details.outputs.pr_body }}
-          files: |
-            ./release_artifacts/**/*.zip
-            ./release_artifacts/**/*.deb
-            ./release_artifacts/**/*.rpm
-            ./release_artifacts/**/*.apk
-            ./release_artifacts/**/*.tar.gz
-          draft: false
-          prerelease: false
+      - name: Fetch fresh repository state
+        run: |
+          git fetch --all --tags --force
+          echo "Repository state refreshed"
+
+      - name: Collect all release artifacts
+        run: |
+          echo "Collecting all artifacts for release..."
+          mkdir -p ./final_release_assets
+
+          # Copy all artifact types to a single directory
+          find ./release_artifacts -type f \( -name "*.zip" -o -name "*.deb" -o -name "*.rpm" -o -name "*.apk" -o -name "*.tar.gz" \) -exec cp {} ./final_release_assets/ \;
+
+          echo "Release assets prepared:"
+          ls -lh ./final_release_assets/
+          echo "Total files: $(ls -1 ./final_release_assets/ | wc -l)"
+
+      - name: Create Release with GitHub CLI
+        run: |
+          # Save PR body to file to avoid shell escaping issues
+          cat > /tmp/release_body.md <<'EOF'
+          ${{ steps.get_pr_details.outputs.pr_body }}
+          EOF
+
+          # Create release using gh CLI with --clobber flag
+          # This will overwrite any existing release and assets
+          gh release create "v${{ env.VERSION }}" \
+            --title "${{ steps.get_pr_details.outputs.pr_title }}" \
+            --notes-file /tmp/release_body.md \
+            --latest \
+            ./final_release_assets/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
