@@ -1023,43 +1023,6 @@ jobs:
           echo "PR Title: $PR_TITLE"
           echo "PR Body: $PR_BODY"
 
-  debug_artifacts:
-    needs:
-      [
-        ubuntu_matrix,
-        macos_matrix,
-        windows_msvc_matrix,
-        ubuntu_arm_cross,
-        alpine_native,
-      ]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./release_artifacts
-
-      - name: List artifact structure
-        run: |
-          echo "=== Artifact Directory Structure ==="
-          find ./release_artifacts -type f -name "*.zip" | head -20
-          echo ""
-          echo "=== All files in release_artifacts ==="
-          find ./release_artifacts -type f | head -50
-          echo ""
-          echo "=== Directory structure ==="
-          ls -la ./release_artifacts/ || echo "No release_artifacts directory"
-          echo ""
-          echo "=== Sample directory contents ==="
-          for dir in ./release_artifacts/*/; do
-            if [ -d "$dir" ]; then
-              echo "Contents of $dir:"
-              ls -la "$dir" | head -10
-              echo ""
-              break
-            fi
-          done
-
   create_release:
     needs:
       [
@@ -1156,6 +1119,19 @@ jobs:
           find ./release_artifacts -name "test-logs-*" -type d | while read dir; do
             echo "Skipped: $dir (test logs only)"
           done
+
+      - name: Delete existing release and tag (if they exist)
+        run: |
+          # Delete existing release using GitHub CLI
+          gh release delete "v${{ env.VERSION }}" --yes --cleanup-tag 2>/dev/null || echo "No existing release to delete"
+
+          # Delete remote tag if it exists (in case it wasn't cleaned up by release delete)
+          git push --delete origin "v${{ env.VERSION }}" 2>/dev/null || echo "No remote tag to delete"
+
+          # Delete local tag if it exists
+          git tag -d "v${{ env.VERSION }}" 2>/dev/null || echo "No local tag to delete"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push tag
         run: |
