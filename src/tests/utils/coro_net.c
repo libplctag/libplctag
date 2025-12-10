@@ -6,6 +6,12 @@
 #include <limits.h>
 #include <inttypes.h>
 
+/* Platform detection for BSD-like systems (mirrors socket.c) */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
+#    define UTIL_BSD_OS_TYPE
+#endif
+
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
@@ -138,7 +144,11 @@ static int socketpair(int domain, int type, int protocol, socket_t pair[2]) {
 static void coro_wake(coro_net_t *net) {
     if (!net) return;
     char c = 1;
-    // Use MSG_NOSIGNAL on POSIX to prevent SIGPIPE if the reader closed
+    /* Prevent SIGPIPE when writing to wake socket:
+     * - Linux: Use MSG_NOSIGNAL flag in send()
+     * - BSD/macOS: SO_NOSIGPIPE socket option (set at socket creation)
+     * - MSG_NOSIGNAL is 0 on BSD/macOS, so it's safe to always include
+     */
     send(net->wakeup_fds[0], &c, 1, MSG_NOSIGNAL);
 }
 
@@ -280,6 +290,17 @@ util_err_t coro_create(coro_net_t **out_coro_net, size_t max_tasks) {
 
         return err;
     }
+
+#ifdef UTIL_BSD_OS_TYPE
+    /* Suppress SIGPIPE on BSD/macOS when writing to closed sockets */
+    int nosigpipe = 1;
+    if (setsockopt(net->wakeup_fds[0], SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "Failed to set SO_NOSIGPIPE on wakeup socket 0");
+    }
+    if (setsockopt(net->wakeup_fds[1], SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "Failed to set SO_NOSIGPIPE on wakeup socket 1");
+    }
+#endif
 
     socket_set_nonblocking(net->wakeup_fds[0], true);
     socket_set_nonblocking(net->wakeup_fds[1], true);
