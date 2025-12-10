@@ -1130,6 +1130,18 @@ jobs:
 
           # Delete local tag if it exists
           git tag -d "v${{ env.VERSION }}" 2>/dev/null || echo "No local tag to delete"
+
+          # Wait for GitHub to fully process the deletion
+          echo "Waiting for deletion to propagate..."
+          sleep 10
+
+          # Verify the release is gone
+          if gh release view "v${{ env.VERSION }}" 2>/dev/null; then
+            echo "WARNING: Release still exists after deletion, waiting longer..."
+            sleep 10
+          else
+            echo "Release successfully deleted"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
