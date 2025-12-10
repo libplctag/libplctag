@@ -146,12 +146,6 @@ endif(BUILD_TESTS)
 # Generate files from templates
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
-# Note: ci.yml no longer needs to be generated from a template.
-# The CI workflow now extracts the version directly from CMakeLists.txt at runtime.
-# if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)  # Only if this is the main project
-#   CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
-# endif()
-
 
 # for installation
 

@@ -85,23 +85,3 @@ install(TARGETS modbus_server
 # CMakeLists.txt for src/tests/test_utils/
 
 enable_testing()
-
-# # Helper function to add coro_net test
-# function(add_coro_net_test test_name test_source)
-#     add_executable(${test_name} ${test_source})
-#     target_include_directories(${test_name} PRIVATE ${CMAKE_SOURCE_DIR}/src)
-#     target_link_libraries(${test_name} coro_net)
-#     add_test(NAME ${test_name} COMMAND ${test_name})
-# endfunction()
-
-# # Test: Lifecycle
-# add_coro_net_test(unit_coro_net_lifecycle test_coro_net_lifecycle.c)
-
-# # Test: Tasks (replaces old sockets test)
-# add_coro_net_test(unit_coro_net_tasks test_coro_net_tasks.c)
-
-# # Test: Socket-less Tasks (replaces old timers test)
-# add_coro_net_test(unit_coro_net_socketless test_coro_net_socketless.c)
-
-# # Test: Macros
-# add_coro_net_test(unit_coro_net_macros test_coro_net_macros.c)
