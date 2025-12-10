@@ -22,7 +22,7 @@ typedef uint32_t event_type_t;
  *
  * Used for deferred event timing. Uses platform-specific functions.
  */
-extern uint64_t util_get_time_ms(void);
+extern uint64_t util_time_ms(void);
 
 /**
  * @brief Get current time in microseconds.

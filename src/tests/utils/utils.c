@@ -13,7 +13,7 @@
  *
  * Uses platform-specific functions.
  */
-uint64_t util_get_time_ms(void) {
+uint64_t util_time_ms(void) {
 #ifdef _WIN32
     return (uint64_t)GetTickCount();
 #else
@@ -30,16 +30,20 @@ uint64_t util_get_time_ms(void) {
  */
 int64_t util_time_us(void) {
 #ifdef _WIN32
-    /* Windows: use QueryPerformanceCounter for high-resolution timing */
-    static LARGE_INTEGER frequency = {0};
-    LARGE_INTEGER counter;
+    /* Windows: use GetSystemTimeAsFileTime for wall-clock time since Unix epoch */
+    FILETIME ft;
+    ULARGE_INTEGER uli;
 
-    if (frequency.QuadPart == 0) {
-        QueryPerformanceFrequency(&frequency);
-    }
+    GetSystemTimeAsFileTime(&ft);
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
 
-    QueryPerformanceCounter(&counter);
-    return (int64_t)((counter.QuadPart * 1000000) / frequency.QuadPart);
+    /* Convert from Windows FILETIME (100ns intervals since 1601-01-01)
+     * to Unix epoch (microseconds since 1970-01-01).
+     * The difference between 1601 and 1970 is 116444736000000000 in 100ns units.
+     */
+    int64_t intervals_since_epoch = (int64_t)uli.QuadPart - 116444736000000000LL;
+    return intervals_since_epoch / 10;  /* Convert 100ns units to microseconds */
 #else
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -122,14 +126,16 @@ int util_set_interrupt_handler(void (*handler)(void)) {
     return 0;
 }
 
+#endif
+
 
 #ifdef _WIN32
 
 void util_sleep_ms(int ms) {
-    if(ms <= 0) { return 1; }
+    if(ms <= 0) { return; }
 
     Sleep((DWORD)(unsigned int)ms);
-    return 1;
+    return;
 }
 
 #else
@@ -145,5 +151,3 @@ void util_sleep_ms(int ms) {
 
 #endif
 
-
-#endif
