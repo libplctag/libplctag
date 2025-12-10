@@ -53,7 +53,7 @@ extern "C" {
         #define LIB_EXPORT extern
     #endif
 
-    // #ifdef LIBPLCTAG_STATIC 
+    // #ifdef LIBPLCTAG_STATIC
     //     #define LIB_EXPORT extern
     // #elif defined(LIBPLCTAGDLL_EXPORTS)
     //     #define LIB_EXPORT __declspec(dllexport)
@@ -68,6 +68,18 @@ extern "C" {
     #else
         #define LIB_EXPORT extern
     #endif
+#endif
+
+/* Experimental API marker - generates compiler warnings when used */
+#if defined(_MSC_VER)
+    /* MSVC */
+    #define LIBPLCTAG_EXPERIMENTAL __declspec(deprecated("This function is experimental and may change in future releases"))
+#elif defined(__GNUC__) || defined(__clang__)
+    /* GCC and Clang */
+    #define LIBPLCTAG_EXPERIMENTAL __attribute__((deprecated("This function is experimental and may change in future releases")))
+#else
+    /* Unknown compiler - no warning */
+    #define LIBPLCTAG_EXPERIMENTAL
 #endif
 
 
@@ -213,6 +225,7 @@ typedef enum {
  * @param debug_level Debug level value (same as plc_tag_set_debug_level()).
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_NOT_FOUND if module name is not recognized.
  */
+LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug_level);
 
 
@@ -222,6 +235,7 @@ LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug
  * @param module_name Case-insensitive module name string.
  * @return Current debug level for the specified module, or PLCTAG_ERR_NOT_FOUND if module name is not recognized.
  */
+LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name);
 
 
@@ -230,6 +244,7 @@ LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name);
  *
  * @return Current global debug level set by plc_tag_set_debug_level().
  */
+LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_get_debug_level(void);
 
 
@@ -242,6 +257,7 @@ LIB_EXPORT int plc_tag_get_debug_level(void);
  * @param module_name Case-insensitive module name string.
  * @return Corresponding module ID bitmask, or 0 if the module name is not recognized.
  */
+LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name);
 
 
@@ -255,6 +271,7 @@ LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name);
  * @param level_name Case-insensitive debug level name string.
  * @return Corresponding debug level ID, or -1 if the level name is not recognized.
  */
+LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_debug_level_id(const char *level_name);
 
 

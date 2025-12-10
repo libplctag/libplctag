@@ -690,6 +690,40 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
 
         /* Is the abort flag still set? This may be synchronous. */
         if(atomic_get_bool(&tag->abort_requested)) {
+            /* Clear the abort flag so the tickler won't process it again */
+            atomic_set_bool(&tag->abort_requested, false);
+
+            /*
+             * Operation-aware cleanup of in-flight flags.
+             *
+             * Handle flags BEFORE calling protocol abort, since the protocol
+             * abort function may modify these flags. We need to know what
+             * was in flight at the time of the abort.
+             *
+             * If a read was in flight, we need to signal completion with abort status
+             * so that any waiting thread (e.g. plc_tag_read with timeout) wakes up.
+             *
+             * If no operation was in flight, just clear the flags.
+             */
+            if(tag->read_in_flight) {
+                tag->read_in_flight = 0;
+                tag->read_complete = 1;
+                tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_ERR_ABORT);
+            } else {
+                tag->read_in_flight = 0;
+                tag->read_complete = 0;
+            }
+
+            if(tag->write_in_flight) {
+                tag->write_in_flight = 0;
+                tag->write_complete = 1;
+                tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_ERR_ABORT);
+            } else {
+                tag->write_in_flight = 0;
+                tag->write_complete = 0;
+            }
+
+            /* Call protocol-specific abort to clean up protocol state */
             if(tag->vtable && tag->vtable->abort) {
                 rc = tag->vtable->abort(tag);
             } else {
@@ -697,24 +731,19 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
                 rc = PLCTAG_ERR_NOT_IMPLEMENTED;
             }
 
-            /* release the kraken... or tickler */
-            // plc_tag_tickler_wake();
+            /* Raise abort event */
+            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, (int8_t)rc);
 
-            /* Clear the abort flag so the tickler won't process it again */
-            atomic_set_bool(&tag->abort_requested, false);
+            /* Signal any waiting threads */
+            cond_signal(tag->tag_cond_wait);
         } else {
+            /*
+             * The abort was already handled by the tickler or PLC thread.
+             * Do not touch the flags - a new operation may have started.
+             */
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "Abort flag is not set, so abort already completed.");
             rc = PLCTAG_STATUS_OK;
         }
-
-        /* Clean up in-flight flags - protocol-specific abort functions don't do this */
-        tag->read_in_flight = 0;
-        tag->read_complete = 0;
-        tag->write_in_flight = 0;
-        tag->write_complete = 0;
-
-        /* Raise abort event - protocol-specific functions don't always do this */
-        tag_raise_event(tag, PLCTAG_EVENT_ABORTED, (int8_t)rc);
     }
 
     plc_tag_generic_handle_event_callbacks(tag);

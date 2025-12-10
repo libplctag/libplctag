@@ -45,6 +45,7 @@ endif()
   test_callback_ex_logix
   test_callback_ex_modbus
   test_connection_group
+  test_connection_stress
   test_emulator_performance
   test_event
   test_fairness

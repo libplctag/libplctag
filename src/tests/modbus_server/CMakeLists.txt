@@ -7,19 +7,18 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Source files
+# Note: Uses coro_net instead of fsm and reactor
 set(SOURCES
     modbus_server.c
     register_storage.c
     modbus_protocol.c
     ../utils/buf.c
     ../utils/err.c
-    ../utils/fsm.c
     ../utils/log.c
-    ../utils/reactor.c
-    ../utils/socket.c
     ../utils/args.c
     ../utils/utils.c
-    ../utils/atomic_utils.c
+    ../utils/coro_net.c
+    ../utils/socket.c
 )
 
 # Include directories
@@ -32,7 +31,7 @@ add_executable(modbus_server ${SOURCES})
 if(WIN32)
     # Windows requires Winsock2
     target_link_libraries(modbus_server ws2_32)
-    
+
     # Suppress Windows-specific warnings
     target_compile_definitions(modbus_server PRIVATE
         _CRT_SECURE_NO_WARNINGS
@@ -46,16 +45,9 @@ elseif(UNIX)
         if(RT_LIBRARY)
             target_link_libraries(modbus_server ${RT_LIBRARY})
         endif()
-
-        # Link atomic library for 64-bit atomic operations on 32-bit ARM
-        # (atomic_utils.c uses __atomic_store_8, __atomic_load_8, etc.)
-        # Only needed on ARM platforms; x86_64 has native atomic instructions
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|ARM)")
-            target_link_libraries(modbus_server atomic)
-        endif()
     endif()
 
-    # Link math library (modbus_server uses sqrt)
+    # Link math library (logging and protocol may use math functions)
     # Math functions are in libm on Unix but in the C runtime on Windows
     target_link_libraries(modbus_server m)
 endif()
@@ -89,3 +81,27 @@ endif()
 install(TARGETS modbus_server
     RUNTIME DESTINATION bin
 )
+
+# CMakeLists.txt for src/tests/test_utils/
+
+enable_testing()
+
+# # Helper function to add coro_net test
+# function(add_coro_net_test test_name test_source)
+#     add_executable(${test_name} ${test_source})
+#     target_include_directories(${test_name} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+#     target_link_libraries(${test_name} coro_net)
+#     add_test(NAME ${test_name} COMMAND ${test_name})
+# endfunction()
+
+# # Test: Lifecycle
+# add_coro_net_test(unit_coro_net_lifecycle test_coro_net_lifecycle.c)
+
+# # Test: Tasks (replaces old sockets test)
+# add_coro_net_test(unit_coro_net_tasks test_coro_net_tasks.c)
+
+# # Test: Socket-less Tasks (replaces old timers test)
+# add_coro_net_test(unit_coro_net_socketless test_coro_net_socketless.c)
+
+# # Test: Macros
+# add_coro_net_test(unit_coro_net_macros test_coro_net_macros.c)

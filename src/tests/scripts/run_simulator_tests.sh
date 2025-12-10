@@ -287,7 +287,7 @@ echo "  Killing Micrologix emulator."
 kill_process ab_server
 
 
-echo "Starting AB emulator for PLC5 tests."
+echo "Starting AB emulator for Omron tests."
 { $TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > "$LOG_DIR/omron_emulator.log" 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
 if [ $EMULATOR_PID -le 0 ]; then
@@ -577,7 +577,7 @@ fi
 # Check that exactly 2 PLC objects were created during test 29.
 # This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
-echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
+echo "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})
 if [ "${PLC_COUNT}" = "2" ] ; then
     echo "OK (found ${PLC_COUNT} PLC creation entries in log file ${TST_LOG})"

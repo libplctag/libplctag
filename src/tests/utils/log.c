@@ -41,6 +41,7 @@
 #include <time.h>
 #include "log.h"
 #include "buf.h"
+#include "utils.h"
 #if defined(_WIN32) && !defined(_MSC_VER)
 #include <windows.h>
 #endif
@@ -191,6 +192,7 @@ static void format_module_names(log_module_mask_t modules, char *buf, size_t buf
     if (buf_size == 0) return;
     
     buf[0] = '\0';
+    buf[buf_size - 1] = '\0';
     size_t offset = 0;
     bool first = true;
     
@@ -236,28 +238,11 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level,
     char prefix[1000]; /* MAGIC */
     char output[1000];
 
-    /* Gather current time in milliseconds since Unix epoch */
-    int64_t epoch_ms = 0;
-#if defined(_WIN32)
-    /* Windows: FILETIME (100ns intervals since 1601-01-01) */
-    FILETIME ft;
-    ULARGE_INTEGER epoch_time;
-    GetSystemTimeAsFileTime(&ft);
-    epoch_time.LowPart  = ft.dwLowDateTime;
-    epoch_time.HighPart = ft.dwHighDateTime;
-    epoch_ms = (int64_t)((epoch_time.QuadPart - 116444736000000000ULL) / 10000); /* -> ms */
-#else
-    /* POSIX: clock_gettime(CLOCK_REALTIME) */
-    struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
-        epoch_ms = 0;
-    } else {
-        epoch_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
-    }
-#endif
+    /* Gather current time in microseconds since Unix epoch */
+    int64_t epoch_us = util_time_us();
 
-    int remainder_ms = (int)(epoch_ms % 1000);
-    time_t epoch = (time_t)(epoch_ms / 1000);
+    int remainder_us = (int)(epoch_us % 1000000);
+    time_t epoch = (time_t)(epoch_us / 1000000);
     struct tm t;
 
 #if defined(_WIN32)
@@ -274,9 +259,9 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level,
 
     /* Build log prefix with timestamp, thread id, modules, level, and site */
     // NOLINTNEXTLINE
-    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) [%s] %s %s:%d %s\n",
+    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%06d thread(%u) [%s] %s %s:%d %s\n",
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-             t.tm_hour, t.tm_min, t.tm_sec, remainder_ms,
+             t.tm_hour, t.tm_min, t.tm_sec, remainder_us,
              get_thread_id(), module_str, log_level_name[debug_level], func, line_num, templ);
     prefix[sizeof(prefix) - 1] = 0;
 

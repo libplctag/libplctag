@@ -46,6 +46,55 @@ $> git clone https://github.com/libplctag/libplctag.git
 
 Or you can download one of the releases directly from GitHub.
 
+## CMake Build Options
+
+The build system supports several configuration options:
+
+### Build Types
+
+```bash
+# MinSizeRel (default) - smallest binaries, optimized
+cmake -DCMAKE_BUILD_TYPE=MinSizeRel ..
+
+# Debug - debugging symbols, sanitizers enabled
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+
+# Release - maximum optimization
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# RelWithDebInfo - optimized with debug symbols
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+```
+
+### Optional Components
+
+```bash
+# Disable examples (default: ON)
+cmake -DBUILD_EXAMPLES=OFF ..
+
+# Disable tests (default: ON)
+cmake -DBUILD_TESTS=OFF ..
+
+# Enable Alpine/musl builds (default: OFF)
+cmake -DBUILD_ALPINE_MUSL=ON ..
+
+# Disable sanitizers in Debug builds (default: ON)
+cmake -DUSE_SANITIZERS=OFF ..
+
+# 32-bit Linux builds (default: OFF)
+cmake -DBUILD_32_BIT=ON ..
+```
+
+### Examples
+
+```bash
+# Minimal library-only build
+cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_EXAMPLES=OFF -DBUILD_TESTS=OFF ..
+
+# Full development build with sanitizers
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON ..
+```
+
 ## Build the Make build files
 
 Go into the project build directory (the build directory may not already exist)/
@@ -75,6 +124,25 @@ $> make
 The binaries will be in the `build/bin_dist` directory.   This includes the libraries (static and dynamic) and the
 executables for the test and example programs.
 
+## Running Tests
+
+After building with `BUILD_TESTS=ON` (enabled by default):
+
+```bash
+# Run all tests
+cd build
+ctest
+
+# Run a specific test
+./bin_dist/test_reconnect --help
+```
+
+On macOS, run Modbus server tests:
+```bash
+cd src/tests
+./scripts/run_modbus_tests.sh ../../build/bin_dist/ ./logs
+```
+
 ## Alternate compilers
 
 If you want to use Clang instead, install Clang first.
@@ -87,6 +155,39 @@ $> export CXX=clang++
 $> cmake ..
 $> make
 ```
+
+## Creating Distribution Packages
+
+CPack generates installable packages:
+
+```bash
+cd build
+
+# Debian/Ubuntu package
+cpack -G DEB
+
+# RPM package (CentOS/RHEL/Fedora)
+cpack -G RPM
+
+# Source tarball
+cpack -G TGZ
+```
+
+Packages are created in the `build` directory.
+
+## Experimental API Features
+
+Some API functions are marked as experimental and subject to change in future releases. These functions will generate compiler warnings when used:
+
+```
+warning: 'plc_tag_example_function' is deprecated: This function is experimental and may change in future releases
+```
+
+**Note:** These functions are **not deprecated** - they are new additions being tested. The warnings are intentional to make users aware the API may change. Check the header file `src/libplctag/lib/libplctag.h` for functions marked with `LIBPLCTAG_EXPERIMENTAL`.
+
+To suppress these warnings during development:
+- **GCC/Clang**: Use `-Wno-deprecated-declarations`
+- **MSVC**: Use `/wd4996`
 
 ## Instructions for Alpine Linux with musl C Library
 
@@ -257,7 +358,7 @@ Alpine builds produce:
 Sanitizers are automatically disabled for Alpine static builds as they don't work well with musl static linking. This is normal behavior.
 
 **Build errors with older CMake:**
-Alpine support requires CMake 3.10 or later. Update CMake if you encounter configuration errors.
+libplctag requires CMake 3.15 or later. Update CMake if you encounter configuration errors.
 
 ## Instructions for Windows using Microsoft Visual Studio
 

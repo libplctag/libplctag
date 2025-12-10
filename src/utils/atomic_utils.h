@@ -47,7 +47,11 @@
 
 /* Non-C11 atomics path (Windows and older compilers) */
 
+#ifdef _WIN32
+typedef volatile short atomic_bool;
+#else
 typedef volatile bool atomic_bool;
+#endif
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
 

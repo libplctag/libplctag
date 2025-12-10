@@ -43,20 +43,12 @@ VALGRIND=""
 # Cross-platform process killing function
 kill_process() {
     local process_name=$1
-    # Find process by name using ps and send SIGTERM for graceful shutdown
-    # Note: ps aux works on Linux, macOS, and Windows Git Bash; PID is always the 2nd field
-    local pids=$(ps aux | grep -i "${process_name}" | grep -v grep | awk '{print $2}' || true)
-    if [[ -n "$pids" ]]; then
-        # Send SIGTERM to allow graceful shutdown and statistics printing
-        for pid in $pids; do
-            kill -TERM $pid > /dev/null 2>&1
-        done
-        # Give process time to shut down gracefully and print statistics
-        sleep 3
-        # Force kill any remaining processes
-        for pid in $pids; do
-            kill -KILL $pid > /dev/null 2>&1
-        done
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+        # Windows (Git Bash)
+        taskkill //F //IM "${process_name}.exe" > /dev/null 2>&1
+    else
+        # Linux/macOS/Alpine - pkill has consistent syntax across platforms
+        pkill -TERM "$process_name" > /dev/null 2>&1
     fi
 }
 
@@ -68,7 +60,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_connection_stress test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix modbus_server modbus_server_coro string_non_standard_udt string_standard tag_rw2 test_connection_stress test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -86,14 +78,16 @@ echo "Killing any existing Modbus emulator processes."
 
 kill_process modbus_server
 
+kill_process modbus_server_coro
+
 # wait for them to exit
 sleep 2
 
 
-echo "Phase 1: Modbus server $SCRIPT_DIR/modbus_server."
+echo "Phase 1: Modbus server $SCRIPT_DIR/modbus_server_coro."
 
-echo "Starting Modbus server $SCRIPT_DIR/modbus_server."
-$TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > "$LOG_DIR/modbus_server.log" 2>&1 &
+echo "  Starting Modbus server $SCRIPT_DIR/modbus_server_coro."
+$TEST_DIR/modbus_server_coro --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > "$LOG_DIR/modbus_server_coro.log" 2>&1 &
 MODBUS_PID=$!
 if [ $MODBUS_PID -le 0 ]; then
     # echo "FAILURE"
@@ -201,8 +195,8 @@ else
 fi
 
 
-# Check that exactly 2 PLC objects were created during test 29.
-# This validates proper PLC object reuse and no spurious creation/destruction.
+#Check that exactly 2 PLC objects were created during test 29.
+#This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
 echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})
@@ -214,12 +208,10 @@ else
     let FAILURES++
 fi
 
-# Let the server dump stats at least one more time
-sleep 2
 
-echo "Killing Modbus emulator."
-
+# echo "  Killing Modbus emulator."
 kill_process modbus_server
+kill_process modbus_server_coro
 
 # wait for them to exit
 sleep 2
@@ -232,3 +224,4 @@ echo " - $SUCCESSES successes."
 echo " - $FAILURES failures."
 
 exit $FAILURES
+

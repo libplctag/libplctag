@@ -1537,7 +1537,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
         }
 
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Main socket fd=%d is valid, max_fd=%d, wake_read_fd=%d", sock->fd, max_fd, sock->wake_read_fd);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Main socket fd=%d is valid, max_fd=%d, wake_read_fd=%d", sock->fd, max_fd, sock->wake_read_fd);
     } else {
         /* Main socket invalid or closed - only wake socket will be monitored (valid for reconnection/idle) */
         max_fd = sock->wake_read_fd;
@@ -1563,18 +1563,15 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "select() returned num_sockets=%d for sock->fd=%d",
            num_sockets, sock->fd);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "select() returned num_sockets=%d, sock->fd=%d", num_sockets, sock->fd);
-
     if(num_sockets == 0) {
         result |= (events & SOCK_EVENT_TIMEOUT);
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "select() timed out, returning TIMEOUT event");
     } else if(num_sockets > 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: num_sockets > 0, checking ready fds. sock->fd=%d, wake_read_fd=%d", sock->fd, sock->wake_read_fd);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "num_sockets (%d) > 0, checking ready fds. sock->fd=%d, wake_read_fd=%d", num_sockets, sock->fd, sock->wake_read_fd);
 
         /* was there a wake up? */
         int wake_isset = FD_ISSET(sock->wake_read_fd, &read_set);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: FD_ISSET(wake_read_fd=%d, read_set)=%d", sock->wake_read_fd, wake_isset);
-
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "FD_ISSET(wake_read_fd=%d, read_set)=%d", sock->wake_read_fd, wake_isset);
         if(wake_isset) {
             char buf[32];
 
@@ -1583,12 +1580,11 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: Set WAKE_UP in result");
         }
 
         /* is read ready for the main fd? Guard against INVALID_SOCKET (-1) which causes undefined behavior in FD_ISSET */
         int read_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &read_set) : 0;
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: FD_ISSET(sock->fd=%d, read_set)=%d", sock->fd, read_isset);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "FD_ISSET(sock->fd=%d, read_set)=%d", sock->fd, read_isset);
 
         if(sock->fd != INVALID_SOCKET && read_isset) {
             char buf;
@@ -1596,20 +1592,14 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
             byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
 
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: recv(MSG_PEEK) returned %d, errno=%d", byte_read, errno);
-
             if(byte_read > 0) {
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can read.");
                 result |= (events & SOCK_EVENT_CAN_READ);
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: Set CAN_READ in result, result=0x%x", result);
             } else if(byte_read == 0) {
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket disconnected (recv returned 0).");
                 result |= (events & SOCK_EVENT_DISCONNECT);
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: Set DISCONNECT in result");
             } else {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: recv(MSG_PEEK) error: errno=%d", errno);
                 if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: Socket not ready (EAGAIN/EWOULDBLOCK), not setting any event");
                     /* Don't report anything, will wait for next event */
                 } else {
                     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket recv error: %d", errno);
@@ -1620,17 +1610,14 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
         /* is write ready for the main fd? Guard against INVALID_SOCKET (-1) */
         int write_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &write_set) : 0;
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: FD_ISSET(sock->fd=%d, write_set)=%d", sock->fd, write_isset);
 
         if(sock->fd != INVALID_SOCKET && write_isset) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: Set CAN_WRITE/CONNECT in result, result=0x%x", result);
         }
 
         /* is there an error? Guard against INVALID_SOCKET (-1) */
         int err_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &err_set) : 0;
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: FD_ISSET(sock->fd=%d, err_set)=%d", sock->fd, err_isset);
 
         if(sock->fd != INVALID_SOCKET && err_isset) {
             /* On some platforms, FD_ISSET on err_set can return true spuriously.
@@ -1654,7 +1641,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             }
         }
 
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "socket_wait_event: After all checks, result=0x%x", result);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "After all checks, result=0x%x", result);
     } else {
         /* error */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned status %d!", num_sockets);

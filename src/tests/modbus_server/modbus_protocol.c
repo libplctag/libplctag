@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include "modbus_protocol.h"
-#include "../utils/log.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -237,6 +237,8 @@ static util_err_t handle_read_holding_registers(buf_t *request, buf_t *response,
                                                 const mbap_header_t *req_header,
                                                 register_storage_t *storage) {
     uint16_t start_address, count;
+
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Read Holding Registers request");
 
     /* Read request parameters */
     if (!buf_read_u16_be(request, "start_address", &start_address) ||
@@ -515,6 +517,9 @@ util_err_t modbus_process_request(uint8_t function_code,
                                   buf_t *response,
                                   const mbap_header_t *req_header,
                                   register_storage_t *storage) {
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Processing Modbus request with function code: 0x%02X", function_code);
+    pdlog_bytes(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, request);
+
     if (!request || !response || !req_header || !storage) {
         return UTIL_EINVAL;
     }
@@ -523,39 +528,47 @@ util_err_t modbus_process_request(uint8_t function_code,
 
     switch (function_code) {
         case MODBUS_FC_READ_COILS:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Read Coils request");
             err = handle_read_coils(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_READ_DISCRETE_INPUTS:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Read Discrete Inputs request");
             err = handle_read_discrete_inputs(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_READ_HOLDING_REGISTERS:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Read Holding Registers request");
             err = handle_read_holding_registers(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_READ_INPUT_REGISTERS:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Read Input Registers request");
             err = handle_read_input_registers(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_WRITE_SINGLE_COIL:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Write Single Coil request");
             err = handle_write_single_coil(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_WRITE_SINGLE_REGISTER:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Write Single Register request");
             err = handle_write_single_register(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_WRITE_MULTIPLE_COILS:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Write Multiple Coils request");
             err = handle_write_multiple_coils(request, response, req_header, storage);
             break;
 
         case MODBUS_FC_WRITE_MULTIPLE_REGISTERS:
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Handling Write Multiple Registers request");
             err = handle_write_multiple_registers(request, response, req_header, storage);
             break;
 
         default:
-            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Unsupported function code: 0x%02X", function_code);
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_WARN, "Unsupported function code: 0x%02X", function_code);
             return UTIL_ENOTSUPPORTED;
     }
 
@@ -563,6 +576,9 @@ util_err_t modbus_process_request(uint8_t function_code,
     if (err != UTIL_OK) {
         modbus_build_exception_response(response, req_header, function_code, err);
     }
+
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Built Modbus response:");
+    pdlog_bytes(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, response);
 
     return err;
 }

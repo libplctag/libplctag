@@ -17,6 +17,7 @@ const char* util_err_str(util_err_t e) {
         case UTIL_EDESTROYED:   return "Object destroyed";
         case UTIL_EHOSTUNREACH: return "Host unreachable";
         case UTIL_EINTERNAL:    return "Internal error";
+        case UTIL_EINTR:        return "Interrupted system call";
         case UTIL_EINVAL:       return "Invalid argument";
         case UTIL_EIO:          return "I/O error";
         case UTIL_ELISTEN:      return "Listen failed";
@@ -101,6 +102,11 @@ util_err_t util_err_from_errno(int e) {
 #ifdef ENETUNREACH
         case ENETUNREACH:
             return UTIL_ENETUNREACH;
+#endif
+
+#ifdef EINTR
+        case EINTR:
+            return UTIL_EINTR;
 #endif
 
 #ifdef ENETDOWN
