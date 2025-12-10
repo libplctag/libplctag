@@ -17,7 +17,6 @@ set(SOURCES
     ../utils/log.c
     ../utils/args.c
     ../utils/utils.c
-    ../utils/atomic_utils.c
     ../utils/coro_net.c
     ../utils/socket.c
 )
@@ -45,13 +44,6 @@ elseif(UNIX)
         find_library(RT_LIBRARY rt)
         if(RT_LIBRARY)
             target_link_libraries(modbus_server ${RT_LIBRARY})
-        endif()
-
-        # Link atomic library for 64-bit atomic operations on 32-bit ARM
-        # (atomic_utils.c uses __atomic_store_8, __atomic_load_8, etc.)
-        # Only needed on ARM platforms; x86_64 has native atomic instructions
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|ARM)")
-            target_link_libraries(modbus_server atomic)
         endif()
     endif()
 

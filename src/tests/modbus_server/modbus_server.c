@@ -58,7 +58,6 @@
 #include "buf.h"
 #include "args.h"
 #include "utils.h"
-#include "atomic_utils.h"
 
 /* ============================================================================
  * Forward Declarations and Constants
@@ -86,25 +85,25 @@ static const int64_t hist_boundaries[HIST_BUCKET_COUNT] = {
 /* Server statistics structure */
 typedef struct {
     /* Total request count and timing */
-    atomic_int64_t total_requests;
-    atomic_int64_t total_response_time_us;
-    atomic_int64_t total_response_time_sq_us;  /* Sum of squares for std dev */
-    atomic_int64_t min_response_time_us;
-    atomic_int64_t max_response_time_us;
+    int64_t total_requests;
+    int64_t total_response_time_us;
+    int64_t total_response_time_sq_us;  /* Sum of squares for std dev */
+    int64_t min_response_time_us;
+    int64_t max_response_time_us;
 
     /* Per-component timing breakdown */
-    atomic_int64_t total_recv_time_us;         /* Total time from recv_start to recv_complete (includes polling) */
-    atomic_int64_t total_poll_overhead_us;     /* Time spent waiting for first byte (polling overhead) */
-    atomic_int64_t total_actual_io_time_us;    /* Time for actual socket I/O after first byte arrives */
-    atomic_int64_t total_process_time_us;
-    atomic_int64_t total_send_time_us;
-    atomic_int64_t total_overhead_time_us;
+    int64_t total_recv_time_us;         /* Total time from recv_start to recv_complete (includes polling) */
+    int64_t total_poll_overhead_us;     /* Time spent waiting for first byte (polling overhead) */
+    int64_t total_actual_io_time_us;    /* Time for actual socket I/O after first byte arrives */
+    int64_t total_process_time_us;
+    int64_t total_send_time_us;
+    int64_t total_overhead_time_us;
 
-    atomic_int64_t clients_connected;
-    atomic_int64_t clients_disconnected;
+    int64_t clients_connected;
+    int64_t clients_disconnected;
 
     /* Histogram buckets for response time distribution */
-    atomic_int64_t hist_buckets[HIST_BUCKET_COUNT];
+    int64_t hist_buckets[HIST_BUCKET_COUNT];
 } server_stats_t;
 
 /* Per-request timing breakdown */
@@ -189,31 +188,12 @@ static const char* hist_bucket_label(int bucket) {
 static void update_histogram(server_stats_t *stats, int64_t response_time_us) {
     for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
         if (response_time_us <= hist_boundaries[i]) {
-            atomic_add_int64(&stats->hist_buckets[i], 1);
+            stats->hist_buckets[i]++;
             break;
         }
     }
 }
 
-static void update_min(atomic_int64_t *min_val, int64_t new_val) {
-    int64_t current;
-    do {
-        current = atomic_get_int64(min_val);
-        if (current != 0 && new_val >= current) {
-            break;
-        }
-    } while (atomic_compare_and_set_int64(min_val, current, new_val) != current);
-}
-
-static void update_max(atomic_int64_t *max_val, int64_t new_val) {
-    int64_t current;
-    do {
-        current = atomic_get_int64(max_val);
-        if (new_val <= current) {
-            break;
-        }
-    } while (atomic_compare_and_set_int64(max_val, current, new_val) != current);
-}
 
 static void print_statistics(server_ctx_t *server) {
     if (!server) return;
@@ -222,18 +202,18 @@ static void print_statistics(server_ctx_t *server) {
     double runtime_sec = (double)(end_time_us - server->start_time_us) / 1000000.0;
 
     server_stats_t *stats = &server->stats;
-    int64_t total_reqs = atomic_get_int64(&stats->total_requests);
-    int64_t total_time = atomic_get_int64(&stats->total_response_time_us);
-    int64_t total_time_sq = atomic_get_int64(&stats->total_response_time_sq_us);
-    int64_t min_time = atomic_get_int64(&stats->min_response_time_us);
-    int64_t max_time = atomic_get_int64(&stats->max_response_time_us);
+    int64_t total_reqs = stats->total_requests;
+    int64_t total_time = stats->total_response_time_us;
+    int64_t total_time_sq = stats->total_response_time_sq_us;
+    int64_t min_time = stats->min_response_time_us;
+    int64_t max_time = stats->max_response_time_us;
 
-    int64_t total_recv = atomic_get_int64(&stats->total_recv_time_us);
-    int64_t total_poll_overhead = atomic_get_int64(&stats->total_poll_overhead_us);
-    int64_t total_actual_io = atomic_get_int64(&stats->total_actual_io_time_us);
-    int64_t total_process = atomic_get_int64(&stats->total_process_time_us);
-    int64_t total_send = atomic_get_int64(&stats->total_send_time_us);
-    int64_t total_overhead = atomic_get_int64(&stats->total_overhead_time_us);
+    int64_t total_recv = stats->total_recv_time_us;
+    int64_t total_poll_overhead = stats->total_poll_overhead_us;
+    int64_t total_actual_io = stats->total_actual_io_time_us;
+    int64_t total_process = stats->total_process_time_us;
+    int64_t total_send = stats->total_send_time_us;
+    int64_t total_overhead = stats->total_overhead_time_us;
 
     /* flush the rest of the log out */
     fflush(stderr);
@@ -250,8 +230,8 @@ static void print_statistics(server_ctx_t *server) {
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║                       CLIENT STATISTICS                          ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
-    fprintf(stderr, "║ Clients connected:    %" PRId64 "                                     \n", (long long)atomic_get_int64(&stats->clients_connected));
-    fprintf(stderr, "║ Clients disconnected: %" PRId64 "                                     \n", (long long)atomic_get_int64(&stats->clients_disconnected));
+    fprintf(stderr, "║ Clients connected:    %" PRId64 "                                     \n", (long long)stats->clients_connected);
+    fprintf(stderr, "║ Clients disconnected: %" PRId64 "                                     \n", (long long)stats->clients_disconnected);
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║                     RESPONSE TIME SUMMARY                        ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
@@ -293,12 +273,12 @@ static void print_statistics(server_ctx_t *server) {
 
     int64_t max_bucket = 0;
     for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
-        int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
+        int64_t count = stats->hist_buckets[i];
         if (count > max_bucket) max_bucket = count;
     }
 
     for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
-        int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
+        int64_t count = stats->hist_buckets[i];
         double pct = total_reqs > 0 ? (double)count / (double)total_reqs * 100 : 0;
         int bar_len = max_bucket > 0 ? (int)((double)count / (double)max_bucket * 30) : 0;
 
@@ -370,7 +350,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler started");
 
-    atomic_add_int64(&client->server->stats.clients_connected, 1);
+    client->server->stats.clients_connected++;
 
     while (1) {
         /* compact the receive buffer */
@@ -477,20 +457,24 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         int64_t send_time = client->timing.send_complete_us - client->timing.send_start_us;
         int64_t overhead_time = total_response_time - actual_io_time - process_time - send_time;
 
-        /* Update statistics atomically */
+        /* Update statistics */
         server_stats_t *stats = &client->server->stats;
-        atomic_add_int64(&stats->total_requests, 1);
-        atomic_add_int64(&stats->total_response_time_us, total_response_time);
-        atomic_add_int64(&stats->total_response_time_sq_us, total_response_time * total_response_time);
-        atomic_add_int64(&stats->total_recv_time_us, recv_time);
-        atomic_add_int64(&stats->total_poll_overhead_us, poll_overhead);
-        atomic_add_int64(&stats->total_actual_io_time_us, actual_io_time);
-        atomic_add_int64(&stats->total_process_time_us, process_time);
-        atomic_add_int64(&stats->total_send_time_us, send_time);
-        atomic_add_int64(&stats->total_overhead_time_us, overhead_time);
+        stats->total_requests++;
+        stats->total_response_time_us += total_response_time;
+        stats->total_response_time_sq_us += total_response_time * total_response_time;
+        stats->total_recv_time_us += recv_time;
+        stats->total_poll_overhead_us += poll_overhead;
+        stats->total_actual_io_time_us += actual_io_time;
+        stats->total_process_time_us += process_time;
+        stats->total_send_time_us += send_time;
+        stats->total_overhead_time_us += overhead_time;
 
-        update_min(&stats->min_response_time_us, total_response_time);
-        update_max(&stats->max_response_time_us, total_response_time);
+        if (stats->min_response_time_us == 0 || total_response_time < stats->min_response_time_us) {
+            stats->min_response_time_us = total_response_time;
+        }
+        if (total_response_time > stats->max_response_time_us) {
+            stats->max_response_time_us = total_response_time;
+        }
 
         update_histogram(stats, total_response_time);
 
@@ -503,7 +487,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler closing");
 
-    atomic_add_int64(&client->server->stats.clients_disconnected, 1);
+    client->server->stats.clients_disconnected++;
 
     coro_remove_task(client->handle);
     socket_close(coro_get_fd(client->handle));
