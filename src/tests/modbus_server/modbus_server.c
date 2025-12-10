@@ -36,12 +36,18 @@
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <math.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
 
 #include "modbus_protocol.h"
 #include "register_storage.h"
@@ -512,9 +518,9 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
 static void listener_handler(coro_task_handle_t handle, socket_t fd, void *context) {
     listener_info_t *listener = (listener_info_t *)context;
-    socket_t client_fd;
-    socket_address_t client_addr;
-    util_err_t err;
+    socket_t client_fd = 0;
+    socket_address_t client_addr = {0};
+    util_err_t err = UTIL_OK;
 
     (void)fd;  /* We have the fd in the handle */
 
@@ -569,6 +575,40 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
     free(listener);
 
     CORO_END(handle);
+}
+
+
+/* statistics dumper */
+
+static void stats_dumper(coro_task_handle_t task, socket_t fd_ignored, void *context) {
+    server_ctx_t *server = (server_ctx_t *)context;
+    (void)fd_ignored;
+
+
+    static int64_t last_print_time = 0;
+
+    CORO_START(task);
+
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Statistics dumper started");
+
+    while (server->running) {
+        int64_t now = util_time_ms();
+
+        if(last_print_time + 1000 < now) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Dumping statistics...");
+            last_print_time = now;
+            print_statistics(server);
+
+            fflush(stderr);
+            fflush(stdout);
+        }
+
+        coro_wait_for_event(task, CORO_EVENT_ALWAYS);
+    }
+
+    coro_remove_task(task);
+
+    CORO_END(task);    
 }
 
 /* ============================================================================
@@ -805,7 +845,7 @@ int main(int argc, char *argv[]) {
         listener_info->bind_port = port;
 
         coro_task_handle_t listener_handle;
-        util_err_t err = coro_add_task(&listener_handle, g_server->coro_net, listen_fd, listener_handler, listener_info);
+        err = coro_add_task(&listener_handle, g_server->coro_net, listen_fd, listener_handler, listener_info);
         if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add listener socket: %s", util_err_str(err));
             CS_CLOSE(listen_fd);
@@ -818,6 +858,20 @@ int main(int argc, char *argv[]) {
         listener_info->handle = listener_handle;
     }
 
+    /* Start statistics dumper task */
+    coro_task_handle_t stats_task_handle;
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Adding statistics dumper task to event loop.");
+    err = coro_add_task(&stats_task_handle, g_server->coro_net, CORO_NO_SOCKET, stats_dumper, &server);
+    if (err != UTIL_OK) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add statistics dumper task: %s", util_err_str(err));
+        args_free(&args_result);
+
+        coro_destroy(&(g_server->coro_net));
+        register_storage_destroy(temp_storage);
+        socket_cleanup();
+        return EXIT_FAILURE;
+    }
+
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Starting coroutine event loop");
     coro_run(&(g_server->coro_net), 50);  /* 50ms tick interval */
 
@@ -826,7 +880,11 @@ int main(int argc, char *argv[]) {
 
     g_server->coro_net = NULL;
 
+    fflush(stderr);
+
     print_statistics(&server);
+
+    fflush(stderr);
 
     args_free(&args_result);
     register_storage_destroy(temp_storage);

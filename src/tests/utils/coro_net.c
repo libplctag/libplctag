@@ -12,6 +12,12 @@
 
 #define INVALID_TASK_INDEX (-1)
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef ULONG nfds_t;
+#endif
+
 /**
  * @brief Task arrays (Struct-of-Arrays optimization)
  *
@@ -149,13 +155,13 @@ util_err_t coro_set_line(coro_task_handle_t task, int line) {
 }
 
 util_err_t coro_set_task_event(coro_task_handle_t task, short event) {
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Setting task event: index=%d event=0x%04x", task.index, event);
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Setting task event: index=%d event=0x%04x", task.index, event);
     if (!task.coro_net || task.index < 0 || task.index >= (int)task.coro_net->max_tasks) return UTIL_EINVAL;
     task.coro_net->task_events[task.index] = event;
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Task event set successfully to 0x%04x", task.coro_net->task_events[task.index]);
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Task event set successfully to 0x%04x", task.coro_net->task_events[task.index]);
     
     // Wake the loop to process the event change immediately
-    coro_wake(task.coro_net);
+    //coro_wake(task.coro_net);
     
     return UTIL_OK;
 }
@@ -322,7 +328,7 @@ util_err_t coro_add_task(coro_task_handle_t *task,
     if (!task) return UTIL_EINVAL;
     if (!net) return UTIL_EINVAL;
 
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Adding task with socket fd=%d", (int)fd);
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Adding task with socket fd=%d", (int)fd);
 
     // Only set non-blocking and TCP_NODELAY if fd is valid (socket-less tasks have fd == CORO_NO_SOCKET)
     if (fd != CORO_NO_SOCKET && fd != INVALID_SOCKET) {
