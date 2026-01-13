@@ -525,6 +525,12 @@ else
 fi
 
 
+# if the OS is Darwin, set the ulimits higher for the connection stress test
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "        Setting ulimit for open files to 1024 for connection stress test."
+    ulimit -n 1024
+fi
+
 let TEST++
 echo -n "  Test $TEST: connection stress (multiple connections) Modbus... "
 $VALGRIND$TEST_DIR/test_connection_stress --num-threads=200 --tag='protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "$LOG_DIR/${TEST}_modbus_connection_stress_test.log" 2>&1
