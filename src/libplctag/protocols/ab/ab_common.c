@@ -864,6 +864,13 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         } else {
             res = PLCTAG_CONN_STATUS_DOWN; /* no session = not connected */
         }
+    } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        /* read connection inactivity timeout from session */
+        if(tag->session) {
+            res = atomic_get_int32(&tag->session->connection_inactivity_timeout_ms);
+        } else {
+            res = SESSION_DISCONNECT_TIMEOUT; /* no session = use default */
+        }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         switch(tag->plc_type) {
             case AB_PLC_PLC5: /* fall through */
@@ -896,14 +903,37 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
 
 int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
-    (void)attrib_name;
-    (void)new_value;
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Starting.");
 
-    raw_tag->status = PLCTAG_ERR_UNSUPPORTED;
+    tag->status = PLCTAG_STATUS_OK;
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        if(new_value < 1 || new_value > SESSION_DISCONNECT_TIMEOUT) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN,
+                   "Invalid connection_inactivity_timeout_ms value %d. Must be between 1 and %d.",
+                   new_value, SESSION_DISCONNECT_TIMEOUT);
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        } else if(tag->session) {
+            atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, new_value);
+            tag->status = PLCTAG_STATUS_OK;
+            rc = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN,
+                   "Cannot set connection_inactivity_timeout_ms: no session exists.");
+            tag->status = PLCTAG_ERR_NOT_FOUND;
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    } else {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    return rc;
 }
 
 int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {

@@ -45,6 +45,7 @@
 /* #define MAX_SESSION_HOST    (128) */
 
 #define SESSION_DEFAULT_TIMEOUT (2000)
+#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
 
 #define MAX_PACKET_SIZE_EX (44 + 4002)
 
@@ -121,6 +122,9 @@ struct ab_session_t {
 
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status;  /* plc_tag_conn_status_t values */
+
+    /* connection inactivity timeout - readable/writable by tags via atomics */
+    atomic_int32_t connection_inactivity_timeout_ms;  /* milliseconds */
 };
 
 

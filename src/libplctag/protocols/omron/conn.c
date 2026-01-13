@@ -297,6 +297,7 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs) {
     int rc = PLCTAG_STATUS_OK;
     int auto_disconnect_enabled = 0;
     int auto_disconnect_timeout_ms = INT_MAX;
+    int connection_inactivity_timeout_ms = CONN_DISCONNECT_TIMEOUT;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
@@ -306,6 +307,15 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs) {
     if(auto_disconnect_timeout_ms != INT_MAX) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "Setting auto-disconnect after %dms.", auto_disconnect_timeout_ms);
         auto_disconnect_enabled = 1;
+    }
+
+    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_DISCONNECT_TIMEOUT);
+    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_DISCONNECT_TIMEOUT) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
+               connection_inactivity_timeout_ms, CONN_DISCONNECT_TIMEOUT, CONN_DISCONNECT_TIMEOUT);
+        connection_inactivity_timeout_ms = CONN_DISCONNECT_TIMEOUT;
+    } else {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "Setting connection_inactivity_timeout_ms to %dms.", connection_inactivity_timeout_ms);
     }
 
     // if(plc_type == OMRON_PLC_PLC5 && str_length(conn_path) > 0) {
@@ -333,6 +343,7 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs) {
             } else {
                 conn->auto_disconnect_enabled = auto_disconnect_enabled;
                 conn->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
+                atomic_init_int32(&conn->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
 
                 /* see if we have an attribute set for forcing the use of the older ForwardOpen */
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "Passed attribute to prohibit use of extended ForwardOpen is %d.",
@@ -1064,7 +1075,8 @@ THREAD_FUNC(conn_handler) {
     conn_state_t state = CONN_OPEN_SOCKET_START;
     int64_t timeout_time = 0;
     int64_t wait_until_time = 0;
-    int64_t auto_disconnect_time = time_ms() + CONN_DISCONNECT_TIMEOUT;
+    int32_t inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+    int64_t auto_disconnect_time = time_ms() + inactivity_timeout_ms;
     int auto_disconnect = 0;
 
 
@@ -1100,7 +1112,8 @@ THREAD_FUNC(conn_handler) {
                 } else {
                     if(rc == PLCTAG_STATUS_OK) {
                         /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
-                        auto_disconnect_time = time_ms() + CONN_DISCONNECT_TIMEOUT;
+                        inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                        auto_disconnect_time = time_ms() + inactivity_timeout_ms;
 
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "Connect complete immediately, going to state CONN_REGISTER.");
 
@@ -1128,7 +1141,8 @@ THREAD_FUNC(conn_handler) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, "Socket connection succeeded.");
 
                     /* calculate the disconnect time. */
-                    auto_disconnect_time = time_ms() + CONN_DISCONNECT_TIMEOUT;
+                    inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                    auto_disconnect_time = time_ms() + inactivity_timeout_ms;
 
                     state = CONN_REGISTER;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
@@ -1212,7 +1226,8 @@ THREAD_FUNC(conn_handler) {
                     int num_reqs = vector_length(conn->requests);
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "There are %d requests pending before cleanup and sending.", num_reqs);
-                        auto_disconnect_time = time_ms() + CONN_DISCONNECT_TIMEOUT;
+                        inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                        auto_disconnect_time = time_ms() + inactivity_timeout_ms;
                     }
                 }
 

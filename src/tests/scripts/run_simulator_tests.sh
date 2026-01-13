@@ -155,19 +155,8 @@ fi
 
 
 let TEST++
-echo -n "  Test $TEST: idle disconnect and reconnect 5 seconds... "
-$VALGRIND$TEST_DIR/test_idle_disconnect --delay=5 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray" > "$LOG_DIR/${TEST}_idle_disconnect_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
-let TEST++
-echo -n "  Test $TEST: idle disconnect and reconnect 35 seconds... "
-$VALGRIND$TEST_DIR/test_idle_disconnect --delay=35 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray" > "$LOG_DIR/${TEST}_idle_disconnect_test.log" 2>&1
+echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (AB ControlLogix)... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray" > "$LOG_DIR/${TEST}_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -327,6 +316,17 @@ sleep 1
 let TEST++
 echo -n "  Test $TEST: basic Omron read/write... "
 $VALGRIND$TEST_DIR/./tag_rw2 --type=sint32  '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --write=42 --debug=4 > "$LOG_DIR/${TEST}_omron_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (Omron)... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" > "$LOG_DIR/${TEST}_idle_disconnect_omron_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -593,6 +593,18 @@ fi
 let TEST++
 echo -n "  Test $TEST: Modbus tag scheduling fairness... "
 $VALGRIND$TEST_DIR/test_fairness "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10&auto_sync_read_ms=200" --num-tags=200 --test-duration-secs=10 > "$LOG_DIR/${TEST}_modbus_fairness_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (Modbus)... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10" > "$LOG_DIR/${TEST}_idle_disconnect_modbus_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

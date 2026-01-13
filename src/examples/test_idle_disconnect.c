@@ -40,35 +40,25 @@
 
 #define REQUIRED_VERSION 2, 1, 10
 #define DATA_TIMEOUT 5000
+#define NEW_TIMEOUT_MS 6000  /* 6 seconds */
 
 
-static int delay_seconds = 0;
 static char *tag_path = NULL;
 
 
 static void parse_args(int argc, char **argv) {
-    if(argc < 3) {
+    if(argc < 2) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "Usage: test_idle_disconnect --delay=N --tag=TAG_STRING\n");
-        // NOLINTNEXTLINE
-        fprintf(stderr, "  --delay=N: number of seconds to delay between reads\n");
+        fprintf(stderr, "Usage: test_idle_disconnect --tag=TAG_STRING\n");
         // NOLINTNEXTLINE
         fprintf(stderr, "  --tag=TAG_STRING: tag path string\n");
         exit(1);
     }
 
     for(int i = 1; i < argc; i++) {
-        if(strncmp(argv[i], "--delay=", 8) == 0) {
-            delay_seconds = atoi(&argv[i][8]);
-        } else if(strncmp(argv[i], "--tag=", 6) == 0) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) {
             tag_path = &argv[i][6];
         }
-    }
-
-    if(delay_seconds <= 0) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Error: delay must be a positive number of seconds\n");
-        exit(1);
     }
 
     if(tag_path == NULL || strlen(tag_path) == 0) {
@@ -139,6 +129,9 @@ static void read_tag(int32_t tag) {
 
 int main(int argc, char **argv) {
     int32_t tag = 0;
+    int timeout_value = 0;
+    int status = 0;
+    int wait_time_ms = 0;
 
     /* check library API version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -154,50 +147,107 @@ int main(int argc, char **argv) {
     /* create the tag */
     tag = create_tag();
 
-    /* perform initial read */
+    /* perform initial read to establish connection */
     read_tag(tag);
 
-    /* check connection status before delay */
-    int status_before_delay = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    /* read the existing inactivity timeout */
+    timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
+    if(timeout_value <= 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Failed to read initial inactivity timeout\n");
+        plc_tag_destroy(tag);
+        exit(1);
+    }
     // NOLINTNEXTLINE
-    fprintf(stderr, "Connection status before delay: %s\n", status_to_string(status_before_delay));
+    fprintf(stderr, "Initial inactivity timeout: %d ms\n", timeout_value);
 
-    /* wait for idle timeout */
+    /* set the inactivity timeout to a lower value */
     // NOLINTNEXTLINE
-    fprintf(stderr, "Waiting %d seconds for idle disconnect...\n", delay_seconds);
-    int remaining_ms = delay_seconds * 1000;
+    fprintf(stderr, "Setting inactivity timeout to %d ms\n", NEW_TIMEOUT_MS);
+    plc_tag_set_int_attribute(tag, "connection_inactivity_timeout_ms", NEW_TIMEOUT_MS);
+
+    /* read it back and verify */
+    timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
+    if(timeout_value != NEW_TIMEOUT_MS) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Failed to set inactivity timeout. Expected %d ms but got %d ms\n", NEW_TIMEOUT_MS, timeout_value);
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Successfully set inactivity timeout to %d ms\n", timeout_value);
+
+    /* check connection status is UP before we start waiting */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Connection status before idle wait: %s\n", status_to_string(status));
+
+    /* wait 50% of the timeout - connection should still be UP */
+    wait_time_ms = (NEW_TIMEOUT_MS / 2);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Waiting %d ms (50%% of timeout)...\n", wait_time_ms);
+    int remaining_ms = wait_time_ms;
     while(remaining_ms > 0) {
         int sleep_ms = (remaining_ms > 500) ? 500 : remaining_ms;
         compat_sleep_ms((uint32_t)sleep_ms, NULL);
         remaining_ms -= sleep_ms;
     }
 
-    /* check connection status after delay */
-    int status_after_delay = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    /* check connection status - should still be UP */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
     // NOLINTNEXTLINE
-    fprintf(stderr, "Connection status after delay: %s\n", status_to_string(status_after_delay));
+    fprintf(stderr, "Connection status after 50%% wait: %s\n", status_to_string(status));
+    if(status != PLCTAG_CONN_STATUS_UP) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Connection should be UP after 50%% wait, but is %s\n", status_to_string(status));
+        plc_tag_destroy(tag);
+        exit(1);
+    }
 
-    /* perform second read after idle period */
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Performing read after idle period...\n");
+    /* read the tag to demonstrate it's still working */
     read_tag(tag);
 
-    /* check connection status after second read */
-    int status_after_read = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    /* wait 150% of the timeout - connection should be DOWN/WAIT */
+    wait_time_ms = (NEW_TIMEOUT_MS * 3 / 2);
     // NOLINTNEXTLINE
-    fprintf(stderr, "Connection status after second read: %s\n", status_to_string(status_after_read));
+    fprintf(stderr, "Waiting %d ms (150%% of timeout)...\n", wait_time_ms);
+    remaining_ms = wait_time_ms;
+    while(remaining_ms > 0) {
+        int sleep_ms = (remaining_ms > 500) ? 500 : remaining_ms;
+        compat_sleep_ms((uint32_t)sleep_ms, NULL);
+        remaining_ms -= sleep_ms;
+    }
 
-    /* validate connection status transition */
-    if((status_after_delay == PLCTAG_CONN_STATUS_WAIT || status_after_delay == PLCTAG_CONN_STATUS_DOWN) &&
-       status_after_read != PLCTAG_CONN_STATUS_UP) {
+    /* check connection status - should be DOWN or WAIT */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Connection status after 150%% wait: %s\n", status_to_string(status));
+    if(status != PLCTAG_CONN_STATUS_DOWN && status != PLCTAG_CONN_STATUS_WAIT) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "ERROR: Connection should be UP after read, but is %s\n", status_to_string(status_after_read));
+        fprintf(stderr, "ERROR: Connection should be DOWN or WAIT after 150%% wait, but is %s\n", status_to_string(status));
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+
+    /* read the tag - should reconnect and be UP */
+    read_tag(tag);
+
+    /* check connection status - should be UP */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Connection status after reconnect read: %s\n", status_to_string(status));
+    if(status != PLCTAG_CONN_STATUS_UP) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Connection should be UP after reconnect read, but is %s\n", status_to_string(status));
         plc_tag_destroy(tag);
         exit(1);
     }
 
     /* clean up */
     plc_tag_destroy(tag);
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Test PASSED!\n");
 
     return 0;
 }

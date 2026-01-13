@@ -657,6 +657,13 @@ int omron_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default
         } else {
             res = PLCTAG_CONN_STATUS_DOWN; /* no connection = not connected */
         }
+    } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        /* read connection inactivity timeout from connection */
+        if(tag->conn) {
+            res = atomic_get_int32(&tag->conn->connection_inactivity_timeout_ms);
+        } else {
+            res = CONN_DISCONNECT_TIMEOUT; /* no connection = use default */
+        }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         res = (int)(tag->elem_type);
     } else if(str_cmp_i(attrib_name, "raw_tag_type_bytes.length") == 0) {
@@ -671,14 +678,37 @@ int omron_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default
 
 
 int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
-    (void)attrib_name;
-    (void)new_value;
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_SPEW, "Starting.");
 
-    raw_tag->status = PLCTAG_ERR_UNSUPPORTED;
+    tag->status = PLCTAG_STATUS_OK;
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        if(new_value < 1 || new_value > CONN_DISCONNECT_TIMEOUT) {
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
+                   "Invalid connection_inactivity_timeout_ms value %d. Must be between 1 and %d.",
+                   new_value, CONN_DISCONNECT_TIMEOUT);
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        } else if(tag->conn) {
+            atomic_set_int32(&tag->conn->connection_inactivity_timeout_ms, new_value);
+            tag->status = PLCTAG_STATUS_OK;
+            rc = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
+                   "Cannot set connection_inactivity_timeout_ms: no connection exists.");
+            tag->status = PLCTAG_ERR_NOT_FOUND;
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    } else {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    return rc;
 }
 
 int omron_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
