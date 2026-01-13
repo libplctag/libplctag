@@ -99,6 +99,9 @@ struct modbus_plc_t {
     /* Count of tags currently attached to this PLC */
     atomic_int32_t tag_count;
 
+    /* connection status - readable by tags via atomics */
+    atomic_int32_t connection_status;  /* plc_tag_conn_status_t values */
+
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
     int64_t next_auto_sync_time_ms;
@@ -657,6 +660,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                     (*plc)->state = PLC_CONNECT_START;
                     (*plc)->tags_needing_connection = 0;
                     (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+                    atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
                     /* Add the new PLC to the global list. We already have the mutex,
                         * so no duplicate can be created by another thread. The struct is
@@ -953,6 +957,7 @@ THREAD_FUNC(modbus_plc_handler) {
         switch(plc->state) {
             case PLC_CONNECT_START:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "in PLC_CONNECT_START state.");
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
 
                 /* reset the PLC to initial state, including closing the socket */
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Calling reset_plc() from PLC_CONNECT_START state.");
@@ -989,6 +994,8 @@ THREAD_FUNC(modbus_plc_handler) {
                 break;
 
             case PLC_CONNECT_WAIT:
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "in PLC_CONNECT_WAIT state.");
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
                 rc = socket_connect_tcp_check(plc->sock, SOCKET_CONNECT_TIMEOUT);
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Socket connected, going to state PLC_READY.");
@@ -1024,6 +1031,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_READY:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_READY state.");
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_UP);
 
                 /* calculate what events we should be waiting for. */
                 waitable_events = SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ;
@@ -1164,6 +1172,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_IDLE_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_IDLE_WAIT state.");
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_WAIT);
 
                 /* Check if any tags need connection (are not IDLE) */
                 if(plc->tags_needing_connection > 0) {
@@ -1184,6 +1193,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_ERR_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_ERR_WAIT state.");
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_WAIT);
 
                 /* wait until done. */
                 if(err_delay_until > time_ms()) {
@@ -3251,6 +3261,13 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = (tag->elem_size + 7) / 8; /* return size in bytes! */
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
+        /* read connection status from PLC */
+        if(tag->plc) {
+            res = atomic_get_int32(&tag->plc->connection_status);
+        } else {
+            res = PLCTAG_CONN_STATUS_DOWN; /* no PLC = not connected */
+        }
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Attribute \"%s\" is not supported.", attrib_name);
         tag->status = PLCTAG_ERR_UNSUPPORTED;

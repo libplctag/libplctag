@@ -857,6 +857,13 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_size;
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
+        /* read connection status from session */
+        if(tag->session) {
+            res = atomic_get_int32(&tag->session->connection_status);
+        } else {
+            res = PLCTAG_CONN_STATUS_DOWN; /* no session = not connected */
+        }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         switch(tag->plc_type) {
             case AB_PLC_PLC5: /* fall through */

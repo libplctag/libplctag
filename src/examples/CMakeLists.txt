@@ -38,6 +38,7 @@ endif()
   test_array_notation
   test_auto_sync
   test_auto_sync_modbus
+  test_idle_disconnect
   test_reconnect_after_outage_async
   test_reconnect_after_outage_sync
   test_callback

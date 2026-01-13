@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include <inttypes.h>
+#include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/defs.h>
@@ -641,6 +642,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     conn->conn_seq_id = (random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
     conn->dhp_dest = dhp_dest;
+    atomic_init_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
     conn->connection_group_id = connection_group_id;
@@ -1088,6 +1090,7 @@ THREAD_FUNC(conn_handler) {
         switch(state) {
             case CONN_OPEN_SOCKET_START:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_OPEN_SOCKET_START state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
 
                 /* we must connect to the gateway*/
                 rc = conn_open_socket(conn);
@@ -1116,6 +1119,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_OPEN_SOCKET_WAIT:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_OPEN_SOCKET_WAIT state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
 
                 /* we must connect to the gateway */
                 rc = socket_connect_tcp_check(conn->sock, 20); /* MAGIC */
@@ -1143,6 +1147,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_REGISTER:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_REGISTER state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
 
                 if((rc = conn_register(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, "conn registration failed %s!", plc_tag_decode_error(rc));
@@ -1159,6 +1164,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_SEND_FORWARD_OPEN:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_SEND_FORWARD_OPEN state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
 
                 if((rc = send_forward_open_request(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
@@ -1172,6 +1178,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_RECEIVE_FORWARD_OPEN:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_RECEIVE_FORWARD_OPEN state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
 
                 if((rc = receive_forward_open_response(conn)) != PLCTAG_STATUS_OK) {
                     if(rc == PLCTAG_ERR_DUPLICATE) {
@@ -1198,6 +1205,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_IDLE:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_IDLE state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_UP);
 
                 /* if there is work to do, make sure we do not disconnect. */
                 critical_block(conn->mutex) {
@@ -1245,6 +1253,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_DISCONNECT:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_DISCONNECT state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DISCONNECTING);
 
                 if((rc = perform_forward_close(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, "Forward close failed %s!", plc_tag_decode_error(rc));
@@ -1256,6 +1265,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_UNREGISTER:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_UNREGISTER state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DISCONNECTING);
 
                 if((rc = conn_unregister(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, "Unregistering conn failed %s!", plc_tag_decode_error(rc));
@@ -1267,6 +1277,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_CLOSE_SOCKET:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_CLOSE_SOCKET state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
                 if((rc = conn_close_socket(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, "Closing conn socket failed %s!", plc_tag_decode_error(rc));
@@ -1294,6 +1305,7 @@ THREAD_FUNC(conn_handler) {
 
             case CONN_WAIT_RETRY:
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_WAIT_RETRY state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_WAIT);
 
                 if(timeout_time < time_ms()) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "Transitioning to CONN_OPEN_SOCKET_START.");
@@ -1306,6 +1318,7 @@ THREAD_FUNC(conn_handler) {
             case CONN_WAIT_RECONNECT:
                 /* wait for at least one request to queue before reconnecting. */
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_WAIT_RECONNECT state.");
+                atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_WAIT);
 
                 auto_disconnect = 0;
 

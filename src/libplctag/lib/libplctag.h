@@ -609,6 +609,20 @@ LIB_EXPORT int plc_tag_write(int32_t tag, int timeout);
  * Tag data accessors.
  */
 
+/**
+ * @brief Connection Status Values.
+ *
+ * Values returned by plc_tag_get_int_attribute() when querying
+ * the "connection_status" attribute on a tag.
+ */
+typedef enum {
+    PLCTAG_CONN_STATUS_UP = 0,           /* Connected and ready for operations */
+    PLCTAG_CONN_STATUS_DOWN = 1,         /* Not connected */
+    PLCTAG_CONN_STATUS_DISCONNECTING = 2,/* In process of disconnecting */
+    PLCTAG_CONN_STATUS_CONNECTING = 3,   /* In process of connecting */
+    PLCTAG_CONN_STATUS_WAIT = 4          /* Waiting to reconnect or retry after disconnect/error */
+} plc_tag_conn_status_t;
+
 /* attributes */
 LIB_EXPORT int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, int default_value);
 LIB_EXPORT int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, int new_value);

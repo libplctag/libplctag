@@ -650,6 +650,13 @@ int omron_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default
         res = tag->elem_size;
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
+        /* read connection status from connection */
+        if(tag->conn) {
+            res = atomic_get_int32(&tag->conn->connection_status);
+        } else {
+            res = PLCTAG_CONN_STATUS_DOWN; /* no connection = not connected */
+        }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         res = (int)(tag->elem_type);
     } else if(str_cmp_i(attrib_name, "raw_tag_type_bytes.length") == 0) {
