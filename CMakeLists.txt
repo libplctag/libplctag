@@ -107,6 +107,8 @@ else()
 endif()
 
 
+# Generate files from templates
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 # where to find include files.
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
@@ -124,9 +126,6 @@ if(BUILD_TESTS)
 endif(BUILD_TESTS)
 
 
-
-# Generate files from templates
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 
 # for installation
