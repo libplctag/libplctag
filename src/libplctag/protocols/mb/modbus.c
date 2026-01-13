@@ -2329,8 +2329,8 @@ int receive_response(modbus_plc_p plc) {
     /* are we done? */
     if(data_needed == 0) {
         /* we got our packet. */
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Received full packet.");
-        pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_SPEW, plc->read_data, plc->read_data_len);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Received full packet.");
+        pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, plc->read_data, plc->read_data_len);
 
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
@@ -2390,8 +2390,8 @@ int send_request(modbus_plc_p plc) {
 
     /* clean up if full write was done. */
     if(data_left == 0) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Full packet written.");
-        pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_SPEW, plc->write_data, plc->write_data_len);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Full packet written.");
+        pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, plc->write_data, plc->write_data_len);
 
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
