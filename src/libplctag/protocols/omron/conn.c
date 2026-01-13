@@ -60,7 +60,8 @@
  */
 #define RETRY_WAIT_MS (5000)
 
-#define CONN_DISCONNECT_TIMEOUT (5000)
+/* Idle time to wait before disconnecting.  Set it to one second less than we negotiate with the PLC. */
+#define CONN_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
 
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define CONN_IDLE_WAIT_TIME (100)

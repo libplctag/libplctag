@@ -77,7 +77,8 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 #define RETRY_WAIT_INITIAL_MS (100)
 #define RETRY_WAIT_MAX_MS (10000)
 
-#define SESSION_DISCONNECT_TIMEOUT (5000)
+/* Idle timeout.  One second less than that negotiated with the PLC. */
+#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define SESSION_IDLE_WAIT_TIME (100)
 
