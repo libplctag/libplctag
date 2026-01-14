@@ -3336,16 +3336,33 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
     tag->status = PLCTAG_STATUS_OK;
 
     if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        if(new_value < 1 || new_value > MODBUS_INACTIVITY_TIMEOUT) {
+        /* Clamp to valid range: 100ms minimum, MODBUS_INACTIVITY_TIMEOUT (30000ms) maximum */
+        int clamped_value = new_value;
+        int out_of_bounds = 0;
+
+        if(clamped_value < 100) {
+            clamped_value = 100;
+            out_of_bounds = 1;
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
-                   "Invalid connection_inactivity_timeout_ms value %d. Must be between 1 and %d.",
+                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.",
+                   new_value);
+        } else if(clamped_value > MODBUS_INACTIVITY_TIMEOUT) {
+            clamped_value = MODBUS_INACTIVITY_TIMEOUT;
+            out_of_bounds = 1;
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
+                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.",
                    new_value, MODBUS_INACTIVITY_TIMEOUT);
-            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        } else if(tag->plc) {
-            atomic_set_int32(&tag->plc->connection_inactivity_timeout_ms, new_value);
-            tag->status = PLCTAG_STATUS_OK;
-            rc = PLCTAG_STATUS_OK;
+        }
+
+        if(tag->plc) {
+            atomic_set_int32(&tag->plc->connection_inactivity_timeout_ms, clamped_value);
+            if(out_of_bounds) {
+                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            } else {
+                tag->status = PLCTAG_STATUS_OK;
+                rc = PLCTAG_STATUS_OK;
+            }
         } else {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
                    "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
