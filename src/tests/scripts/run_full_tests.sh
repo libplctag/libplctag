@@ -51,7 +51,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_modbus_multiple test_reconnect_after_outage_async test_reconnect_after_outage_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_idle_disconnect test_modbus_multiple test_reconnect_after_outage_async test_reconnect_after_outage_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -122,6 +122,17 @@ fi
 let TEST++
 echo -n "Test $TEST: test standard strings... "
 $VALGRIND$TEST_DIR/string_standard > "$LOG_DIR/${TEST}_standard_string_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: idle disconnect and reconnect with runtime timeout change (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=TestBigArray" > "$LOG_DIR/${TEST}_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
