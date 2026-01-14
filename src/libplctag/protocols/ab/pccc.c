@@ -3239,36 +3239,15 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
  * Fragments are not supported.
  */
 int pccc_dhp_check_write_status(ab_tag_p tag) {
-    pccc_resp *pccc;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Starting.");
 
     /* the request reference is valid. */
 
-    // pccc = (pccc_resp *)(tag->req->data);
-
-    // /* fake exception */
-    // do {
-    //     if(pccc->general_status != AB_EIP_OK) {
-    //         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, "PCCC command failed, response code: %d", pccc->general_status);
-    //         rc = PLCTAG_ERR_REMOTE_ERR;
-    //         break;
-    //     }
-
-    //     if(pccc->pccc_status != AB_EIP_OK) {
-    //         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc->pccc_status,
-    //                pccc_decode_error(&pccc->pccc_status));
-    //         rc = PLCTAG_ERR_REMOTE_ERR;
-    //         break;
-    //     }
-
     /* get the header pointers */
     eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
     pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(eip_cpf + 1);
-
-    uint8_t *data = (uint8_t *)(pccc_cmd + 1);
-    uint8_t *data_end = tag->req->data + tag->req->request_size;
 
     /* fake exceptions */
     do {
