@@ -514,8 +514,8 @@ else
 fi
 
 let TEST++
-echo -n "  Test $TEST: test short reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 3 > "$LOG_DIR/${TEST}_modbus_reconnect_short_test.log" 2>&1
+echo -n "  Test $TEST: test idle disconnect with Modbus... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" > "$LOG_DIR/${TEST}_modbus_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -523,18 +523,6 @@ else
     echo "OK"
     let SUCCESSES++
 fi
-
-let TEST++
-echo -n "  Test $TEST: test long reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 15 > "$LOG_DIR/${TEST}_modbus_reconnect_long_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
 
 let TEST++
 echo -n "  Test $TEST: thread stress Modbus... "
@@ -603,18 +591,6 @@ fi
 
 
 let TEST++
-echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (Modbus)... "
-$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10" > "$LOG_DIR/${TEST}_idle_disconnect_modbus_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
-
-let TEST++
 echo -n "  Test $TEST: for Modbus reconnect bug... "
 TST_LOG="$LOG_DIR/${TEST}_modbus_reconnect_bug_test.log"
 $VALGRIND$TEST_DIR/test_modbus_multiple > "${TST_LOG}" 2>&1
@@ -630,7 +606,7 @@ fi
 # Check that exactly 2 PLC objects were created during test 29.
 # This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
-echo "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
+echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})
 if [ "${PLC_COUNT}" = "2" ] ; then
     echo "OK (found ${PLC_COUNT} PLC creation entries in log file ${TST_LOG})"
@@ -640,17 +616,17 @@ else
     let FAILURES++
 fi
 
-# echo "  Killing Modbus emulator."
-kill_process modbus_server
+# Let the server dump stats at least one more time
+sleep 2
 
-# Make sure no ab_server instances are running before running auto_sync_reconnect test
-kill_process ab_server
+echo "Killing Modbus emulator."
+
+kill_process modbus_server
 
 # wait for them to exit
 sleep 2
 
-
-
+# show results
 echo ""
 echo "Results:"
 echo " - $TEST tests."

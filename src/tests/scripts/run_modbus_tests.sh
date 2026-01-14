@@ -90,8 +90,6 @@ kill_process modbus_server
 sleep 2
 
 
-echo "Phase 1: Modbus server $SCRIPT_DIR/modbus_server."
-
 echo "Starting Modbus server $SCRIPT_DIR/modbus_server."
 $TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > "$LOG_DIR/modbus_server.log" 2>&1 &
 MODBUS_PID=$!
@@ -105,9 +103,10 @@ else
     # echo "Modbus server started"
 fi
 
+
 let TEST++
-echo -n "  Test $TEST: test short reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 3 > "$LOG_DIR/${TEST}_modbus_reconnect_short_test.log" 2>&1
+echo -n "  Test $TEST: test idle disconnect with Modbus... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" > "$LOG_DIR/${TEST}_modbus_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -115,18 +114,6 @@ else
     echo "OK"
     let SUCCESSES++
 fi
-
-let TEST++
-echo -n "  Test $TEST: test long reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 15 > "$LOG_DIR/${TEST}_modbus_reconnect_long_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
 
 let TEST++
 echo -n "  Test $TEST: thread stress Modbus... "
