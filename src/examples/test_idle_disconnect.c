@@ -40,7 +40,9 @@
 
 #define REQUIRED_VERSION 2, 1, 10
 #define DATA_TIMEOUT 5000
-#define NEW_TIMEOUT_MS 6000  /* 6 seconds */
+#define NEW_TIMEOUT_MS 6000        /* 6 seconds */
+#define INVALID_TIMEOUT_MS 1000000 /* Way too high, should be clamped */
+#define NEAR_MAX_TIMEOUT_MS 29900  /* Just under 30000ms max */
 
 
 static char *tag_path = NULL;
@@ -56,9 +58,7 @@ static void parse_args(int argc, char **argv) {
     }
 
     for(int i = 1; i < argc; i++) {
-        if(strncmp(argv[i], "--tag=", 6) == 0) {
-            tag_path = &argv[i][6];
-        }
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
     }
 
     if(tag_path == NULL || strlen(tag_path) == 0) {
@@ -96,18 +96,12 @@ static int32_t create_tag(void) {
 
 static const char *status_to_string(int status) {
     switch(status) {
-        case PLCTAG_CONN_STATUS_UP:
-            return "UP";
-        case PLCTAG_CONN_STATUS_DOWN:
-            return "DOWN";
-        case PLCTAG_CONN_STATUS_CONNECTING:
-            return "CONNECTING";
-        case PLCTAG_CONN_STATUS_DISCONNECTING:
-            return "DISCONNECTING";
-        case PLCTAG_CONN_STATUS_WAIT:
-            return "WAIT";
-        default:
-            return "UNKNOWN";
+        case PLCTAG_CONN_STATUS_UP: return "UP";
+        case PLCTAG_CONN_STATUS_DOWN: return "DOWN";
+        case PLCTAG_CONN_STATUS_CONNECTING: return "CONNECTING";
+        case PLCTAG_CONN_STATUS_DISCONNECTING: return "DISCONNECTING";
+        case PLCTAG_CONN_STATUS_WAIT: return "WAIT";
+        default: return "UNKNOWN";
     }
 }
 
@@ -150,16 +144,16 @@ int main(int argc, char **argv) {
     /* perform initial read to establish connection */
     read_tag(tag);
 
-    /* read the existing inactivity timeout */
-    timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
-    if(timeout_value <= 0) {
+    /* read the existing inactivity timeout (should be max by default) */
+    int initial_timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
+    if(initial_timeout_value <= 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Failed to read initial inactivity timeout\n");
         plc_tag_destroy(tag);
         exit(1);
     }
     // NOLINTNEXTLINE
-    fprintf(stderr, "Initial inactivity timeout: %d ms\n", timeout_value);
+    fprintf(stderr, "Initial inactivity timeout (default max): %d ms\n", initial_timeout_value);
 
     /* set the inactivity timeout to a lower value */
     // NOLINTNEXTLINE
@@ -243,11 +237,113 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
+    /* Test 2: Try to set an invalid (too high) timeout value */
+    // NOLINTNEXTLINE
+    fprintf(stderr, "\n=== Test 2: Invalid timeout value (too high) ===\n");
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Attempting to set inactivity timeout to invalid value %d ms\n", INVALID_TIMEOUT_MS);
+    int set_rc = plc_tag_set_int_attribute(tag, "connection_inactivity_timeout_ms", INVALID_TIMEOUT_MS);
+
+    if(set_rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Got expected error: %s\n", plc_tag_decode_error(set_rc));
+    } else {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Warning: No error returned, checking if value was clamped\n");
+    }
+
+    /* read the attribute and verify it was clamped/restored to the initial maximum */
+    timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "After invalid set attempt, timeout is: %d ms\n", timeout_value);
+    if(timeout_value != initial_timeout_value) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Timeout was not restored to initial value. Expected %d ms but got %d ms\n", initial_timeout_value,
+                timeout_value);
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Timeout correctly restored to initial maximum value: %d ms\n", timeout_value);
+
+    /* Test 3: Wait almost the maximum timeout and verify immediate read */
+    // NOLINTNEXTLINE
+    fprintf(stderr, "\n=== Test 3: Wait near-maximum timeout ===\n");
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Setting inactivity timeout to near-maximum %d ms\n", NEAR_MAX_TIMEOUT_MS);
+    plc_tag_set_int_attribute(tag, "connection_inactivity_timeout_ms", NEAR_MAX_TIMEOUT_MS);
+
+    timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
+    if(timeout_value != NEAR_MAX_TIMEOUT_MS) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Failed to set near-max timeout. Expected %d ms but got %d ms\n", NEAR_MAX_TIMEOUT_MS,
+                timeout_value);
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Successfully set inactivity timeout to %d ms\n", timeout_value);
+
+    /* check connection status is UP before we start waiting */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Connection status before near-max wait: %s\n", status_to_string(status));
+
+    /* wait the near-maximum timeout - connection should still be UP (not timed out) */
+    wait_time_ms = NEAR_MAX_TIMEOUT_MS;
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Waiting %d ms (near-maximum timeout)...\n", wait_time_ms);
+    remaining_ms = wait_time_ms;
+    while(remaining_ms > 0) {
+        int sleep_ms = (remaining_ms > 500) ? 500 : remaining_ms;
+        compat_sleep_ms((uint32_t)sleep_ms, NULL);
+        remaining_ms -= sleep_ms;
+    }
+
+    /* check connection status - should still be UP */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Connection status after near-max wait: %s\n", status_to_string(status));
+    if(status != PLCTAG_CONN_STATUS_UP) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Connection should be UP after near-max wait, but is %s\n", status_to_string(status));
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+
+    /* read the tag - should complete immediately with existing connection */
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Reading tag after near-max timeout wait (should be immediate)...\n");
+
+    int64_t start_time_ms = compat_time_ms();
+
+    read_tag(tag);
+
+    int64_t end_time_ms = compat_time_ms();
+    uint32_t read_time_ms = (uint32_t)(end_time_ms - start_time_ms);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Read completed in %u ms (should be fast, < 100ms)\n", read_time_ms);
+    if(read_time_ms > 100) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "WARNING: Read took longer than expected (%u ms), possible reconnection\n", read_time_ms);
+    }
+
+    /* check connection status - should still be UP */
+    status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Connection status after near-max timeout read: %s\n", status_to_string(status));
+    if(status != PLCTAG_CONN_STATUS_UP) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Connection should be UP after near-max read, but is %s\n", status_to_string(status));
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+
     /* clean up */
     plc_tag_destroy(tag);
 
     // NOLINTNEXTLINE
-    fprintf(stderr, "Test PASSED!\n");
+    fprintf(stderr, "\nAll tests PASSED!\n");
 
     return 0;
 }
