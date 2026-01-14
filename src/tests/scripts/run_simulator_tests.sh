@@ -180,7 +180,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: library shutdown and restart... "
-$VALGRIND$TEST_DIR/test_shutdown_restart > "$LOG_DIR/${TEST}_shutdown_restart.log" 2>&1
+$VALGRIND$TEST_DIR/test_shutdown_restart "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray" > "$LOG_DIR/${TEST}_shutdown_restart.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -255,7 +255,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: emulator test extended callbacks async... "
-$VALGRIND$TEST_DIR/test_callback_ex_logix > "$LOG_DIR/${TEST}_extended_callback_async_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_callback_ex_logix "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray" > "$LOG_DIR/${TEST}_extended_callback_async_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
