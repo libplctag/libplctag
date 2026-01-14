@@ -320,7 +320,18 @@ fi
 
 let TEST++
 echo -n "Test $TEST: basic DH+ bridging... "
-$VALGRIND$TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab_eip&gateway=10.206.1.40&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10' --debug=4 --write=0  > "$LOG_DIR/${TEST}_dhp_bridge.log" 2>&1
+$VALGRIND$TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab_eip&gateway=10.206.1.40&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N7:0' --debug=4 --write=42  > "$LOG_DIR/${TEST}_dhp_bridge.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: basic DH+ bridging bit change... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab_eip&gateway=10.206.1.40&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10' --debug=4 --write=0  > "$LOG_DIR/${TEST}_dhp_bridge_bit_change.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
