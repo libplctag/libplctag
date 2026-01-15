@@ -247,6 +247,15 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->allow_packing = 0;
             break;
 
+        case AB_PLC_GENERIC:
+            /* Generic PLC type uses unconnected messaging for stateless operations */
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Generic CIP device setup.");
+            tag->use_connected_msg = 0;
+
+            /* Generic type does not support packing */
+            tag->allow_packing = 0;
+            break;
+
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
@@ -391,6 +400,32 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             break;
 
+        case AB_PLC_GENERIC:
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up generic CIP device tag.");
+
+            /* Generic type supports optional path for reaching modules in chassis */
+            if(path && str_length(path)) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Generic device using path: %s", path);
+            }
+
+            /* if we did not fill in the byte order elsewhere, fill it in now. */
+            if(!tag->byte_order) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Using default CIP byte order for generic device.");
+                tag->byte_order = &logix_tag_byte_order;
+            }
+
+            /* Set vtable based on element type (should be identity tag) */
+            if(tag->vtable == &default_vtable || !tag->vtable) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting vtable based on tag type.");
+                /* The actual vtable will be set during get_tag_data_type */
+            }
+
+            tag->use_connected_msg = 0;
+            tag->allow_packing = 0;
+            tag->first_read = 0; /* no first read for special tags */
+
+            break;
+
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
@@ -408,6 +443,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         case AB_PLC_LGX:
             /* fall through */
         case AB_PLC_MICRO800:
+            /* fall through */
+        case AB_PLC_GENERIC:
             /* fill this in when we read the tag. */
             // tag->elem_size = 0;
             tag->size = 0;
@@ -597,6 +634,23 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                     }
                 }
+            }
+
+            break;
+
+        case AB_PLC_GENERIC:
+            /* Generic PLC type only supports special tags like @identity */
+            tag_name = attr_get_str(attribs, "name", NULL);
+
+            if(str_cmp_i(tag_name, "@identity") == 0) {
+                rc = setup_identity_tag(tag);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Error setting up identity tag!");
+                    return rc;
+                }
+            } else {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Generic PLC type only supports @identity tag, got: %s", tag_name);
+                return PLCTAG_ERR_UNSUPPORTED;
             }
 
             break;
@@ -1022,6 +1076,9 @@ plc_type_t get_plc_type(attr attribs) {
               || !str_cmp_i(cpu_type, "njnx") || !str_cmp_i(cpu_type, "nx1p2")) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found OMRON NJ/NX Series PLC.");
         return AB_PLC_OMRON_NJNX;
+    } else if(!str_cmp_i(cpu_type, "generic") || !str_cmp_i(cpu_type, "cip")) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found generic CIP device.");
+        return AB_PLC_GENERIC;
     } else {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported device type: %s", cpu_type);
 
@@ -1106,6 +1163,17 @@ int check_tag_name(ab_tag_p tag, const char *name) {
                 return rc;
             }
 
+            break;
+
+        case AB_PLC_GENERIC:
+            /* Generic PLC type only supports special tags like @identity */
+            /* Special tag handling is done elsewhere, just validate the name format */
+            if(name[0] != '@') {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Generic PLC type only supports special tags starting with @, got: %s", name);
+                return PLCTAG_ERR_UNSUPPORTED;
+            }
+
+            /* Placeholder - actual tag handling is done in special tag setup */
             break;
 
         default:
