@@ -190,7 +190,7 @@ int main(int argc, char *argv[]) {
         offset += 1;
 
         if(offset + (int)name_length <= size) {
-            char product_name[256];
+            char product_name[257] = {0}; /* zero it out first */
             int name_idx;
 
             /* Copy the product name */
