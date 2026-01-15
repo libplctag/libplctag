@@ -933,6 +933,37 @@ util_err_t socket_recv_buf(socket_t sock, buf_t *in) {
     return UTIL_OK;
 }
 
+util_err_t socket_recv_frame(socket_t sock, buf_t *buf,
+                             socket_frame_check_fn frame_check, void *context) {
+    util_err_t err;
+
+    if (sock == INVALID_SOCKET || buf == NULL || frame_check == NULL) {
+        return UTIL_EINVAL;
+    }
+
+    if (!buf_ok(buf)) {
+        return UTIL_EINVAL;
+    }
+
+    /* First check if we already have a complete frame from previous data */
+    err = frame_check(buf, context);
+    if (err == UTIL_OK) {
+        return UTIL_OK;  /* Frame already complete */
+    }
+    if (err != UTIL_EAGAIN) {
+        return err;  /* Frame check found an error */
+    }
+
+    /* Try to receive more data */
+    err = socket_recv_buf(sock, buf);
+    if (err != UTIL_OK) {
+        return err;  /* EAGAIN, ECLOSED, or error */
+    }
+
+    /* Check again after receiving new data */
+    return frame_check(buf, context);
+}
+
 util_err_t socket_recvfrom_buf(socket_t sock, socket_address_t *from_addr, buf_t *in) {
     if (sock == INVALID_SOCKET || from_addr == NULL || in == NULL) {
         return UTIL_EINVAL;
