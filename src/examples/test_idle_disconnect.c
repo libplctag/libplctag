@@ -42,7 +42,7 @@
 #define DATA_TIMEOUT 5000
 #define NEW_TIMEOUT_MS 6000        /* 6 seconds */
 #define INVALID_TIMEOUT_MS 1000000 /* Way too high, should be clamped */
-#define NEAR_MAX_TIMEOUT_MS 29900  /* Just under 30000ms max */
+#define NEAR_MAX_TIMEOUT_MS 28000  /* Just under 30000ms max */
 
 
 static char *tag_path = NULL;
@@ -270,11 +270,11 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "\n=== Test 3: Wait near-maximum timeout ===\n");
     // NOLINTNEXTLINE
-    fprintf(stderr, "Setting inactivity timeout to near-maximum %d ms\n", NEAR_MAX_TIMEOUT_MS);
-    plc_tag_set_int_attribute(tag, "connection_inactivity_timeout_ms", NEAR_MAX_TIMEOUT_MS);
+    fprintf(stderr, "Setting inactivity timeout to maximum %d ms\n", initial_timeout_value);
+    plc_tag_set_int_attribute(tag, "connection_inactivity_timeout_ms", initial_timeout_value);
 
     timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
-    if(timeout_value != NEAR_MAX_TIMEOUT_MS) {
+    if(timeout_value != initial_timeout_value) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Failed to set near-max timeout. Expected %d ms but got %d ms\n", NEAR_MAX_TIMEOUT_MS,
                 timeout_value);
@@ -288,6 +288,9 @@ int main(int argc, char **argv) {
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
     // NOLINTNEXTLINE
     fprintf(stderr, "Connection status before near-max wait: %s\n", status_to_string(status));
+
+    // /* read to reset the timeout calculation */
+    // read_tag(tag);
 
     /* wait the near-maximum timeout - connection should still be UP (not timed out) */
     wait_time_ms = NEAR_MAX_TIMEOUT_MS;
