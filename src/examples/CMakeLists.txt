@@ -17,6 +17,7 @@ endif()
   barcode_test
   busy_test
   data_dumper
+  get_identity
   list_tags_logix
   list_tags_micro8x0
   list_tags_omron_incomplete
