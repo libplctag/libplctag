@@ -37,6 +37,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define REQUIRED_VERSION 2, 5, 0
 #define DATA_TIMEOUT 5000
@@ -155,9 +156,7 @@ static void parse_args(int argc, char **argv) {
     }
 
     for(int i = 1; i < argc; i++) {
-        if(strncmp(argv[i], "--tag=", 6) == 0) {
-            tag_path = &argv[i][6];
-        }
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
     }
 
     if(tag_path == NULL || strlen(tag_path) == 0) {
