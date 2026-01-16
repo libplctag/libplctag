@@ -106,6 +106,7 @@ struct modbus_plc_t {
     int64_t last_packet_time_ms;
     int64_t disconnect_at_time_ms;  /* Calculated deadline for disconnection based on inactivity timeout */
     int64_t next_auto_sync_time_ms;
+    int32_t cached_inactivity_timeout_ms;  /* Cached value for detecting timeout changes */
 
     /* hostname/ip and possibly port of the server. */
     char *server;
@@ -668,7 +669,8 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
                     /* Calculate initial disconnect deadline */
-                    (*plc)->disconnect_at_time_ms = (*plc)->last_packet_time_ms + atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
+                    (*plc)->cached_inactivity_timeout_ms = atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
+                    (*plc)->disconnect_at_time_ms = (*plc)->last_packet_time_ms + (*plc)->cached_inactivity_timeout_ms;
 
                     /* Add the new PLC to the global list. We already have the mutex,
                      * so no duplicate can be created by another thread. The struct is
@@ -970,6 +972,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 /* Reset the disconnect deadline when entering connection state */
                 plc->last_packet_time_ms = time_ms();
                 timeout_ms = atomic_get_int32(&plc->connection_inactivity_timeout_ms);
+                plc->cached_inactivity_timeout_ms = timeout_ms;
                 plc->disconnect_at_time_ms = plc->last_packet_time_ms + timeout_ms;
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
                        "Resetting disconnect deadline to %" PRId64 " (timeout=%dms)",
@@ -996,6 +999,7 @@ THREAD_FUNC(modbus_plc_handler) {
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
                     int32_t timeout_ms = atomic_get_int32(&plc->connection_inactivity_timeout_ms);
+                    plc->cached_inactivity_timeout_ms = timeout_ms;
                     plc->disconnect_at_time_ms = plc->last_packet_time_ms + timeout_ms;
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO,
                            "Updated last_packet_time_ms=%" PRId64 ", disconnect_at=%" PRId64 " (connection succeeded immediately in PLC_CONNECT_START).",
@@ -1027,6 +1031,7 @@ THREAD_FUNC(modbus_plc_handler) {
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
                     timeout_ms = atomic_get_int32(&plc->connection_inactivity_timeout_ms);
+                    plc->cached_inactivity_timeout_ms = timeout_ms;
                     plc->disconnect_at_time_ms = plc->last_packet_time_ms + timeout_ms;
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO,
                            "Updated last_packet_time_ms=%" PRId64 ", disconnect_at=%" PRId64 " (connection established in PLC_CONNECT_WAIT).",
@@ -1059,6 +1064,15 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_READY state.");
                 atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_UP);
 
+                /* make sure that our timeout period has not changed */
+                if(plc->cached_inactivity_timeout_ms != atomic_get_int32(&plc->connection_inactivity_timeout_ms)) {
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
+                           "Inactivity timeout changed from %" PRId32 "ms to %" PRId32 "ms, updating disconnect deadline.",
+                           plc->cached_inactivity_timeout_ms, atomic_get_int32(&plc->connection_inactivity_timeout_ms));
+                    plc->cached_inactivity_timeout_ms = atomic_get_int32(&plc->connection_inactivity_timeout_ms);
+                    plc->disconnect_at_time_ms = plc->last_packet_time_ms + plc->cached_inactivity_timeout_ms;
+                }
+
                 /* calculate what events we should be waiting for. */
                 waitable_events = SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ;
 
@@ -1075,7 +1089,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 if(sock_events & SOCK_EVENT_TIMEOUT) {
                     int64_t current_time = time_ms();
                     int64_t idle_time = current_time - plc->last_packet_time_ms;
-                    int32_t inactivity_timeout_ms = atomic_get_int32(&plc->connection_inactivity_timeout_ms);
+                    int32_t inactivity_timeout_ms = plc->cached_inactivity_timeout_ms;
 
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Socket wait timed out. Idle for %" PRId64 "ms. Pending requests: %d",
                            idle_time, plc->pending_request_count);
