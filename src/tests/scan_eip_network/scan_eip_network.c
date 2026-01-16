@@ -43,14 +43,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <arpa/inet.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
 #include <iphlpapi.h>
+#include <ws2ipdef.h>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
 #else
+#include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #endif
