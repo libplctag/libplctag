@@ -1221,6 +1221,15 @@ THREAD_FUNC(conn_handler) {
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, "in CONN_IDLE state.");
                 atomic_set_int32(&conn->connection_status, PLCTAG_CONN_STATUS_UP);
 
+                /* make sure that our timeout period has not changed */
+                if(inactivity_timeout_ms != atomic_get_int32(&conn->connection_inactivity_timeout_ms)) {
+                    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL,
+                           "Inactivity timeout changed from %" PRId32 "ms to %" PRId32 "ms, updating auto disconnect time.",
+                           inactivity_timeout_ms, atomic_get_int32(&conn->connection_inactivity_timeout_ms));
+                    inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                    auto_disconnect_time = time_ms() + inactivity_timeout_ms;
+                }
+
                 /* if there is work to do, make sure we do not disconnect. */
                 critical_block(conn->mutex) {
                     int num_reqs = vector_length(conn->requests);
