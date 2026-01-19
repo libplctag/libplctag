@@ -1,9 +1,9 @@
-#include "socket.h"
-#include "log.h"
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stddef.h>
+#include "socket.h"
+#include "log.h"
 
 /* Platform detection for BSD-like systems (mirrors production code) */
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
