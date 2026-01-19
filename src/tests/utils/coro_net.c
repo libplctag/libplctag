@@ -1,10 +1,10 @@
+#include <string.h>
+#include <limits.h>
+#include <inttypes.h>
 #include "coro_net.h"
 #include "socket.h"
 #include "log.h"
 #include "utils.h"
-#include <string.h>
-#include <limits.h>
-#include <inttypes.h>
 
 /* Platform detection for BSD-like systems (mirrors socket.c) */
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \

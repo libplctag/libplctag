@@ -60,7 +60,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -155,6 +155,18 @@ fi
 
 
 let TEST++
+echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (AB ControlLogix)... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray" > "$LOG_DIR/${TEST}_idle_disconnect_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
 echo -n "  Test $TEST: hard library shutdown... "
 $VALGRIND$TEST_DIR/test_shutdown_cip > "$LOG_DIR/${TEST}_shutdown.log" 2>&1
 if [ $? != 0 ]; then
@@ -168,7 +180,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: library shutdown and restart... "
-$VALGRIND$TEST_DIR/test_shutdown_restart > "$LOG_DIR/${TEST}_shutdown_restart.log" 2>&1
+$VALGRIND$TEST_DIR/test_shutdown_restart "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray" > "$LOG_DIR/${TEST}_shutdown_restart.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -243,7 +255,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: emulator test extended callbacks async... "
-$VALGRIND$TEST_DIR/test_callback_ex_logix > "$LOG_DIR/${TEST}_extended_callback_async_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_callback_ex_logix "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray" > "$LOG_DIR/${TEST}_extended_callback_async_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -304,6 +316,17 @@ sleep 1
 let TEST++
 echo -n "  Test $TEST: basic Omron read/write... "
 $VALGRIND$TEST_DIR/./tag_rw2 --type=sint32  '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --write=42 --debug=4 > "$LOG_DIR/${TEST}_omron_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (Omron)... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" > "$LOG_DIR/${TEST}_idle_disconnect_omron_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -491,8 +514,8 @@ else
 fi
 
 let TEST++
-echo -n "  Test $TEST: test short reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 3 > "$LOG_DIR/${TEST}_modbus_reconnect_short_test.log" 2>&1
+echo -n "  Test $TEST: test idle disconnect with Modbus... "
+$VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" > "$LOG_DIR/${TEST}_modbus_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -500,18 +523,6 @@ else
     echo "OK"
     let SUCCESSES++
 fi
-
-let TEST++
-echo -n "  Test $TEST: test long reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 15 > "$LOG_DIR/${TEST}_modbus_reconnect_long_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
 
 let TEST++
 echo -n "  Test $TEST: thread stress Modbus... "
@@ -524,6 +535,12 @@ else
     let SUCCESSES++
 fi
 
+
+# if the OS is Darwin, set the ulimits higher for the connection stress test
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "        Setting ulimit for open files to 1024 for connection stress test."
+    ulimit -n 1024
+fi
 
 let TEST++
 echo -n "  Test $TEST: connection stress (multiple connections) Modbus... "
@@ -589,7 +606,7 @@ fi
 # Check that exactly 2 PLC objects were created during test 29.
 # This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
-echo "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
+echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})
 if [ "${PLC_COUNT}" = "2" ] ; then
     echo "OK (found ${PLC_COUNT} PLC creation entries in log file ${TST_LOG})"
@@ -599,17 +616,17 @@ else
     let FAILURES++
 fi
 
-# echo "  Killing Modbus emulator."
-kill_process modbus_server
+# Let the server dump stats at least one more time
+sleep 2
 
-# Make sure no ab_server instances are running before running auto_sync_reconnect test
-kill_process ab_server
+echo "Killing Modbus emulator."
+
+kill_process modbus_server
 
 # wait for them to exit
 sleep 2
 
-
-
+# show results
 echo ""
 echo "Results:"
 echo " - $TEST tests."

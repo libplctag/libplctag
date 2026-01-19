@@ -67,4 +67,7 @@ endif()
 message("Building Modbus TCP server.")
 add_subdirectory("modbus_server")
 
+# Build scan_eip_network utility
+add_subdirectory("scan_eip_network")
+
 

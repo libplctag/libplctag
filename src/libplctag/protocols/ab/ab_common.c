@@ -247,6 +247,15 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->allow_packing = 0;
             break;
 
+        case AB_PLC_GENERIC:
+            /* Generic PLC type uses unconnected messaging for stateless operations */
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Generic CIP device setup.");
+            tag->use_connected_msg = 0;
+
+            /* Generic type does not support packing */
+            tag->allow_packing = 0;
+            break;
+
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
@@ -391,6 +400,32 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             break;
 
+        case AB_PLC_GENERIC:
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting up generic CIP device tag.");
+
+            /* Generic type supports optional path for reaching modules in chassis */
+            if(path && str_length(path)) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Generic device using path: %s", path);
+            }
+
+            /* if we did not fill in the byte order elsewhere, fill it in now. */
+            if(!tag->byte_order) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Using default CIP byte order for generic device.");
+                tag->byte_order = &logix_tag_byte_order;
+            }
+
+            /* Set vtable based on element type (should be identity tag) */
+            if(tag->vtable == &default_vtable || !tag->vtable) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Setting vtable based on tag type.");
+                /* The actual vtable will be set during get_tag_data_type */
+            }
+
+            tag->use_connected_msg = 0;
+            tag->allow_packing = 0;
+            tag->first_read = 0; /* no first read for special tags */
+
+            break;
+
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
@@ -408,6 +443,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         case AB_PLC_LGX:
             /* fall through */
         case AB_PLC_MICRO800:
+            /* fall through */
+        case AB_PLC_GENERIC:
             /* fill this in when we read the tag. */
             // tag->elem_size = 0;
             tag->size = 0;
@@ -597,6 +634,23 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                     }
                 }
+            }
+
+            break;
+
+        case AB_PLC_GENERIC:
+            /* Generic PLC type only supports special tags like @identity */
+            tag_name = attr_get_str(attribs, "name", NULL);
+
+            if(str_cmp_i(tag_name, "@identity") == 0) {
+                rc = setup_identity_tag(tag);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Error setting up identity tag!");
+                    return rc;
+                }
+            } else {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Generic PLC type only supports @identity tag, got: %s", tag_name);
+                return PLCTAG_ERR_UNSUPPORTED;
             }
 
             break;
@@ -857,6 +911,20 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_size;
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
+        /* read connection status from session */
+        if(tag->session) {
+            res = atomic_get_int32(&tag->session->connection_status);
+        } else {
+            res = PLCTAG_CONN_STATUS_DOWN; /* no session = not connected */
+        }
+    } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        /* read connection inactivity timeout from session */
+        if(tag->session) {
+            res = atomic_get_int32(&tag->session->connection_inactivity_timeout_ms);
+        } else {
+            res = SESSION_DISCONNECT_TIMEOUT; /* no session = use default */
+        }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         switch(tag->plc_type) {
             case AB_PLC_PLC5: /* fall through */
@@ -889,14 +957,54 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
 
 int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
-    (void)attrib_name;
-    (void)new_value;
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Starting.");
 
-    raw_tag->status = PLCTAG_ERR_UNSUPPORTED;
+    tag->status = PLCTAG_STATUS_OK;
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
+        int clamped_value = new_value;
+        int out_of_bounds = 0;
+
+        if(clamped_value < 100) {
+            clamped_value = 100;
+            out_of_bounds = 1;
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN,
+                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.",
+                   new_value);
+        } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
+            clamped_value = SESSION_DISCONNECT_TIMEOUT;
+            out_of_bounds = 1;
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN,
+                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.",
+                   new_value, SESSION_DISCONNECT_TIMEOUT);
+        }
+
+        if(tag->session) {
+            atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, clamped_value);
+            if(out_of_bounds) {
+                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            } else {
+                tag->status = PLCTAG_STATUS_OK;
+                rc = PLCTAG_STATUS_OK;
+            }
+        } else {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN,
+                   "Cannot set connection_inactivity_timeout_ms: no session exists.");
+            tag->status = PLCTAG_ERR_NOT_FOUND;
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    } else {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    return rc;
 }
 
 int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
@@ -968,6 +1076,9 @@ plc_type_t get_plc_type(attr attribs) {
               || !str_cmp_i(cpu_type, "njnx") || !str_cmp_i(cpu_type, "nx1p2")) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found OMRON NJ/NX Series PLC.");
         return AB_PLC_OMRON_NJNX;
+    } else if(!str_cmp_i(cpu_type, "generic") || !str_cmp_i(cpu_type, "cip")) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Found generic CIP device.");
+        return AB_PLC_GENERIC;
     } else {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Unsupported device type: %s", cpu_type);
 
@@ -1052,6 +1163,17 @@ int check_tag_name(ab_tag_p tag, const char *name) {
                 return rc;
             }
 
+            break;
+
+        case AB_PLC_GENERIC:
+            /* Generic PLC type only supports special tags like @identity */
+            /* Special tag handling is done elsewhere, just validate the name format */
+            if(name[0] != '@') {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Generic PLC type only supports special tags starting with @, got: %s", name);
+                return PLCTAG_ERR_UNSUPPORTED;
+            }
+
+            /* Placeholder - actual tag handling is done in special tag setup */
             break;
 
         default:

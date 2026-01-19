@@ -57,7 +57,8 @@ typedef enum {
     TYPE_F64,
     TYPE_STRING,
     TYPE_META,
-    TYPE_RAW
+    TYPE_RAW,
+    TYPE_IDENTITY
 } element_type_t;
 
 struct run_args {
@@ -130,7 +131,7 @@ int main(int argc, char **argv) {
         }
 
         /* start with a read. */
-        if(args.element_type != TYPE_RAW) {
+        if(args.element_type != TYPE_RAW && args.element_type != TYPE_IDENTITY) {
             rc = plc_tag_read(args.tag, args.timeout);
             if(rc != PLCTAG_STATUS_OK) {
                 printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
@@ -138,6 +139,16 @@ int main(int argc, char **argv) {
             }
 
             /* dump out the tag values. */
+            dump_values(&args);
+        } else if(args.element_type == TYPE_IDENTITY) {
+            /* For identity tags, we need to read them. */
+            rc = plc_tag_read(args.tag, args.timeout);
+            if(rc != PLCTAG_STATUS_OK) {
+                printf("ERROR: Error returned while trying to read identity tag %s!\n", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* dump out the identity information. */
             dump_values(&args);
         }
 
@@ -187,13 +198,16 @@ void usage(void) {
         "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--timeout=<timeout>] [--debug=<debug>] \n"
         "\n"
         "  <type>    - type is one of 'bit', 'uint8', 'sint8', 'uint16', 'sint16', \n "
-        "              'uint32', 'sint32', 'real32', 'real64', 'string' or 'metadata'.  \n"
-        "              The type is the type of the data to be read/written to the named tag.\n"
-        "              The types starting with 'u' are unsigned and with 's' are signed.\n"
-        "              For floating point, use 'real32' or 'real64'.  The 'metadata' type\n"
-        "              returns information about the raw (device) tag type data, the size of\n"
-        "              a single element and the number of elements that were requested, not the\n"
-        "              actual size of the tag in the device!\n"
+        "              'uint32', 'sint32', 'real32', 'real64', 'string', 'metadata', \n"
+        "              'raw', or 'identity'.  The type is the type of the data to be \n"
+        "              read/written to the named tag.  The types starting with 'u' are \n"
+        "              unsigned and with 's' are signed.  For floating point, use \n"
+        "              'real32' or 'real64'.  The 'metadata' type returns information \n"
+        "              about the raw (device) tag type data, the size of a single element \n"
+        "              and the number of elements that were requested, not the actual size \n"
+        "              of the tag in the device!  The 'identity' type is used with CIP \n"
+        "              identity tags (@identity) on generic CIP devices to display device \n"
+        "              information.\n"
         "\n"
         "  <tag string> - The path to the device containing the named data.  This value may need to\n"
         "              be quoted.   Use double quotes on Windows and single quotes on Unix-like systems.\n"
@@ -362,6 +376,8 @@ void parse_type(char *type_str, struct run_args *args) {
         args->element_type = TYPE_META;
     } else if(compat_strcasecmp(type_str, "raw") == 0) {
         args->element_type = TYPE_RAW;
+    } else if(compat_strcasecmp(type_str, "identity") == 0) {
+        args->element_type = TYPE_IDENTITY;
     } else {
         printf("ERROR: Unknown type %s!\n", type_str);
         cleanup(args);
@@ -914,6 +930,99 @@ void dump_values(struct run_args *args) {
 
                     /* skip the whole tag. */
                     offset += plc_tag_get_size(tag);
+
+                    break;
+
+                case TYPE_IDENTITY: {
+                    int size = plc_tag_get_size(tag);
+                    int offset_id = 0;
+
+                    if(size < 14) {
+                        printf("ERROR: Identity response too small to contain identity data (got %d bytes, need at least 14)\n", size);
+                        cleanup(args);
+                        exit(1);
+                    }
+
+                    printf("=== CIP Identity Object ===\n\n");
+
+                    /* Vendor ID (UINT, 2 bytes) */
+                    uint16_t vendor_id = plc_tag_get_uint16(tag, offset_id);
+                    offset_id += 2;
+                    printf("Vendor ID: %u (0x%04X)\n", vendor_id, vendor_id);
+
+                    /* Device Type (UINT, 2 bytes) */
+                    uint16_t device_type = plc_tag_get_uint16(tag, offset_id);
+                    offset_id += 2;
+                    printf("Device Type: %u (0x%04X)\n", device_type, device_type);
+
+                    /* Product Code (UINT, 2 bytes) */
+                    uint16_t product_code = plc_tag_get_uint16(tag, offset_id);
+                    offset_id += 2;
+                    printf("Product Code: %u (0x%04X)\n", product_code, product_code);
+
+                    /* Revision (2 bytes: major.minor) */
+                    uint8_t revision_major = plc_tag_get_uint8(tag, offset_id);
+                    offset_id += 1;
+                    uint8_t revision_minor = plc_tag_get_uint8(tag, offset_id);
+                    offset_id += 1;
+                    printf("Revision: %u.%u\n", revision_major, revision_minor);
+
+                    /* Status Word (WORD, 2 bytes) */
+                    uint16_t status_word = plc_tag_get_uint16(tag, offset_id);
+                    offset_id += 2;
+                    printf("Status: 0x%04X\n", status_word);
+
+                    /* Serial Number (UDINT, 4 bytes) */
+                    uint32_t serial_number = plc_tag_get_uint32(tag, offset_id);
+                    offset_id += 4;
+                    printf("Serial Number: %u (0x%08X)\n", serial_number, serial_number);
+
+                    /* Product Name (SHORT_STRING: 1 byte length + N bytes string) */
+                    if(offset_id < size) {
+                        uint8_t name_length = plc_tag_get_uint8(tag, offset_id);
+                        offset_id += 1;
+
+                        if(offset_id + (int)name_length <= size) {
+                            char product_name[256];
+                            int name_idx;
+
+                            /* Copy the product name */
+                            for(name_idx = 0; name_idx < (int)name_length && name_idx < 255; name_idx++) {
+                                product_name[name_idx] = (char)plc_tag_get_uint8(tag, offset_id + name_idx);
+                            }
+                            product_name[name_idx] = '\0';
+                            offset_id += (int)name_length;
+
+                            printf("Product Name: %s\n", product_name);
+                        } else {
+                            printf("Product Name: <truncated or invalid>\n");
+                        }
+                    }
+
+                    /* State (USINT, 1 byte) - optional, may not be present in all devices */
+                    if(offset_id < size) {
+                        uint8_t state = plc_tag_get_uint8(tag, offset_id);
+                        offset_id += 1;
+                        printf("State: %u (0x%02X)\n", state, state);
+                    }
+
+                    /* Print raw data for debugging */
+                    printf("\n=== Raw Data ===\n");
+                    for(int i = 0; i < size; i++) {
+                        uint8_t data = plc_tag_get_uint8(tag, i);
+                        printf("%02X ", (unsigned int)data);
+                        if((i + 1) % 16 == 0) {
+                            printf("\n");
+                        }
+                    }
+
+                    if(size % 16 != 0) {
+                        printf("\n");
+                    }
+
+                    /* skip the whole tag. */
+                    offset += size;
+                }
 
                     break;
 

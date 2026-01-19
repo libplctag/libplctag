@@ -37,11 +37,13 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define REQUIRED_VERSION 2, 5, 0
-
-#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
 #define DATA_TIMEOUT 5000
+
+/* Tag path from command line */
+static char *tag_path = NULL;
 
 typedef int32_t TAG_ELEMENT;
 
@@ -144,7 +146,28 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
 }
 
 
-int main(int argc, const char **argv) {
+static void parse_args(int argc, char **argv) {
+    if(argc < 2) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Usage: test_callback_ex_logix --tag=TAG_STRING\n");
+        // NOLINTNEXTLINE
+        fprintf(stderr, "  --tag=TAG_STRING: tag path string\n");
+        exit(1);
+    }
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
+    }
+
+    if(tag_path == NULL || strlen(tag_path) == 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error: tag path must be specified\n");
+        exit(1);
+    }
+}
+
+
+int main(int argc, char **argv) {
     int32_t tag = 0;
     int rc;
     int i;
@@ -155,8 +178,8 @@ int main(int argc, const char **argv) {
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     TAG_ELEMENT *tag_element_array = NULL;
 
-    (void)argc;
-    (void)argv;
+    /* Parse command line arguments */
+    parse_args(argc, argv);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -177,7 +200,7 @@ int main(int argc, const char **argv) {
 
     /* create the tag */
     printf("Creating test tag.\n");
-    tag = plc_tag_create_ex(TAG_PATH, tag_callback, tag_element_array, 0);
+    tag = plc_tag_create_ex(tag_path, tag_callback, tag_element_array, 0);
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;

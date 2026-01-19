@@ -1,5 +1,8 @@
-#include "err.h"
 #include <errno.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+#include "err.h"
 
 const char* util_err_str(util_err_t e) {
     switch (e) {

@@ -59,9 +59,10 @@ typedef enum {
     AB_TYPE_STRING,
     AB_TYPE_SHORT_STRING,
     AB_TYPE_TIMER,
-    AB_TYPE_TAG_ENTRY, /* not a real AB type, but a pseudo type for AB's internal tag entry. */
-    AB_TYPE_TAG_UDT,   /* as above, but for UDTs. */
-    AB_TYPE_TAG_RAW    /* raw CIP tag */
+    AB_TYPE_TAG_ENTRY,  /* not a real AB type, but a pseudo type for AB's internal tag entry. */
+    AB_TYPE_TAG_UDT,    /* as above, but for UDTs. */
+    AB_TYPE_TAG_RAW,    /* raw CIP tag */
+    AB_TYPE_TAG_IDENTITY /* CIP Identity Object data */
 } elem_type_t;
 
 

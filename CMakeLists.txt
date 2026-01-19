@@ -59,7 +59,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project version
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 13)
+set (libplctag_VERSION_PATCH 14)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -107,6 +107,8 @@ else()
 endif()
 
 
+# Generate files from templates
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 # where to find include files.
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
@@ -124,31 +126,9 @@ if(BUILD_TESTS)
 endif(BUILD_TESTS)
 
 
-#    set(CLI_FILES ${cli_SRC_PATH}/cli.c
-#        ${cli_SRC_PATH}/cli.h
-#        ${cli_SRC_PATH}/getline.h
-#        ${cli_SRC_PATH}/uthash.h
-#        ${libplctag_SRCS}
-#    )
-
-#    foreach(CLI_FILES ${CLI_FILES})
-#    set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
-#    endforeach()
-
-#    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-
-#    target_link_libraries(cli ${example_LIBRARIES} )
-
-#    if(BASE_LINK_FLAGS)
-#    set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-#    endif()
-
-# Generate files from templates
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 
 # for installation
-
 macro(print_all_variables)
     message(STATUS "print_all_variables------------------------------------------{")
     get_cmake_property(_variableNames VARIABLES)

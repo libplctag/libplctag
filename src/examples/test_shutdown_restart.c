@@ -47,12 +47,14 @@
 #include <string.h>
 
 #define REQUIRED_VERSION 2, 5, 0
-#define TAG_STRING_TEMPLATE "protocol=ab_eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[%d]"
 #define DATA_TIMEOUT (5000)
 #define NUM_THREADS (10)
 #define LOOP_INTERVAL_MS (250)
 #define PRE_SHUTDOWN_WAIT_MS (2000)
 #define POST_SHUTDOWN_WAIT_MS (2000)
+
+/* Base tag path from command line */
+static char *base_tag_path = NULL;
 
 /* Thread state flags */
 static volatile int terminate_threads = 0;
@@ -75,7 +77,30 @@ typedef struct {
 static void *worker_thread(void *arg);
 
 
-int main(void) {
+static void parse_args(int argc, char **argv) {
+    if(argc < 2) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Usage: test_shutdown_restart --tag=TAG_STRING\n");
+        // NOLINTNEXTLINE
+        fprintf(stderr, "  --tag=TAG_STRING: tag path string\n");
+        exit(1);
+    }
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) {
+            base_tag_path = &argv[i][6];
+        }
+    }
+
+    if(base_tag_path == NULL || strlen(base_tag_path) == 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error: tag path must be specified\n");
+        exit(1);
+    }
+}
+
+
+int main(int argc, char **argv) {
     compat_thread_t threads[NUM_THREADS] = {0};
     thread_stats_t thread_stats[NUM_THREADS] = {0};
     int rc = PLCTAG_STATUS_OK;
@@ -83,6 +108,9 @@ int main(void) {
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
+
+    /* Parse command line arguments */
+    parse_args(argc, argv);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -201,7 +229,7 @@ int main(void) {
 
 static void *worker_thread(void *arg) {
     thread_stats_t *stats = (thread_stats_t *)arg;
-    char tag_string[256];
+    char tag_string[512];
     int32_t tag_id = 0;
     int rc = PLCTAG_STATUS_OK;
     int32_t value = 0;
@@ -209,7 +237,7 @@ static void *worker_thread(void *arg) {
     int need_recreate = 0;
 
     /* Build tag string with unique array index */
-    snprintf(tag_string, sizeof(tag_string), TAG_STRING_TEMPLATE, stats->thread_id);
+    snprintf(tag_string, sizeof(tag_string), "%s[%d]", base_tag_path, stats->thread_id);
 
     fprintf(stderr, "Thread %d: Starting with tag string: %s\n", stats->thread_id, tag_string);
 

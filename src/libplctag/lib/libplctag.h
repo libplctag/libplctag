@@ -40,48 +40,47 @@ extern "C" {
 #endif
 
 
-#if  defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(_WIN64)
-    #ifdef __cplusplus
-        #define C_FUNC extern "C"
-    #else
-        #define C_FUNC
-    #endif
+#if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(_WIN64)
+#    ifdef __cplusplus
+#        define C_FUNC extern "C"
+#    else
+#        define C_FUNC
+#    endif
 
-    #ifdef LIBPLCTAGDLL_EXPORTS
-        #define LIB_EXPORT __declspec(dllexport)
-    #else
-        #define LIB_EXPORT extern
-    #endif
+#    ifdef LIBPLCTAGDLL_EXPORTS
+#        define LIB_EXPORT __declspec(dllexport)
+#    else
+#        define LIB_EXPORT extern
+#    endif
 
-    // #ifdef LIBPLCTAG_STATIC
-    //     #define LIB_EXPORT extern
-    // #elif defined(LIBPLCTAGDLL_EXPORTS)
-    //     #define LIB_EXPORT __declspec(dllexport)
-    //     #error "DLL Export"
-    // #else
-    //     #define LIB_EXPORT __declspec(dllimport)
-    //     #error "DLL Import"
-    // #endif
+// #ifdef LIBPLCTAG_STATIC
+//     #define LIB_EXPORT extern
+// #elif defined(LIBPLCTAGDLL_EXPORTS)
+//     #define LIB_EXPORT __declspec(dllexport)
+//     #error "DLL Export"
+// #else
+//     #define LIB_EXPORT __declspec(dllimport)
+//     #error "DLL Import"
+// #endif
 #else
-    #ifdef LIBPLCTAGDLL_EXPORTS
-        #define LIB_EXPORT __attribute__ ((visibility ("default")))
-    #else
-        #define LIB_EXPORT extern
-    #endif
+#    ifdef LIBPLCTAGDLL_EXPORTS
+#        define LIB_EXPORT __attribute__((visibility("default")))
+#    else
+#        define LIB_EXPORT extern
+#    endif
 #endif
 
 /* Experimental API marker - generates compiler warnings when used */
 #if defined(_MSC_VER)
-    /* MSVC */
-    #define LIBPLCTAG_EXPERIMENTAL __declspec(deprecated("This function is experimental and may change in future releases"))
+/* MSVC */
+#    define LIBPLCTAG_EXPERIMENTAL __declspec(deprecated("This function is experimental and may change in future releases"))
 #elif defined(__GNUC__) || defined(__clang__)
-    /* GCC and Clang */
-    #define LIBPLCTAG_EXPERIMENTAL __attribute__((deprecated("This function is experimental and may change in future releases")))
+/* GCC and Clang */
+#    define LIBPLCTAG_EXPERIMENTAL __attribute__((deprecated("This function is experimental and may change in future releases")))
 #else
-    /* Unknown compiler - no warning */
-    #define LIBPLCTAG_EXPERIMENTAL
+/* Unknown compiler - no warning */
+#    define LIBPLCTAG_EXPERIMENTAL
 #endif
-
 
 
 /* library internal status and error codes - generated from error_codes.def */
@@ -128,9 +127,6 @@ typedef enum {
     PLCTAG_ERR_PARTIAL = -38,
     PLCTAG_ERR_BUSY = -39
 } plctag_error_code_t;
-
-
-
 
 
 /**
@@ -184,30 +180,30 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
 
 /** Debug module IDs - these are 64-bit pre-shifted values for bitmask operations */
 typedef enum {
-    PLCTAG_MODULE_LIB                    = (1ULL << 0),
-    PLCTAG_MODULE_INIT                   = (1ULL << 1),
-    PLCTAG_MODULE_VERSION                = (1ULL << 2),
-    PLCTAG_MODULE_UTILS                  = (1ULL << 3),
-    PLCTAG_MODULE_AB_SESSION             = (1ULL << 4),
-    PLCTAG_MODULE_AB_PCCC                = (1ULL << 5),
-    PLCTAG_MODULE_AB_CIP                 = (1ULL << 6),
-    PLCTAG_MODULE_AB_COMMON              = (1ULL << 7),
-    PLCTAG_MODULE_AB_EIP_CIP             = (1ULL << 8),
-    PLCTAG_MODULE_AB_EIP_CIP_SPECIAL     = (1ULL << 9),
-    PLCTAG_MODULE_AB_EIP_LGX_PCCC        = (1ULL << 10),
-    PLCTAG_MODULE_AB_EIP_PLC5_PCCC       = (1ULL << 11),
-    PLCTAG_MODULE_AB_EIP_PLC5_DHP        = (1ULL << 12),
-    PLCTAG_MODULE_AB_EIP_SLC_PCCC        = (1ULL << 13),
-    PLCTAG_MODULE_AB_EIP_SLC_DHP         = (1ULL << 14),
-    PLCTAG_MODULE_AB_ERROR               = (1ULL << 15),
-    PLCTAG_MODULE_OMRON_CONN             = (1ULL << 16),
-    PLCTAG_MODULE_OMRON_CIP              = (1ULL << 17),
-    PLCTAG_MODULE_OMRON_COMMON           = (1ULL << 18),
-    PLCTAG_MODULE_OMRON_STANDARD_TAG     = (1ULL << 19),
-    PLCTAG_MODULE_OMRON_RAW_TAG          = (1ULL << 20),
-    PLCTAG_MODULE_MODBUS                 = (1ULL << 21),
-    PLCTAG_MODULE_SYSTEM                 = (1ULL << 22),
-    PLCTAG_MODULE_PLATFORM               = (1ULL << 23)
+    PLCTAG_MODULE_LIB = (1ULL << 0),
+    PLCTAG_MODULE_INIT = (1ULL << 1),
+    PLCTAG_MODULE_VERSION = (1ULL << 2),
+    PLCTAG_MODULE_UTILS = (1ULL << 3),
+    PLCTAG_MODULE_AB_SESSION = (1ULL << 4),
+    PLCTAG_MODULE_AB_PCCC = (1ULL << 5),
+    PLCTAG_MODULE_AB_CIP = (1ULL << 6),
+    PLCTAG_MODULE_AB_COMMON = (1ULL << 7),
+    PLCTAG_MODULE_AB_EIP_CIP = (1ULL << 8),
+    PLCTAG_MODULE_AB_EIP_CIP_SPECIAL = (1ULL << 9),
+    PLCTAG_MODULE_AB_EIP_LGX_PCCC = (1ULL << 10),
+    PLCTAG_MODULE_AB_EIP_PLC5_PCCC = (1ULL << 11),
+    PLCTAG_MODULE_AB_EIP_PLC5_DHP = (1ULL << 12),
+    PLCTAG_MODULE_AB_EIP_SLC_PCCC = (1ULL << 13),
+    PLCTAG_MODULE_AB_EIP_SLC_DHP = (1ULL << 14),
+    PLCTAG_MODULE_AB_ERROR = (1ULL << 15),
+    PLCTAG_MODULE_OMRON_CONN = (1ULL << 16),
+    PLCTAG_MODULE_OMRON_CIP = (1ULL << 17),
+    PLCTAG_MODULE_OMRON_COMMON = (1ULL << 18),
+    PLCTAG_MODULE_OMRON_STANDARD_TAG = (1ULL << 19),
+    PLCTAG_MODULE_OMRON_RAW_TAG = (1ULL << 20),
+    PLCTAG_MODULE_MODBUS = (1ULL << 21),
+    PLCTAG_MODULE_SYSTEM = (1ULL << 22),
+    PLCTAG_MODULE_PLATFORM = (1ULL << 23)
 } plctag_debug_module_t;
 
 
@@ -294,8 +290,6 @@ LIB_EXPORT int plc_tag_debug_level_id(const char *level_name);
 LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_patch);
 
 
-
-
 /**
  * @defgroup Tag_Operations Tag Operations.
  * @brief Public API for tag operations.
@@ -325,7 +319,6 @@ LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_p
 LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
 
 
-
 /**
  * @brief Create a new tag with callback support.
  *
@@ -342,8 +335,9 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
  * @return Opaque tag handle (>0 on success, <0 on error with PLCTAG_ERR_xyz code).
  */
 
-LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata, int timeout);
-
+LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
+                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                     void *userdata, int timeout);
 
 
 /**
@@ -364,7 +358,6 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
 LIB_EXPORT void plc_tag_shutdown(void);
 
 
-
 /**
  * @brief Tag event type enumeration.
  *
@@ -379,14 +372,14 @@ LIB_EXPORT void plc_tag_shutdown(void);
  */
 
 typedef enum {
-    PLCTAG_EVENT_READ_STARTED       = 1,  /*!< Read operation started */
-    PLCTAG_EVENT_READ_COMPLETED     = 2,  /*!< Read operation completed */
-    PLCTAG_EVENT_WRITE_STARTED      = 3,  /*!< Write operation started */
-    PLCTAG_EVENT_WRITE_COMPLETED    = 4,  /*!< Write operation completed */
-    PLCTAG_EVENT_ABORTED            = 5,  /*!< Operation aborted */
-    PLCTAG_EVENT_DESTROYED          = 6,  /*!< Tag destroyed */
-    PLCTAG_EVENT_CREATED            = 7,  /*!< Tag created */
-    PLCTAG_EVENT_MAX                = 8   /*!< Maximum event type value */
+    PLCTAG_EVENT_READ_STARTED = 1,    /*!< Read operation started */
+    PLCTAG_EVENT_READ_COMPLETED = 2,  /*!< Read operation completed */
+    PLCTAG_EVENT_WRITE_STARTED = 3,   /*!< Write operation started */
+    PLCTAG_EVENT_WRITE_COMPLETED = 4, /*!< Write operation completed */
+    PLCTAG_EVENT_ABORTED = 5,         /*!< Operation aborted */
+    PLCTAG_EVENT_DESTROYED = 6,       /*!< Tag destroyed */
+    PLCTAG_EVENT_CREATED = 7,         /*!< Tag created */
+    PLCTAG_EVENT_MAX = 8              /*!< Maximum event type value */
 } plctag_event_t;
 
 /**
@@ -437,8 +430,9 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * @see plc_tag_register_callback()
  */
 
-LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
-
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id,
+                                            void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                            void *userdata);
 
 
 /*
@@ -453,7 +447,6 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_
  */
 
 LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
-
 
 
 /*
@@ -479,7 +472,6 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
 LIB_EXPORT int plc_tag_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));
 
 
-
 /*
  * plc_tag_unregister_logger
  *
@@ -492,7 +484,6 @@ LIB_EXPORT int plc_tag_register_logger(void (*log_callback_func)(int32_t tag_id,
  */
 
 LIB_EXPORT int plc_tag_unregister_logger(void);
-
 
 
 /*
@@ -512,7 +503,6 @@ LIB_EXPORT int plc_tag_unregister_logger(void);
 LIB_EXPORT int plc_tag_lock(int32_t tag);
 
 
-
 /*
  * plc_tag_unlock
  *
@@ -521,9 +511,6 @@ LIB_EXPORT int plc_tag_lock(int32_t tag);
  */
 
 LIB_EXPORT int plc_tag_unlock(int32_t tag);
-
-
-
 
 
 /*
@@ -541,8 +528,6 @@ LIB_EXPORT int plc_tag_unlock(int32_t tag);
 LIB_EXPORT int plc_tag_abort(int32_t tag);
 
 
-
-
 /*
  * plc_tag_destroy
  *
@@ -552,10 +537,6 @@ LIB_EXPORT int plc_tag_abort(int32_t tag);
  * This is a function provided by the underlying protocol implementation.
  */
 LIB_EXPORT int plc_tag_destroy(int32_t tag);
-
-
-
-
 
 
 /*
@@ -571,8 +552,6 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag);
 LIB_EXPORT int plc_tag_read(int32_t tag, int timeout);
 
 
-
-
 /*
  * plc_tag_status
  *
@@ -583,10 +562,6 @@ LIB_EXPORT int plc_tag_read(int32_t tag, int timeout);
  * This is a function provided by the underlying protocol implementation.
  */
 LIB_EXPORT int plc_tag_status(int32_t tag);
-
-
-
-
 
 
 /*
@@ -603,11 +578,24 @@ LIB_EXPORT int plc_tag_status(int32_t tag);
 LIB_EXPORT int plc_tag_write(int32_t tag, int timeout);
 
 
-
-
 /*
  * Tag data accessors.
  */
+
+/**
+ * @brief Connection Status Values.
+ *
+ * Values returned by plc_tag_get_int_attribute() when querying
+ * the "connection_status" attribute on a tag.
+ */
+typedef enum {
+    PLCTAG_CONN_STATUS_UP = 0,            /* Connected and ready for operations */
+    PLCTAG_CONN_STATUS_DOWN = 1,          /* Not connected */
+    PLCTAG_CONN_STATUS_DISCONNECTING = 2, /* In process of disconnecting */
+    PLCTAG_CONN_STATUS_CONNECTING = 3,    /* In process of connecting */
+    PLCTAG_CONN_STATUS_IDLE_WAIT = 4,     /* Waiting to reconnect after idle disconnect */
+    PLCTAG_CONN_STATUS_ERR_WAIT = 5       /* Waiting to reconnect after error */
+} plc_tag_conn_status_t;
 
 /* attributes */
 LIB_EXPORT int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, int default_value);

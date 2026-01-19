@@ -38,12 +38,14 @@
 
 #include <libplctag/protocols/omron/defs.h>
 #include <libplctag/protocols/omron/omron_common.h>
+#include <utils/atomic_utils.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
 
 /* #define MAX_CONN_HOST    (128) */
 
 #define CONN_DEFAULT_TIMEOUT (2000)
+#define CONN_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
 
 #define MAX_PACKET_SIZE_EX (44 + 4002)
 
@@ -116,6 +118,12 @@ struct omron_conn_t {
     /* disconnect handling */
     int auto_disconnect_enabled;
     int auto_disconnect_timeout_ms;
+
+    /* connection status - readable by tags via atomics */
+    atomic_int32_t connection_status;  /* plc_tag_conn_status_t values */
+
+    /* connection inactivity timeout - readable/writable by tags via atomics */
+    atomic_int32_t connection_inactivity_timeout_ms;  /* milliseconds */
 };
 
 

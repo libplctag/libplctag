@@ -21,7 +21,6 @@ AlwaysBreakTemplateDeclarations: false
 BinPackArguments: true
 BinPackParameters: true
 BitFieldColonSpacing: Both
-BraceBreakingStyle: Attach
 BraceWrapping:
   AfterCaseLabel: false
   AfterClass: false
@@ -107,7 +106,6 @@ SpaceBeforeParensOptions:
   AfterControlStatements: false
   AfterForeachMacros: false
   AfterFunctionDeclarationName: false
-  AfterNamespaceName: false
   AfterFunctionDefinitionName: false
   AfterIfMacros: false
   AfterOverloadedOperator: false
@@ -118,7 +116,6 @@ SpaceBeforeParensOptions:
 SpaceBeforeRangeBasedForLoopColon: false
 SpaceBeforeSquareBrackets: false
 SpaceInEmptyParentheses: false
-SpaceInParentheses: false
 SpaceAroundPointerQualifiers: Default
 SpacesBeforeTrailingComments: 2
 SpacesInAngles: false
