@@ -1148,8 +1148,8 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     eip_encap *hdr = NULL;
     uint8_t *data = NULL;
-    uint8_t *cpf_items = NULL;
-    uint8_t *udi_data = NULL;
+    // uint8_t *cpf_items = NULL;
+    // uint8_t *udi_data = NULL;
     uint16_t cpf_item_count = 0;
     uint16_t item_type = 0;
     uint16_t item_length = 0;
@@ -1172,7 +1172,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
      * Item 2: UDI (type + length + CIP response data)
      */
 
-    cpf_items = data;
+    // cpf_items = data;
     data += 4; /* skip interface handle */
     data += 2; /* skip timeout */
 

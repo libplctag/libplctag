@@ -590,7 +590,7 @@ static void receiver_handler(coro_task_handle_t handle, socket_t fd, void *conte
 
 static void timer_handler(coro_task_handle_t handle, socket_t unused_fd, void *context) {
     timer_ctx_t *ctx = (timer_ctx_t *)context;
-    uint64_t elapsed_ms;
+    int64_t elapsed_ms;
 
     (void)unused_fd;
 
