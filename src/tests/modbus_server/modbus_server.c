@@ -365,9 +365,16 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         /* Capture when we start trying to receive (may block waiting for data) */
         client->timing.recv_start_us = util_time_us();
 
-        /* Read until we get a full frame - macro will set first_byte_us and recv_complete_us */
-        socket_read_yield(handle, &client->recv_buf, modbus_frame_check, NULL,
-                         &client->timing.first_byte_us, &client->timing.recv_complete_us, err);
+        /* Read until we get a full frame */
+        while ((err = socket_recv_frame(fd, &client->recv_buf, modbus_frame_check, NULL)) == UTIL_EAGAIN) {
+            coro_yield(handle, CORO_EVENT_READ);
+        }
+
+        /* Capture timestamps after we exit the loop (data arrived or error occurred) */
+        client->timing.recv_complete_us = util_time_us();
+        /* For simplicity, use same timestamp for first byte and complete in the refactored version
+         * This is acceptable since socket_recv_frame() typically completes in one call for small Modbus frames */
+        client->timing.first_byte_us = client->timing.recv_complete_us;
 
         /* Request processing start is when data actually arrived (not when we started blocking) */
         client->timing.request_start_us = client->timing.first_byte_us;
@@ -437,9 +444,12 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
-        socket_write_yield(handle, &client->send_buf, err);
+        while ((err = socket_send_buf(fd, &client->send_buf)) == UTIL_EAGAIN) {
+            coro_yield(handle, CORO_EVENT_WRITE);
+        }
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
+            break;
         }
 
         /* Capture send complete time and calculate statistics */
@@ -514,7 +524,9 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
 
     while (listener->server->running) {
         pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Waiting for incoming connections...");
-        socket_accept_yield(handle, &client_fd, &client_addr, err);
+        while ((err = socket_accept(fd, &client_fd, &client_addr)) == UTIL_EAGAIN) {
+            coro_yield(handle, CORO_EVENT_READ);
+        }
         if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to accept connection");
             break;
@@ -562,38 +574,6 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
 }
 
 
-/* statistics dumper */
-
-static void stats_dumper(coro_task_handle_t task, socket_t fd_ignored, void *context) {
-    server_ctx_t *server = (server_ctx_t *)context;
-    (void)fd_ignored;
-
-
-    static int64_t last_print_time = 0;
-
-    CORO_START(task);
-
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Statistics dumper started");
-
-    while (server->running) {
-        int64_t now = util_time_ms();
-
-        if(last_print_time + 1000 < now) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Dumping statistics...");
-            last_print_time = now;
-            print_statistics(server);
-
-            fflush(stderr);
-            fflush(stdout);
-        }
-
-        coro_wait_for_event(task, CORO_EVENT_ALWAYS);
-    }
-
-    coro_remove_task(task);
-
-    CORO_END(task);    
-}
 
 /* ============================================================================
  * Main Entry Point
@@ -842,19 +822,6 @@ int main(int argc, char *argv[]) {
         listener_info->handle = listener_handle;
     }
 
-    /* Start statistics dumper task */
-    coro_task_handle_t stats_task_handle;
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Adding statistics dumper task to event loop.");
-    err = coro_add_task(&stats_task_handle, g_server->coro_net, CORO_NO_SOCKET, stats_dumper, &server);
-    if (err != UTIL_OK) {
-        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add statistics dumper task: %s", util_err_str(err));
-        args_free(&args_result);
-
-        coro_destroy(&(g_server->coro_net));
-        register_storage_destroy(temp_storage);
-        socket_cleanup();
-        return EXIT_FAILURE;
-    }
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Starting coroutine event loop");
     coro_run(&(g_server->coro_net), 50);  /* 50ms tick interval */

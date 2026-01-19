@@ -47,7 +47,7 @@
 
 #define READ_TIMEOUT (100)
 #define FIRST_RUN_TIME (10000)
-#define DISCONNECT_TIME_MS (30000)
+#define DISCONNECT_TIME_MS (60000)
 #define SECOND_RUN_TIME (30000)
 #define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
 
@@ -247,9 +247,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             }
             break;
 
-        default:
-            compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status));
-            break;
+        default: compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status)); break;
     }
 }
 
@@ -368,12 +366,12 @@ int run_auto_test(const char *ab_server_cmd) {
     setup_tag(&auto_test_state, AUTO_SYNC_TAG_ATTRIBS);
     log("[DEBUG] Tag setup complete\n");
 
-    log("[DEBUG] Entering first phase - waiting for disconnect time (%" PRId64 "ms)...\n", auto_test_state.disconnect_time - auto_test_state.start_time);
+    log("[DEBUG] Entering first phase - waiting for disconnect time (%" PRId64 "ms)...\n",
+        auto_test_state.disconnect_time - auto_test_state.start_time);
     while((current_time = compat_time_ms()) < auto_test_state.disconnect_time) {
         compat_sleep_ms(READ_TIMEOUT, NULL);
         log("[DEBUG] Phase 1: current=%" PRId64 "ms, disconnect=%" PRId64 "ms, reads=%d\n",
-            current_time - auto_test_state.start_time,
-            auto_test_state.disconnect_time - auto_test_state.start_time,
+            current_time - auto_test_state.start_time, auto_test_state.disconnect_time - auto_test_state.start_time,
             auto_test_state.read_success_count);
     }
 
@@ -387,13 +385,14 @@ int run_auto_test(const char *ab_server_cmd) {
     fputs("\nD\n", stderr);
     fflush(stderr);
 
-    log("[DEBUG] Entering second phase - waiting for reconnect time (%" PRId64 "ms)...\n", auto_test_state.reconnect_time - auto_test_state.start_time);
+    log("[DEBUG] Entering second phase - waiting for reconnect time (%" PRId64 "ms)...\n",
+        auto_test_state.reconnect_time - auto_test_state.start_time);
     while((current_time = compat_time_ms()) < auto_test_state.reconnect_time) {
         compat_sleep_ms(1000, NULL);
-        log("[DEBUG] Phase 2: current=%" PRId64 "ms, reconnect=%" PRId64 "ms\n",
-            current_time - auto_test_state.start_time,
+        log("[DEBUG] Phase 2: current=%" PRId64 "ms, reconnect=%" PRId64 "ms\n", current_time - auto_test_state.start_time,
             auto_test_state.reconnect_time - auto_test_state.start_time);
-        fputs(".", stderr); fflush(stderr);
+        fputs(".", stderr);
+        fflush(stderr);
     }
 
     log("[DEBUG] Phase 2 complete - reconnect starting\n");
@@ -407,14 +406,13 @@ int run_auto_test(const char *ab_server_cmd) {
 
     auto_test_state.reconnect_done = 1;
 
-    log("[DEBUG] Entering third phase - waiting for test end time (%" PRId64 "ms)...\n", auto_test_state.end_time - auto_test_state.start_time);
+    log("[DEBUG] Entering third phase - waiting for test end time (%" PRId64 "ms)...\n",
+        auto_test_state.end_time - auto_test_state.start_time);
     while(compat_time_ms() < auto_test_state.end_time) {
         compat_sleep_ms(READ_TIMEOUT, NULL);
         int64_t debug_time = compat_time_ms();
-        log("[DEBUG] Phase 3: current=%" PRId64 "ms, end=%" PRId64 "ms, reads=%d\n",
-            debug_time - auto_test_state.start_time,
-            auto_test_state.end_time - auto_test_state.start_time,
-            auto_test_state.read_success_count);
+        log("[DEBUG] Phase 3: current=%" PRId64 "ms, end=%" PRId64 "ms, reads=%d\n", debug_time - auto_test_state.start_time,
+            auto_test_state.end_time - auto_test_state.start_time, auto_test_state.read_success_count);
     }
     log("[DEBUG] Phase 3 complete - test ending\n");
 

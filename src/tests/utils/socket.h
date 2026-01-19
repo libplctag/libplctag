@@ -240,19 +240,47 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
 
 /**
  * @brief Receive data on a socket.
- * 
+ *
  * Data is received into the provided buffer.  The passed
  * buffer must have sufficient capacity to hold the incoming data or the
  * data will be truncated.  The end index of the buffer is updated to reflect
  * the amount of data received.
- * 
+ *
  * Any existing data in the buffer is preserved; new data is appended.
- * 
+ *
  * @param sock - Socket to receive data on
  * @param in - Buffer to store the received data
  * @return util_err_t - UTIL_OK on success, error code on failure.
  */
 util_err_t socket_recv_buf(socket_t sock, buf_t *in);
+
+/**
+ * @brief Frame check callback type for socket_recv_frame()
+ *
+ * Called after each recv() to check if a complete frame has been received.
+ *
+ * @param buf - Buffer containing received data so far
+ * @param context - User-supplied context pointer
+ * @return UTIL_OK if frame is complete, UTIL_EAGAIN if more data needed, error code on failure
+ */
+typedef util_err_t (*socket_frame_check_fn)(buf_t *buf, void *context);
+
+/**
+ * @brief Receive data until a complete frame is detected
+ *
+ * Reads data from socket into buffer, calling frame_check after each read
+ * to determine if a complete frame has been received. If the buffer already
+ * contains a complete frame (from previous reads), returns immediately without
+ * performing a recv().
+ *
+ * @param sock - Socket to receive data on
+ * @param buf - Buffer to store received data (data is appended)
+ * @param frame_check - Callback to check if frame is complete
+ * @param context - User context passed to frame_check
+ * @return UTIL_OK when frame complete, UTIL_EAGAIN if would block, error code on failure
+ */
+util_err_t socket_recv_frame(socket_t sock, buf_t *buf,
+                             socket_frame_check_fn frame_check, void *context);
 
 
 

@@ -175,14 +175,14 @@ socket_t coro_get_fd(coro_task_handle_t task);
 /**
  * Yield execution until a task event occurs
  * Usage:
- *   coro_wait_for_event(task, POLLIN);        // Wait for socket read
- *   coro_wait_for_event(task, POLLOUT);       // Wait for socket write
- *   coro_wait_for_event(task, CORO_EVENT_ALWAYS);  // Run next loop cycle
+ *   coro_yield(task, CORO_EVENT_READ);        // Wait for socket read
+ *   coro_yield(task, CORO_EVENT_WRITE);       // Wait for socket write
+ *   coro_yield(task, CORO_EVENT_ALWAYS);      // Run next loop cycle
  */
-#define coro_wait_for_event(task, ev) \
+#define coro_yield(task, event) \
     do { \
         coro_set_line((task), __LINE__); \
-        coro_set_task_event((task), (ev)); \
+        coro_set_task_event((task), (event)); \
         return; \
         case __LINE__:; \
     } while(0)
@@ -194,152 +194,6 @@ socket_t coro_get_fd(coro_task_handle_t task);
 #define CORO_END(task) default: break; } coro_remove_task(task);
 
 
-/**
- * Accept a connection with automatic retry on EAGAIN
- * Usage:
- *   socket_t client_fd;
- *   socket_address_t client_addr;
- *   socket_accept_yield(task, &client_fd, &client_addr, err);
- */
-#define socket_accept_yield(task, client_fd_ptr, client_addr, err) \
-    do { \
-        socket_t __listen_fd; \
-        util_err_t __err; \
-        do { \
-            __listen_fd = coro_get_fd(task); \
-            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Attempting to accept connection on fd=%d", (int)__listen_fd); \
-            __err = socket_accept(__listen_fd, (client_fd_ptr), (client_addr)); \
-            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Accept returned %s", util_err_str(__err)); \
-            if (__err == UTIL_EAGAIN) { \
-                pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Yielding on accept for fd=%d", (int)__listen_fd); \
-                coro_wait_for_event((task), CORO_EVENT_ACCEPT); \
-                __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
-            } \
-        } while (__err == UTIL_EAGAIN); \
-        (err) = __err; \
-    } while(0)
-
-/**
- * Connect with automatic retry on EAGAIN
- * Usage:
- *   socket_address_t addr;
- *   socket_connect_yield(task, &addr, err);
- */
-#define socket_connect_yield(task, address, err) \
-    do { \
-        socket_t __fd; \
-        util_err_t __err; \
-        do { \
-            __fd = coro_get_fd(task); \
-            __err = socket_connect(__fd, (address)); \
-            if (__err == UTIL_EAGAIN) { \
-                coro_wait_for_event((task), CORO_EVENT_CONNECT); \
-                __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
-            } \
-        } while (__err == UTIL_EAGAIN); \
-        (err) = __err; \
-    } while(0)
-
-/**
- * Read with automatic retry until frame complete
- * Usage:
- *   int64_t first_byte_ts = 0, complete_ts = 0;
- *   socket_read_yield(task, &buf, frame_check_func, ctx, &first_byte_ts, &complete_ts, err);
- *
- * @param first_byte_ts_ptr Optional pointer to timestamp (int64_t*) - set when first data arrives (can be NULL)
- * @param complete_ts_ptr Optional pointer to timestamp (int64_t*) - set when frame complete (can be NULL)
- */
-#define socket_read_yield(task, buf, frame_func, ctx, first_byte_ts_ptr, complete_ts_ptr, err) \
-    do { \
-        socket_t __fd; \
-        util_err_t __err; \
-        do { \
-            __fd = coro_get_fd(task); \
-            __err = socket_recv_buf(__fd, (buf)); \
-            if(__err == UTIL_OK) { \
-                pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Read %zu bytes from fd=%d", buf_read_size(buf), (int)__fd); \
-                /* Capture first byte timestamp if requested and not already set */ \
-                if ((first_byte_ts_ptr) && (*(first_byte_ts_ptr) == 0)) { \
-                    *(first_byte_ts_ptr) = util_time_us(); \
-                } \
-                __err = (frame_func)((buf), (ctx)); \
-                /* Capture frame complete timestamp if frame check succeeded */ \
-                if (__err == UTIL_OK && (complete_ts_ptr)) { \
-                    *(complete_ts_ptr) = util_time_us(); \
-                } \
-            } \
-            if( __err == UTIL_EAGAIN) { \
-                coro_wait_for_event((task), CORO_EVENT_READ); \
-                __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
-            } \
-        } while (__err == UTIL_EAGAIN); \
-        (err) = __err; \
-    } while(0)
-
-/**
- * Receive datagram with automatic retry on EAGAIN
- * Usage:
- *   socket_address_t from_addr;
- *   socket_recvfrom_yield(task, &buf, &from_addr, err);
- */
-#define socket_recvfrom_yield(task, buf, from_addr, err) \
-    do { \
-        socket_t __fd; \
-        util_err_t __err; \
-        do { \
-            __fd = coro_get_fd(task); \
-            __err = socket_recvfrom_buf(__fd, (from_addr), (buf)); \
-            if (__err == UTIL_EAGAIN) { \
-                coro_wait_for_event((task), CORO_EVENT_READ); \
-                __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
-            } \
-        } while (__err == UTIL_EAGAIN); \
-        (err) = __err; \
-    } while(0)
-
-/**
- * Send datagram with automatic retry on EAGAIN
- * Usage:
- *   socket_address_t to_addr;
- *   socket_sendto_yield(task, &buf, &to_addr, err);
- */
-#define socket_sendto_yield(task, buf, to_addr, err) \
-    do { \
-        socket_t __fd; \
-        util_err_t __err; \
-        do { \
-            __fd = coro_get_fd(task); \
-            __err = socket_sendto_buf(__fd, (to_addr), (buf)); \
-            if (__err == UTIL_EAGAIN) { \
-                coro_wait_for_event((task), CORO_EVENT_WRITE); \
-                __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
-            } \
-        } while (__err == UTIL_EAGAIN); \
-        (err) = __err; \
-    } while(0)
-
-/**
- * Write with automatic retry on EAGAIN
- * Usage:
- *   socket_write_yield(task, &buf, err);
- */
-#define socket_write_yield(task, buf, err) \
-    do { \
-        socket_t __fd; \
-        util_err_t __err; \
-        __err = UTIL_OK; \
-        while (buf_read_size((buf)) > 0) { \
-            __fd = coro_get_fd(task); \
-            __err = socket_send_buf(__fd, (buf)); \
-            if (__err == UTIL_EAGAIN) { \
-                coro_wait_for_event((task), CORO_EVENT_WRITE); \
-                __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
-            } else if (__err != UTIL_OK) { \
-                break; \
-            } \
-        } \
-        (err) = __err; \
-    } while(0)
 
 #endif
 

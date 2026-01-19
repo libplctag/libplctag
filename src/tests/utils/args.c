@@ -1,11 +1,11 @@
-#include "args.h"
-#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
+#include "args.h"
+#include "log.h"
 
 /* Cross-platform compatibility for strcasecmp */
 #ifdef _WIN32

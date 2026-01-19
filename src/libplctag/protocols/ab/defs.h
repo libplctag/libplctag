@@ -167,11 +167,13 @@
 
 
 #define AB_EIP_SECS_PER_TICK 0x0A
-#define AB_EIP_TIMEOUT_TICKS 0x05
+#define AB_EIP_TIMEOUT_TICKS 0x0E
 #define AB_EIP_VENDOR_ID 0xF33D     /*tres 1337 */
 #define AB_EIP_VENDOR_SN 0x21504345 /* the string !PCE */
-#define AB_EIP_TIMEOUT_MULTIPLIER 0x01
-#define AB_EIP_RPI 1000000
+#define AB_EIP_TIMEOUT_MULTIPLIER 0x03
+#define AB_EIP_RPI 1000000 /* in microseconds */
+
+#define AB_EIP_CONN_TIMEOUT_MS ((AB_EIP_RPI * 4 * (1 << AB_EIP_TIMEOUT_MULTIPLIER)) / 1000)
 
 // #define AB_EIP_TRANSPORT 0xA3
 
@@ -199,6 +201,7 @@ typedef enum {
     AB_PLC_LGX_PCCC,
     AB_PLC_MICRO800,
     AB_PLC_OMRON_NJNX,
+    AB_PLC_GENERIC,         /* Generic CIP device access (no PLC-specific protocol) */
     AB_PLC_TYPE_LAST,
 } plc_type_t;
 

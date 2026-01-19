@@ -17,6 +17,7 @@ endif()
   barcode_test
   busy_test
   data_dumper
+  get_identity
   list_tags_logix
   list_tags_micro8x0
   list_tags_omron_incomplete
@@ -38,6 +39,7 @@ endif()
   test_array_notation
   test_auto_sync
   test_auto_sync_modbus
+  test_idle_disconnect
   test_reconnect_after_outage_async
   test_reconnect_after_outage_sync
   test_callback
