@@ -952,6 +952,9 @@ jobs:
           fetch-depth: 0
 
       - name: Debug GitHub context
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           echo "Event name: ${{ github.event_name }}"
           echo "Ref: ${{ github.ref }}"
@@ -961,8 +964,8 @@ jobs:
           echo "PR Action: ${{ github.event.action }}"
           echo "PR Number: ${{ github.event.number }}"
           echo "PR Merged: ${{ github.event.pull_request.merged }}"
-          echo "PR Title (direct): ${{ github.event.pull_request.title }}"
-          echo "PR Body (direct): ${{ github.event.pull_request.body }}"
+          echo "PR Title (direct): $PR_TITLE"
+          echo "PR Body (direct): $PR_BODY"
           echo "Repository: ${{ github.repository }}"
           echo "SHA: ${{ github.sha }}"
           echo "Actor: ${{ github.actor }}"
@@ -982,12 +985,15 @@ jobs:
           echo "Combined condition: ${{ (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release') }}"
 
       - name: Test PR lookup logic
+        env:
+          GH_PR_TITLE: ${{ github.event.pull_request.title }}
+          GH_PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           echo "=== Testing PR lookup logic ==="
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "Using direct PR context"
-            PR_TITLE="${{ github.event.pull_request.title }}"
-            PR_BODY="${{ github.event.pull_request.body }}"
+            PR_TITLE="$GH_PR_TITLE"
+            PR_BODY="$GH_PR_BODY"
           else
             echo "Using API lookup for push event"
             echo "Finding merged PR for commit ${{ github.sha }}"
