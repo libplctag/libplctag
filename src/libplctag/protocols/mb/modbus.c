@@ -104,9 +104,9 @@ struct modbus_plc_t {
 
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
-    int64_t disconnect_at_time_ms;  /* Calculated deadline for disconnection based on inactivity timeout */
+    int64_t disconnect_at_time_ms; /* Calculated deadline for disconnection based on inactivity timeout */
     int64_t next_auto_sync_time_ms;
-    int32_t cached_inactivity_timeout_ms;  /* Cached value for detecting timeout changes */
+    int32_t cached_inactivity_timeout_ms; /* Cached value for detecting timeout changes */
 
     /* hostname/ip and possibly port of the server. */
     char *server;
@@ -173,7 +173,7 @@ struct modbus_plc_t {
     int64_t tickle_overhead_time_sum_us;
 
     /* comms timeout/disconnect - readable/writable by tags via atomics */
-    atomic_int32_t connection_inactivity_timeout_ms;  /* milliseconds */
+    atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
 
     /* data */
     int read_data_len;
@@ -568,11 +568,13 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", MODBUS_INACTIVITY_TIMEOUT);
     if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > MODBUS_INACTIVITY_TIMEOUT) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
+               "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
                connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT, MODBUS_INACTIVITY_TIMEOUT);
         connection_inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT;
     } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Setting connection_inactivity_timeout_ms to %dms.", connection_inactivity_timeout_ms);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Setting connection_inactivity_timeout_ms to %dms.",
+               connection_inactivity_timeout_ms);
     }
 
     if(server_id < 0 || server_id > 255) {
@@ -974,8 +976,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 timeout_ms = atomic_get_int32(&plc->connection_inactivity_timeout_ms);
                 plc->cached_inactivity_timeout_ms = timeout_ms;
                 plc->disconnect_at_time_ms = plc->last_packet_time_ms + timeout_ms;
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
-                       "Resetting disconnect deadline to %" PRId64 " (timeout=%dms)",
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Resetting disconnect deadline to %" PRId64 " (timeout=%dms)",
                        plc->disconnect_at_time_ms, timeout_ms);
 
                 atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
@@ -1002,7 +1003,8 @@ THREAD_FUNC(modbus_plc_handler) {
                     plc->cached_inactivity_timeout_ms = timeout_ms;
                     plc->disconnect_at_time_ms = plc->last_packet_time_ms + timeout_ms;
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO,
-                           "Updated last_packet_time_ms=%" PRId64 ", disconnect_at=%" PRId64 " (connection succeeded immediately in PLC_CONNECT_START).",
+                           "Updated last_packet_time_ms=%" PRId64 ", disconnect_at=%" PRId64
+                           " (connection succeeded immediately in PLC_CONNECT_START).",
                            plc->last_packet_time_ms, plc->disconnect_at_time_ms);
 
                     plc->state = PLC_READY;
@@ -1034,7 +1036,8 @@ THREAD_FUNC(modbus_plc_handler) {
                     plc->cached_inactivity_timeout_ms = timeout_ms;
                     plc->disconnect_at_time_ms = plc->last_packet_time_ms + timeout_ms;
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO,
-                           "Updated last_packet_time_ms=%" PRId64 ", disconnect_at=%" PRId64 " (connection established in PLC_CONNECT_WAIT).",
+                           "Updated last_packet_time_ms=%" PRId64 ", disconnect_at=%" PRId64
+                           " (connection established in PLC_CONNECT_WAIT).",
                            plc->last_packet_time_ms, plc->disconnect_at_time_ms);
 
                     /* reset err_delay */
@@ -1221,7 +1224,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_IDLE_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_IDLE_WAIT state.");
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_WAIT);
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_IDLE_WAIT);
 
                 /* Check if any tags need connection (are not IDLE) */
                 if(plc->tags_needing_connection > 0) {
@@ -1241,7 +1244,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_ERR_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_ERR_WAIT state.");
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_WAIT);
+                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_ERR_WAIT);
 
                 /* wait until done. */
                 if(err_delay_until > time_ms()) {
@@ -3357,14 +3360,12 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
         if(clamped_value < 100) {
             clamped_value = 100;
             out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
-                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.",
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.",
                    new_value);
         } else if(clamped_value > MODBUS_INACTIVITY_TIMEOUT) {
             clamped_value = MODBUS_INACTIVITY_TIMEOUT;
             out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.",
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.",
                    new_value, MODBUS_INACTIVITY_TIMEOUT);
         }
 
@@ -3378,8 +3379,7 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
                 rc = PLCTAG_STATUS_OK;
             }
         } else {
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
-                   "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
             tag->status = PLCTAG_ERR_NOT_FOUND;
             rc = PLCTAG_ERR_NOT_FOUND;
         }

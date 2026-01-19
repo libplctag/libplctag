@@ -101,7 +101,8 @@ static const char *status_to_string(int status) {
         case PLCTAG_CONN_STATUS_DOWN: return "DOWN";
         case PLCTAG_CONN_STATUS_CONNECTING: return "CONNECTING";
         case PLCTAG_CONN_STATUS_DISCONNECTING: return "DISCONNECTING";
-        case PLCTAG_CONN_STATUS_WAIT: return "WAIT";
+        case PLCTAG_CONN_STATUS_IDLE_WAIT: return "IDLE_WAIT";
+        case PLCTAG_CONN_STATUS_ERR_WAIT: return "ERR_WAIT";
         default: return "UNKNOWN";
     }
 }
@@ -232,7 +233,7 @@ int main(int argc, char **argv) {
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
     // NOLINTNEXTLINE
     fprintf(stderr, "Connection status after 150%% wait: %s\n", status_to_string(status));
-    if(status != PLCTAG_CONN_STATUS_DOWN && status != PLCTAG_CONN_STATUS_WAIT) {
+    if(status != PLCTAG_CONN_STATUS_DOWN && status != PLCTAG_CONN_STATUS_IDLE_WAIT) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Connection should be DOWN or WAIT after 150%% wait, but is %s\n", status_to_string(status));
         plc_tag_destroy(tag);

@@ -1289,8 +1289,8 @@ typedef enum {
     SESSION_UNREGISTER,
     SESSION_CLOSE_SOCKET,
     SESSION_START_RETRY,
-    SESSION_WAIT_RETRY,
-    SESSION_WAIT_RECONNECT
+    SESSION_WAIT_ERR_RETRY,
+    SESSION_WAIT_IDLE_RECONNECT
 } session_state_t;
 
 
@@ -1555,7 +1555,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 if(auto_disconnect) {
-                    state = SESSION_WAIT_RECONNECT;
+                    state = SESSION_WAIT_IDLE_RECONNECT;
                 } else {
                     state = SESSION_START_RETRY;
                 }
@@ -1572,14 +1572,14 @@ THREAD_FUNC(session_handler) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Waiting %dms before trying to reconnect.", (int)(retry_wait_ms));
 
                 /* start waiting. */
-                state = SESSION_WAIT_RETRY;
+                state = SESSION_WAIT_ERR_RETRY;
 
                 cond_signal(session->session_wait_cond);
                 break;
 
-            case SESSION_WAIT_RETRY:
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_WAIT_RETRY state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_WAIT);
+            case SESSION_WAIT_ERR_RETRY:
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_WAIT_ERR_RETRY state.");
+                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_ERR_WAIT);
 
                 if(timeout_time < now) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET_START.");
@@ -1592,10 +1592,10 @@ THREAD_FUNC(session_handler) {
 
                 break;
 
-            case SESSION_WAIT_RECONNECT:
+            case SESSION_WAIT_IDLE_RECONNECT:
                 /* wait for at least one request to queue before reconnecting. */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_WAIT_RECONNECT state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_WAIT);
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "in SESSION_WAIT_IDLE_RECONNECT state.");
+                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_IDLE_WAIT);
 
                 auto_disconnect = 0;
 
