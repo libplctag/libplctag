@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 
 #define REQUIRED_VERSION 2, 1, 10
 #define DATA_TIMEOUT 5000
@@ -202,7 +203,7 @@ int main(int argc, char **argv) {
     /* wait 50% of the timeout - connection should still be UP */
     wait_time_ms = (NEW_TIMEOUT_MS / 2);
     // NOLINTNEXTLINE
-    fprintf(stderr, "Waiting %d ms (50%% of timeout)...\n", wait_time_ms);
+    fprintf(stderr, "Waiting %" PRId64 " ms (50%% of timeout)...\n", wait_time_ms);
 
     wait_until(compat_time_ms() + wait_time_ms);
 
@@ -223,7 +224,7 @@ int main(int argc, char **argv) {
     /* wait 150% of the timeout - connection should be DOWN/WAIT */
     wait_time_ms = (NEW_TIMEOUT_MS * 3 / 2);
     // NOLINTNEXTLINE
-    fprintf(stderr, "Waiting %d ms (150%% of timeout)...\n", wait_time_ms);
+    fprintf(stderr, "Waiting %" PRId64 "ms (150%% of timeout)...\n", wait_time_ms);
 
     wait_until(compat_time_ms() + wait_time_ms);
 
@@ -309,7 +310,7 @@ int main(int argc, char **argv) {
     /* wait the near-maximum timeout - connection should still be UP (not timed out) */
     wait_time_ms = NEAR_MAX_TIMEOUT_MS;
     // NOLINTNEXTLINE
-    fprintf(stderr, "Waiting %d ms (near-maximum timeout)...\n", wait_time_ms);
+    fprintf(stderr, "Waiting %" PRId64 "ms (near-maximum timeout)...\n", wait_time_ms);
 
     wait_until(compat_time_ms() + wait_time_ms);
 
