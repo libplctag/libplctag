@@ -121,11 +121,34 @@ static void read_tag(int32_t tag) {
 }
 
 
+static void wait_until(int64_t end_time_ms) {
+    int64_t now_ms = compat_time_ms();
+    int64_t start_time_ms = now_ms;
+    int64_t wait_duration_ms = end_time_ms - start_time_ms;
+
+    do {
+        int64_t sleep_ms = end_time_ms - now_ms;
+
+        /* clamp max wait at 500ms*/
+        if(sleep_ms > 500) { sleep_ms = 500; }
+
+        if(sleep_ms <= 0) { break; }
+
+        compat_sleep_ms((uint32_t)sleep_ms, NULL);
+
+        // NOLINTNEXTLINE
+        fprintf(stderr, "    Waiting... %.2f%% complete\n", ((float)(now_ms - start_time_ms) * 100.0f) / (float)wait_duration_ms);
+
+        now_ms = compat_time_ms();
+    } while(now_ms < end_time_ms);
+}
+
+
 int main(int argc, char **argv) {
     int32_t tag = 0;
     int timeout_value = 0;
     int status = 0;
-    int wait_time_ms = 0;
+    int64_t wait_time_ms = 0;
 
     /* check library API version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -180,12 +203,8 @@ int main(int argc, char **argv) {
     wait_time_ms = (NEW_TIMEOUT_MS / 2);
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting %d ms (50%% of timeout)...\n", wait_time_ms);
-    int remaining_ms = wait_time_ms;
-    while(remaining_ms > 0) {
-        int sleep_ms = (remaining_ms > 500) ? 500 : remaining_ms;
-        compat_sleep_ms((uint32_t)sleep_ms, NULL);
-        remaining_ms -= sleep_ms;
-    }
+
+    wait_until(compat_time_ms() + wait_time_ms);
 
     /* check connection status - should still be UP */
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
@@ -205,12 +224,8 @@ int main(int argc, char **argv) {
     wait_time_ms = (NEW_TIMEOUT_MS * 3 / 2);
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting %d ms (150%% of timeout)...\n", wait_time_ms);
-    remaining_ms = wait_time_ms;
-    while(remaining_ms > 0) {
-        int sleep_ms = (remaining_ms > 500) ? 500 : remaining_ms;
-        compat_sleep_ms((uint32_t)sleep_ms, NULL);
-        remaining_ms -= sleep_ms;
-    }
+
+    wait_until(compat_time_ms() + wait_time_ms);
 
     /* check connection status - should be DOWN or WAIT */
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
@@ -276,8 +291,7 @@ int main(int argc, char **argv) {
     timeout_value = plc_tag_get_int_attribute(tag, "connection_inactivity_timeout_ms", 0);
     if(timeout_value != initial_timeout_value) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "ERROR: Failed to set near-max timeout. Expected %d ms but got %d ms\n", NEAR_MAX_TIMEOUT_MS,
-                timeout_value);
+        fprintf(stderr, "ERROR: Failed to set max timeout. Expected %d ms but got %d ms\n", initial_timeout_value, timeout_value);
         plc_tag_destroy(tag);
         exit(1);
     }
@@ -296,12 +310,8 @@ int main(int argc, char **argv) {
     wait_time_ms = NEAR_MAX_TIMEOUT_MS;
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting %d ms (near-maximum timeout)...\n", wait_time_ms);
-    remaining_ms = wait_time_ms;
-    while(remaining_ms > 0) {
-        int sleep_ms = (remaining_ms > 500) ? 500 : remaining_ms;
-        compat_sleep_ms((uint32_t)sleep_ms, NULL);
-        remaining_ms -= sleep_ms;
-    }
+
+    wait_until(compat_time_ms() + wait_time_ms);
 
     /* check connection status - should still be UP */
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
