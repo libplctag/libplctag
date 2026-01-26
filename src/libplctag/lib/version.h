@@ -42,7 +42,7 @@
  * checking them against a dynamically linked library.
  */
 
-#define LIB_VER_STRING "2.6.14"
+#define LIB_VER_STRING "2.6.15"
 #define LIB_VER_MAJOR (@libplctag_VERSION_MAJOR @)
 #define LIB_VER_MINOR (@libplctag_VERSION_MINOR @)
 #define LIB_VER_PATCH (@libplctag_VERSION_PATCH @)
