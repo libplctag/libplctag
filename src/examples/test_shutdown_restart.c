@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -87,9 +87,7 @@ static void parse_args(int argc, char **argv) {
     }
 
     for(int i = 1; i < argc; i++) {
-        if(strncmp(argv[i], "--tag=", 6) == 0) {
-            base_tag_path = &argv[i][6];
-        }
+        if(strncmp(argv[i], "--tag=", 6) == 0) { base_tag_path = &argv[i][6]; }
     }
 
     if(base_tag_path == NULL || strlen(base_tag_path) == 0) {
@@ -171,9 +169,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "\n=== Step 6: Waiting for threads to finish ===\n");
     for(int i = 0; i < NUM_THREADS; i++) {
         rc = compat_thread_join(threads[i], NULL);
-        if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "WARNING: Error joining thread %d: %s\n", i, plc_tag_decode_error(rc));
-        }
+        if(rc != PLCTAG_STATUS_OK) { fprintf(stderr, "WARNING: Error joining thread %d: %s\n", i, plc_tag_decode_error(rc)); }
         fprintf(stderr, "Thread %d joined.\n", i);
     }
 
@@ -181,22 +177,16 @@ int main(int argc, char **argv) {
      * Step 7: Report statistics
      */
     fprintf(stderr, "\n=== Step 7: Thread Statistics ===\n");
-    fprintf(stderr, "%-8s %-12s %-14s %-12s %-12s %-14s %-8s %-8s %-8s\n",
-            "Thread", "InitCreate", "InitTime(ms)", "RecreateOK", "RecreateTry", "RecreTime(ms)", "Reads", "Writes", "Errors");
+    fprintf(stderr, "%-8s %-12s %-14s %-12s %-12s %-14s %-8s %-8s %-8s\n", "Thread", "InitCreate", "InitTime(ms)", "RecreateOK",
+            "RecreateTry", "RecreTime(ms)", "Reads", "Writes", "Errors");
     fprintf(stderr, "-------- ------------ -------------- ------------ ------------ -------------- -------- -------- --------\n");
 
     for(int i = 0; i < NUM_THREADS; i++) {
         thread_stats_t *stats = &thread_stats[i];
-        fprintf(stderr, "%-8d %-12s %-14" PRId64 " %-12s %-12s %-14" PRId64 " %-8d %-8d %-8d\n",
-                stats->thread_id,
-                stats->initial_tag_created ? "YES" : "NO",
-                stats->initial_tag_create_time_ms,
-                stats->recreate_succeeded ? "YES" : "NO",
-                stats->recreate_attempted ? "YES" : "NO",
-                stats->recreate_time_ms,
-                stats->read_count,
-                stats->write_count,
-                stats->error_count);
+        fprintf(stderr, "%-8d %-12s %-14" PRId64 " %-12s %-12s %-14" PRId64 " %-8d %-8d %-8d\n", stats->thread_id,
+                stats->initial_tag_created ? "YES" : "NO", stats->initial_tag_create_time_ms,
+                stats->recreate_succeeded ? "YES" : "NO", stats->recreate_attempted ? "YES" : "NO", stats->recreate_time_ms,
+                stats->read_count, stats->write_count, stats->error_count);
 
         if(!stats->initial_tag_created) {
             fprintf(stderr, "  Thread %d: FAILED to create initial tag!\n", i);
@@ -256,8 +246,8 @@ static void *worker_thread(void *arg) {
     }
 
     stats->initial_tag_created = 1;
-    fprintf(stderr, "Thread %d: Initial tag created (ID=%" PRId32 ") in %" PRId64 " ms\n",
-            stats->thread_id, tag_id, stats->initial_tag_create_time_ms);
+    fprintf(stderr, "Thread %d: Initial tag created (ID=%" PRId32 ") in %" PRId64 " ms\n", stats->thread_id, tag_id,
+            stats->initial_tag_create_time_ms);
 
     /*
      * Main loop: read, increment, write, sleep
@@ -274,8 +264,8 @@ static void *worker_thread(void *arg) {
             stats->recreate_time_ms = compat_time_ms() - start_time;
 
             if(tag_id < 0) {
-                fprintf(stderr, "Thread %d: ERROR recreating tag: %s, retrying...\n",
-                        stats->thread_id, plc_tag_decode_error(tag_id));
+                fprintf(stderr, "Thread %d: ERROR recreating tag: %s, retrying...\n", stats->thread_id,
+                        plc_tag_decode_error(tag_id));
                 stats->error_count++;
                 stats->last_error = tag_id;
                 compat_sleep_ms(LOOP_INTERVAL_MS, NULL);
@@ -284,8 +274,8 @@ static void *worker_thread(void *arg) {
 
             stats->recreate_succeeded = 1;
             need_recreate = 0;
-            fprintf(stderr, "Thread %d: Tag recreated (ID=%" PRId32 ") in %" PRId64 " ms\n",
-                    stats->thread_id, tag_id, stats->recreate_time_ms);
+            fprintf(stderr, "Thread %d: Tag recreated (ID=%" PRId32 ") in %" PRId64 " ms\n", stats->thread_id, tag_id,
+                    stats->recreate_time_ms);
         }
 
         /* Read the tag */
@@ -338,9 +328,8 @@ static void *worker_thread(void *arg) {
         }
     }
 
-    fprintf(stderr, "Thread %d: Exiting. Reads=%d, Writes=%d, Errors=%d\n",
-            stats->thread_id, stats->read_count, stats->write_count, stats->error_count);
+    fprintf(stderr, "Thread %d: Exiting. Reads=%d, Writes=%d, Errors=%d\n", stats->thread_id, stats->read_count,
+            stats->write_count, stats->error_count);
 
     return NULL;
 }
-

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,7 +34,6 @@
 /***************************************************************************
  ****************************** WINDOWS ************************************
  **************************************************************************/
-
 
 
 #ifndef __PLATFORM_H__
@@ -73,15 +72,15 @@ extern "C"
 #define MSG_NOSIGNAL 0
 
 #ifdef _MSC_VER
-    /* MS Visual Studio C compiler. */
-    #define START_PACK __pragma( pack(push, 1) )
-    #define END_PACK   __pragma( pack(pop) )
-    #define __PRETTY_FUNCTION__ __FUNCTION__
+/* MS Visual Studio C compiler. */
+#    define START_PACK __pragma(pack(push, 1))
+#    define END_PACK __pragma(pack(pop))
+#    define __PRETTY_FUNCTION__ __FUNCTION__
 #else
-    /* MinGW on Windows. */
-    #define START_PACK
-    #define END_PACK  __attribute__((packed))
-    #define __PRETTY_FUNCTION__  __func__
+/* MinGW on Windows. */
+#    define START_PACK
+#    define END_PACK __attribute__((packed))
+#    define __PRETTY_FUNCTION__ __func__
 #endif
 
 /* VS C++ uses foo[] to denote a zero length array. */
@@ -93,43 +92,33 @@ extern "C"
 
 /* Apparently ssize_t is not on Windows. */
 #if defined(_MSC_VER)
-#include <BaseTsd.h>
+#    include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #endif
 
 
 #ifndef COUNT_NARG
-#define COUNT_NARG(...)                                                \
-         COUNT_NARG_(__VA_ARGS__,COUNT_RSEQ_N())
+#    define COUNT_NARG(...) COUNT_NARG_(__VA_ARGS__, COUNT_RSEQ_N())
 #endif
 
 #ifndef COUNT_NARG_
-#define COUNT_NARG_(...)                                               \
-         COUNT_ARG_N(__VA_ARGS__)
+#    define COUNT_NARG_(...) COUNT_ARG_N(__VA_ARGS__)
 #endif
 
 #ifndef COUNT_ARG_N
-#define COUNT_ARG_N(                                                   \
-          _1, _2, _3, _4, _5, _6, _7, _8, _9,_10, \
-         _11,_12,_13,_14,_15,_16,_17,_18,_19,_20, \
-         _21,_22,_23,_24,_25,_26,_27,_28,_29,_30, \
-         _31,_32,_33,_34,_35,_36,_37,_38,_39,_40, \
-         _41,_42,_43,_44,_45,_46,_47,_48,_49,_50, \
-         _51,_52,_53,_54,_55,_56,_57,_58,_59,_60, \
-         _61,_62,_63,N,...) N
+#    define COUNT_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22,     \
+                        _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43, \
+                        _44, _45, _46, _47, _48, _49, _50, _51, _52, _53, _54, _55, _56, _57, _58, _59, _60, _61, _62, _63, N,   \
+                        ...)                                                                                                     \
+        N
 #endif
 
 #ifndef COUNT_RSEQ_N
-#define COUNT_RSEQ_N()                                                 \
-         63,62,61,60,                   \
-         59,58,57,56,55,54,53,52,51,50, \
-         49,48,47,46,45,44,43,42,41,40, \
-         39,38,37,36,35,34,33,32,31,30, \
-         29,28,27,26,25,24,23,22,21,20, \
-         19,18,17,16,15,14,13,12,11,10, \
-         9,8,7,6,5,4,3,2,1,0
+#    define COUNT_RSEQ_N()                                                                                                       \
+        63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34,  \
+            33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, \
+            2, 1, 0
 #endif
-
 
 
 /* memory functions/defs */
@@ -145,14 +134,14 @@ extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
 extern int str_cmp(const char *first, const char *second);
 extern int str_cmp_i(const char *first, const char *second);
 extern int str_cmp_i_n(const char *first, const char *second, int num_chars);
-extern char* str_str_cmp_i(const char* haystack, const char* needle);
+extern char *str_str_cmp_i(const char *haystack, const char *needle);
 extern int str_copy(char *dst, int dst_size, const char *src);
 extern int str_length(const char *str);
 extern char *str_dup(const char *str);
 extern int str_to_int(const char *str, int *val);
 extern int str_to_float(const char *str, float *val);
 extern char **str_split(const char *str, const char *sep);
-#define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__)+1, s1, __VA_ARGS__)
+#define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__) + 1, s1, __VA_ARGS__)
 extern char *str_concat_impl(int num_args, ...);
 
 /* mutex functions/defs */
@@ -165,8 +154,8 @@ extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
 #if defined(_WIN32) && defined(_MSC_VER)
-    /* MinGW on Windows does not need this. */
-    #define __func__ __FUNCTION__
+/* MinGW on Windows does not need this. */
+#    define __func__ __FUNCTION__
 #endif
 
 #define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
@@ -193,17 +182,20 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
  * synchronized block.
  */
 
-#define PLCTAG_CAT2(a,b) a##b
-#define PLCTAG_CAT(a,b) PLCTAG_CAT2(a,b)
-#define LINE_ID(base) PLCTAG_CAT(base,__LINE__)
+#define PLCTAG_CAT2(a, b) a##b
+#define PLCTAG_CAT(a, b) PLCTAG_CAT2(a, b)
+#define LINE_ID(base) PLCTAG_CAT(base, __LINE__)
 
-#define critical_block(lock) \
-for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))  for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock); LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_) ; LINE_ID(__sync_flag_nargle_) = 0)
+#define critical_block(lock)                                                \
+    for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); \
+        LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))               \
+        for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock);              \
+            LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0)
 
 /* thread functions/defs */
 typedef struct thread_t *thread_p;
-//typedef PTHREAD_START_ROUTINE thread_func_t;
-//typedef DWORD /*WINAPI*/ (*thread_func_t)(void *lpParam );
+// typedef PTHREAD_START_ROUTINE thread_func_t;
+// typedef DWORD /*WINAPI*/ (*thread_func_t)(void *lpParam );
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg);
 extern void thread_stop(void);
 extern void thread_kill(thread_p t);
@@ -216,23 +208,26 @@ extern int thread_destroy(thread_p *t);
 
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && (defined(__MINGW32__) || defined(__MINGW64__))
-    #define THREAD_LOCAL _Thread_local
+#    define THREAD_LOCAL _Thread_local
 #else /* use Windows __declspec attribute */
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
-    #include <processthreadsapi.h>
-    #define THREAD_LOCAL __declspec(thread)
-    #define thread_func_t LPTHREAD_START_ROUTINE
-    #define NO_RETURN __declspec(noreturn)
-    #define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
-    #define THREAD_RETURN(val) return (DWORD)val;
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
+#    include <processthreadsapi.h>
+#    define THREAD_LOCAL __declspec(thread)
+#    define thread_func_t LPTHREAD_START_ROUTINE
+#    define NO_RETURN __declspec(noreturn)
+#    define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
+#    define THREAD_RETURN(val) return (DWORD)val;
 
 #endif
 
 
 /* atomic operations */
-#define spin_block(lock) \
-for(int LINE_ID(__sync_flag_nargle_lock) = 1; LINE_ID(__sync_flag_nargle_lock); LINE_ID(__sync_flag_nargle_lock) = 0, lock_release(lock))  for(int LINE_ID(__sync_rc_nargle_lock) = lock_acquire(lock); LINE_ID(__sync_rc_nargle_lock) && LINE_ID(__sync_flag_nargle_lock) ; LINE_ID(__sync_flag_nargle_lock) = 0)
+#define spin_block(lock)                                                            \
+    for(int LINE_ID(__sync_flag_nargle_lock) = 1; LINE_ID(__sync_flag_nargle_lock); \
+        LINE_ID(__sync_flag_nargle_lock) = 0, lock_release(lock))                   \
+        for(int LINE_ID(__sync_rc_nargle_lock) = lock_acquire(lock);                \
+            LINE_ID(__sync_rc_nargle_lock) && LINE_ID(__sync_flag_nargle_lock); LINE_ID(__sync_flag_nargle_lock) = 0)
 
 typedef volatile long int lock_t;
 
@@ -245,8 +240,8 @@ extern void lock_release(lock_t *lock);
 
 
 /* condition variables */
-typedef struct cond_t* cond_p;
-extern int cond_create(cond_p * c);
+typedef struct cond_t *cond_p;
+extern int cond_create(cond_p *c);
 extern int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms);
 extern int cond_signal_impl(const char *func, int line_num, cond_p c);
 extern int cond_clear_impl(const char *func, int line_num, cond_p c);
@@ -259,14 +254,14 @@ extern int cond_destroy(cond_p *c);
 /* socket functions */
 typedef struct sock_t *sock_p;
 typedef enum {
-    SOCK_EVENT_NONE         = 0,
-    SOCK_EVENT_TIMEOUT      = (1 << 0),
-    SOCK_EVENT_DISCONNECT   = (1 << 1),
-    SOCK_EVENT_ERROR        = (1 << 2),
-    SOCK_EVENT_CAN_READ     = (1 << 3),
-    SOCK_EVENT_CAN_WRITE    = (1 << 4),
-    SOCK_EVENT_WAKE_UP      = (1 << 5),
-    SOCK_EVENT_CONNECT      = (1 << 6),
+    SOCK_EVENT_NONE = 0,
+    SOCK_EVENT_TIMEOUT = (1 << 0),
+    SOCK_EVENT_DISCONNECT = (1 << 1),
+    SOCK_EVENT_ERROR = (1 << 2),
+    SOCK_EVENT_CAN_READ = (1 << 3),
+    SOCK_EVENT_CAN_WRITE = (1 << 4),
+    SOCK_EVENT_WAKE_UP = (1 << 5),
+    SOCK_EVENT_CONNECT = (1 << 6),
 
     SOCK_EVENT_DEFAULT_MASK = (SOCK_EVENT_TIMEOUT | SOCK_EVENT_DISCONNECT | SOCK_EVENT_ERROR | SOCK_EVENT_WAKE_UP)
 } sock_event_t;
@@ -303,7 +298,6 @@ extern struct tm *localtime_r(const time_t *timep, struct tm *result);
 }
 #endif
 */
-
 
 
 #endif

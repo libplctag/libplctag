@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -65,7 +65,8 @@ static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip
 
 
 slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
-    log_info("eip_dispatch_request(): raw_output size = %zu, server_to_client_max_packet = %zu", slice_len(raw_output), plc->server_to_client_max_packet);
+    log_info("eip_dispatch_request(): raw_output size = %zu, server_to_client_max_packet = %zu", slice_len(raw_output),
+             plc->server_to_client_max_packet);
 
     slice_s output = slice_from_slice(raw_output, 0, plc->server_to_client_max_packet);
 
@@ -190,14 +191,15 @@ slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s
     /* EIP version must be 1. */
     if(register_request.eip_version != EIP_VERSION) {
         log_info("Request failed sanity check: request EIP version is %u but should be %u.", register_request.eip_version,
-             EIP_VERSION);
+                 EIP_VERSION);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* Session request option flags must be zero. */
     if(register_request.option_flags != (uint16_t)0) {
-        log_info("Request failed sanity check: request option flags field is %u but should be zero.", register_request.option_flags);
+        log_info("Request failed sanity check: request option flags field is %u but should be zero.",
+                 register_request.option_flags);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }

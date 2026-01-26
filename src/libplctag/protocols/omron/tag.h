@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,17 +32,17 @@
  ***************************************************************************/
 
 #ifndef __PLCTAG_OMRON_TAG_H__
-#define __PLCTAG_OMRON_TAG_H__ 1
+#    define __PLCTAG_OMRON_TAG_H__ 1
 
 /* do these first */
-#define MAX_TAG_NAME (260)
-#define MAX_TAG_TYPE_INFO (64)
+#    define MAX_TAG_NAME (260)
+#    define MAX_TAG_TYPE_INFO (64)
 
 /* they are used in some of these includes */
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
-#include <libplctag/protocols/omron/conn.h>
-#include <libplctag/protocols/omron/omron_common.h>
+#    include <libplctag/lib/libplctag.h>
+#    include <libplctag/lib/tag.h>
+#    include <libplctag/protocols/omron/conn.h>
+#    include <libplctag/protocols/omron/omron_common.h>
 
 typedef enum {
     OMRON_TYPE_BOOL,

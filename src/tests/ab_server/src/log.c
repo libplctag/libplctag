@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -44,11 +44,10 @@
 
 /* Thread-local storage */
 #if defined(_MSC_VER)
-    #define THREAD_LOCAL __declspec(thread)
+#    define THREAD_LOCAL __declspec(thread)
 #else
-    #define THREAD_LOCAL __thread
+#    define THREAD_LOCAL __thread
 #endif
-
 
 
 /*
@@ -57,9 +56,9 @@
 
 static volatile log_level_t global_debug_level = LOG_LEVEL_NONE;
 #if defined(_MSC_VER)
-static volatile LONG thread_num_lock = 0;  /* Used with InterlockedCompareExchange (requires 4 bytes) */
+static volatile LONG thread_num_lock = 0; /* Used with InterlockedCompareExchange (requires 4 bytes) */
 #else
-static volatile unsigned char thread_num_lock = 0;  /* Used with __atomic_test_and_set/__atomic_clear */
+static volatile unsigned char thread_num_lock = 0; /* Used with __atomic_test_and_set/__atomic_clear */
 #endif
 static volatile uint32_t thread_num = 1;
 
@@ -83,7 +82,6 @@ log_level_t log_set_level(log_level_t level) {
 log_level_t log_get_level(void) { return global_debug_level; }
 
 
-
 static uint32_t get_thread_id(void) {
     if(!this_thread_num) {
         /* Use spinlock to ensure only one thread initializes at a time */
@@ -92,23 +90,21 @@ static uint32_t get_thread_id(void) {
         int expected = 0;
         int desired = 1;
         int actual = 0;
-        while((actual = InterlockedCompareExchange((volatile LONG*)&thread_num_lock, desired, expected)) != expected) {
+        while((actual = InterlockedCompareExchange((volatile LONG *)&thread_num_lock, desired, expected)) != expected) {
             /* Busy wait - spinlock */
         }
 
         /* Check again inside the lock - another thread may have initialized while we waited */
         if(!this_thread_num) {
             /* Increment and return old value */
-            this_thread_num = (uint32_t)InterlockedIncrement((volatile LONG*)&thread_num) - 1;
+            this_thread_num = (uint32_t)InterlockedIncrement((volatile LONG *)&thread_num) - 1;
         }
 
         /* Release the lock */
-        InterlockedExchange((volatile LONG*)&thread_num_lock, 0);
+        InterlockedExchange((volatile LONG *)&thread_num_lock, 0);
 #else
         /* POSIX: Use GCC __atomic builtins on unsigned char for proper semantics */
-        while(__atomic_test_and_set(&thread_num_lock, __ATOMIC_SEQ_CST)) {
-            /* Busy wait - spinlock */
-        }
+        while(__atomic_test_and_set(&thread_num_lock, __ATOMIC_SEQ_CST)) { /* Busy wait - spinlock */ }
 
         /* Check again inside the lock - another thread may have initialized while we waited */
         if(!this_thread_num) {
@@ -148,13 +144,13 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
     FILETIME ft;
     ULARGE_INTEGER epoch_time;
     GetSystemTimeAsFileTime(&ft);
-    epoch_time.LowPart  = ft.dwLowDateTime;
+    epoch_time.LowPart = ft.dwLowDateTime;
     epoch_time.HighPart = ft.dwHighDateTime;
     epoch_ms = (int64_t)((epoch_time.QuadPart - 116444736000000000ULL) / 10000); /* -> ms */
 #else
     /* POSIX: clock_gettime(CLOCK_REALTIME) */
     struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+    if(clock_gettime(CLOCK_REALTIME, &ts) == -1) {
         epoch_ms = 0;
     } else {
         epoch_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
@@ -175,15 +171,12 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
 
     /* Build log prefix with timestamp, thread id, level, and site */
     const char *level_str = "UNKNOWN";
-    if(debug_level >= 0 && debug_level < LOG_LEVEL_END) {
-        level_str = log_level_name[debug_level];
-    }
+    if(debug_level >= 0 && debug_level < LOG_LEVEL_END) { level_str = log_level_name[debug_level]; }
 
     // NOLINTNEXTLINE
-    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) %s %s:%d %s\n",
-             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-             t.tm_hour, t.tm_min, t.tm_sec, remainder_ms,
-             get_thread_id(), level_str, func, line_num, templ);
+    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) %s %s:%d %s\n", t.tm_year + 1900,
+             t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), level_str, func, line_num,
+             templ);
     prefix[sizeof(prefix) - 1] = 0;
 
     /* Format and emit the final message */

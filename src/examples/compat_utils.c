@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -120,9 +120,7 @@ int compat_mutex_destroy(compat_mutex_t *mutex) { return pthread_mutex_destroy(m
 
 /* atomic operations - POSIX */
 
-int32_t compat_atomic_load_int32(compat_atomic_int32_t *atomic) {
-    return __atomic_load_n(&atomic->value, __ATOMIC_SEQ_CST);
-}
+int32_t compat_atomic_load_int32(compat_atomic_int32_t *atomic) { return __atomic_load_n(&atomic->value, __ATOMIC_SEQ_CST); }
 
 void compat_atomic_store_int32(compat_atomic_int32_t *atomic, int32_t value) {
     __atomic_store_n(&atomic->value, value, __ATOMIC_SEQ_CST);
@@ -132,13 +130,9 @@ int32_t compat_atomic_add_int32(compat_atomic_int32_t *atomic, int32_t delta) {
     return __atomic_fetch_add(&atomic->value, delta, __ATOMIC_SEQ_CST);
 }
 
-int32_t compat_atomic_inc_int32(compat_atomic_int32_t *atomic) {
-    return __atomic_fetch_add(&atomic->value, 1, __ATOMIC_SEQ_CST);
-}
+int32_t compat_atomic_inc_int32(compat_atomic_int32_t *atomic) { return __atomic_fetch_add(&atomic->value, 1, __ATOMIC_SEQ_CST); }
 
-int64_t compat_atomic_load_int64(compat_atomic_int64_t *atomic) {
-    return __atomic_load_n(&atomic->value, __ATOMIC_SEQ_CST);
-}
+int64_t compat_atomic_load_int64(compat_atomic_int64_t *atomic) { return __atomic_load_n(&atomic->value, __ATOMIC_SEQ_CST); }
 
 void compat_atomic_store_int64(compat_atomic_int64_t *atomic, int64_t value) {
     __atomic_store_n(&atomic->value, value, __ATOMIC_SEQ_CST);

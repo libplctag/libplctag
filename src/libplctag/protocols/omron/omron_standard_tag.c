@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -281,7 +281,8 @@ int tag_write_start(omron_tag_p tag) {
      */
 
     if(tag->first_read) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "No read has completed yet, doing pre-read to get type information.");
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL,
+               "No read has completed yet, doing pre-read to get type information.");
 
         tag->pre_write_read = 1;
         tag->write_in_progress = 0; /* temporarily mask this off */
@@ -409,7 +410,8 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to add request to conn! Error %s!", plc_tag_decode_error(rc));
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+               tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -550,7 +552,8 @@ int build_read_request_unconnected(omron_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to add request to conn! Error %s!", plc_tag_decode_error(rc));
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+               tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -582,7 +585,8 @@ int build_write_bit_request_connected(omron_tag_p tag) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -685,9 +689,9 @@ int build_write_bit_request_connected(omron_tag_p tag) {
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+    cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
     cip->cpf_cai_item_type = h2le16(OMRON_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
+    cip->cpf_cai_item_length = h2le16(4);                /* ALWAYS 4, size of connection ID*/
     cip->cpf_cdi_item_type = h2le16(OMRON_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
@@ -736,7 +740,8 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -858,20 +863,20 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+    cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
     cip->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
+    cip->cpf_nai_item_length = h2le16(0);                /* ALWAYS 0 */
     cip->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
     cip->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
 
     /* CM Service Request - Connection Manager */
     cip->cm_service_code = OMRON_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
+    cip->cm_req_path_size = 2;                             /* 2, size in 16-bit words of path, next field */
+    cip->cm_req_path[0] = 0x20;                            /* class */
+    cip->cm_req_path[1] = 0x06;                            /* Connection Manager */
+    cip->cm_req_path[2] = 0x24;                            /* instance */
+    cip->cm_req_path[3] = 0x01;                            /* instance 1 */
 
     /* Unconnected send needs timeout information */
     cip->secs_per_tick = OMRON_EIP_SECS_PER_TICK; /* seconds per tick */
@@ -904,7 +909,6 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
 }
 
 
-
 int build_write_request_connected(omron_tag_p tag, int byte_offset) {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_co_req *cip = NULL;
@@ -927,7 +931,8 @@ int build_write_request_connected(omron_tag_p tag, int byte_offset) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1040,7 +1045,8 @@ int build_write_request_connected(omron_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to add request to conn! Error %s!", plc_tag_decode_error(rc));
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+               tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -1078,7 +1084,8 @@ int build_write_request_unconnected(omron_tag_p tag, int byte_offset) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1226,7 +1233,8 @@ int build_write_request_unconnected(omron_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to add request to conn! Error %s!", plc_tag_decode_error(rc));
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+               tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -1274,7 +1282,8 @@ static int check_read_status_connected(omron_tag_p tag) {
         ptrdiff_t payload_size = 0;
 
         if(cip_resp->reply_service != (OMRON_EIP_CMD_CIP_READ | OMRON_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d",
+                   cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -1312,7 +1321,8 @@ static int check_read_status_connected(omron_tag_p tag) {
                     if(type_length == 0) { type_length = *(data + 1) + 2; }
 
                     if(type_length <= 0) {
-                        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN,
+                               "Unable to determine type data length for type byte 0x%02x!", *data);
                         rc = PLCTAG_ERR_UNSUPPORTED;
                         break;
                     }
@@ -1323,7 +1333,8 @@ static int check_read_status_connected(omron_tag_p tag) {
                     tag->encoded_type_info_size = type_length;
                     mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
                 } else {
-                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x", *data);
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x",
+                           *data);
                     rc = PLCTAG_ERR_UNSUPPORTED;
                     break;
                 }
@@ -1436,13 +1447,15 @@ static int check_read_status_unconnected(omron_tag_p tag) {
         ptrdiff_t payload_size = 0;
 
         if(le2h16(cip_resp->encap_command) != OMRON_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unexpected EIP packet type received: %d!",
+                   cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(cip_resp->encap_status) != OMRON_EIP_OK) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "EIP command failed, response code: %d",
+                   le2h32(cip_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1455,7 +1468,8 @@ static int check_read_status_unconnected(omron_tag_p tag) {
          */
 
         if(cip_resp->reply_service != (OMRON_EIP_CMD_CIP_READ | OMRON_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d",
+                   cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -1493,7 +1507,8 @@ static int check_read_status_unconnected(omron_tag_p tag) {
                     if(type_length == 0) { type_length = *(data + 1) + 2; }
 
                     if(type_length <= 0) {
-                        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN,
+                               "Unable to determine type data length for type byte 0x%02x!", *data);
                         rc = PLCTAG_ERR_UNSUPPORTED;
                         break;
                     }
@@ -1504,7 +1519,8 @@ static int check_read_status_unconnected(omron_tag_p tag) {
                     tag->encoded_type_info_size = type_length;
                     mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
                 } else {
-                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x", *data);
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x",
+                           *data);
                     rc = PLCTAG_ERR_UNSUPPORTED;
                     break;
                 }
@@ -1624,7 +1640,8 @@ static int check_write_status_connected(omron_tag_p tag) {
     do {
         if(cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE | OMRON_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_RMW | OMRON_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d",
+                   cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -1680,7 +1697,8 @@ static int check_write_status_unconnected(omron_tag_p tag) {
     do {
         if(cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE | OMRON_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_RMW | OMRON_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "CIP response reply service unexpected: %d",
+                   cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -1722,7 +1740,6 @@ static int check_write_status_unconnected(omron_tag_p tag) {
 }
 
 
-
 int calculate_write_data_per_packet(omron_tag_p tag) {
     int overhead = 0;
     int data_per_packet = 0;
@@ -1743,13 +1760,13 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     } else {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "Unconnected tag.");
-        overhead = 1                                  /* service request, one byte */
-                   + tag->encoded_name_size           /* full encoded name */
-                   + tag->encoded_type_info_size      /* encoded type size */
+        overhead = 1                               /* service request, one byte */
+                   + tag->encoded_name_size        /* full encoded name */
+                   + tag->encoded_type_info_size   /* encoded type size */
                    + tag->conn->conn_path_size + 2 /* encoded device path size plus two bytes for length and padding */
-                   + 2                                /* element count, 16-bit int */
-                   + 4                                /* byte offset, 32-bit int */
-                   + 8;                               /* MAGIC fudge factor */
+                   + 2                             /* element count, 16-bit int */
+                   + 4                             /* byte offset, 32-bit int */
+                   + 8;                            /* MAGIC fudge factor */
     }
 
     /* make sure that overhead is an even number of bytes */
@@ -1759,20 +1776,22 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
 
     data_per_packet = available_payload - overhead;
 
-    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, "Write packet available payload is %d, write overhead is %d, and write data per packet is %d.",
-           available_payload, overhead, data_per_packet);
+    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL,
+           "Write packet available payload is %d, write overhead is %d, and write data per packet is %d.", available_payload,
+           overhead, data_per_packet);
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
-               overhead, available_payload);
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN,
+               "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!", overhead,
+               available_payload);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     int element_size = 0;
     int elements_per_packet = 0;
 
-   /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
-    8 bytes as the unit */
+    /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
+     8 bytes as the unit */
     if(tag->elem_size < 8) {
         elements_per_packet = data_per_packet / tag->elem_size;
         data_per_packet = elements_per_packet * tag->elem_size;
@@ -1787,7 +1806,8 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
     }
 
     if(elements_per_packet < 1) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN,
+               "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
                available_payload, element_size);
         return PLCTAG_ERR_TOO_LARGE;
     }

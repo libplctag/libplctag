@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -43,10 +43,8 @@
 #define REQUIRED_VERSION 2, 6, 13
 
 /* Modbus tags with auto sync enabled */
-#define TAG_READ_ATTRIBS \
-    "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr0&auto_sync_read_ms=200"
-#define TAG_WRITE_ATTRIBS \
-    "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr10&auto_sync_write_ms=50"
+#define TAG_READ_ATTRIBS "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr0&auto_sync_read_ms=200"
+#define TAG_WRITE_ATTRIBS "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr10&auto_sync_write_ms=50"
 
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (15000)
@@ -106,7 +104,7 @@ void *writer_function(void *tag_arg) {
 
 
 void tag_callback(int32_t tag_id, int event, int status, void *user_data) {
-    (void)user_data;  /* unused */
+    (void)user_data; /* unused */
     /* handle the events. */
     switch(event) {
         case PLCTAG_EVENT_ABORTED:

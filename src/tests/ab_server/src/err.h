@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -39,24 +39,24 @@
 /* ===== PROTOCOL ERRORS (ODVA Specified - DO NOT CHANGE) ===== */
 
 /* CIP Service Error Codes (ODVA CIP Specification) */
-#define CIP_OK                      ((uint8_t)0x00)
-#define CIP_ERR_EXT_ERR             ((uint8_t)0x01)  /* Extended error status */
-#define CIP_ERR_INVALID_PARAM       ((uint8_t)0x03)  /* Invalid parameter */
-#define CIP_ERR_PATH_SEGMENT        ((uint8_t)0x04)  /* Bad path segment */
-#define CIP_ERR_PATH_DEST_UNKNOWN   ((uint8_t)0x05)  /* Unknown destination */
-#define CIP_ERR_FRAG                ((uint8_t)0x06)  /* Fragmentation error */
-#define CIP_ERR_UNSUPPORTED         ((uint8_t)0x08)  /* Unsupported service */
-#define CIP_ERR_INSUFFICIENT_DATA   ((uint8_t)0x13)  /* Not enough data */
-#define CIP_ERR_TOO_MUCH_DATA       ((uint8_t)0x15)  /* Too much data */
-#define CIP_ERR_EXTENDED            ((uint8_t)0xff)  /* Extended error indicator */
+#define CIP_OK ((uint8_t)0x00)
+#define CIP_ERR_EXT_ERR ((uint8_t)0x01)           /* Extended error status */
+#define CIP_ERR_INVALID_PARAM ((uint8_t)0x03)     /* Invalid parameter */
+#define CIP_ERR_PATH_SEGMENT ((uint8_t)0x04)      /* Bad path segment */
+#define CIP_ERR_PATH_DEST_UNKNOWN ((uint8_t)0x05) /* Unknown destination */
+#define CIP_ERR_FRAG ((uint8_t)0x06)              /* Fragmentation error */
+#define CIP_ERR_UNSUPPORTED ((uint8_t)0x08)       /* Unsupported service */
+#define CIP_ERR_INSUFFICIENT_DATA ((uint8_t)0x13) /* Not enough data */
+#define CIP_ERR_TOO_MUCH_DATA ((uint8_t)0x15)     /* Too much data */
+#define CIP_ERR_EXTENDED ((uint8_t)0xff)          /* Extended error indicator */
 
 /* CIP Extended Error Codes (ODVA CIP Specification) */
-#define CIP_ERR_EX_DUPLICATE_CONN   ((uint16_t)0x0100)
+#define CIP_ERR_EX_DUPLICATE_CONN ((uint16_t)0x0100)
 #define CIP_ERR_EX_INVALID_CONN_SIZE ((uint16_t)0x0109)
-#define CIP_ERR_EX_TOO_LONG         ((uint16_t)0x2105)
+#define CIP_ERR_EX_TOO_LONG ((uint16_t)0x2105)
 
 /* EIP Protocol Error Codes (ODVA EIP Specification) */
-#define EIP_ERR_BAD_REQUEST         ((uint32_t)1)
+#define EIP_ERR_BAD_REQUEST ((uint32_t)1)
 
 /* ===== INTERNAL ERRORS (Application-level, never sent on wire) ===== */
 
@@ -65,26 +65,26 @@ typedef enum {
     ERR_OK = 0,
 
     /* Socket/Network Layer (1000-1999) */
-    ERR_SOCKET_STARTUP = 1000,      /* Socket subsystem startup failed (Winsock only) */
-    ERR_SOCKET_CREATE = 1001,       /* Socket creation failed */
-    ERR_SOCKET_BIND = 1002,         /* Socket bind failed */
-    ERR_SOCKET_LISTEN = 1003,       /* Socket listen failed */
-    ERR_SOCKET_ACCEPT = 1004,       /* Socket accept failed */
-    ERR_SOCKET_CONNECT = 1005,      /* Socket connect failed */
-    ERR_SOCKET_SETOPT = 1006,       /* Socket set option failed */
-    ERR_SOCKET_READ = 1007,         /* Socket read failed */
-    ERR_SOCKET_WRITE = 1008,        /* Socket write failed */
-    ERR_SOCKET_SELECT = 1009,       /* Socket select failed */
-    ERR_SOCKET_TIMEOUT = 1010,      /* Socket operation timeout */
-    ERR_SOCKET_EOF = 1011,          /* End of file (connection closed) */
-    ERR_SOCKET_BAD_PARAM = 1012,    /* Bad parameter to socket function */
+    ERR_SOCKET_STARTUP = 1000,   /* Socket subsystem startup failed (Winsock only) */
+    ERR_SOCKET_CREATE = 1001,    /* Socket creation failed */
+    ERR_SOCKET_BIND = 1002,      /* Socket bind failed */
+    ERR_SOCKET_LISTEN = 1003,    /* Socket listen failed */
+    ERR_SOCKET_ACCEPT = 1004,    /* Socket accept failed */
+    ERR_SOCKET_CONNECT = 1005,   /* Socket connect failed */
+    ERR_SOCKET_SETOPT = 1006,    /* Socket set option failed */
+    ERR_SOCKET_READ = 1007,      /* Socket read failed */
+    ERR_SOCKET_WRITE = 1008,     /* Socket write failed */
+    ERR_SOCKET_SELECT = 1009,    /* Socket select failed */
+    ERR_SOCKET_TIMEOUT = 1010,   /* Socket operation timeout */
+    ERR_SOCKET_EOF = 1011,       /* End of file (connection closed) */
+    ERR_SOCKET_BAD_PARAM = 1012, /* Bad parameter to socket function */
 
     /* TCP Server/Protocol Layer (2000-2999) */
-    ERR_TCP_INCOMPLETE = 2000,      /* More data needed */
-    ERR_TCP_BAD_REQUEST = 2001,     /* Invalid request format */
-    ERR_TCP_UNSUPPORTED = 2002,     /* Unsupported command/feature */
-    ERR_TCP_PROCESSED = 2003,       /* Successfully processed */
-    ERR_TCP_DONE = 2004,            /* Close connection */
+    ERR_TCP_INCOMPLETE = 2000,  /* More data needed */
+    ERR_TCP_BAD_REQUEST = 2001, /* Invalid request format */
+    ERR_TCP_UNSUPPORTED = 2002, /* Unsupported command/feature */
+    ERR_TCP_PROCESSED = 2003,   /* Successfully processed */
+    ERR_TCP_DONE = 2004,        /* Close connection */
 
     /* OS/System POSIX Errors (3000-3499) */
     /* These map errno values to internal error codes */

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -236,9 +236,7 @@ int socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd) {
     TIMEVAL timeout;
     int num_accept_ready = 0;
 
-    if(!out_client_fd) {
-        return (SOCKET)ERR_SOCKET_BAD_PARAM;
-    }
+    if(!out_client_fd) { return (SOCKET)ERR_SOCKET_BAD_PARAM; }
 
     *out_client_fd = INVALID_SOCKET;
 
