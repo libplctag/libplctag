@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -201,7 +201,7 @@ typedef enum {
     AB_PLC_LGX_PCCC,
     AB_PLC_MICRO800,
     AB_PLC_OMRON_NJNX,
-    AB_PLC_GENERIC,         /* Generic CIP device access (no PLC-specific protocol) */
+    AB_PLC_GENERIC, /* Generic CIP device access (no PLC-specific protocol) */
     AB_PLC_TYPE_LAST,
 } plc_type_t;
 

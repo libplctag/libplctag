@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *   Author Heath Raftery                                                  *
  *                                                                         *
@@ -38,12 +38,12 @@
 
 /* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    MUTEX_STATUS_OK             = 0,
-    MUTEX_ERR_NULL_PTR          = -25,
-    MUTEX_ERR_MUTEX_DESTROY     = -14,
-    MUTEX_ERR_MUTEX_INIT        = -15,
-    MUTEX_ERR_MUTEX_LOCK        = -16,
-    MUTEX_ERR_MUTEX_UNLOCK      = -17
+    MUTEX_STATUS_OK = 0,
+    MUTEX_ERR_NULL_PTR = -25,
+    MUTEX_ERR_MUTEX_DESTROY = -14,
+    MUTEX_ERR_MUTEX_INIT = -15,
+    MUTEX_ERR_MUTEX_LOCK = -16,
+    MUTEX_ERR_MUTEX_UNLOCK = -17
 } mutex_err_t;
 
 /* mutex functions/defs */
@@ -59,8 +59,8 @@ extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
 #if defined(IS_WINDOWS) && defined(IS_MSVC)
-    /* MinGW on Windows does not need this. */
-    #define __func__ __FUNCTION__
+/* MinGW on Windows does not need this. */
+#    define __func__ __FUNCTION__
 #endif
 
 #define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
@@ -88,13 +88,20 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
  */
 
 #if IS_WINDOWS
-#define PLCTAG_CAT2(a,b) a##b
-#define PLCTAG_CAT(a,b) PLCTAG_CAT2(a,b)
-#define LINE_ID(base) PLCTAG_CAT(base,__LINE__)
+#    define PLCTAG_CAT2(a, b) a##b
+#    define PLCTAG_CAT(a, b) PLCTAG_CAT2(a, b)
+#    define LINE_ID(base) PLCTAG_CAT(base, __LINE__)
 
-#define critical_block(lock) \
-for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))  for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock); LINE_ID(__sync_rc_nargle_) == MUTEX_STATUS_OK && LINE_ID(__sync_flag_nargle_) ; LINE_ID(__sync_flag_nargle_) = 0)
+#    define critical_block(lock)                                                \
+        for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); \
+            LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))               \
+            for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock);              \
+                LINE_ID(__sync_rc_nargle_) == MUTEX_STATUS_OK && LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0)
 #else
-#define critical_block(lock) \
-for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))  for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock); __sync_rc_nargle_##__LINE__ == MUTEX_STATUS_OK && __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0)
+#    define critical_block(lock)                                                                 \
+        for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__;                \
+            __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))                               \
+            for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock);                              \
+                __sync_rc_nargle_##__LINE__ == MUTEX_STATUS_OK && __sync_flag_nargle_##__LINE__; \
+                __sync_flag_nargle_##__LINE__ = 0)
 #endif

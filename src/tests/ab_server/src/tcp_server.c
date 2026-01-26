@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -158,11 +158,11 @@ void tcp_server_destroy(tcp_server_p server) {
 
 THREAD_FUNC(conn_handler) {
     client_session_p session = arg;
-    uint8_t input_buf[65536 + 128];                            /* Rockwell supports up to 64k (Micro800) */
-    uint8_t output_buf[65536 + 128];                           /* plus some extra for headers etc. */
+    uint8_t input_buf[65536 + 128];                      /* Rockwell supports up to 64k (Micro800) */
+    uint8_t output_buf[65536 + 128];                     /* plus some extra for headers etc. */
     tcp_server_p server = (tcp_server_p)session->server; /* need to cast for C++ */
-    slice_s accumulated_data = {0};  /* slice representing all data received so far */
-    slice_s read_target = {0};       /* slice representing where to read next data */
+    slice_s accumulated_data = {0};                      /* slice representing all data received so far */
+    slice_s read_target = {0};                           /* slice representing where to read next data */
     slice_s tmp_output = {0};
     int rc = TCP_SERVER_DONE;
     plc_s *plc = (plc_s *)session->server_context;
@@ -173,8 +173,8 @@ THREAD_FUNC(conn_handler) {
     /* no one will join this thread, so clean ourselves up. */
     thread_detach();
 
-    accumulated_data = slice_make(input_buf, 0);  /* start with zero accumulated data */
-    read_target = slice_make(input_buf, sizeof(input_buf));  /* read into entire buffer initially */
+    accumulated_data = slice_make(input_buf, 0);            /* start with zero accumulated data */
+    read_target = slice_make(input_buf, sizeof(input_buf)); /* read into entire buffer initially */
     tmp_output = slice_make(output_buf, sizeof(output_buf));
 
     do {
@@ -233,14 +233,11 @@ THREAD_FUNC(conn_handler) {
 
                 case ERR_TCP_INCOMPLETE:
                     /* next read should go after the accumulated data */
-                    read_target = slice_from_slice(slice_make(input_buf, sizeof(input_buf)),
-                                                   slice_len(accumulated_data),
+                    read_target = slice_from_slice(slice_make(input_buf, sizeof(input_buf)), slice_len(accumulated_data),
                                                    sizeof(input_buf) - slice_len(accumulated_data));
                     break;
 
-                case ERR_TCP_PROCESSED: 
-                
-                    break;
+                case ERR_TCP_PROCESSED: break;
 
                 case ERR_TCP_BAD_REQUEST:
                     log_info("WARN: Bad request!");

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -59,19 +59,18 @@ struct {
     const tag_create_function tag_constructor;
 } tag_type_map[] = {
     /* System tags */
-    {.protocol= NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
+    {.protocol = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
     /* Allen-Bradley PLCs */
-    {.protocol= "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
-    {.protocol= "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
-    {.protocol= "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
-    {.protocol= "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}
-};
+    {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
+    {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
 
 /* Library state machine */
-#define LIB_STATE_UNINITIALIZED  ((int32_t)0)
-#define LIB_STATE_INITIALIZING   ((int32_t)1)
-#define LIB_STATE_RUNNING        ((int32_t)2)
-#define LIB_STATE_SHUTTING_DOWN  ((int32_t)3)
+#define LIB_STATE_UNINITIALIZED ((int32_t)0)
+#define LIB_STATE_INITIALIZING ((int32_t)1)
+#define LIB_STATE_RUNNING ((int32_t)2)
+#define LIB_STATE_SHUTTING_DOWN ((int32_t)3)
 
 static atomic_int32_t library_state = ATOMIC_INT_STATIC_INIT;
 
@@ -149,7 +148,7 @@ void destroy_modules(void) {
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
 
-    /* 
+    /*
      * Try to transition from RUNNING to SHUTTING_DOWN.
      * atomic_compare_and_set_int32() returns the old value.
      * If it returns RUNNING, the swap succeeded.
@@ -208,14 +207,15 @@ int initialize_modules(void) {
         return PLCTAG_STATUS_OK;
     }
 
-    /* 
+    /*
      * Try to transition from UNINITIALIZED to INITIALIZING.
      * Only one thread can win this race.
-     * 
+     *
      * atomic_compare_and_set_int32() returns the old value.
      * If it returns UNINITIALIZED, the swap succeeded.
      */
-    while((old_state = atomic_compare_and_set_int32(&library_state, LIB_STATE_UNINITIALIZED, LIB_STATE_INITIALIZING)) != LIB_STATE_UNINITIALIZED) {
+    while((old_state = atomic_compare_and_set_int32(&library_state, LIB_STATE_UNINITIALIZED, LIB_STATE_INITIALIZING))
+          != LIB_STATE_UNINITIALIZED) {
 
         switch(old_state) {
             case LIB_STATE_RUNNING:

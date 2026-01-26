@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes  & @Joylei                           *
+ *   Copyright (C) 2026 by Kyle Hayes  & @Joylei                           *
  *   Author Kyle Hayes  kyle.hayes@gmail.com, @Joylei                      *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -229,7 +229,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
     /* get the tag data type, or try. */
     rc = get_tag_data_type(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Error %s getting tag element data type or handling special tag!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Error %s getting tag element data type or handling special tag!",
+               plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
         return (plc_tag_p)tag;
     }
@@ -287,7 +288,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
         tag->vtable->read((plc_tag_p)tag);
         // tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
     } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, "Not kicking off initial read: tag is special or does not have read function.");
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL,
+               "Not kicking off initial read: tag is special or does not have read function.");
 
         /* force the created event because we do not do an initial read here. */
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
@@ -391,7 +393,8 @@ int get_tag_data_type(omron_tag_p tag, attr attribs) {
             }
         } else {
             if(elem_size > 0) {
-                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
+                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
+                       "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
             }
         }
     }
@@ -465,9 +468,12 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+                   tag->tag_id);
             critical_block(tag->api_mutex) {
-                if(tag->req != req) { pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Request got changed out from underneath us!"); }
+                if(tag->req != req) {
+                    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Request got changed out from underneath us!");
+                }
                 if(tag->req == req) { tag->req = rc_dec(tag->req); }
             }
 
@@ -693,14 +699,12 @@ int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_val
         if(clamped_value < 100) {
             clamped_value = 100;
             out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
-                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.",
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.",
                    new_value);
         } else if(clamped_value > CONN_DISCONNECT_TIMEOUT) {
             clamped_value = CONN_DISCONNECT_TIMEOUT;
             out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.",
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.",
                    new_value, CONN_DISCONNECT_TIMEOUT);
         }
 
@@ -714,8 +718,7 @@ int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_val
                 rc = PLCTAG_STATUS_OK;
             }
         } else {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
-                   "Cannot set connection_inactivity_timeout_ms: no connection exists.");
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Cannot set connection_inactivity_timeout_ms: no connection exists.");
             tag->status = PLCTAG_ERR_NOT_FOUND;
             rc = PLCTAG_ERR_NOT_FOUND;
         }
@@ -740,11 +743,13 @@ int omron_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "raw_tag_type_bytes") == 0) {
         if(tag->encoded_type_info_size > buffer_length) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.",
-                   tag->encoded_type_info_size, buffer_length);
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN,
+                   "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size,
+                   buffer_length);
             rc = PLCTAG_ERR_TOO_SMALL;
         } else if(tag->encoded_type_info_size <= buffer_length) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, "Copying %d bytes of tag type information.", tag->encoded_type_info_size, buffer_length);
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, "Copying %d bytes of tag type information.",
+                   tag->encoded_type_info_size, buffer_length);
 
             /* copy the data */
             mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), tag->encoded_type_info_size);
@@ -881,16 +886,22 @@ int omron_check_request_status(omron_tag_p tag) {
         eip_header = (eip_encap *)(req->data);
 
         if(le2h32(eip_header->encap_status) != OMRON_EIP_OK) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "EIP command failed, response code: %d",
+                   le2h32(eip_header->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         switch(le2h16(eip_header->encap_command)) {
-            case OMRON_EIP_CONNECTED_SEND: pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Received a connected send EIP packet."); break;
-            case OMRON_EIP_UNCONNECTED_SEND: pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Received an unconnected send EIP packet."); break;
+            case OMRON_EIP_CONNECTED_SEND:
+                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Received a connected send EIP packet.");
+                break;
+            case OMRON_EIP_UNCONNECTED_SEND:
+                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Received an unconnected send EIP packet.");
+                break;
             default:
-                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
+                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".",
+                       le2h16(eip_header->encap_command));
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
         }

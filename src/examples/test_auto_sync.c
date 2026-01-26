@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -101,7 +101,7 @@ void *writer_function(void *tag_arg) {
 
 
 void tag_callback(int32_t tag_id, int event, int status, void *user_data) {
-    (void)user_data;  /* unused */
+    (void)user_data; /* unused */
     /* handle the events. */
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
@@ -227,11 +227,11 @@ int main(void) {
         fprintf(stderr, "FAILURE: Number of writes, %d%%, not close to the expected number, 90%%!\n", write_success_actual);
         rc = 1;
     }
-    
+
     if(rc == 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "SUCCESS: Test completed successfully.\n");
-    }  
+    }
 
     return rc;
 }

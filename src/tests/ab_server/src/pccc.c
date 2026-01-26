@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -191,12 +191,12 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc) {
     /* check the amount of data requested. */
     if((end_byte_offset - start_byte_offset) > 240) {
         log_info("Request asks for too much data, %u bytes, for response packet!",
-             (unsigned int)(end_byte_offset - start_byte_offset));
+                 (unsigned int)(end_byte_offset - start_byte_offset));
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
     log_info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
-         transfer_size * tag->elem_size);
+             transfer_size * tag->elem_size);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
@@ -280,7 +280,7 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc) {
 
     if(data_len != (transfer_size * tag->elem_size)) {
         log_info("Data in packet is not the same length, %u, as the requested transfer, %d!", data_len,
-             (transfer_size * tag->elem_size));
+                 (transfer_size * tag->elem_size));
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
@@ -291,7 +291,7 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc) {
     }
 
     log_info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
-         transfer_size * tag->elem_size);
+             transfer_size * tag->elem_size);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
@@ -342,7 +342,7 @@ slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     /* Calculate element size and offsets. */
     elem_size = tag->elem_size;
     tag_size = tag->elem_count * tag->elem_size;
-    start_byte_offset = data_file_element * tag->elem_size; // MAGIC - 3 is offset of first mask byte in RMW packet
+    start_byte_offset = data_file_element * tag->elem_size;  // MAGIC - 3 is offset of first mask byte in RMW packet
 
     log_info("Element size %zu, start byte offset %zu, tag size %zu.", elem_size, start_byte_offset, tag_size);
 

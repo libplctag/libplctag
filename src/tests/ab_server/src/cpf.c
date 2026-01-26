@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -118,7 +118,7 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
 
     if(header.item_data_length != (slice_len(input) - CPF_UCONN_HEADER_SIZE)) {
         log_info("CPF unconnected payload length, %d, does not match passed length, %d!",
-             (slice_len(input) - CPF_UCONN_HEADER_SIZE - 2), header.item_data_length);
+                 (slice_len(input) - CPF_UCONN_HEADER_SIZE - 2), header.item_data_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -199,7 +199,7 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
 
     if(header.item_data_length != (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2))) {
         log_info("CPF payload length, %d, does not match passed length, %d!", (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2)),
-             header.item_data_length);
+                 header.item_data_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -215,16 +215,24 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
     if(!slice_has_err(result)) {
         /* build outbound header. */
         size_t offset = 0;
-        slice_set_uint32_le(output, offset, header.interface_handle); offset += 4;
-        slice_set_uint16_le(output, offset, header.router_timeout); offset += 2;
-        slice_set_uint16_le(output, offset, 2); offset += 2;           /* two items. */
-        slice_set_uint16_le(output, offset, CPF_ITEM_CAI); offset += 2; /* connected address type. */
-        slice_set_uint16_le(output, offset, 4); offset += 2;           /* connection ID is 4 bytes. */
-        slice_set_uint32_le(output, offset, plc->client_connection_id); offset += 4;
-        slice_set_uint16_le(output, offset, CPF_ITEM_CDI); offset += 2; /* connected data type */
-        slice_set_uint16_le(output, offset,
-            (uint16_t)(slice_len(result) + 2)); offset += 2; /* result from CIP processing downstream.  Plus 2 bytes for sequence number. */
-        slice_set_uint16_le(output, offset, header.conn_seq); offset += 2;
+        slice_set_uint32_le(output, offset, header.interface_handle);
+        offset += 4;
+        slice_set_uint16_le(output, offset, header.router_timeout);
+        offset += 2;
+        slice_set_uint16_le(output, offset, 2);
+        offset += 2; /* two items. */
+        slice_set_uint16_le(output, offset, CPF_ITEM_CAI);
+        offset += 2; /* connected address type. */
+        slice_set_uint16_le(output, offset, 4);
+        offset += 2; /* connection ID is 4 bytes. */
+        slice_set_uint32_le(output, offset, plc->client_connection_id);
+        offset += 4;
+        slice_set_uint16_le(output, offset, CPF_ITEM_CDI);
+        offset += 2; /* connected data type */
+        slice_set_uint16_le(output, offset, (uint16_t)(slice_len(result) + 2));
+        offset += 2; /* result from CIP processing downstream.  Plus 2 bytes for sequence number. */
+        slice_set_uint16_le(output, offset, header.conn_seq);
+        offset += 2;
 
         /* create a new slice with the CPF header and the response packet in it. */
         result = slice_from_slice(output, (size_t)0, (size_t)(slice_len(result) + offset));

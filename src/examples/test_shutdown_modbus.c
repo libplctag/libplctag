@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -41,7 +41,8 @@
 
 
 #define REQUIRED_VERSION 2, 5, 5
-#define TAG_ATTRIBS_TMPL "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"
+#define TAG_ATTRIBS_TMPL \
+    "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
@@ -129,7 +130,7 @@ int main(void) {
     /* Join all threads with periodic status logging */
     int threads_remaining = NUM_TAGS * 2;
     int64_t wait_start = compat_time_ms();
-    int64_t wait_timeout = 30000;  /* 30 second timeout */
+    int64_t wait_timeout = 30000; /* 30 second timeout */
 
     for(int i = 0; i < NUM_TAGS; i++) {
         // NOLINTNEXTLINE
@@ -152,10 +153,10 @@ int main(void) {
 
         /* Check if we're taking too long */
         int64_t elapsed = compat_time_ms() - wait_start;
-        if (elapsed > wait_timeout) {
+        if(elapsed > wait_timeout) {
             // NOLINTNEXTLINE
-            fprintf(stderr, "ERROR: Thread join timeout after %" PRId64 "ms with %d threads still remaining!\n",
-                    elapsed, threads_remaining);
+            fprintf(stderr, "ERROR: Thread join timeout after %" PRId64 "ms with %d threads still remaining!\n", elapsed,
+                    threads_remaining);
             fflush(stderr);
             break;
         }

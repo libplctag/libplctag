@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -44,18 +44,18 @@
 
 /* Summary statistics structure */
 typedef struct {
-    int count;          /* Number of values */
-    int min;            /* Minimum value */
-    int max;            /* Maximum value */
-    double mean;        /* Arithmetic mean */
-    double variance;    /* Population variance */
-    double std_dev;     /* Population standard deviation */
-    double cv;          /* Coefficient of variation (std_dev/mean * 100) */
+    int count;            /* Number of values */
+    int min;              /* Minimum value */
+    int max;              /* Maximum value */
+    double mean;          /* Arithmetic mean */
+    double variance;      /* Population variance */
+    double std_dev;       /* Population standard deviation */
+    double cv;            /* Coefficient of variation (std_dev/mean * 100) */
     double min_max_ratio; /* min/max ratio (1.0 = perfect equality) */
-    int q1;             /* First quartile (25th percentile) */
-    int median;         /* Median (50th percentile) */
-    int q3;             /* Third quartile (75th percentile) */
-    int iqr;            /* Interquartile range (Q3 - Q1) */
+    int q1;               /* First quartile (25th percentile) */
+    int median;           /* Median (50th percentile) */
+    int q3;               /* Third quartile (75th percentile) */
+    int iqr;              /* Interquartile range (Q3 - Q1) */
 } stats_summary_t;
 
 /*
@@ -86,8 +86,7 @@ void stats_print_summary(FILE *stream, const stats_summary_t *summary);
  * @param num_buckets   Number of histogram buckets (0 for auto)
  * @param max_bar_width Maximum width of histogram bars in characters
  */
-void stats_print_histogram(FILE *stream, const int *values, int count,
-                           int num_buckets, int max_bar_width);
+void stats_print_histogram(FILE *stream, const int *values, int count, int num_buckets, int max_bar_width);
 
 /*
  * Assess fairness based on statistics.

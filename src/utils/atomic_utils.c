@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -46,8 +46,8 @@
 #if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
 
 #    ifdef _WIN32
-#       define WIN32_LEAN_AND_MEAN
-#       include <windows.h>
+#        define WIN32_LEAN_AND_MEAN
+#        include <windows.h>
 #    endif
 
 void atomic_init_bool(atomic_bool *a, bool new_val) { *a = new_val; }

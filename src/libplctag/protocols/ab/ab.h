@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,15 +32,16 @@
  ***************************************************************************/
 
 #ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
+#    define __LIBPLCTAG_AB_H__ 1
 
 
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
-#include <utils/attr.h>
+#    include <libplctag/lib/libplctag.h>
+#    include <libplctag/lib/tag.h>
+#    include <utils/attr.h>
 
 void ab_teardown(void);
 int ab_init(void);
-plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
+plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                        void *userdata);
 
 #endif
