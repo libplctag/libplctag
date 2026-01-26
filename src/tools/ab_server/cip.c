@@ -225,7 +225,6 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
 
 
 /*
-/*
  * Handle multi-service requests (service 0x0a)
  *
  * We have to unpack and dispatch each sub-request, then repack the responses.
