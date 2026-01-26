@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -138,8 +138,12 @@ extern int compat_mutex_destroy(compat_mutex_t *mutex);
 
 /* atomic operations */
 
-typedef struct { volatile int32_t value; } compat_atomic_int32_t;
-typedef struct { volatile int64_t value; } compat_atomic_int64_t;
+typedef struct {
+    volatile int32_t value;
+} compat_atomic_int32_t;
+typedef struct {
+    volatile int64_t value;
+} compat_atomic_int64_t;
 
 extern int32_t compat_atomic_load_int32(compat_atomic_int32_t *atomic);
 extern void compat_atomic_store_int32(compat_atomic_int32_t *atomic, int32_t value);

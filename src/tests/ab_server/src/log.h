@@ -1,7 +1,7 @@
 #pragma once
 
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -80,16 +80,26 @@ void log_impl(const char *func, int line_num, log_level_t lvl, const char *templ
 
 /* helper macros */
 
-#define log_error(...)   do { if((LOG_LEVEL_ERROR) <= log_get_level()) \
-                            log_impl(__func__, __LINE__, LOG_LEVEL_ERROR, __VA_ARGS__); } while(0)
-#define log_warn(...)    do { if((LOG_LEVEL_WARN)  <= log_get_level()) \
-                            log_impl(__func__, __LINE__, LOG_LEVEL_WARN,  __VA_ARGS__); } while(0)
-#define log_info(...)    do { if((LOG_LEVEL_INFO)  <= log_get_level()) \
-                            log_impl(__func__, __LINE__, LOG_LEVEL_INFO,  __VA_ARGS__); } while(0)
-#define log_detail(...)  do { if((LOG_LEVEL_DETAIL)<= log_get_level()) \
-                            log_impl(__func__, __LINE__, LOG_LEVEL_DETAIL,__VA_ARGS__); } while(0)
-#define log_spew(...)    do { if((LOG_LEVEL_SPEW)  <= log_get_level()) \
-                            log_impl(__func__, __LINE__, LOG_LEVEL_SPEW,  __VA_ARGS__); } while(0)
+#define log_error(...)                                                                                       \
+    do {                                                                                                     \
+        if((LOG_LEVEL_ERROR) <= log_get_level()) log_impl(__func__, __LINE__, LOG_LEVEL_ERROR, __VA_ARGS__); \
+    } while(0)
+#define log_warn(...)                                                                                      \
+    do {                                                                                                   \
+        if((LOG_LEVEL_WARN) <= log_get_level()) log_impl(__func__, __LINE__, LOG_LEVEL_WARN, __VA_ARGS__); \
+    } while(0)
+#define log_info(...)                                                                                      \
+    do {                                                                                                   \
+        if((LOG_LEVEL_INFO) <= log_get_level()) log_impl(__func__, __LINE__, LOG_LEVEL_INFO, __VA_ARGS__); \
+    } while(0)
+#define log_detail(...)                                                                                        \
+    do {                                                                                                       \
+        if((LOG_LEVEL_DETAIL) <= log_get_level()) log_impl(__func__, __LINE__, LOG_LEVEL_DETAIL, __VA_ARGS__); \
+    } while(0)
+#define log_spew(...)                                                                                      \
+    do {                                                                                                   \
+        if((LOG_LEVEL_SPEW) <= log_get_level()) log_impl(__func__, __LINE__, LOG_LEVEL_SPEW, __VA_ARGS__); \
+    } while(0)
 
 
 #ifdef __cplusplus

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -58,11 +58,11 @@
 #define TAG_WRITE_20 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=co0&elem_count=1"
 
 #define DATA_TIMEOUT 1000
-#define READ_PHASE_TIME_MS 5000  /* 5 seconds for read phase */
-#define READ_PERIOD_MS 250  /* Read every 250 ms */
-#define WRITE_PHASE_DELAY_MS 12000  /* 12 seconds before switching to write phase */
-#define WRITE_PHASE_TIME_MS 5000    /* 5 seconds for write phase */
-#define WRITE_PERIOD_MS 500 /* Write every 500 ms */
+#define READ_PHASE_TIME_MS 5000    /* 5 seconds for read phase */
+#define READ_PERIOD_MS 250         /* Read every 250 ms */
+#define WRITE_PHASE_DELAY_MS 12000 /* 12 seconds before switching to write phase */
+#define WRITE_PHASE_TIME_MS 5000   /* 5 seconds for write phase */
+#define WRITE_PERIOD_MS 500        /* Write every 500 ms */
 
 static int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms);
 
@@ -72,10 +72,8 @@ int main(void) {
     int32_t write_tags[2] = {0, 0};
     int rc = PLCTAG_STATUS_OK;
     int i;
-    const char *read_tag_paths[8] = {
-        TAG_READ_11, TAG_READ_12, TAG_READ_13, TAG_READ_14,
-        TAG_READ_15, TAG_READ_16, TAG_READ_17, TAG_READ_18
-    };
+    const char *read_tag_paths[8] = {TAG_READ_11, TAG_READ_12, TAG_READ_13, TAG_READ_14,
+                                     TAG_READ_15, TAG_READ_16, TAG_READ_17, TAG_READ_18};
     int64_t start_time, current_time, read_phase_end_time, write_phase_start_time, write_phase_end_time;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
@@ -103,9 +101,7 @@ int main(void) {
         if(read_tags[i] < 0) {
             printf("ERROR %s: Could not create read tag %d!\n", plc_tag_decode_error(read_tags[i]), i + 11);
             rc = read_tags[i];
-            for(int j = 0; j < i; j++) {
-                plc_tag_destroy(read_tags[j]);
-            }
+            for(int j = 0; j < i; j++) { plc_tag_destroy(read_tags[j]); }
             goto cleanup;
         }
         printf("  Created read tag %d (index %d).\n", i + 11, i);
@@ -145,21 +141,19 @@ int main(void) {
         printf("PHASE 2: All read tags completed read.\n");
 
         current_time = compat_time_ms();
-        if((current_time - start_time) % 2000 < READ_PERIOD_MS) {  /* Print roughly every 2 seconds */
-            printf("PHASE 2: Read phase running... elapsed %"PRId64" ms\n", current_time - start_time);
+        if((current_time - start_time) % 2000 < READ_PERIOD_MS) { /* Print roughly every 2 seconds */
+            printf("PHASE 2: Read phase running... elapsed %" PRId64 " ms\n", current_time - start_time);
         }
 
         compat_sleep_ms(READ_PERIOD_MS, NULL);
     }
 
-    printf("PHASE 2: Read phase complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
+    printf("PHASE 2: Read phase complete at %" PRId64 " ms.\n", compat_time_ms() - start_time);
 
     /* ===== PHASE 3: Wait for write_phase_start_time ===== */
-    printf("PHASE 3: Waiting %"PRId64" ms before creating write tags...\n", (int64_t)WRITE_PHASE_DELAY_MS);
-    while(compat_time_ms() < write_phase_start_time) {
-        compat_sleep_ms(100, NULL);
-    }
-    printf("PHASE 3: Wait complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
+    printf("PHASE 3: Waiting %" PRId64 " ms before creating write tags...\n", (int64_t)WRITE_PHASE_DELAY_MS);
+    while(compat_time_ms() < write_phase_start_time) { compat_sleep_ms(100, NULL); }
+    printf("PHASE 3: Wait complete at %" PRId64 " ms.\n", compat_time_ms() - start_time);
 
     /* ===== PHASE 4: Create both write tags and wait for OK ===== */
     printf("PHASE 4: Creating write tags (19-20).\n");
@@ -196,11 +190,9 @@ int main(void) {
     while(compat_time_ms() < write_phase_end_time) {
         size_t all_tags_count = 10;
         int32_t all_tags[10];
-        
+
         /* Build array of all tags for batch operations */
-        for(i = 0; i < 8; i++) {
-            all_tags[i] = read_tags[i];
-        }
+        for(i = 0; i < 8; i++) { all_tags[i] = read_tags[i]; }
         all_tags[8] = write_tags[0];
         all_tags[9] = write_tags[1];
 
@@ -237,27 +229,23 @@ int main(void) {
         }
 
         current_time = compat_time_ms();
-        if((current_time - start_time) % 2000 < DATA_TIMEOUT) {  /* Print roughly every 2 seconds */
+        if((current_time - start_time) % 2000 < DATA_TIMEOUT) { /* Print roughly every 2 seconds */
             printf("PHASE 5: Read/write loop... elapsed %" PRId64 " ms\n", current_time - start_time);
         }
 
         compat_sleep_ms(WRITE_PERIOD_MS, NULL);
     }
 
-    printf("PHASE 5: Read/write phase complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
+    printf("PHASE 5: Read/write phase complete at %" PRId64 " ms.\n", compat_time_ms() - start_time);
 
 cleanup:
     /* ===== PHASE 6: Destroy all tags ===== */
     printf("PHASE 6: Destroying all tags.\n");
     for(i = 0; i < 8; i++) {
-        if(read_tags[i] > 0) {
-            plc_tag_destroy(read_tags[i]);
-        }
+        if(read_tags[i] > 0) { plc_tag_destroy(read_tags[i]); }
     }
     for(i = 0; i < 2; i++) {
-        if(write_tags[i] > 0) {
-            plc_tag_destroy(write_tags[i]);
-        }
+        if(write_tags[i] > 0) { plc_tag_destroy(write_tags[i]); }
     }
 
     printf("PHASE 6: All tags destroyed.\n");
@@ -270,7 +258,6 @@ cleanup:
         return (rc < 0) ? -rc : 1;
     }
 }
-
 
 
 int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
@@ -295,9 +282,7 @@ int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
         }
 
         /* If any are still pending, sleep a bit and retry */
-        if(!all_ok) {
-            compat_sleep_ms(5, NULL);
-        }
+        if(!all_ok) { compat_sleep_ms(5, NULL); }
 
         /* Check timeout */
         if(timeout_time < compat_time_ms()) {
@@ -308,5 +293,3 @@ int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
 
     return PLCTAG_STATUS_OK;
 }
-
-

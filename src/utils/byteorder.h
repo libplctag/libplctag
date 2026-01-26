@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -43,7 +43,10 @@ START_PACK typedef struct {
     } val;
 } END_PACK uint16_le;
 
-#define UINT16_LE_INIT(v) {.val = {.u_val = ((uint16_t)(v))}}
+#define UINT16_LE_INIT(v)                  \
+    {                                      \
+        .val = {.u_val = ((uint16_t)(v)) } \
+    }
 
 START_PACK typedef struct {
     union {
@@ -52,7 +55,10 @@ START_PACK typedef struct {
     } val;
 } END_PACK uint32_le;
 
-#define UINT32_LE_INIT(v) {.val = {.u_val = ((uint32_t)(v))}}
+#define UINT32_LE_INIT(v)                  \
+    {                                      \
+        .val = {.u_val = ((uint32_t)(v)) } \
+    }
 
 
 START_PACK typedef struct {
@@ -62,12 +68,13 @@ START_PACK typedef struct {
     } val;
 } END_PACK uint64_le;
 
-#define UINT64_LE_INIT(v) {.val = {.u_val = ((uint64_t)(v))}}
+#define UINT64_LE_INIT(v)                  \
+    {                                      \
+        .val = {.u_val = ((uint64_t)(v)) } \
+    }
 
 
-
-inline static uint16_le h2le16(uint16_t val)
-{
+inline static uint16_le h2le16(uint16_t val) {
     uint16_le result;
 
     result.val.b_val[0] = (uint8_t)(val & 0xFF);
@@ -77,8 +84,7 @@ inline static uint16_le h2le16(uint16_t val)
 }
 
 
-inline static uint16_t le2h16(uint16_le src)
-{
+inline static uint16_t le2h16(uint16_le src) {
     uint16_t result = 0;
 
     result = (uint16_t)(src.val.b_val[0] + ((src.val.b_val[1]) << 8));
@@ -87,10 +93,7 @@ inline static uint16_t le2h16(uint16_le src)
 }
 
 
-
-
-inline static uint32_le h2le32(uint32_t val)
-{
+inline static uint32_le h2le32(uint32_t val) {
     uint32_le result;
 
     result.val.b_val[0] = (uint8_t)(val & 0xFF);
@@ -102,8 +105,7 @@ inline static uint32_le h2le32(uint32_t val)
 }
 
 
-inline static uint32_t le2h32(uint32_le src)
-{
+inline static uint32_t le2h32(uint32_le src) {
     uint32_t result = 0;
 
     result |= (uint32_t)(src.val.b_val[0]);
@@ -115,12 +117,7 @@ inline static uint32_t le2h32(uint32_le src)
 }
 
 
-
-
-
-
-inline static uint64_le h2le64(uint64_t val)
-{
+inline static uint64_le h2le64(uint64_t val) {
     uint64_le result;
 
     result.val.b_val[0] = (uint8_t)(val & 0xFF);
@@ -136,8 +133,7 @@ inline static uint64_le h2le64(uint64_t val)
 }
 
 
-inline static uint64_t le2h64(uint64_le src)
-{
+inline static uint64_t le2h64(uint64_le src) {
     uint64_t result = 0;
 
     result |= (uint64_t)(src.val.b_val[0]);
@@ -151,7 +147,6 @@ inline static uint64_t le2h64(uint64_le src)
 
     return result;
 }
-
 
 
 /* as seen on comp.arch by David Brown

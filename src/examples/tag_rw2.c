@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -938,7 +938,8 @@ void dump_values(struct run_args *args) {
                     int offset_id = 0;
 
                     if(size < 14) {
-                        printf("ERROR: Identity response too small to contain identity data (got %d bytes, need at least 14)\n", size);
+                        printf("ERROR: Identity response too small to contain identity data (got %d bytes, need at least 14)\n",
+                               size);
                         cleanup(args);
                         exit(1);
                     }
@@ -1011,20 +1012,16 @@ void dump_values(struct run_args *args) {
                     for(int i = 0; i < size; i++) {
                         uint8_t data = plc_tag_get_uint8(tag, i);
                         printf("%02X ", (unsigned int)data);
-                        if((i + 1) % 16 == 0) {
-                            printf("\n");
-                        }
+                        if((i + 1) % 16 == 0) { printf("\n"); }
                     }
 
-                    if(size % 16 != 0) {
-                        printf("\n");
-                    }
+                    if(size % 16 != 0) { printf("\n"); }
 
                     /* skip the whole tag. */
                     offset += size;
                 }
 
-                    break;
+                break;
 
                 default:
                     printf("ERROR: Unsupported tag type %d!\n", args->element_type);

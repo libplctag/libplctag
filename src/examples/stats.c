@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -37,20 +37,14 @@
 #include "stats.h"
 
 /* Comparison function for qsort */
-static int compare_ints(const void *a, const void *b) {
-    return (*(const int *)a) - (*(const int *)b);
-}
+static int compare_ints(const void *a, const void *b) { return (*(const int *)a) - (*(const int *)b); }
 
 int stats_calculate(const int *values, int count, stats_summary_t *summary) {
-    if (!values || !summary || count <= 0) {
-        return -1;
-    }
+    if(!values || !summary || count <= 0) { return -1; }
 
     /* Allocate sorted copy for quartile calculations */
     int *sorted = malloc((size_t)count * sizeof(int));
-    if (!sorted) {
-        return -1;
-    }
+    if(!sorted) { return -1; }
     memcpy(sorted, values, (size_t)count * sizeof(int));
     qsort(sorted, (size_t)count, sizeof(int), compare_ints);
 
@@ -62,14 +56,12 @@ int stats_calculate(const int *values, int count, stats_summary_t *summary) {
 
     /* Calculate mean */
     long long sum = 0;
-    for (int i = 0; i < count; i++) {
-        sum += values[i];
-    }
+    for(int i = 0; i < count; i++) { sum += values[i]; }
     summary->mean = (double)sum / count;
 
     /* Calculate variance and standard deviation */
     double variance_sum = 0.0;
-    for (int i = 0; i < count; i++) {
+    for(int i = 0; i < count; i++) {
         double diff = (double)values[i] - summary->mean;
         variance_sum += diff * diff;
     }
@@ -77,14 +69,14 @@ int stats_calculate(const int *values, int count, stats_summary_t *summary) {
     summary->std_dev = sqrt(summary->variance);
 
     /* Coefficient of variation (as percentage) */
-    if (summary->mean > 0.0) {
+    if(summary->mean > 0.0) {
         summary->cv = (summary->std_dev / summary->mean) * 100.0;
     } else {
         summary->cv = 0.0;
     }
 
     /* Min/Max ratio */
-    if (summary->max > 0) {
+    if(summary->max > 0) {
         summary->min_max_ratio = (double)summary->min / (double)summary->max;
     } else {
         summary->min_max_ratio = 0.0;
@@ -96,10 +88,10 @@ int stats_calculate(const int *values, int count, stats_summary_t *summary) {
     summary->q1 = sorted[q1_idx];
 
     /* Median = 50th percentile */
-    if (count % 2 == 0) {
-        summary->median = (sorted[count/2 - 1] + sorted[count/2]) / 2;
+    if(count % 2 == 0) {
+        summary->median = (sorted[count / 2 - 1] + sorted[count / 2]) / 2;
     } else {
-        summary->median = sorted[count/2];
+        summary->median = sorted[count / 2];
     }
 
     /* Q3 = 75th percentile */
@@ -114,9 +106,7 @@ int stats_calculate(const int *values, int count, stats_summary_t *summary) {
 }
 
 void stats_print_summary(FILE *stream, const stats_summary_t *summary) {
-    if (!stream || !summary) {
-        return;
-    }
+    if(!stream || !summary) { return; }
 
     fprintf(stream, "\nStatistics Summary:\n");
     fprintf(stream, "-------------------\n");
@@ -134,89 +124,70 @@ void stats_print_summary(FILE *stream, const stats_summary_t *summary) {
     fprintf(stream, "IQR (Q3-Q1):        %d\n", summary->iqr);
 }
 
-void stats_print_histogram(FILE *stream, const int *values, int count,
-                           int num_buckets, int max_bar_width) {
-    if (!stream || !values || count <= 0) {
-        return;
-    }
+void stats_print_histogram(FILE *stream, const int *values, int count, int num_buckets, int max_bar_width) {
+    if(!stream || !values || count <= 0) { return; }
 
     /* Find min/max */
     int min_val = values[0];
     int max_val = values[0];
-    for (int i = 1; i < count; i++) {
-        if (values[i] < min_val) min_val = values[i];
-        if (values[i] > max_val) max_val = values[i];
+    for(int i = 1; i < count; i++) {
+        if(values[i] < min_val) { min_val = values[i]; }
+        if(values[i] > max_val) { max_val = values[i]; }
     }
 
     /* Auto-determine buckets if not specified */
-    if (num_buckets <= 0) {
+    if(num_buckets <= 0) {
         int range = max_val - min_val + 1;
-        if (range <= 10) {
-            num_buckets = range;  /* One bucket per value */
-        } else if (range <= 20) {
+        if(range <= 10) {
+            num_buckets = range; /* One bucket per value */
+        } else if(range <= 20) {
             num_buckets = 10;
         } else {
             num_buckets = 15;
         }
     }
 
-    if (max_bar_width <= 0) {
-        max_bar_width = 40;
-    }
+    if(max_bar_width <= 0) { max_bar_width = 40; }
 
     /* Allocate bucket counts */
     int *buckets = calloc((size_t)num_buckets, sizeof(int));
-    if (!buckets) {
-        return;
-    }
+    if(!buckets) { return; }
 
     /* Calculate bucket size */
     int range = max_val - min_val;
     double bucket_size = (range > 0) ? ((double)range / num_buckets) : 1.0;
-    if (bucket_size < 1.0) {
-        bucket_size = 1.0;
-    }
+    if(bucket_size < 1.0) { bucket_size = 1.0; }
 
     /* Count values in each bucket */
     int max_bucket_count = 0;
-    for (int i = 0; i < count; i++) {
+    for(int i = 0; i < count; i++) {
         int bucket = (int)((values[i] - min_val) / bucket_size);
-        if (bucket >= num_buckets) {
-            bucket = num_buckets - 1;
-        }
+        if(bucket >= num_buckets) { bucket = num_buckets - 1; }
         buckets[bucket]++;
-        if (buckets[bucket] > max_bucket_count) {
-            max_bucket_count = buckets[bucket];
-        }
+        if(buckets[bucket] > max_bucket_count) { max_bucket_count = buckets[bucket]; }
     }
 
     /* Print histogram */
     fprintf(stream, "\nHistogram:\n");
     fprintf(stream, "----------\n");
 
-    for (int b = 0; b < num_buckets; b++) {
+    for(int b = 0; b < num_buckets; b++) {
         int bucket_start = min_val + (int)(b * bucket_size);
         int bucket_end = min_val + (int)((b + 1) * bucket_size) - 1;
-        if (b == num_buckets - 1) {
-            bucket_end = max_val;
-        }
+        if(b == num_buckets - 1) { bucket_end = max_val; }
 
         /* Calculate bar length */
         int bar_len = 0;
-        if (max_bucket_count > 0) {
-            bar_len = (buckets[b] * max_bar_width) / max_bucket_count;
-        }
+        if(max_bucket_count > 0) { bar_len = (buckets[b] * max_bar_width) / max_bucket_count; }
 
         /* Print bucket range and bar */
-        if (bucket_start == bucket_end) {
+        if(bucket_start == bucket_end) {
             fprintf(stream, "%4d:     ", bucket_start);
         } else {
             fprintf(stream, "%4d-%4d: ", bucket_start, bucket_end);
         }
 
-        for (int i = 0; i < bar_len; i++) {
-            fprintf(stream, "#");
-        }
+        for(int i = 0; i < bar_len; i++) { fprintf(stream, "#"); }
         fprintf(stream, " (%d)\n", buckets[b]);
     }
 
@@ -224,22 +195,20 @@ void stats_print_histogram(FILE *stream, const int *values, int count,
 }
 
 int stats_assess_fairness(const stats_summary_t *summary, FILE *stream) {
-    if (!summary) {
-        return -1;
-    }
+    if(!summary) { return -1; }
 
     int is_fair = 1;
 
-    if (stream) {
+    if(stream) {
         fprintf(stream, "\nFairness Assessment:\n");
         fprintf(stream, "--------------------\n");
 
         /* CV assessment */
-        if (summary->cv < 5.0) {
+        if(summary->cv < 5.0) {
             fprintf(stream, "CV:        EXCELLENT (%.2f%% < 5%%)\n", summary->cv);
-        } else if (summary->cv < 10.0) {
+        } else if(summary->cv < 10.0) {
             fprintf(stream, "CV:        GOOD (%.2f%% < 10%%)\n", summary->cv);
-        } else if (summary->cv < 20.0) {
+        } else if(summary->cv < 20.0) {
             fprintf(stream, "CV:        ACCEPTABLE (%.2f%% < 20%%)\n", summary->cv);
         } else {
             fprintf(stream, "CV:        POOR (%.2f%% >= 20%%)\n", summary->cv);
@@ -247,11 +216,11 @@ int stats_assess_fairness(const stats_summary_t *summary, FILE *stream) {
         }
 
         /* Min/Max ratio assessment */
-        if (summary->min_max_ratio > 0.9) {
+        if(summary->min_max_ratio > 0.9) {
             fprintf(stream, "Min/Max:   EXCELLENT (%.3f > 0.9)\n", summary->min_max_ratio);
-        } else if (summary->min_max_ratio > 0.8) {
+        } else if(summary->min_max_ratio > 0.8) {
             fprintf(stream, "Min/Max:   GOOD (%.3f > 0.8)\n", summary->min_max_ratio);
-        } else if (summary->min_max_ratio > 0.7) {
+        } else if(summary->min_max_ratio > 0.7) {
             fprintf(stream, "Min/Max:   ACCEPTABLE (%.3f > 0.7)\n", summary->min_max_ratio);
         } else {
             fprintf(stream, "Min/Max:   POOR (%.3f <= 0.7)\n", summary->min_max_ratio);
@@ -262,9 +231,7 @@ int stats_assess_fairness(const stats_summary_t *summary, FILE *stream) {
         fprintf(stream, "\nResult:    %s\n", is_fair ? "PASS" : "FAIL");
     } else {
         /* Silent mode - just check thresholds */
-        if (summary->cv >= 20.0 || summary->min_max_ratio <= 0.7) {
-            is_fair = 0;
-        }
+        if(summary->cv >= 20.0 || summary->min_max_ratio <= 0.7) { is_fair = 0; }
     }
 
     return is_fair ? 0 : -1;

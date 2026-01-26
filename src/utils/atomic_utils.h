@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -47,29 +47,29 @@
 
 /* Non-C11 atomics path (Windows and older compilers) */
 
-#ifdef _WIN32
+#    ifdef _WIN32
 typedef volatile short atomic_bool;
-#else
+#    else
 typedef volatile bool atomic_bool;
-#endif
+#    endif
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
 
-#define ATOMIC_INT_STATIC_INIT (0)
-#define ATOMIC_BOOL_STATIC_INIT (false)
+#    define ATOMIC_INT_STATIC_INIT (0)
+#    define ATOMIC_BOOL_STATIC_INIT (false)
 
 #else
 
 /* C11 atomics path */
 
-#include <stdatomic.h>
+#    include <stdatomic.h>
 
 typedef _Atomic bool atomic_bool;
 typedef _Atomic int32_t atomic_int32_t;
 typedef _Atomic int64_t atomic_int64_t;
 
-#define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
-#define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
+#    define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
+#    define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
 
 #endif
 
@@ -94,4 +94,3 @@ int64_t atomic_get_int64(atomic_int64_t *a);
 int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
 int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
 int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
-

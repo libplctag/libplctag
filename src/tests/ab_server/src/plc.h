@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -42,25 +42,26 @@
 typedef uint16_t tag_type_t;
 
 /* CIP data types. */
-#define TAG_CIP_TYPE_BOOL        ((tag_type_t)0x00C1) /* 8-bit boolean value */
-#define TAG_CIP_TYPE_SINT        ((tag_type_t)0x00C2) /* Signed 8–bit integer value */
-#define TAG_CIP_TYPE_INT         ((tag_type_t)0x00C3) /* Signed 16–bit integer value */
-#define TAG_CIP_TYPE_DINT        ((tag_type_t)0x00C4) /* Signed 32–bit integer value */
-#define TAG_CIP_TYPE_LINT        ((tag_type_t)0x00C5) /* Signed 64–bit integer value */
-#define TAG_CIP_TYPE_USINT       ((tag_type_t)0x00C6) /* Unsigned 8–bit integer value */
-#define TAG_CIP_TYPE_UINT        ((tag_type_t)0x00C7) /* Unsigned 16–bit integer value */
-#define TAG_CIP_TYPE_UDINT       ((tag_type_t)0x00C8) /* Unsigned 32–bit integer value */
-#define TAG_CIP_TYPE_ULINT       ((tag_type_t)0x00C9) /* Unsigned 64–bit integer value */
-#define TAG_CIP_TYPE_REAL        ((tag_type_t)0x00CA) /* 32–bit floating point value, IEEE format */
-#define TAG_CIP_TYPE_LREAL       ((tag_type_t)0x00CB) /* 64–bit floating point value, IEEE format */
-#define TAG_CIP_TYPE_STRING      ((tag_type_t)0x00D0) /* 88-byte string, with 82 bytes of data, 4-byte count and 2 bytes of padding */
+#define TAG_CIP_TYPE_BOOL ((tag_type_t)0x00C1)   /* 8-bit boolean value */
+#define TAG_CIP_TYPE_SINT ((tag_type_t)0x00C2)   /* Signed 8–bit integer value */
+#define TAG_CIP_TYPE_INT ((tag_type_t)0x00C3)    /* Signed 16–bit integer value */
+#define TAG_CIP_TYPE_DINT ((tag_type_t)0x00C4)   /* Signed 32–bit integer value */
+#define TAG_CIP_TYPE_LINT ((tag_type_t)0x00C5)   /* Signed 64–bit integer value */
+#define TAG_CIP_TYPE_USINT ((tag_type_t)0x00C6)  /* Unsigned 8–bit integer value */
+#define TAG_CIP_TYPE_UINT ((tag_type_t)0x00C7)   /* Unsigned 16–bit integer value */
+#define TAG_CIP_TYPE_UDINT ((tag_type_t)0x00C8)  /* Unsigned 32–bit integer value */
+#define TAG_CIP_TYPE_ULINT ((tag_type_t)0x00C9)  /* Unsigned 64–bit integer value */
+#define TAG_CIP_TYPE_REAL ((tag_type_t)0x00CA)   /* 32–bit floating point value, IEEE format */
+#define TAG_CIP_TYPE_LREAL ((tag_type_t)0x00CB)  /* 64–bit floating point value, IEEE format */
+#define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0) /* 88-byte string, with 82 bytes of data, 4-byte count and 2 bytes of padding \
+                                                  */
 
 /* PCCC data types.   FIXME */
-#define TAG_PCCC_TYPE_BIT         ((uint8_t)0x85) /* 1-bit boolean value as unsigned 16-bit integer */
-#define TAG_PCCC_TYPE_INT         ((uint8_t)0x89) /* Signed 16–bit integer value */
-#define TAG_PCCC_TYPE_DINT        ((uint8_t)0x91) /* Signed 32–bit integer value */
-#define TAG_PCCC_TYPE_REAL        ((uint8_t)0x8a) /* 32–bit floating point value, IEEE format */
-#define TAG_PCCC_TYPE_STRING      ((uint8_t)0x8d) /* 82-byte string with 2-byte count word. */
+#define TAG_PCCC_TYPE_BIT ((uint8_t)0x85)    /* 1-bit boolean value as unsigned 16-bit integer */
+#define TAG_PCCC_TYPE_INT ((uint8_t)0x89)    /* Signed 16–bit integer value */
+#define TAG_PCCC_TYPE_DINT ((uint8_t)0x91)   /* Signed 32–bit integer value */
+#define TAG_PCCC_TYPE_REAL ((uint8_t)0x8a)   /* 32–bit floating point value, IEEE format */
+#define TAG_PCCC_TYPE_STRING ((uint8_t)0x8d) /* 82-byte string with 2-byte count word. */
 
 struct tag_def_s {
     struct tag_def_s *next_tag;
@@ -77,7 +78,7 @@ struct tag_def_s {
        and types) are expected to be created once, in a single thread. From then on those fields
        are expected to be read-only (even if by multiple threads). */
     mutex_p data_mutex;
-    
+
     /* Fairness tracking - per-request latency statistics */
     atomic_int32_t request_count;
     atomic_int64_t total_latency_us;     /* sum of all request latencies in microseconds */
@@ -88,19 +89,12 @@ struct tag_def_s {
 
 typedef struct tag_def_s tag_def_s;
 
-typedef enum {
-    PLC_CONTROL_LOGIX,
-    PLC_MICRO800,
-    PLC_OMRON,
-    PLC_PLC5,
-    PLC_SLC,
-    PLC_MICROLOGIX
-} plc_type_t;
+typedef enum { PLC_CONTROL_LOGIX, PLC_MICRO800, PLC_OMRON, PLC_PLC5, PLC_SLC, PLC_MICROLOGIX } plc_type_t;
 
 /* Define the context that is passed around. */
 typedef struct plc_s {
     plc_type_t plc_type;
-    const char* port_str;
+    const char *port_str;
     uint8_t path[20];
     uint8_t path_len;
 

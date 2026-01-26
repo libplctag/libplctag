@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
     compat_set_interrupt_handler(interrupt_handler);
 
     /* Initialize logger to write to stderr */
-    if (clog_init_fd(0, fileno(stderr)) != 0) {
+    if(clog_init_fd(0, fileno(stderr)) != 0) {
         fprintf(stderr, "Failed to initialize logger.\n");
         return 1;
     }
@@ -217,9 +217,7 @@ int main(int argc, char **argv) {
     }
 
     /* Use defaults if not specified */
-    if(!tag_string) {
-        tag_string = DEFAULT_TAG_PATH;
-    }
+    if(!tag_string) { tag_string = DEFAULT_TAG_PATH; }
 
     if(num_threads > MAX_THREADS) {
         // NOLINTNEXTLINE
@@ -318,9 +316,7 @@ int main(int argc, char **argv) {
         total_request_time += args[tid].total_io_time;
     }
 
-    if(total_requests > 0) {
-        avg_request_time = total_request_time / total_requests;
-    }
+    if(total_requests > 0) { avg_request_time = total_request_time / total_requests; }
 
     /* Print detailed statistics */
     // NOLINTNEXTLINE
@@ -334,7 +330,8 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "║ Total requests: %d                                              \n", total_requests);
     // NOLINTNEXTLINE
-    fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n", (total_requests * 1000.0) / (total_run_time > 0 ? total_run_time : 1));
+    fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n",
+            (total_requests * 1000.0) / (total_run_time > 0 ? total_run_time : 1));
     // NOLINTNEXTLINE
     fprintf(stderr, "╠════════════════════════════════════════════════════════════════╣\n");
     // NOLINTNEXTLINE
@@ -349,8 +346,8 @@ int main(int argc, char **argv) {
     for(int tid = 0; tid < num_threads; tid++) {
         int64_t avg = args[tid].iteration > 0 ? args[tid].total_io_time / args[tid].iteration : 0;
         // NOLINTNEXTLINE
-        fprintf(stderr, "║  %3d     %6d        %4" PRId64 "   %4" PRId64 "   %4" PRId64 "                      ║\n",
-                tid, args[tid].iteration, args[tid].min_io_time, avg, args[tid].max_io_time);
+        fprintf(stderr, "║  %3d     %6d        %4" PRId64 "   %4" PRId64 "   %4" PRId64 "                      ║\n", tid,
+                args[tid].iteration, args[tid].min_io_time, avg, args[tid].max_io_time);
     }
 
     // NOLINTNEXTLINE

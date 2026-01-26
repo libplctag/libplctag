@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -181,8 +181,8 @@ void *rc_inc_impl(const char *func, int line_num, void *data) {
     }
 
     if(!result) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func,
-               line_num);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN,
+               "Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
     } else {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Ref count is %d for %p.", count, data);
     }
@@ -236,7 +236,8 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
 
         /* clean up only if count is zero. */
         if(rc && count <= 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.", func, line_num, data, rc->function_name, rc->line_num);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.",
+                   func, line_num, data, rc->function_name, rc->line_num);
 
             /*
              * Queue the cleanup instead of doing it immediately.
@@ -274,12 +275,11 @@ void refcount_cleanup(refcount_p rc) {
         return;
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Deferred destruction of %p, allocated in function %s at line %d", (void*)(rc + 1), rc->function_name, rc->line_num);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Deferred destruction of %p, allocated in function %s at line %d", (void *)(rc + 1),
+           rc->function_name, rc->line_num);
 
     /* call the clean up function */
-    if(rc->cleanup_func) {
-        rc->cleanup_func((void *)(rc + 1));
-    }
+    if(rc->cleanup_func) { rc->cleanup_func((void *)(rc + 1)); }
 
     /* finally done. */
     mem_free(rc);
@@ -294,11 +294,11 @@ void refcount_cleanup(refcount_p rc) {
  * Waits on the cleanup condition variable and processes cleanup queue entries
  * one at a time. This ensures that destructors don't run in arbitrary user threads
  * but in a dedicated cleanup thread, avoiding complex thread synchronization issues.
- * 
+ *
  * the deferred cleanup vector contains pointers to the refcount header.
  */
 THREAD_FUNC(refcount_cleanup_thread_func) {
-    (void)arg;  /* Unused parameter */
+    (void)arg; /* Unused parameter */
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Cleanup thread starting.");
 
     while(cleanup_thread_running) {
@@ -307,12 +307,11 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
         cond_wait(cleanup_cond, 100); /* 100 millisecond timeout */
 
         do {
-            critical_block(cleanup_mutex) {
-                header = vector_remove(cleanup_queue, 0);
-            }
+            critical_block(cleanup_mutex) { header = vector_remove(cleanup_queue, 0); }
 
             if(header) {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Processing cleanup for object %p allocated at %s:%d", (void*)(header + 1), header->function_name, header->line_num);
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Processing cleanup for object %p allocated at %s:%d",
+                       (void *)(header + 1), header->function_name, header->line_num);
                 refcount_cleanup(header);
             }
         } while(header != NULL);
@@ -392,14 +391,12 @@ int refcount_teardown(void) {
     /* Wait for the cleanup thread to finish */
     if(cleanup_thread) {
         /* Signal the cleanup thread to exit */
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Signaling cleanup thread to exit.");        
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Signaling cleanup thread to exit.");
         cleanup_thread_running = 0;
-        if(cleanup_cond) {
-            cond_signal(cleanup_cond);
-        }
+        if(cleanup_cond) { cond_signal(cleanup_cond); }
 
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Waiting for cleanup thread to exit.");
-        
+
         thread_join(cleanup_thread);
         thread_destroy(&cleanup_thread);
         cleanup_thread = NULL;
@@ -412,7 +409,7 @@ int refcount_teardown(void) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Draining any remaining cleanup queue entries.");
 
         refcount_p header = NULL;
-        
+
         do {
             critical_block(cleanup_mutex) { header = vector_remove(cleanup_queue, 0); }
 
@@ -441,4 +438,3 @@ int refcount_teardown(void) {
 
     return PLCTAG_STATUS_OK;
 }
-
