@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -43,23 +43,22 @@
 #include "buf.h"
 #include "utils.h"
 #if defined(_WIN32) && !defined(_MSC_VER)
-#include <windows.h>
+#    include <windows.h>
 #endif
 
 /* Guard for MSVC which doesn't support C11 stdatomic.h */
 #if defined(_MSC_VER)
-    /* Microsoft Visual C++ compiler */
-    #include <windows.h>
-    /* Define atomic types and operations for MSVC */
-    #define _Atomic volatile
-    #define atomic_fetch_add(obj, arg) InterlockedExchangeAdd((volatile LONG *)(obj), arg)
-    #define LOCK_INIT false
+/* Microsoft Visual C++ compiler */
+#    include <windows.h>
+/* Define atomic types and operations for MSVC */
+#    define _Atomic volatile
+#    define atomic_fetch_add(obj, arg) InterlockedExchangeAdd((volatile LONG *)(obj), arg)
+#    define LOCK_INIT false
 #else
-    /* Standard C11 atomics for other compilers */
-    #include <stdatomic.h>
-    #define LOCK_INIT false
+/* Standard C11 atomics for other compilers */
+#    include <stdatomic.h>
+#    define LOCK_INIT false
 #endif
-
 
 
 /*
@@ -78,18 +77,18 @@ static const char *log_module_names[] = {
 /* Per-module log levels */
 static _Atomic log_level_t module_log_levels[64];
 
-static _Atomic int thread_num_lock = 0;  /* 0 = unlocked, 1 = locked */
+static _Atomic int thread_num_lock = 0; /* 0 = unlocked, 1 = locked */
 static _Atomic uint32_t thread_num = 1;
 
 /*
  * Keep the thread ID and the tag ID thread local.
  */
 
-#if defined(_MSC_VER) && (_MSC_VER < 1900) // Visual Studio before 2015
-    #define THREAD_LOCAL __declspec(thread)
+#if defined(_MSC_VER) && (_MSC_VER < 1900)  // Visual Studio before 2015
+#    define THREAD_LOCAL __declspec(thread)
 #else
-    // C11 standard thread local storage
-    #define THREAD_LOCAL _Thread_local
+// C11 standard thread local storage
+#    define THREAD_LOCAL _Thread_local
 #endif
 
 static THREAD_LOCAL uint32_t this_thread_num = 0;
@@ -97,14 +96,14 @@ static THREAD_LOCAL uint32_t this_thread_num = 0;
 
 /* Helper to find bit position from module bitmask */
 static inline int log_module_to_index(log_module_t module) {
-    if (module == 0) return -1;
-    
+    if(module == 0) { return -1; }
+
     int pos = 0;
     uint64_t m = module;
-    while ((m & 1) == 0) {
+    while((m & 1) == 0) {
         m >>= 1;
         pos++;
-        if (pos >= 64) return -1;
+        if(pos >= 64) { return -1; }
     }
     return pos;
 }
@@ -112,40 +111,31 @@ static inline int log_module_to_index(log_module_t module) {
 
 void log_module_set_level(log_module_t module, log_level_t level) {
     int idx = log_module_to_index(module);
-    if (idx >= 0 && idx < 64) {
-        module_log_levels[idx] = level;
-    }
+    if(idx >= 0 && idx < 64) { module_log_levels[idx] = level; }
 }
 
 
 log_level_t log_module_get_level(log_module_t module) {
     int idx = log_module_to_index(module);
-    if (idx >= 0 && idx < 64) {
-        return module_log_levels[idx];
-    }
+    if(idx >= 0 && idx < 64) { return module_log_levels[idx]; }
     return LOG_LEVEL_NONE;
 }
 
 
 void log_set_all_modules(log_level_t level) {
-    for (int i = 0; i < 64; i++) {
-        module_log_levels[i] = level;
-    }
+    for(int i = 0; i < 64; i++) { module_log_levels[i] = level; }
 }
 
 
 bool log_is_enabled(log_module_mask_t modules, log_level_t level) {
     /* Check each bit in the modules mask */
-    for (int i = 0; i < 64; i++) {
-        if (modules & (1ULL << i)) {
-            if (level <= module_log_levels[i]) {
-                return true;
-            }
+    for(int i = 0; i < 64; i++) {
+        if(modules & (1ULL << i)) {
+            if(level <= module_log_levels[i]) { return true; }
         }
     }
     return false;
 }
-
 
 
 static uint32_t get_thread_id(void) {
@@ -156,7 +146,7 @@ static uint32_t get_thread_id(void) {
 
 #if defined(_MSC_VER)
         /* MSVC uses InterlockedCompareExchange */
-        while(InterlockedCompareExchange((volatile LONG*)&thread_num_lock, desired, expected) != expected) {
+        while(InterlockedCompareExchange((volatile LONG *)&thread_num_lock, desired, expected) != expected) {
             /* Busy wait - spinlock */
         }
 #else
@@ -175,7 +165,7 @@ static uint32_t get_thread_id(void) {
 
         /* Release the lock */
 #if defined(_MSC_VER)
-        InterlockedExchange((volatile LONG*)&thread_num_lock, 0);
+        InterlockedExchange((volatile LONG *)&thread_num_lock, 0);
 #else
         atomic_store(&thread_num_lock, 0);
 #endif
@@ -189,25 +179,25 @@ static const char *log_level_name[LOG_LEVEL_END] = {"NONE", "ERROR", "WARN", "IN
 
 /* Helper to build module names string from bitmask */
 static void format_module_names(log_module_mask_t modules, char *buf, size_t buf_size) {
-    if (buf_size == 0) return;
-    
+    if(buf_size == 0) { return; }
+
     buf[0] = '\0';
     buf[buf_size - 1] = '\0';
     size_t offset = 0;
     bool first = true;
-    
-    for (int i = 0; i < (int)LOG_MODULE_COUNT && i < 64; i++) {
-        if (modules & (1ULL << i)) {
-            if (!first && offset < buf_size - 1) {
+
+    for(int i = 0; i < (int)LOG_MODULE_COUNT && i < 64; i++) {
+        if(modules & (1ULL << i)) {
+            if(!first && offset < buf_size - 1) {
                 buf[offset++] = '|';
                 buf[offset] = '\0';
             }
-            
+
             const char *name = log_module_names[i];
             size_t remaining = buf_size - offset;
-            if (name && remaining > 0) {
+            if(name && remaining > 0) {
                 size_t name_len = strlen(name);
-                if (name_len < remaining) {
+                if(name_len < remaining) {
                     strcpy(&buf[offset], name);
                     offset += name_len;
                 } else {
@@ -224,7 +214,7 @@ static void format_module_names(log_module_mask_t modules, char *buf, size_t buf
 
 /**
  * @brief Log a message.
- * 
+ *
  * @param func name of the function in which the log is generated
  * @param line_num line number in the source file
  * @param debug_level log level
@@ -232,8 +222,7 @@ static void format_module_names(log_module_mask_t modules, char *buf, size_t buf
  * @param templ format string for the log message
  * @param ... additional arguments for the format string
  */
-extern void log_impl(const char *func, int line_num, log_level_t debug_level, 
-                     log_module_mask_t modules, const char *templ, ...) {
+extern void log_impl(const char *func, int line_num, log_level_t debug_level, log_module_mask_t modules, const char *templ, ...) {
     va_list va;
     char prefix[1000]; /* MAGIC */
     char output[1000];
@@ -259,10 +248,9 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level,
 
     /* Build log prefix with timestamp, thread id, modules, level, and site */
     // NOLINTNEXTLINE
-    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%06d thread(%u) [%s] %s %s:%d %s\n",
-             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-             t.tm_hour, t.tm_min, t.tm_sec, remainder_us,
-             get_thread_id(), module_str, log_level_name[debug_level], func, line_num, templ);
+    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%06d thread(%u) [%s] %s %s:%d %s\n", t.tm_year + 1900,
+             t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_us, get_thread_id(), module_str,
+             log_level_name[debug_level], func, line_num, templ);
     prefix[sizeof(prefix) - 1] = 0;
 
     /* Format and emit the final message */
@@ -279,16 +267,15 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level,
 
 /**
  * @brief Log a buffer's contents as hex.
- * 
+ *
  * @param func name of the function in which the log is generated
  * @param line_num line number in the source file
  * @param lvl log level
  * @param modules bitmask of modules this log applies to
  * @param buf buffer containing the bytes to log
  */
-void log_bytes_impl(const char *func, int line_num, log_level_t lvl, 
-                    log_module_mask_t modules, buf_t *buf) {
-    if (!buf) {
+void log_bytes_impl(const char *func, int line_num, log_level_t lvl, log_module_mask_t modules, buf_t *buf) {
+    if(!buf) {
         log_impl(func, line_num, lvl, modules, "<null>");
         return;
     }
@@ -296,12 +283,12 @@ void log_bytes_impl(const char *func, int line_num, log_level_t lvl,
     size_t count = buf_read_size(buf);
     const uint8_t *data = buf_read_ptr(buf);
 
-    if (!data || count == 0) {
+    if(!data || count == 0) {
         log_impl(func, line_num, lvl, modules, "<empty>");
         return;
     }
 
-    for (size_t row = 0; row < (count + (COLUMNS - 1)) / COLUMNS; ++row) {
+    for(size_t row = 0; row < (count + (COLUMNS - 1)) / COLUMNS; ++row) {
         char row_buf[(COLUMNS * 3) + 6] = {0};
         char *p = row_buf;
 
@@ -310,14 +297,10 @@ void log_bytes_impl(const char *func, int line_num, log_level_t lvl,
         size_t start = row * COLUMNS;
         size_t end = start + COLUMNS;
 
-        if (end > count) { end = count; }
+        if(end > count) { end = count; }
 
-        for (size_t i = start; i < end; ++i) {
-            p += sprintf(p, " %02x", (unsigned)data[i]);
-        }
+        for(size_t i = start; i < end; ++i) { p += sprintf(p, " %02x", (unsigned)data[i]); }
 
         log_impl(func, line_num, lvl, modules, "%s", row_buf);
     }
 }
-
-

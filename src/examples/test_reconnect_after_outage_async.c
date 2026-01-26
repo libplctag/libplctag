@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Simon Labrecque                                 *
+ *   Copyright (C) 2026 by Simon Labrecque                                 *
  *   Author Simon Labrecque  simon@wegel.ca                                *
  *   Changes by Kyle Hayes kyle.hayes@gmail.com                            *
  *                                                                         *

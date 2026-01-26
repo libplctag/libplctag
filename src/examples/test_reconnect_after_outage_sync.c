@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Simon Labrecque                                 *
+ *   Copyright (C) 2026 by Simon Labrecque                                 *
  *   Author Simon Labrecque  simon@wegel.ca                                *
  *   Changes by Kyle Hayes kyle.hayes@gmail.com                            *
  *                                                                         *
@@ -248,9 +248,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             }
             break;
 
-        default:
-            compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status));
-            break;
+        default: compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status)); break;
     }
 }
 
@@ -364,13 +362,13 @@ int run_manual_test(const char *ab_server_cmd) {
     setup_tag(&manual_test_state, MANUAL_SYNC_TAG_ATTRIBS);
     log("[DEBUG] Tag setup complete\n");
 
-    log("[DEBUG] Entering Phase 1 - reading until disconnect at %" PRId64 "ms\n", manual_test_state.disconnect_time - manual_test_state.start_time);
+    log("[DEBUG] Entering Phase 1 - reading until disconnect at %" PRId64 "ms\n",
+        manual_test_state.disconnect_time - manual_test_state.start_time);
     while((current_time = compat_time_ms()) < manual_test_state.disconnect_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
         log("[DEBUG] Phase 1: plc_tag_read at offset %" PRId64 "ms (target disconnect at %" PRId64 "ms), reads so far: %d\n",
-            current_time - manual_test_state.start_time,
-            manual_test_state.disconnect_time - manual_test_state.start_time,
+            current_time - manual_test_state.start_time, manual_test_state.disconnect_time - manual_test_state.start_time,
             manual_test_state.read_success_count);
         int read_rc = plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
         log("[DEBUG] Phase 1: plc_tag_read returned %s\n", plc_tag_decode_error(read_rc));
@@ -389,13 +387,13 @@ int run_manual_test(const char *ab_server_cmd) {
     fputs("\nD\n", stderr);
     fflush(stderr);
 
-    log("[DEBUG] Entering Phase 2 - waiting while disconnected until %" PRId64 "ms\n", manual_test_state.reconnect_time - manual_test_state.start_time);
+    log("[DEBUG] Entering Phase 2 - waiting while disconnected until %" PRId64 "ms\n",
+        manual_test_state.reconnect_time - manual_test_state.start_time);
     while((current_time = compat_time_ms()) < manual_test_state.reconnect_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
         log("[DEBUG] Phase 2: plc_tag_read at offset %" PRId64 "ms (target reconnect at %" PRId64 "ms)\n",
-            current_time - manual_test_state.start_time,
-            manual_test_state.reconnect_time - manual_test_state.start_time);
+            current_time - manual_test_state.start_time, manual_test_state.reconnect_time - manual_test_state.start_time);
         int read_rc = plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
         log("[DEBUG] Phase 2: plc_tag_read returned %s\n", plc_tag_decode_error(read_rc));
 
@@ -414,13 +412,13 @@ int run_manual_test(const char *ab_server_cmd) {
 
     manual_test_state.reconnect_done = 1;
 
-    log("[DEBUG] Entering Phase 3 - reading after reconnect until %" PRId64 "ms\n", manual_test_state.end_time - manual_test_state.start_time);
+    log("[DEBUG] Entering Phase 3 - reading after reconnect until %" PRId64 "ms\n",
+        manual_test_state.end_time - manual_test_state.start_time);
     while((current_time = compat_time_ms()) < manual_test_state.end_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
         log("[DEBUG] Phase 3: plc_tag_read at offset %" PRId64 "ms (target end at %" PRId64 "ms), reads after reconnect: %d\n",
-            current_time - manual_test_state.start_time,
-            manual_test_state.end_time - manual_test_state.start_time,
+            current_time - manual_test_state.start_time, manual_test_state.end_time - manual_test_state.start_time,
             manual_test_state.read_success_after_reconnect);
         int read_rc = plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
         log("[DEBUG] Phase 3: plc_tag_read returned %s\n", plc_tag_decode_error(read_rc));

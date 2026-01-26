@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,20 +34,17 @@
 #include <libplctag/protocols/ab/tag.h>
 
 
+struct tag_vtable_t slc_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
+                                  .read = (tag_vtable_func)pccc_tag_read_start,
+                                  .status = (tag_vtable_func)pccc_tag_status,
+                                  .tickler = (tag_vtable_func)pccc_tag_tickler,
+                                  .write = (tag_vtable_func)pccc_tag_write_start,
+                                  .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
 
-struct tag_vtable_t slc_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
-    .read = (tag_vtable_func)pccc_tag_read_start,
-    .status = (tag_vtable_func)pccc_tag_status,
-    .tickler = (tag_vtable_func)pccc_tag_tickler,
-    .write = (tag_vtable_func)pccc_tag_write_start,
-    .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
-
-    /* data accessors */
-    .get_int_attrib = ab_get_int_attrib,
-    .set_int_attrib = ab_set_int_attrib,
-    .get_byte_array_attrib = ab_get_byte_array_attrib
-};
+                                  /* data accessors */
+                                  .get_int_attrib = ab_get_int_attrib,
+                                  .set_int_attrib = ab_set_int_attrib,
+                                  .get_byte_array_attrib = ab_get_byte_array_attrib};
 
 
 /* default string types used for PLC-5 PLCs. */
@@ -70,5 +67,3 @@ tag_byte_order_t slc_tag_byte_order = {.is_allocated = 0,
                                        .str_max_capacity = 82,
                                        .str_total_length = 84,
                                        .str_pad_bytes = 0};
-
-

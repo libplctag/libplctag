@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -1006,7 +1006,8 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
     }
 
     if(timeout_ms <= 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms, func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms,
+               func, line_num);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -1049,7 +1050,8 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
         /* clear the flag now that we've responded. */
         c->flag = 0;
     } else {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func,
+               line_num);
     }
 
     LeaveCriticalSection(&(c->cs));
@@ -1344,8 +1346,8 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
                 rc = PLCTAG_STATUS_PENDING;
                 done = 1;
             } else {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d trying to start connection attempt %d process!  Trying next IP address.", sock_err,
-                       i);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN,
+                       "Error %d trying to start connection attempt %d process!  Trying next IP address.", sock_err, i);
                 i++;
             }
         } else {
@@ -1598,7 +1600,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                     result |= (events & SOCK_EVENT_ERROR);
                 } else {
                     /* FD_ISSET was spurious - there's no actual error */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW,
+                           "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
                 }
             } else {
                 /* Failed to get socket error state, assume there's an error */

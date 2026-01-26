@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -43,9 +43,9 @@
  */
 
 #define LIB_VER_STRING "2.6.14"
-#define LIB_VER_MAJOR (2)
-#define LIB_VER_MINOR (6)
-#define LIB_VER_PATCH (14)
+#define LIB_VER_MAJOR (@libplctag_VERSION_MAJOR @)
+#define LIB_VER_MINOR (@libplctag_VERSION_MINOR @)
+#define LIB_VER_PATCH (@libplctag_VERSION_PATCH @)
 
 extern const char *VERSION;
 extern const uint64_t version_major;

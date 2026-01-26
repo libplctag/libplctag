@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -52,9 +52,9 @@
 #include "stats.h"
 #include <libplctag/lib/libplctag.h>
 
-#define DEFAULT_NUM_TAGS 200           /* Number of tags to test */
-#define DEFAULT_TEST_DURATION_SECS 10  /* Test duration in seconds */
-#define TAG_CREATE_TIMEOUT_MS 10000    /* Timeout for tags to become ready */
+#define DEFAULT_NUM_TAGS 200          /* Number of tags to test */
+#define DEFAULT_TEST_DURATION_SECS 10 /* Test duration in seconds */
+#define TAG_CREATE_TIMEOUT_MS 10000   /* Timeout for tags to become ready */
 
 typedef struct {
     compat_atomic_int32_t tag_id;
@@ -91,35 +91,27 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     tag_stats_t *stats = (tag_stats_t *)userdata;
     int64_t now = compat_time_ms();
 
-    switch (event) {
-        case PLCTAG_EVENT_CREATED:
-            compat_atomic_store_int64(&stats->ready_time, now);
-            break;
-        case PLCTAG_EVENT_READ_STARTED:
-            compat_atomic_inc_int32(&stats->read_started_count);
-            break;
+    switch(event) {
+        case PLCTAG_EVENT_CREATED: compat_atomic_store_int64(&stats->ready_time, now); break;
+        case PLCTAG_EVENT_READ_STARTED: compat_atomic_inc_int32(&stats->read_started_count); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            if (status == PLCTAG_STATUS_OK) {
+            if(status == PLCTAG_STATUS_OK) {
                 compat_atomic_inc_int32(&stats->read_completed_count);
 
                 /* Calculate wait time since last read */
                 int64_t last_time = compat_atomic_load_int64(&stats->last_read_time);
-                if (last_time > 0) {
+                if(last_time > 0) {
                     int64_t wait = now - last_time;
                     compat_atomic_add_int64(&stats->total_wait_time, wait);
 
                     /* Update max wait time if needed (simple store, race is benign) */
                     int64_t current_max = compat_atomic_load_int64(&stats->max_wait_time);
-                    if (wait > current_max) {
-                        compat_atomic_store_int64(&stats->max_wait_time, wait);
-                    }
+                    if(wait > current_max) { compat_atomic_store_int64(&stats->max_wait_time, wait); }
 
                     /* Update min wait time if needed (simple store, race is benign) */
                     int64_t current_min = compat_atomic_load_int64(&stats->min_wait_time);
-                    if (current_min == 0 || wait < current_min) {
-                        compat_atomic_store_int64(&stats->min_wait_time, wait);
-                    }
+                    if(current_min == 0 || wait < current_min) { compat_atomic_store_int64(&stats->min_wait_time, wait); }
                 }
 
                 compat_atomic_store_int64(&stats->last_read_time, now);
@@ -128,8 +120,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
             }
             break;
 
-        default:
-            break;
+        default: break;
     }
 }
 
@@ -144,22 +135,20 @@ int main(int argc, char **argv) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* Parse command line arguments in any order */
-    if (argc < 2) {
-        usage(argv[0]);
-    }
+    if(argc < 2) { usage(argv[0]); }
 
-    for (int i = 1; i < argc; i++) {
-        if (strncmp(argv[i], "--tag=", 6) == 0) {
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) {
             tag_string = argv[i] + 6;
-        } else if (strncmp(argv[i], "--num-tags=", 11) == 0) {
+        } else if(strncmp(argv[i], "--num-tags=", 11) == 0) {
             num_tags = atoi(argv[i] + 11);
-            if (num_tags <= 0) {
+            if(num_tags <= 0) {
                 fprintf(stderr, "Number of tags must be greater than zero!\n");
                 usage(argv[0]);
             }
-        } else if (strncmp(argv[i], "--test-duration-secs=", 21) == 0) {
+        } else if(strncmp(argv[i], "--test-duration-secs=", 21) == 0) {
             test_duration_secs = atoi(argv[i] + 21);
-            if (test_duration_secs <= 0) {
+            if(test_duration_secs <= 0) {
                 fprintf(stderr, "Test duration must be greater than zero!\n");
                 usage(argv[0]);
             }
@@ -170,7 +159,7 @@ int main(int argc, char **argv) {
     }
 
     /* Verify required arguments */
-    if (!tag_string) {
+    if(!tag_string) {
         fprintf(stderr, "Error: --tag argument is required!\n");
         usage(argv[0]);
     }
@@ -179,7 +168,7 @@ int main(int argc, char **argv) {
 
     /* Allocate dynamic arrays */
     stats = calloc((size_t)num_tags, sizeof(*stats));
-    if (!stats) {
+    if(!stats) {
         fprintf(stderr, "Error allocating stats array!\n");
         return 1;
     }
@@ -192,10 +181,10 @@ int main(int argc, char **argv) {
 
     /* Create all tags with the same tag string */
     fprintf(stderr, "Creating tags...\n");
-    for (int i = 0; i < num_tags; i++) {
+    for(int i = 0; i < num_tags; i++) {
         /* create the tags async */
         int32_t tag_id = plc_tag_create_ex(tag_string, tag_callback, &stats[i], 0);
-        if (tag_id < 0) {
+        if(tag_id < 0) {
             fprintf(stderr, "Failed to create tag %d: %s\n", i, plc_tag_decode_error(tag_id));
             free(stats);
             return 1;
@@ -204,39 +193,33 @@ int main(int argc, char **argv) {
         /* initialize stats with tag ID - must be set AFTER tag creation */
         compat_atomic_store_int32(&stats[i].tag_id, tag_id);
 
-        if ((i + 1) % 10 == 0) {
-            fprintf(stderr, "  Created %d tags...\n", i + 1);
-        }
+        if((i + 1) % 10 == 0) { fprintf(stderr, "  Created %d tags...\n", i + 1); }
     }
 
     /* Wait for all tags to be ready */
     fprintf(stderr, "\nWaiting for all tags to become ready...\n");
     int64_t tag_create_timeout = compat_time_ms() + TAG_CREATE_TIMEOUT_MS;
     int all_ready = 0;
-    while (compat_time_ms() < tag_create_timeout) {
+    while(compat_time_ms() < tag_create_timeout) {
         all_ready = 1;
-        for (int i = 0; i < num_tags; i++) {
+        for(int i = 0; i < num_tags; i++) {
             if(compat_atomic_load_int64(&stats[i].ready_time) == 0) {
                 all_ready = 0;
                 break;
             }
         }
 
-        if (all_ready) {
-            break;
-        }
+        if(all_ready) { break; }
 
         compat_sleep_ms(100, NULL);
     }
 
-    if (!all_ready) {
+    if(!all_ready) {
         fprintf(stderr, "Warning: Not all tags became ready before timeout!\n");
-        for (int i = 0; i < num_tags; i++) {
+        for(int i = 0; i < num_tags; i++) {
             int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
             int status = plc_tag_status(tag_id);
-            if (status != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "  Tag %d: %s\n", i, plc_tag_decode_error(status));
-            }
+            if(status != PLCTAG_STATUS_OK) { fprintf(stderr, "  Tag %d: %s\n", i, plc_tag_decode_error(status)); }
         }
     } else {
         fprintf(stderr, "All tags ready.\n");
@@ -262,13 +245,13 @@ int main(int argc, char **argv) {
 
     int total_started = 0;
     int *read_counts = malloc((size_t)num_tags * sizeof(int));
-    if (!read_counts) {
+    if(!read_counts) {
         fprintf(stderr, "Error allocating read_counts array!\n");
         free(stats);
         return 1;
     }
 
-    for (int i = 0; i < num_tags; i++) {
+    for(int i = 0; i < num_tags; i++) {
         int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
         int32_t started = compat_atomic_load_int32(&stats[i].read_started_count);
         int32_t completed = compat_atomic_load_int32(&stats[i].read_completed_count);
@@ -277,11 +260,10 @@ int main(int argc, char **argv) {
         int64_t min_wait = compat_atomic_load_int64(&stats[i].min_wait_time);
         int64_t max_wait = compat_atomic_load_int64(&stats[i].max_wait_time);
 
-        fprintf(stderr, "Tag %2d (ID=%d): started=%d, completed=%d, failed=%d, avg_wait=%" PRId64 "ms, min_wait=%" PRId64 "ms, max_wait=%" PRId64 "ms\n",
-               i, tag_id, started, completed, failed,
-               completed > 1 ? (total_wait / (completed - 1)) : 0,
-               min_wait,
-               max_wait);
+        fprintf(stderr,
+                "Tag %2d (ID=%d): started=%d, completed=%d, failed=%d, avg_wait=%" PRId64 "ms, min_wait=%" PRId64
+                "ms, max_wait=%" PRId64 "ms\n",
+                i, tag_id, started, completed, failed, completed > 1 ? (total_wait / (completed - 1)) : 0, min_wait, max_wait);
 
         read_counts[i] = completed;
         total_started += started;
@@ -289,7 +271,7 @@ int main(int argc, char **argv) {
 
     /* Calculate and print fairness statistics */
     stats_summary_t summary;
-    if (stats_calculate(read_counts, num_tags, &summary) != 0) {
+    if(stats_calculate(read_counts, num_tags, &summary) != 0) {
         fprintf(stderr, "Error calculating statistics!\n");
         free(read_counts);
         free(stats);
@@ -301,15 +283,13 @@ int main(int argc, char **argv) {
     stats_print_histogram(stderr, read_counts, num_tags, 0, 40);
 
     /* Assess fairness and set return code */
-    if (stats_assess_fairness(&summary, stderr) != 0) {
-        rc = PLCTAG_ERR_BAD_STATUS;
-    }
+    if(stats_assess_fairness(&summary, stderr) != 0) { rc = PLCTAG_ERR_BAD_STATUS; }
 
     free(read_counts);
 
     /* Cleanup */
     fprintf(stderr, "\nCleaning up...\n");
-    for (int i = 0; i < num_tags; i++) {
+    for(int i = 0; i < num_tags; i++) {
         int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
         plc_tag_destroy(tag_id);
     }

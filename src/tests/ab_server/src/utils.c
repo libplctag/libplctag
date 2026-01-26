@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -275,8 +275,8 @@ void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s)
     max_row = (slice_len(s) + (COLUMNS - 1)) / COLUMNS;
 
     /* diagnostic: log the slice length */
-    fprintf(stderr, "[DEBUG] log_slice_impl_func called: func=%s, line=%d, lvl=%d, slice_len=%zu, max_row=%zu\n",
-            func, line, lvl, slice_len(s), max_row);
+    fprintf(stderr, "[DEBUG] log_slice_impl_func called: func=%s, line=%d, lvl=%d, slice_len=%zu, max_row=%zu\n", func, line, lvl,
+            slice_len(s), max_row);
 
     for(row = 0; row < max_row; row++) {
         size_t offset = (row * COLUMNS);

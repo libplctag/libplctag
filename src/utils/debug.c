@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -44,9 +44,9 @@
 #include <utils/debug.h>
 
 #if defined(_WIN32) || defined(_WIN64)
-    #include <windows.h>
+#    include <windows.h>
 #else
-    #include <sys/time.h>
+#    include <sys/time.h>
 #endif
 
 
@@ -106,15 +106,13 @@ void debug_module_set_level(debug_module_t module, int level) {
     /* module is a pre-shifted bitmask (1 << bit), extract the bit position */
     int bit = 0;
     uint64_t shifted = (uint64_t)module;
-    
+
     while(shifted > 1) {
         shifted >>= 1;
         bit++;
     }
-    
-    if(bit < 64) {
-        module_debug_levels[bit] = level;
-    }
+
+    if(bit < 64) { module_debug_levels[bit] = level; }
 }
 
 
@@ -122,23 +120,19 @@ int debug_module_get_level(debug_module_t module) {
     /* module is a pre-shifted bitmask (1 << bit), extract the bit position */
     int bit = 0;
     uint64_t shifted = (uint64_t)module;
-    
+
     while(shifted > 1) {
         shifted >>= 1;
         bit++;
     }
-    
-    if(bit < 64) {
-        return module_debug_levels[bit];
-    }
+
+    if(bit < 64) { return module_debug_levels[bit]; }
     return DEBUG_NONE;
 }
 
 
 void debug_set_all_modules(int level) {
-    for(int i = 0; i < 64; i++) {
-        module_debug_levels[i] = level;
-    }
+    for(int i = 0; i < 64; i++) { module_debug_levels[i] = level; }
 }
 
 
@@ -148,14 +142,12 @@ bool debug_is_enabled(debug_module_mask_t modules, int level) {
         /* Check if any module in the mask has this level enabled */
         for(int bit = 0; bit < 64; bit++) {
             if(modules & (1ULL << bit)) {
-                if(level <= module_debug_levels[bit]) {
-                    return true;
-                }
+                if(level <= module_debug_levels[bit]) { return true; }
             }
         }
         return false;
     }
-    
+
     /* If global debug level is set, use it as override */
     return level <= global_debug_level;
 }
@@ -176,7 +168,7 @@ static uint32_t get_thread_id(void) {
 static void format_module_names(debug_module_mask_t modules, char *buf, size_t buf_size) {
     bool first = true;
     buf[0] = '\0';
-    
+
     for(int bit = 0; bit < 64 && buf_size > 1; bit++) {
         if(modules & (1ULL << bit)) {
             if(bit < (int)DEBUG_MODULE_COUNT && debug_module_names[bit]) {
@@ -206,11 +198,11 @@ static int64_t time_us(void) {
     /* Windows implementation using GetSystemTimePreciseAsFileTime (Windows 8+) */
     FILETIME ft;
     ULARGE_INTEGER uli;
-    
+
     GetSystemTimePreciseAsFileTime(&ft);
     uli.LowPart = ft.dwLowDateTime;
     uli.HighPart = ft.dwHighDateTime;
-    
+
     /* FILETIME is in 100-nanosecond intervals since Jan 1, 1601 */
     /* Convert to microseconds and adjust to Unix epoch (Jan 1, 1970) */
     /* Difference is 11644473600 seconds = 11644473600000000 microseconds */
@@ -218,9 +210,9 @@ static int64_t time_us(void) {
 #else
     /* POSIX implementation using gettimeofday (Linux, BSD, macOS) */
     struct timeval tv;
-    
+
     gettimeofday(&tv, NULL);
-    
+
     return (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
 #endif
 }
@@ -267,8 +259,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     // NOLINTNEXTLINE
     snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%06d thread(%u) tag(%" PRId32 ") [%s] %s %s:%d %s\n",
              t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
-             t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_us, get_thread_id(), tag_id, module_buf, debug_level_name[debug_level], func,
-             line_num, templ);
+             t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_us, get_thread_id(), tag_id, module_buf,
+             debug_level_name[debug_level], func, line_num, templ);
 
     /* make sure it is zero terminated */
     prefix[sizeof(prefix) - 1] = 0;
@@ -283,7 +275,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
         log_callback_func(tag_id, debug_level, output);
     } else {
         fputs(output, stderr);
-        
+
         /* Flush periodically for better performance while ensuring timely output */
         log_call_count++;
         if(debug_level <= DEBUG_ERROR || (log_call_count % 100) == 0) {
@@ -298,7 +290,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 
 #define COLUMNS (16)
 
-void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, uint8_t *data, int count) {
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, uint8_t *data,
+                            int count) {
     int max_row, row, column;
     char row_buf[(COLUMNS * 3) + 5 + 1];
 
@@ -361,9 +354,7 @@ int debug_unregister_logger(void) {
 
 void debug_flush(void) {
     /* Flush stderr to ensure all buffered log output is written */
-    if(!log_callback_func) {
-        fflush(stderr);
-    }
+    if(!log_callback_func) { fflush(stderr); }
 }
 
 
@@ -372,16 +363,12 @@ void debug_flush(void) {
  * Returns the module ID (pre-shifted bitmask) or 0 if not found.
  */
 debug_module_t debug_module_id(const char *module_name) {
-    if(!module_name) {
-        return 0;
-    }
-    
-    /* Map module name strings to enum values */
-    #define MODULE_CASE(name) \
-        if(str_cmp_i(module_name, #name) == 0) { \
-            return DEBUG_MODULE_##name; \
-        }
-    
+    if(!module_name) { return 0; }
+
+/* Map module name strings to enum values */
+#define MODULE_CASE(name) \
+    if(str_cmp_i(module_name, #name) == 0) { return DEBUG_MODULE_##name; }
+
     MODULE_CASE(LIB)
     MODULE_CASE(INIT)
     MODULE_CASE(VERSION)
@@ -405,9 +392,9 @@ debug_module_t debug_module_id(const char *module_name) {
     MODULE_CASE(OMRON_RAW_TAG)
     MODULE_CASE(MODBUS)
     MODULE_CASE(SYSTEM)
-    
-    #undef MODULE_CASE
-    
+
+#undef MODULE_CASE
+
     return 0;
 }
 
@@ -417,28 +404,14 @@ debug_module_t debug_module_id(const char *module_name) {
  * Returns the debug level ID or -1 if not found.
  */
 int debug_level_id(const char *level_name) {
-    if(!level_name) {
-        return -1;
-    }
-    
-    if(str_cmp_i(level_name, "NONE") == 0 || str_cmp_i(level_name, "DEBUG_NONE") == 0) {
-        return DEBUG_NONE;
-    }
-    if(str_cmp_i(level_name, "ERROR") == 0 || str_cmp_i(level_name, "DEBUG_ERROR") == 0) {
-        return DEBUG_ERROR;
-    }
-    if(str_cmp_i(level_name, "WARN") == 0 || str_cmp_i(level_name, "DEBUG_WARN") == 0) {
-        return DEBUG_WARN;
-    }
-    if(str_cmp_i(level_name, "INFO") == 0 || str_cmp_i(level_name, "DEBUG_INFO") == 0) {
-        return DEBUG_INFO;
-    }
-    if(str_cmp_i(level_name, "DETAIL") == 0 || str_cmp_i(level_name, "DEBUG_DETAIL") == 0) {
-        return DEBUG_DETAIL;
-    }
-    if(str_cmp_i(level_name, "SPEW") == 0 || str_cmp_i(level_name, "DEBUG_SPEW") == 0) {
-        return DEBUG_SPEW;
-    }
-    
+    if(!level_name) { return -1; }
+
+    if(str_cmp_i(level_name, "NONE") == 0 || str_cmp_i(level_name, "DEBUG_NONE") == 0) { return DEBUG_NONE; }
+    if(str_cmp_i(level_name, "ERROR") == 0 || str_cmp_i(level_name, "DEBUG_ERROR") == 0) { return DEBUG_ERROR; }
+    if(str_cmp_i(level_name, "WARN") == 0 || str_cmp_i(level_name, "DEBUG_WARN") == 0) { return DEBUG_WARN; }
+    if(str_cmp_i(level_name, "INFO") == 0 || str_cmp_i(level_name, "DEBUG_INFO") == 0) { return DEBUG_INFO; }
+    if(str_cmp_i(level_name, "DETAIL") == 0 || str_cmp_i(level_name, "DEBUG_DETAIL") == 0) { return DEBUG_DETAIL; }
+    if(str_cmp_i(level_name, "SPEW") == 0 || str_cmp_i(level_name, "DEBUG_SPEW") == 0) { return DEBUG_SPEW; }
+
     return -1;
 }

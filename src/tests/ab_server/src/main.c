@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -554,7 +554,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
-         tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
+             tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
 
     /* add the tag to the list. */
     tag->next_tag = plc->tags;
@@ -754,7 +754,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
-         tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
+             tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
 
     /* add the tag to the list. */
     tag->next_tag = plc->tags;

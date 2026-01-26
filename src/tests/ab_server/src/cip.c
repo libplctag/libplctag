@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -115,8 +115,6 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 #define CIP_MINIMAL_RESPONSE_SIZE ((size_t)6) /* four bytes for header plus 2 for optional extended status. */
 
 
-
-
 static slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
 
 static slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
@@ -158,9 +156,7 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     log_info_slice(cip_service_payload);
 
     switch(cip_service) {
-        case CIP_SRV_MULTI:
-            return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc);
-            break;
+        case CIP_SRV_MULTI: return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc); break;
 
         case CIP_SRV_FORWARD_OPEN:
         case CIP_SRV_FORWARD_OPEN_EX:
@@ -188,9 +184,9 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
 }
 
 
-/* 
+/*
  * Handle multi-service requests (service 0x0a)
- * 
+ *
  * We have to unpack and dispatch each sub-request, then repack the responses.
  */
 slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
@@ -201,34 +197,34 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
     (void)cip_service_path; /* static for multi-service requests, but we should really check it. */
 
     size_t output_offset = 0;
-    
+
     log_info("Processing Multi-Service request");
-    
+
     /* Phase 1: Parse request structure */
     if(slice_len(cip_service_payload) < 2) {
         log_info("Multi-service payload too small for service count");
         return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
-    
+
     service_count = slice_get_uint16_le(cip_service_payload, 0);
-    
+
     log_info("Multi-service request contains %d services", service_count);
-    
+
     if(service_count == 0 || service_count > MAX_SUB_PACKETS) {
         log_info("Invalid service count: %d", service_count);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
-    
+
     /* Need space for offsets array */
     if(slice_len(cip_service_payload) < (size_t)(2 + service_count * 2)) {
         log_info("Multi-service payload too small for offset array");
         return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
-    
+
     /* calculate the overhead of the multi-response payload */
-    size_t multi_response_overhead = 4                                              /* CIP response header size */
-                                    + sizeof(uint16_t)                              /* service count */
-                                    + (service_count * sizeof(uint16_t));           /* offsets array */
+    size_t multi_response_overhead = 4                                     /* CIP response header size */
+                                     + sizeof(uint16_t)                    /* service count */
+                                     + (service_count * sizeof(uint16_t)); /* offsets array */
 
     /* do we have room? Guess using a minimal response size for all requests */
     if(slice_len(output) < (multi_response_overhead + (service_count * CIP_MINIMAL_RESPONSE_SIZE))) {
@@ -240,8 +236,8 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
     output_offset = multi_response_overhead;
 
     /* calculate the offset from the response count word */
-    size_t offset_from_response_count =  sizeof(uint16_t)                       /* service count */
-                                    + (service_count * sizeof(uint16_t));  /* offsets array */
+    size_t offset_from_response_count = sizeof(uint16_t)                      /* service count */
+                                        + (service_count * sizeof(uint16_t)); /* offsets array */
 
 
     /* calculate the maximum slice of the multi-response payload */
@@ -259,10 +255,9 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
         uint16_t request_offset = slice_get_uint16_le(cip_service_payload, 2 + (i * 2));
         /* Offsets are from the start of the multi-service payload (byte 0) */
         size_t request_start = request_offset;
-        size_t next_request_start = (i + 1 < service_count) 
-            ? slice_get_uint16_le(cip_service_payload, 2 + (i + 1) * 2)
-            : slice_len(cip_service_payload);
-        
+        size_t next_request_start =
+            (i + 1 < service_count) ? slice_get_uint16_le(cip_service_payload, 2 + (i + 1) * 2) : slice_len(cip_service_payload);
+
         if(request_start >= slice_len(cip_service_payload)) {
             log_info("Request %zu offset %u is out of bounds", i, request_offset);
             return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
@@ -278,7 +273,8 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
         slice_s request = slice_from_slice(cip_service_payload, request_start, next_request_start - request_start);
 
         /* determine the maximum possible response size for this request */
-        slice_s response_output = slice_from_slice(output, output_offset, (slice_len(output) - (output_offset + ((service_count - i) * CIP_MINIMAL_RESPONSE_SIZE))));
+        slice_s response_output = slice_from_slice(
+            output, output_offset, (slice_len(output) - (output_offset + ((service_count - i) * CIP_MINIMAL_RESPONSE_SIZE))));
 
         log_info("Response output slice starts at offset %zu with length %zu", output_offset, slice_len(response_output));
 
@@ -315,23 +311,23 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
 
     /* CIP response header (4 bytes) */
     slice_set_uint8(output, response_offset_pos++, cip_service | CIP_DONE); /* 0x8a */
-    slice_set_uint8(output, response_offset_pos++, 0); /* reserved */
+    slice_set_uint8(output, response_offset_pos++, 0);                      /* reserved */
     /* Status: 0x1E if any sub-request had an error, else CIP_OK (0x00) */
     slice_set_uint8(output, response_offset_pos++, any_error ? 0x1E : CIP_OK);
     slice_set_uint8(output, response_offset_pos++, 0); /* additional status size */
-    
+
     /* Multi-service response payload starts after CIP header */
     size_t multi_payload_start = response_offset_pos;
 
     log_info("Filled in header:");
     log_info_slice(slice_from_slice(output, 0, response_offset_pos + 2 + (service_count * 2)));
-    
+
     /* Service count */
     slice_set_uint16_le(output, multi_payload_start, service_count);
 
     log_info("Multi-service response completed, total size %zu bytes", output_offset);
     log_info_slice(slice_from_slice(output, 0, output_offset));
-    
+
     return slice_from_slice(output, 0, output_offset);
 }
 
@@ -380,7 +376,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     log_info_slice(cip_service_payload);
 
     log_info("output buffer size: %zu", slice_len(output));
-    
+
 
     if(!slice_match_data_exact(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
         log_info("Forward Open service requested from wrong object!");
@@ -586,7 +582,8 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     /* check the remaining length */
     if(offset >= slice_len(cip_service_payload)) {
         /* FIXME - send back the right error. */
-        log_info("Forward close request size, %d, too small.   Should be greater than %d!", slice_len(cip_service_payload), offset);
+        log_info("Forward close request size, %d, too small.   Should be greater than %d!", slice_len(cip_service_payload),
+                 offset);
         return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
 
@@ -620,19 +617,19 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     if(plc->client_connection_serial_number != fc_req.client_connection_serial_number) {
         /* FIXME - send back the right error. */
         log_info("Forward close connection serial number, %x, did not match the connection serial number originally passed, %x!",
-             fc_req.client_connection_serial_number, plc->client_connection_serial_number);
+                 fc_req.client_connection_serial_number, plc->client_connection_serial_number);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
     if(plc->client_vendor_id != fc_req.client_vendor_id) {
         /* FIXME - send back the right error. */
         log_info("Forward Close client vendor ID, %x, did not match the client vendor ID originally passed, %x!",
-             fc_req.client_vendor_id, plc->client_vendor_id);
+                 fc_req.client_vendor_id, plc->client_vendor_id);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
     if(plc->client_serial_number != fc_req.client_serial_number) {
         /* FIXME - send back the right error. */
         log_info("Forward close client serial number, %x, did not match the client serial number originally passed, %x!",
-             fc_req.client_serial_number, plc->client_serial_number);
+                 fc_req.client_serial_number, plc->client_serial_number);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
@@ -710,7 +707,7 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
         log_info_slice(cip_service_path);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
-    
+
     /* Record request arrival time for latency tracking */
     atomic_store_int64(&tag->last_request_time_us, util_time_us());
 
@@ -812,26 +809,22 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* fill in the tag data type */
     slice_set_uint16_le(cip_response_type_info_slice, 0, tag->tag_type);
-    
+
     /* Calculate and record request latency */
     int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
-    if (request_start > 0) {
+    if(request_start > 0) {
         int64_t latency = util_time_us() - request_start;
         atomic_inc_int32(&tag->request_count);
-        atomic_load_int64(&tag->total_latency_us);  /* Need atomic add, use workaround */
-        
+        atomic_load_int64(&tag->total_latency_us); /* Need atomic add, use workaround */
+
         /* Update min latency */
         int64_t current_min = atomic_load_int64(&tag->min_latency_us);
-        if (current_min == 0 || latency < current_min) {
-            atomic_store_int64(&tag->min_latency_us, latency);
-        }
-        
+        if(current_min == 0 || latency < current_min) { atomic_store_int64(&tag->min_latency_us, latency); }
+
         /* Update max latency */
         int64_t current_max = atomic_load_int64(&tag->max_latency_us);
-        if (latency > current_max) {
-            atomic_store_int64(&tag->max_latency_us, latency);
-        }
-        
+        if(latency > current_max) { atomic_store_int64(&tag->max_latency_us, latency); }
+
         /* Add to total - not perfectly atomic but good enough for statistics */
         int64_t total = atomic_load_int64(&tag->total_latency_us);
         atomic_store_int64(&tag->total_latency_us, total + latency);
@@ -884,7 +877,7 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
         log_info_slice(cip_service_path);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
-    
+
     /* Record request arrival time for latency tracking */
     atomic_store_int64(&tag->last_request_time_us, util_time_us());
 
@@ -966,28 +959,24 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 
     /* fill in the CIP response header. */
     slice_set_uint8(cip_response_header_slice, 0, cip_service | CIP_DONE);
-    slice_set_uint8(cip_response_header_slice, 1, 0); /* reserved */
+    slice_set_uint8(cip_response_header_slice, 1, 0);      /* reserved */
     slice_set_uint8(cip_response_header_slice, 2, CIP_OK); /* status */
-    slice_set_uint8(cip_response_header_slice, 3, 0); /* no extended error */
-    
+    slice_set_uint8(cip_response_header_slice, 3, 0);      /* no extended error */
+
     /* Calculate and record request latency */
     int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
-    if (request_start > 0) {
+    if(request_start > 0) {
         int64_t latency = util_time_us() - request_start;
         atomic_inc_int32(&tag->request_count);
-        
+
         /* Update min latency */
         int64_t current_min = atomic_load_int64(&tag->min_latency_us);
-        if (current_min == 0 || latency < current_min) {
-            atomic_store_int64(&tag->min_latency_us, latency);
-        }
-        
+        if(current_min == 0 || latency < current_min) { atomic_store_int64(&tag->min_latency_us, latency); }
+
         /* Update max latency */
         int64_t current_max = atomic_load_int64(&tag->max_latency_us);
-        if (latency > current_max) {
-            atomic_store_int64(&tag->max_latency_us, latency);
-        }
-        
+        if(latency > current_max) { atomic_store_int64(&tag->max_latency_us, latency); }
+
         /* Add to total - not perfectly atomic but good enough for statistics */
         int64_t total = atomic_load_int64(&tag->total_latency_us);
         atomic_store_int64(&tag->total_latency_us, total + latency);

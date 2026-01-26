@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -35,7 +35,7 @@
 
 /* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    MEMORY_STATUS_OK            = 0,
+    MEMORY_STATUS_OK = 0,
 } memory_err_t;
 
 

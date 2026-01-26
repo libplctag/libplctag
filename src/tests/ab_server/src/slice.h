@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -46,48 +46,81 @@ typedef struct {
     uint8_t *data;
 } slice_s;
 
-inline static slice_s slice_make(const uint8_t *data, size_t len) { return (slice_s){ .len = len, .data = (uint8_t *)data }; }
+inline static slice_s slice_make(const uint8_t *data, size_t len) { return (slice_s){.len = len, .data = (uint8_t *)data}; }
 inline static slice_s slice_make_err(int err) { return slice_make(NULL, (size_t)err); }
 inline static size_t slice_len(slice_s s) { return s.len; }
-inline static bool slice_in_bounds(slice_s s, size_t index) { if(index < s.len) { return true; } else { return false; } }
-inline static uint8_t slice_get_uint8(slice_s s, size_t index) { if(slice_in_bounds(s, index)) { return s.data[index]; } else { return UINT8_MAX; } }
-inline static bool slice_set_uint8(slice_s s, size_t index, uint8_t val) { if(slice_in_bounds(s, index)) { s.data[index] = val; return true; } else { return false; } }
-inline static uint8_t *slice_get_bytes(slice_s s, size_t index) {  if(slice_in_bounds(s, index)) { return &s.data[index];} else { return NULL;} }
-inline static bool slice_has_err(slice_s s) { if(s.data == NULL) { return true; } else { return false; } }
+inline static bool slice_in_bounds(slice_s s, size_t index) {
+    if(index < s.len) {
+        return true;
+    } else {
+        return false;
+    }
+}
+inline static uint8_t slice_get_uint8(slice_s s, size_t index) {
+    if(slice_in_bounds(s, index)) {
+        return s.data[index];
+    } else {
+        return UINT8_MAX;
+    }
+}
+inline static bool slice_set_uint8(slice_s s, size_t index, uint8_t val) {
+    if(slice_in_bounds(s, index)) {
+        s.data[index] = val;
+        return true;
+    } else {
+        return false;
+    }
+}
+inline static uint8_t *slice_get_bytes(slice_s s, size_t index) {
+    if(slice_in_bounds(s, index)) {
+        return &s.data[index];
+    } else {
+        return NULL;
+    }
+}
+inline static bool slice_has_err(slice_s s) {
+    if(s.data == NULL) {
+        return true;
+    } else {
+        return false;
+    }
+}
 inline static int slice_get_err(slice_s s) { return (int)(ssize_t)slice_len(s); }
 inline static bool slice_match_data_prefix(slice_s s, const uint8_t *data, size_t data_len) {
     /* Must be no more data prefix than data in the slice. */
     if(data_len > slice_len(s)) {
-        //fprintf(stderr, "Slice has too little data to match prefix bytes. Slice has length %d and bytes have length %d!\n", (int)slice_len(s), (int)data_len);
+        // fprintf(stderr, "Slice has too little data to match prefix bytes. Slice has length %d and bytes have length %d!\n",
+        // (int)slice_len(s), (int)data_len);
         return false;
     }
 
-    for(size_t i=0; i < data_len; i++) {
-        //fprintf(stderr,"Comparing element %d, %x and %x\n", (int)i, (int)slice_get_uint8(s, (ssize_t)i), data[i]);
-        if(slice_get_uint8(s, i) != data[i]) {
-            return false;
-        }
+    for(size_t i = 0; i < data_len; i++) {
+        // fprintf(stderr,"Comparing element %d, %x and %x\n", (int)i, (int)slice_get_uint8(s, (ssize_t)i), data[i]);
+        if(slice_get_uint8(s, i) != data[i]) { return false; }
     }
     return true;
 }
-inline static bool slice_match_string_prefix(slice_s s, const char *data) { return slice_match_data_prefix(s, (const uint8_t*)data, strlen(data)); }
+inline static bool slice_match_string_prefix(slice_s s, const char *data) {
+    return slice_match_data_prefix(s, (const uint8_t *)data, strlen(data));
+}
 inline static bool slice_match_data_exact(slice_s s, const uint8_t *data, size_t data_len) {
     /* must be an exact match */
     if(data_len != slice_len(s)) {
-        //fprintf(stderr, "lengths do not match! Slice has length %d and bytes have length %d!\n", (int)slice_len(s), (int)data_len);
+        // fprintf(stderr, "lengths do not match! Slice has length %d and bytes have length %d!\n", (int)slice_len(s),
+        // (int)data_len);
         return false;
     }
 
     return slice_match_data_prefix(s, data, data_len);
 }
-inline static bool slice_match_string_exact(slice_s s, const char *data) { return slice_match_data_exact(s, (const uint8_t*)data, strlen(data)); }
+inline static bool slice_match_string_exact(slice_s s, const char *data) {
+    return slice_match_data_exact(s, (const uint8_t *)data, strlen(data));
+}
 inline static slice_s slice_from_slice(slice_s src, size_t start, size_t len) {
     size_t actual_start;
     size_t actual_len;
 
-    if(slice_has_err(src)) {
-        return src;
-    }
+    if(slice_has_err(src)) { return src; }
 
     /* Handle case where start is beyond the source buffer */
     if(start > src.len) {
@@ -103,20 +136,16 @@ inline static slice_s slice_from_slice(slice_s src, size_t start, size_t len) {
         actual_len = len;
     }
 
-    return (slice_s){ .len = actual_len, .data = &(src.data[actual_start]) };
+    return (slice_s){.len = actual_len, .data = &(src.data[actual_start])};
 }
 
 
 /* helper functions to get and set data in a slice. */
 
 inline static bool slice_copy_data_in(slice_s dest, uint8_t *src_data, size_t src_len) {
-    if(slice_has_err(dest)) {
-        return false;
-    }
+    if(slice_has_err(dest)) { return false; }
 
-    if(slice_len(dest) < src_len) {
-        return false;
-    }
+    if(slice_len(dest) < src_len) { return false; }
 
     // NOLINTNEXTLINE
     memcpy(dest.data, src_data, src_len);
@@ -125,13 +154,9 @@ inline static bool slice_copy_data_in(slice_s dest, uint8_t *src_data, size_t sr
 }
 
 inline static bool slice_copy_data_out(uint8_t *dest_data, size_t dest_len, slice_s src) {
-    if(slice_has_err(src)) {
-        return false;
-    }
+    if(slice_has_err(src)) { return false; }
 
-    if(slice_len(src) > dest_len) {
-        return false;
-    }
+    if(slice_len(src) > dest_len) { return false; }
 
     // NOLINTNEXTLINE
     memcpy(dest_data, src.data, slice_len(src));
@@ -140,20 +165,15 @@ inline static bool slice_copy_data_out(uint8_t *dest_data, size_t dest_len, slic
 }
 
 inline static bool slice_copy_slice(slice_s dest, slice_s src) {
-    if(slice_has_err(dest) || slice_has_err(src)) {
-        return false;
-    }
+    if(slice_has_err(dest) || slice_has_err(src)) { return false; }
 
-    if(slice_len(dest) < slice_len(src)) {
-        return false;
-    }
+    if(slice_len(dest) < slice_len(src)) { return false; }
 
     // NOLINTNEXTLINE
     memcpy(dest.data, src.data, slice_len(src));
 
     return true;
 }
-
 
 
 inline static uint16_t slice_get_uint16_le(slice_s input_buf, size_t offset) {
@@ -171,10 +191,9 @@ inline static uint32_t slice_get_uint32_le(slice_s input_buf, size_t offset) {
     uint32_t res = 0;
 
     if(slice_in_bounds(input_buf, offset + 3)) {
-        res =  ((uint32_t)slice_get_uint8(input_buf, offset))
-             + (((uint32_t)slice_get_uint8(input_buf, offset + 1)) << 8)
-             + (((uint32_t)slice_get_uint8(input_buf, offset + 2)) << 16)
-             + (((uint32_t)slice_get_uint8(input_buf, offset + 3)) << 24);
+        res = ((uint32_t)slice_get_uint8(input_buf, offset)) + (((uint32_t)slice_get_uint8(input_buf, offset + 1)) << 8)
+              + (((uint32_t)slice_get_uint8(input_buf, offset + 2)) << 16)
+              + (((uint32_t)slice_get_uint8(input_buf, offset + 3)) << 24);
     }
 
     return res;
@@ -185,14 +204,13 @@ inline static uint64_t slice_get_uint64_le(slice_s input_buf, size_t offset) {
     uint64_t res = 0;
 
     if(slice_in_bounds(input_buf, offset + 7)) {
-        res =  ((uint64_t)slice_get_uint8(input_buf, offset))
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 1)) << 8)
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 2)) << 16)
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 3)) << 24)
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 4)) << 32)
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 5)) << 40)
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 6)) << 48)
-             + (((uint64_t)slice_get_uint8(input_buf, offset + 7)) << 56);
+        res = ((uint64_t)slice_get_uint8(input_buf, offset)) + (((uint64_t)slice_get_uint8(input_buf, offset + 1)) << 8)
+              + (((uint64_t)slice_get_uint8(input_buf, offset + 2)) << 16)
+              + (((uint64_t)slice_get_uint8(input_buf, offset + 3)) << 24)
+              + (((uint64_t)slice_get_uint8(input_buf, offset + 4)) << 32)
+              + (((uint64_t)slice_get_uint8(input_buf, offset + 5)) << 40)
+              + (((uint64_t)slice_get_uint8(input_buf, offset + 6)) << 48)
+              + (((uint64_t)slice_get_uint8(input_buf, offset + 7)) << 56);
     }
 
     return res;
