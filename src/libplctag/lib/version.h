@@ -42,10 +42,11 @@
  * checking them against a dynamically linked library.
  */
 
+// clang-format off
 #define LIB_VER_STRING "2.6.15"
-#define LIB_VER_MAJOR (@libplctag_VERSION_MAJOR @)
-#define LIB_VER_MINOR (@libplctag_VERSION_MINOR @)
-#define LIB_VER_PATCH (@libplctag_VERSION_PATCH @)
+#define LIB_VER_MAJOR (2)
+#define LIB_VER_MINOR (6)
+#define LIB_VER_PATCH (15)
 
 extern const char *VERSION;
 extern const uint64_t version_major;
