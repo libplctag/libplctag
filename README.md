@@ -4,7 +4,8 @@
   - [What is libplctag?](#what-is-libplctag)
   - [Tier One Platforms](#tier-one-platforms)
   - [WARNING - DISCLAIMER](#warning---disclaimer)
-  - [Get It!](#get-it)
+  - [Get it!](#get-it)
+  - [Support it!](#support-it)
   - [Features](#features)
     - [High Level Features](#high-level-features)
     - [Detailed Features](#detailed-features)
@@ -60,9 +61,16 @@ We make no claims or warrants about the suitability of this code for any purpose
 
 Be careful!
 
-## Get It!
+## Get it!
 
 Download it from the [releases page](https://github.com/libplctag/libplctag/releases)!
+
+## Support it!
+
+If you find libplctag useful, consider supporting its development:
+
+- [Support via Polar.sh](https://polar.sh/libplctag) (Accepts Credit Card, Apple/Google Pay)
+- [GitHub Sponsors](https://github.com/sponsors/libplctag)
 
 ## Features
 
