@@ -1,3 +1,5 @@
+<insert full original content here> 
+
 ## Support this Project
 
 If you find libplctag useful, consider supporting its development:
@@ -5,4 +7,4 @@ If you find libplctag useful, consider supporting its development:
 - [Monthly Support via Polar.sh](https://polar.sh/libplctag) (Accepts Credit Card, Apple/Google Pay)
 - [GitHub Sponsors](https://github.com/sponsors/libplctag)
 
-WARNING - DISCLAIMER
+<original content continues here>
