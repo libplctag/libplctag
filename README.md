@@ -69,7 +69,6 @@ Download it from the [releases page](https://github.com/libplctag/libplctag/rele
 
 If you find libplctag useful, consider supporting its development:
 
-- [Support via Polar.sh](https://polar.sh/libplctag) (Accepts Credit Card, Apple/Google Pay)
 - [GitHub Sponsors](https://github.com/sponsors/libplctag)
 
 ## Features
