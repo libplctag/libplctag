@@ -42,8 +42,8 @@
  */
 
 
-#define CLOG_MAIN
-#include "clog.h"
+// #define CLOG_MAIN
+// #include "clog.h"
 
 #include "compat_utils.h"
 #include <inttypes.h>
@@ -186,15 +186,7 @@ int main(int argc, char **argv) {
     /* cat ^C etc. */
     compat_set_interrupt_handler(interrupt_handler);
 
-    /* Initialize logger to write to stderr */
-    if(clog_init_fd(0, fileno(stderr)) != 0) {
-        fprintf(stderr, "Failed to initialize logger.\n");
-        return 1;
-    }
-    /* Set format to match modbus_server output: YYYY-MM-DD HH:MM:SS.MICROSECONDS LEVEL message */
-    clog_set_fmt(0, "%d %t.%u %l: %m\n");
-
-    clog_info(CLOG(0), "Hit ^C to terminate the test.");
+    fprintf(stderr, "Hit ^C to terminate the test.\n");
 
     /* Parse command-line arguments */
     num_threads = DEFAULT_THREAD_COUNT;
@@ -378,12 +370,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "╚════════════════════════════════════════════════════════════════╝\n\n");
 
     if(success) {
-        clog_info(CLOG(0), "*** Test SUCCEEDED!");
-        clog_free(0);
+        fprintf(stderr, "*** Test SUCCEEDED!\n");
         return 0;
     } else {
-        clog_info(CLOG(0), "*** Test FAILED!");
-        clog_free(0);
+        fprintf(stderr, "*** Test FAILED!\n");
         return -1;
     }
 }

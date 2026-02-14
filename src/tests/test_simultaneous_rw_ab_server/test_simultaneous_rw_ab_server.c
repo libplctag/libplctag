@@ -26,6 +26,8 @@ static volatile int read_passed = 0;
 static volatile int write_passed = 0;
 
 void *reader_thread(void *arg) {
+    (void)arg;
+
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
     if(tag < 0) {
         // NOLINTNEXTLINE
@@ -61,6 +63,8 @@ void *reader_thread(void *arg) {
 }
 
 void *writer_thread(void *arg) {
+    (void)arg;
+
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
     if(tag < 0) {
         // NOLINTNEXTLINE
@@ -86,7 +90,7 @@ void *writer_thread(void *arg) {
     return NULL;
 }
 
-void start_server() {
+void start_server(void) {
     // NOLINTNEXTLINE
     fprintf(stdout, "[INFO ] Starting ab_server...\n");
 
@@ -101,7 +105,7 @@ void start_server() {
     compat_sleep_ms(1000, NULL);  // wait for server to initialize
 }
 
-void stop_server() {
+void stop_server(void) {
     // NOLINTNEXTLINE
     fprintf(stdout, "[INFO ] Stopping ab_server...\n");
     system(SERVER_CMD_STOP);

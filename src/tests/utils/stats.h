@@ -33,22 +33,67 @@
 
 #pragma once
 
-#include <stdint.h>
+#include <stdio.h>
 
 /*
- * The library version in various ways.
+ * Statistics utility functions for analyzing distributions.
  *
- * The defines are for building in specific versions and then
- * checking them against a dynamically linked library.
+ * These functions help measure fairness and detect clustering in
+ * distributions of values (e.g., read counts per tag).
  */
 
-// clang-format off
-#define LIB_VER_STRING "@VERSION@"
-#define LIB_VER_MAJOR (@libplctag_VERSION_MAJOR@)
-#define LIB_VER_MINOR (@libplctag_VERSION_MINOR@)
-#define LIB_VER_PATCH (@libplctag_VERSION_PATCH@)
+/* Summary statistics structure */
+typedef struct {
+    int count;            /* Number of values */
+    int min;              /* Minimum value */
+    int max;              /* Maximum value */
+    double mean;          /* Arithmetic mean */
+    double variance;      /* Population variance */
+    double std_dev;       /* Population standard deviation */
+    double cv;            /* Coefficient of variation (std_dev/mean * 100) */
+    double min_max_ratio; /* min/max ratio (1.0 = perfect equality) */
+    int q1;               /* First quartile (25th percentile) */
+    int median;           /* Median (50th percentile) */
+    int q3;               /* Third quartile (75th percentile) */
+    int iqr;              /* Interquartile range (Q3 - Q1) */
+} stats_summary_t;
 
-extern const char *VERSION;
-extern const uint64_t version_major;
-extern const uint64_t version_minor;
-extern const uint64_t version_patch;
+/*
+ * Calculate summary statistics for an array of integer values.
+ *
+ * @param values    Array of integer values to analyze
+ * @param count     Number of values in the array
+ * @param summary   Output structure to fill with statistics
+ *
+ * @return 0 on success, -1 on error (null pointer or count <= 0)
+ */
+int stats_calculate(const int *values, int count, stats_summary_t *summary);
+
+/*
+ * Print summary statistics to a file stream.
+ *
+ * @param stream    Output stream (e.g., stderr)
+ * @param summary   Statistics to print
+ */
+void stats_print_summary(FILE *stream, const stats_summary_t *summary);
+
+/*
+ * Print a histogram of values to a file stream.
+ *
+ * @param stream        Output stream (e.g., stderr)
+ * @param values        Array of integer values
+ * @param count         Number of values
+ * @param num_buckets   Number of histogram buckets (0 for auto)
+ * @param max_bar_width Maximum width of histogram bars in characters
+ */
+void stats_print_histogram(FILE *stream, const int *values, int count, int num_buckets, int max_bar_width);
+
+/*
+ * Assess fairness based on statistics.
+ *
+ * @param summary   Statistics to assess
+ * @param stream    Output stream for assessment (can be NULL for no output)
+ *
+ * @return 0 if fair (CV < 20% AND min/max > 0.7), -1 if unfair
+ */
+int stats_assess_fairness(const stats_summary_t *summary, FILE *stream);
