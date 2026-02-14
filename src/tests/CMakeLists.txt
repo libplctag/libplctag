@@ -8,14 +8,6 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
-# Build the Modbus TCP server
-# This is a lightweight implementation using the coro_net event-based reactor
-message("Building Modbus TCP server.")
-add_subdirectory("modbus_server")
-
-# Build scan_eip_network utility
-add_subdirectory("scan_eip_network")
-
 # Build test executables
 add_subdirectory("stress_api_lock")
 add_subdirectory("stress_rc_mem")

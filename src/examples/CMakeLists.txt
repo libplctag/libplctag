@@ -29,7 +29,6 @@ endif()
   slc500
   string_non_standard_udt
   string_standard
-  test_alternate_tag_listing
   toggle_bit
   toggle_bool
   trigger_double_free

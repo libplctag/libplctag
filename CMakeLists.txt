@@ -127,6 +127,8 @@ endif(BUILD_TESTS)
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/tools")
 
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/poc")
+
 
 
 

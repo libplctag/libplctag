@@ -1,4 +1,4 @@
-message("Building scan_eip_network utility.")
+message("Building scan_eip_network POC.")
 
 set(SCAN_EIP_NETWORK_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/scan_eip_network.c
@@ -13,7 +13,6 @@ add_executable(scan_eip_network ${SCAN_EIP_NETWORK_FILES}
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/args.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/log.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/log_modules.def
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/utils.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/utils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/coro_net.c

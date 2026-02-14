@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.10)
+message("Building modbus_server POC.")
 
-project(modbus_server C)
+cmake_minimum_required(VERSION 3.10)
 
 # Set C11 standard
 set(CMAKE_C_STANDARD 11)
@@ -12,17 +12,17 @@ set(SOURCES
     modbus_server.c
     register_storage.c
     modbus_protocol.c
-    ../utils/buf.c
-    ../utils/err.c
-    ../utils/log.c
-    ../utils/args.c
-    ../utils/utils.c
-    ../utils/coro_net.c
-    ../utils/socket.c
+    buf.c
+    err.c
+    log.c
+    args.c
+    utils.c
+    coro_net.c
+    socket.c
 )
 
 # Include directories
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../utils)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # Create executable
 add_executable(modbus_server ${SOURCES})
@@ -81,7 +81,3 @@ endif()
 install(TARGETS modbus_server
     RUNTIME DESTINATION bin
 )
-
-# CMakeLists.txt for src/tests/test_utils/
-
-enable_testing()
