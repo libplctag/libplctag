@@ -18,9 +18,6 @@ endif()
   busy_test
   data_dumper
   get_identity
-  list_tags_logix
-  list_tags_micro8x0
-  list_tags_omron_incomplete
   multithread
   multithread_cached_read
   multithread_plc5
@@ -37,8 +34,6 @@ endif()
   toggle_bool
   trigger_double_free
   write_string
-  tag_rw_deprecated
-  tag_rw2
 )
 
 foreach(example ${EXAMPLE_EXECUTABLES})
@@ -81,8 +76,3 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     #     target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
     # endif()
 endforeach()
-
-# Install only the tag_rw2 tool into the devel component
-install(TARGETS tag_rw2
-    RUNTIME DESTINATION bin
-    COMPONENT devel)
