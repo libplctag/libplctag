@@ -31,7 +31,6 @@ endif()
   string_standard
   toggle_bit
   toggle_bool
-  trigger_double_free
   write_string
 )
 

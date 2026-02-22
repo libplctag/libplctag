@@ -40,5 +40,6 @@ add_subdirectory("test_string")
 add_subdirectory("test_tag_attributes")
 add_subdirectory("test_tag_type_attribute")
 add_subdirectory("thread_stress")
+add_subdirectory("trigger_double_free")
 
 
