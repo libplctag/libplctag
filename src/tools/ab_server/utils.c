@@ -33,6 +33,7 @@
 
 #include "utils.h"
 #include "compat.h"
+#include "err.h"
 #include "plc.h"
 #include "log.h"
 #include <errno.h>
@@ -270,6 +271,11 @@ void slice_dump(slice_s s) {
 void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s) {
     size_t max_row, row, column;
     char row_buf[300]; /* MAGIC */
+
+    if(slice_has_err(s)) {
+        log_impl(func, line, lvl, "Slice has error: %s", err_to_string(slice_get_err(s)));
+        return;
+    }
 
     /* determine the number of rows we will need to print. */
     max_row = (slice_len(s) + (COLUMNS - 1)) / COLUMNS;

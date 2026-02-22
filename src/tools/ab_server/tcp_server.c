@@ -202,11 +202,11 @@ THREAD_FUNC(conn_handler) {
 
         tmp_output = server->handler(accumulated_data, tmp_output, session->server_context);
 
-        log_info("Handler output:");
-        log_info_slice(tmp_output);
-
         /* check the response. */
         if(!slice_has_err(tmp_output)) {
+            log_info("Handler output:");
+            log_info_slice(tmp_output);
+
             slice_s write_res = socket_write(session->client_fd, tmp_output, 1000); /* MAGIC*/
 
             if(slice_has_err(write_res)) {
