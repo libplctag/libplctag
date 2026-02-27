@@ -1769,13 +1769,18 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     } else {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, "Unconnected tag.");
-        overhead = 1                                  /* service request, one byte */
-                   + tag->encoded_name_size           /* full encoded name */
-                   + tag->encoded_type_info_size      /* encoded type size */
-                   + tag->session->conn_path_size + 2 /* encoded device path size plus two bytes for length and padding */
-                   + 2                                /* element count, 16-bit int */
-                   + 4                                /* byte offset, 32-bit int */
-                   + 8;                               /* MAGIC fudge factor */
+        overhead = 1                             /* CIP service Unconnected Send */
+                   + 1                           /* path size */
+                   + 4                           /* Connection Manager 20 06 24 1 */
+                   + 1                           /* seconds per tick */
+                   + 1                           /* timeout ticks */
+                   + 2                           /* Embedded payload size */
+                   + 1                           /* service request, one byte */
+                   + tag->encoded_name_size      /* full encoded name */
+                   + tag->encoded_type_info_size /* encoded type size */
+                   + 2                           /* element count, 16-bit int */
+                   + 4                           /* byte offset, 32-bit int */
+                   + 8;                          /* MAGIC fudge factor */
     }
 
     /* make sure that overhead is an even number of bytes */
