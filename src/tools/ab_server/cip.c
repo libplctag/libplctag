@@ -166,6 +166,8 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
             return handle_forward_close(cip_service, cip_service_path, cip_service_payload, output, plc);
             break;
 
+        case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
+
         case CIP_SRV_UNCONNECTED_SEND:
             /* we've stripped off the CM part, but there is a byte count of the remaining data that we need. */
             uint16_t embedded_cip_service_length = slice_get_uint16_le(cip_service_payload, 2);
@@ -216,8 +218,6 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
         case CIP_SRV_WRITE_NAMED_TAG_FRAG:
             return handle_write_request(cip_service, cip_service_path, cip_service_payload, output, plc);
             break;
-
-        case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
 
         default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
     }
