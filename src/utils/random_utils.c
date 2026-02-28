@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -38,7 +38,7 @@
 
 /* FIXME - move this all over into a compatibility/platform check header */
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    #include <stdlib.h>
+#    include <stdlib.h>
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
@@ -50,23 +50,19 @@ uint64_t random_u64(uint64_t upper_bound) {
 }
 
 #elif defined(__linux__)
-#include <stdlib.h>
-#include <sys/random.h>
+#    include <stdlib.h>
+#    include <sys/random.h>
 
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
-    if (upper_bound == 0) {
-        return 0;
-    }
+    if(upper_bound == 0) { return 0; }
 
-    if (getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
+    if(getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
         /* not enough entropy, do it the hard way. */
         srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
-        for (size_t i = 0; i < sizeof(random_number); ++i) {
-            ((uint8_t*)&random_number)[i] ^= (uint8_t)(rand() % 256);
-        }
+        for(size_t i = 0; i < sizeof(random_number); ++i) { ((uint8_t *)&random_number)[i] ^= (uint8_t)(rand() % 256); }
     }
 
     random_number %= upper_bound;
@@ -76,11 +72,11 @@ uint64_t random_u64(uint64_t upper_bound) {
 
 
 #elif defined(_WIN32) || defined(_WIN64)
-#include <windows.h>
+#    include <windows.h>
 
-#include <wincrypt.h>
+#    include <wincrypt.h>
 
-#include <bcrypt.h>  /* for BCryptGenRandom() */
+#    include <bcrypt.h> /* for BCryptGenRandom() */
 
 
 uint64_t random_u64(uint64_t upper_bound) {
@@ -89,17 +85,13 @@ uint64_t random_u64(uint64_t upper_bound) {
     if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
         return RANDOM_U64_ERROR;
     }
-    if(upper_bound == 0) {
-        return 0;
-    }
+    if(upper_bound == 0) { return 0; }
     random_number %= upper_bound;
 
     return random_number;
 }
-    
 
 
 #else
-    #error "Platform does not support good random function!"
+#    error "Platform does not support good random function!"
 #endif
-

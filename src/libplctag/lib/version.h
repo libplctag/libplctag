@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -42,10 +42,11 @@
  * checking them against a dynamically linked library.
  */
 
-#define LIB_VER_STRING "2.6.14"
+// clang-format off
+#define LIB_VER_STRING "2.6.15"
 #define LIB_VER_MAJOR (2)
 #define LIB_VER_MINOR (6)
-#define LIB_VER_PATCH (14)
+#define LIB_VER_PATCH (15)
 
 extern const char *VERSION;
 extern const uint64_t version_major;

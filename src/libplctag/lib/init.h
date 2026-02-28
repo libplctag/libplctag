@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -38,6 +38,8 @@
 #include "tag.h"
 
 extern int initialize_modules(void);
-typedef plc_tag_p (*tag_create_function)(attr attributes, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
+typedef plc_tag_p (*tag_create_function)(attr attributes,
+                                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                         void *userdata);
 extern tag_create_function find_tag_create_func(attr attributes);
 extern void destroy_modules(void);

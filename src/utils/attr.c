@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -137,7 +137,8 @@ extern attr attr_create_from_str(const char *attr_str) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Key-value pair \"%s\".", *kv_pair);
 
         if(separator == NULL) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!", attr_str, *kv_pair);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!", attr_str,
+                   *kv_pair);
             mem_free(kv_pairs);
             attr_destroy(res);
             return NULL;
@@ -162,16 +163,18 @@ extern attr attr_create_from_str(const char *attr_str) {
         /* check the string lengths */
 
         if(str_length(key) <= 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Key must not be zero length!",
-                   attr_str, *kv_pair);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN,
+                   "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Key must not be zero length!", attr_str,
+                   *kv_pair);
             mem_free(kv_pairs);
             attr_destroy(res);
             return NULL;
         }
 
         if(str_length(value) <= 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Value must not be zero length!",
-                   attr_str, *kv_pair);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN,
+                   "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Value must not be zero length!", attr_str,
+                   *kv_pair);
             mem_free(kv_pairs);
             attr_destroy(res);
             return NULL;

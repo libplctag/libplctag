@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,18 +32,18 @@
  ***************************************************************************/
 
 #ifndef __PLCTAG_AB_TAG_H__
-#define __PLCTAG_AB_TAG_H__ 1
+#    define __PLCTAG_AB_TAG_H__ 1
 
 /* do these first */
-#define MAX_TAG_NAME (260)
-#define MAX_TAG_TYPE_INFO (64)
+#    define MAX_TAG_NAME (260)
+#    define MAX_TAG_TYPE_INFO (64)
 
 /* they are used in some of these includes */
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
+#    include <libplctag/lib/libplctag.h>
+#    include <libplctag/lib/tag.h>
+#    include <libplctag/protocols/ab/ab_common.h>
+#    include <libplctag/protocols/ab/pccc.h>
+#    include <libplctag/protocols/ab/session.h>
 
 typedef enum {
     AB_TYPE_BOOL,
@@ -59,9 +59,9 @@ typedef enum {
     AB_TYPE_STRING,
     AB_TYPE_SHORT_STRING,
     AB_TYPE_TIMER,
-    AB_TYPE_TAG_ENTRY,  /* not a real AB type, but a pseudo type for AB's internal tag entry. */
-    AB_TYPE_TAG_UDT,    /* as above, but for UDTs. */
-    AB_TYPE_TAG_RAW,    /* raw CIP tag */
+    AB_TYPE_TAG_ENTRY,   /* not a real AB type, but a pseudo type for AB's internal tag entry. */
+    AB_TYPE_TAG_UDT,     /* as above, but for UDTs. */
+    AB_TYPE_TAG_RAW,     /* raw CIP tag */
     AB_TYPE_TAG_IDENTITY /* CIP Identity Object data */
 } elem_type_t;
 

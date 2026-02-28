@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,28 +32,28 @@
  ***************************************************************************/
 
 #ifndef __PLCTAG_AB_SESSION_H__
-#define __PLCTAG_AB_SESSION_H__ 1
+#    define __PLCTAG_AB_SESSION_H__ 1
 
-#include <stdbool.h>
+#    include <stdbool.h>
 
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/defs.h>
-#include <utils/atomic_utils.h>
-#include <utils/rc.h>
-#include <utils/vector.h>
+#    include <libplctag/protocols/ab/ab_common.h>
+#    include <libplctag/protocols/ab/defs.h>
+#    include <utils/atomic_utils.h>
+#    include <utils/rc.h>
+#    include <utils/vector.h>
 
 /* #define MAX_SESSION_HOST    (128) */
 
-#define SESSION_DEFAULT_TIMEOUT (2000)
-#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
+#    define SESSION_DEFAULT_TIMEOUT (2000)
+#    define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
 
-#define MAX_PACKET_SIZE_EX (44 + 4002)
+#    define MAX_PACKET_SIZE_EX (44 + 4002)
 
-#define SESSION_MIN_REQUESTS (10)
-#define SESSION_INC_REQUESTS (10)
+#    define SESSION_MIN_REQUESTS (10)
+#    define SESSION_INC_REQUESTS (10)
 
-#define MAX_CONN_PATH (260) /* 256 plus padding. */
-#define MAX_IP_ADDR_SEG_LEN (16)
+#    define MAX_CONN_PATH (260) /* 256 plus padding. */
+#    define MAX_IP_ADDR_SEG_LEN (16)
 
 
 struct ab_session_t {
@@ -121,10 +121,10 @@ struct ab_session_t {
     int auto_disconnect_timeout_ms;
 
     /* connection status - readable by tags via atomics */
-    atomic_int32_t connection_status;  /* plc_tag_conn_status_t values */
+    atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
-    atomic_int32_t connection_inactivity_timeout_ms;  /* milliseconds */
+    atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
 };
 
 

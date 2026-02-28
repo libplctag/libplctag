@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -222,8 +222,8 @@ int plc_tag_tickler_wake_impl(const char *func, int line_num) {
 
     rc = cond_signal(tag_tickler_wait);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s trying to signal condition variable in call from %s:%d", plc_tag_decode_error(rc), func,
-               line_num);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s trying to signal condition variable in call from %s:%d",
+               plc_tag_decode_error(rc), func, line_num);
         return rc;
     }
 
@@ -250,8 +250,8 @@ int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag)
 
     rc = cond_signal(tag->tag_cond_wait);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s trying to signal condition variable in call from %s:%d", plc_tag_decode_error(rc), func,
-               line_num);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s trying to signal condition variable in call from %s:%d",
+               plc_tag_decode_error(rc), func, line_num);
         return rc;
     }
 
@@ -378,7 +378,8 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 
                     /* warn if we need to skip more than one period. */
                     if(periods > 1) {
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods, tag->auto_sync_read_ms);
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods,
+                               tag->auto_sync_read_ms);
                     }
 
                     tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
@@ -417,7 +418,8 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
 
             /* was there a read start? */
             if(tag->event_read_started) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read started with status %s.", plc_tag_decode_error(tag->event_read_started_status));
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read started with status %s.",
+                       plc_tag_decode_error(tag->event_read_started_status));
                 tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
                 tag->event_read_started = 0;
                 tag->event_read_started_status = PLCTAG_STATUS_OK;
@@ -425,7 +427,8 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
 
             /* was there a write start? */
             if(tag->event_write_started) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag write started with status %s.", plc_tag_decode_error(tag->event_write_started_status));
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag write started with status %s.",
+                       plc_tag_decode_error(tag->event_write_started_status));
                 tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
                 tag->event_write_started = 0;
                 tag->event_write_started_status = PLCTAG_STATUS_OK;
@@ -442,7 +445,8 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
 
             /* was there a read completion? */
             if(tag->event_read_complete) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read completed with status %s.", plc_tag_decode_error(tag->event_read_complete_status));
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read completed with status %s.",
+                       plc_tag_decode_error(tag->event_read_complete_status));
                 tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
                 tag->event_read_complete = 0;
                 tag->event_read_complete_status = PLCTAG_STATUS_OK;
@@ -481,7 +485,8 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
     /* get the connection group ID here rather than in each PLC specific tag type. */
     tag->connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     if(tag->connection_group_id < 0 || tag->connection_group_id > 32767) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Connection group ID must be between 0 and 32767, inclusive, but was %d!", tag->connection_group_id);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Connection group ID must be between 0 and 32767, inclusive, but was %d!",
+               tag->connection_group_id);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -769,7 +774,8 @@ static int plc_tag_status_impl(plc_tag_p tag) {
 
         if(rc == PLCTAG_STATUS_OK) {
             if(tag->read_in_flight || tag->write_in_flight) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "rc was OK but read_in_flight=%d write_in_flight=%d, changing to PENDING", tag->read_in_flight, tag->write_in_flight);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "rc was OK but read_in_flight=%d write_in_flight=%d, changing to PENDING",
+                       tag->read_in_flight, tag->write_in_flight);
                 rc = PLCTAG_STATUS_PENDING;
             }
         }
@@ -789,7 +795,7 @@ static int plc_tag_status_impl(plc_tag_p tag) {
  * plc_tag_decode_error()
  *
  * This takes an integer error value and turns it into a printable string.
- * 
+ *
  * Returns a pointer to a static string.
  */
 
@@ -868,18 +874,16 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level) {
  */
 LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug_level) {
     /* We need to map module names to their enum values and call debug_module_set_level */
-    
-    if(!module_name || debug_level < PLCTAG_DEBUG_NONE || debug_level > PLCTAG_DEBUG_SPEW) {
-        return PLCTAG_ERR_BAD_PARAM;
+
+    if(!module_name || debug_level < PLCTAG_DEBUG_NONE || debug_level > PLCTAG_DEBUG_SPEW) { return PLCTAG_ERR_BAD_PARAM; }
+
+/* Map module name strings to enum values */
+#define MODULE_CASE(name, enum_val)                    \
+    if(str_cmp_i(module_name, #name) == 0) {           \
+        debug_module_set_level(enum_val, debug_level); \
+        return PLCTAG_STATUS_OK;                       \
     }
-    
-    /* Map module name strings to enum values */
-    #define MODULE_CASE(name, enum_val) \
-        if(str_cmp_i(module_name, #name) == 0) { \
-            debug_module_set_level(enum_val, debug_level); \
-            return PLCTAG_STATUS_OK; \
-        }
-    
+
     MODULE_CASE(LIB, DEBUG_MODULE_LIB)
     MODULE_CASE(INIT, DEBUG_MODULE_INIT)
     MODULE_CASE(VERSION, DEBUG_MODULE_VERSION)
@@ -903,9 +907,9 @@ LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug
     MODULE_CASE(OMRON_RAW_TAG, DEBUG_MODULE_OMRON_RAW_TAG)
     MODULE_CASE(MODBUS, DEBUG_MODULE_MODBUS)
     MODULE_CASE(SYSTEM, DEBUG_MODULE_SYSTEM)
-    
-    #undef MODULE_CASE
-    
+
+#undef MODULE_CASE
+
     return PLCTAG_ERR_NOT_FOUND;
 }
 
@@ -917,16 +921,12 @@ LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug
  * the module name is not recognized.
  */
 LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name) {
-    if(!module_name) {
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-    
-    /* Map module name strings to enum values */
-    #define MODULE_CASE(name, enum_val) \
-        if(str_cmp_i(module_name, #name) == 0) { \
-            return debug_module_get_level(enum_val); \
-        }
-    
+    if(!module_name) { return PLCTAG_ERR_BAD_PARAM; }
+
+/* Map module name strings to enum values */
+#define MODULE_CASE(name, enum_val) \
+    if(str_cmp_i(module_name, #name) == 0) { return debug_module_get_level(enum_val); }
+
     MODULE_CASE(LIB, DEBUG_MODULE_LIB)
     MODULE_CASE(INIT, DEBUG_MODULE_INIT)
     MODULE_CASE(VERSION, DEBUG_MODULE_VERSION)
@@ -950,9 +950,9 @@ LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name) {
     MODULE_CASE(OMRON_RAW_TAG, DEBUG_MODULE_OMRON_RAW_TAG)
     MODULE_CASE(MODBUS, DEBUG_MODULE_MODBUS)
     MODULE_CASE(SYSTEM, DEBUG_MODULE_SYSTEM)
-    
-    #undef MODULE_CASE
-    
+
+#undef MODULE_CASE
+
     return PLCTAG_ERR_NOT_FOUND;
 }
 
@@ -962,9 +962,7 @@ LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name) {
  *
  * Returns the current global debug level set by plc_tag_set_debug_level().
  */
-LIB_EXPORT int plc_tag_get_debug_level(void) {
-    return get_debug_level();
-}
+LIB_EXPORT int plc_tag_get_debug_level(void) { return get_debug_level(); }
 
 
 /*
@@ -973,9 +971,7 @@ LIB_EXPORT int plc_tag_get_debug_level(void) {
  * This function takes a string like "AB_SESSION" or "OMRON_CONN" and returns
  * the corresponding module ID. Returns 0 if the module name is not recognized.
  */
-LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name) {
-    return (uint64_t)debug_module_id(module_name);
-}
+LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name) { return (uint64_t)debug_module_id(module_name); }
 
 
 /*
@@ -985,9 +981,7 @@ LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name) {
  * and returns the corresponding debug level ID. Returns -1 if the level name
  * is not recognized.
  */
-LIB_EXPORT int plc_tag_debug_level_id(const char *level_name) {
-    return debug_level_id(level_name);
-}
+LIB_EXPORT int plc_tag_debug_level_id(const char *level_name) { return debug_level_id(level_name); }
 
 
 /*
@@ -1218,7 +1212,8 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
             /* wait for something to happen */
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s while waiting for tag creation to complete!",
+                       plc_tag_decode_error(rc));
                 if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
 
                 /* remove the tag from the hashtable. */
@@ -1723,7 +1718,8 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
     plc_tag_generic_handle_event_callbacks(tag);
 
     /* release the reference outside the mutex. */
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 " and tag mutex not locked.", tag->tag_id);
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 " and tag mutex not locked.",
+           tag->tag_id);
     rc_dec(tag);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "Done.");
@@ -1843,7 +1839,8 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             /* wait for something to happen */
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s while waiting for tag read to complete!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s while waiting for tag read to complete!",
+                       plc_tag_decode_error(rc));
                 plc_tag_abort_impl(tag);
 
                 break;
@@ -2035,7 +2032,8 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
             /* wait for something to happen */
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s while waiting for tag write to complete!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s while waiting for tag write to complete!",
+                       plc_tag_decode_error(rc));
                 plc_tag_abort_impl(tag);
 
                 break;
@@ -2387,8 +2385,8 @@ static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
             real_offset = offset_bit;
         }
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, "selecting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8),
-               tag->data[real_offset / 8]);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, "selecting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8),
+               (real_offset / 8), tag->data[real_offset / 8]);
 
         if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
             res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
@@ -2448,8 +2446,8 @@ static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
             real_offset = offset_bit;
         }
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, "Setting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8),
-               tag->data[real_offset / 8]);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, "Setting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8),
+               (real_offset / 8), tag->data[real_offset / 8]);
 
         if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
             if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
@@ -3552,7 +3550,8 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
 
         /* determine the maximum number of characters/bytes to copy. */
         if(buffer_length < string_length) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Buffer length, %d, is less than the string length, %d!", buffer_length, string_length);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Buffer length, %d, is less than the string length, %d!", buffer_length,
+                   string_length);
             max_len = buffer_length;
         } else {
             max_len = string_length;
@@ -3693,7 +3692,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
             int last_count_word_index = string_start_offset + (int)(unsigned int)tag->byte_order->str_count_word_bytes;
 
             if(last_count_word_index > (int)(tag->size)) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Unable to write valid count word as count word would go past the end of the tag buffer!");
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Unable to write valid count word as count word would go past the end of the tag buffer!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
                 tag->status = (int8_t)rc;
                 break;
@@ -3705,8 +3705,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
             switch(tag->byte_order->str_count_word_bytes) {
                 case 1:
                     if(string_length > UINT8_MAX) {
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "String length, %u, is greater than can be expressed in a one-byte count word!",
-                               string_length);
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                               "String length, %u, is greater than can be expressed in a one-byte count word!", string_length);
                         rc = PLCTAG_ERR_TOO_LARGE;
                         break;
                     }
@@ -3716,8 +3716,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
                 case 2:
                     if(string_length > UINT16_MAX) {
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "String length, %u, is greater than can be expressed in a two-byte count word!",
-                               string_length);
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                               "String length, %u, is greater than can be expressed in a two-byte count word!", string_length);
                         rc = PLCTAG_ERR_TOO_LARGE;
                         break;
                     }
@@ -3730,8 +3730,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
                 case 4:
                     if(string_length > UINT32_MAX) {
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "String length, %u, is greater than can be expressed in a four-byte count word!",
-                               string_length);
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                               "String length, %u, is greater than can be expressed in a four-byte count word!", string_length);
                         rc = PLCTAG_ERR_TOO_LARGE;
                         break;
                     }
@@ -3747,7 +3747,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
                     break;
 
                 default:
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Unsupported string count size, %d!", tag->byte_order->str_count_word_bytes);
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Unsupported string count size, %d!",
+                           tag->byte_order->str_count_word_bytes);
                     rc = PLCTAG_ERR_UNSUPPORTED;
                     tag->status = (int8_t)rc;
                     break;
@@ -3775,8 +3776,9 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
             if(char_index < (size_t)(uint32_t)tag->size) {
                 tag->data[char_index] = (uint8_t)string_val[i];
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Out of bounds index, %zu, generated during string copy!  Tag size is %" PRId32 ".",
-                       char_index, tag->size);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Out of bounds index, %zu, generated during string copy!  Tag size is %" PRId32 ".", char_index,
+                       tag->size);
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
 
                 /* note: only breaks out of the for loop, we need another break. */
@@ -4165,7 +4167,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
             rc = check_byte_order_str(byte_order_str, 2);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string int16_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string int16_byte_order, \"%s\", is illegal or malformed.",
+                       byte_order_str);
                 return rc;
             }
 
@@ -4181,7 +4184,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
             rc = check_byte_order_str(byte_order_str, 4);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string int32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string int32_byte_order, \"%s\", is illegal or malformed.",
+                       byte_order_str);
                 return rc;
             }
 
@@ -4198,7 +4202,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
             rc = check_byte_order_str(byte_order_str, 8);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string int64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string int64_byte_order, \"%s\", is illegal or malformed.",
+                       byte_order_str);
                 return rc;
             }
 
@@ -4219,7 +4224,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
             rc = check_byte_order_str(byte_order_str, 4);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string float32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string float32_byte_order, \"%s\", is illegal or malformed.",
+                       byte_order_str);
                 return rc;
             }
 
@@ -4240,7 +4246,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
             rc = check_byte_order_str(byte_order_str, 8);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string float64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string float64_byte_order, \"%s\", is illegal or malformed.",
+                       byte_order_str);
                 return rc;
             }
 
@@ -4281,7 +4288,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             if(str_param == 1 || str_param == 0) {
                 tag->byte_order->str_is_fixed_length = (str_param ? 1 : 0);
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag string attribute str_is_fixed_length must be missing, zero (0) or one (1)!");
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Tag string attribute str_is_fixed_length must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4292,7 +4300,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             if(str_param == 1 || str_param == 0) {
                 tag->byte_order->str_is_zero_terminated = (str_param ? 1 : 0);
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag string attribute str_is_zero_terminated must be missing, zero (0) or one (1)!");
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Tag string attribute str_is_zero_terminated must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4303,7 +4312,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             if(str_param == 1 || str_param == 0) {
                 tag->byte_order->str_is_byte_swapped = (str_param ? 1 : 0);
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag string attribute str_is_byte_swapped must be missing, zero (0) or one (1)!");
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Tag string attribute str_is_byte_swapped must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4316,7 +4326,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4 || str_param == 8) {
                 tag->byte_order->str_count_word_bytes = (unsigned int)str_param;
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, 4, or 8!");
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, 4, or 8!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4364,7 +4375,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
                 } /* Padding to 0 bytes doesnt make much sense, so we overwride to 1 byte which means no padding */
                 tag->byte_order->str_pad_to_multiple_bytes = (unsigned int)str_param;
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag string attribute str_pad_to_multiple_bytes must be missing, 1, 2 or 4!");
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                       "Tag string attribute str_pad_to_multiple_bytes must be missing, 1, 2 or 4!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4374,7 +4386,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* if we have a counted string, we need the count! */
         if(tag->byte_order->str_is_counted) {
             if(tag->byte_order->str_count_word_bytes == 0) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                pdebug(
+                    DEBUG_MODULE_LIB, DEBUG_WARN,
                     "If a string definition is counted, you must use both \"str_is_counted\" and \"str_count_word_bytes\" parameters!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
@@ -4383,7 +4396,8 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* if we have a fixed length string, we need to know what the length is! */
         if(tag->byte_order->str_is_fixed_length) {
             if(tag->byte_order->str_total_length == 0) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                pdebug(
+                    DEBUG_MODULE_LIB, DEBUG_WARN,
                     "If a string definition is fixed length, you must use both \"str_is_fixed_length\" and \"str_total_length\" parameters!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
@@ -4394,11 +4408,13 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
            && (tag->byte_order->str_is_zero_terminated + tag->byte_order->str_max_capacity + tag->byte_order->str_count_word_bytes
                + tag->byte_order->str_pad_bytes)
                   > tag->byte_order->str_total_length) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag string total length, %d bytes, must be at least the sum, %d, of the other string components!",
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                   "Tag string total length, %d bytes, must be at least the sum, %d, of the other string components!",
                    tag->byte_order->str_total_length,
                    tag->byte_order->str_is_zero_terminated + tag->byte_order->str_max_capacity
                        + tag->byte_order->str_count_word_bytes + tag->byte_order->str_pad_bytes);
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "str_is_zero_terminated=%d, str_max_capacity=%d, str_count_word_bytes=%d, str_pad_bytes=%d",
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL,
+                   "str_is_zero_terminated=%d, str_max_capacity=%d, str_count_word_bytes=%d, str_pad_bytes=%d",
                    tag->byte_order->str_is_zero_terminated, tag->byte_order->str_max_capacity,
                    tag->byte_order->str_count_word_bytes, tag->byte_order->str_pad_bytes);
             return PLCTAG_ERR_BAD_PARAM;
@@ -4435,7 +4451,8 @@ int check_byte_order_str(const char *byte_order, int length) {
         int val = 0;
 
         if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string, \"%s\", must be only characters from '0' to '7'!", byte_order);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string, \"%s\", must be only characters from '0' to '7'!",
+                   byte_order);
             return PLCTAG_ERR_BAD_DATA;
         }
 
@@ -4443,7 +4460,8 @@ int check_byte_order_str(const char *byte_order, int length) {
         val = byte_order[i] - '0';
 
         if(val < 0 || val > (length - 1)) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string, \"%s\", must only values from 0 to %d!", byte_order, (length - 1));
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Byte order string, \"%s\", must only values from 0 to %d!", byte_order,
+                   (length - 1));
             return PLCTAG_ERR_BAD_DATA;
         }
 
@@ -4608,7 +4626,8 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
                 break;
 
             default:
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Unsupported string count word size, %d bytes!", tag->byte_order->str_count_word_bytes);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Unsupported string count word size, %d bytes!",
+                       tag->byte_order->str_count_word_bytes);
                 return 0; /* FIXME - this should be an error code. */
                 break;
         }
@@ -4657,11 +4676,13 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
         if(tag->byte_order->str_is_fixed_length) {
             if(tag->byte_order->str_total_length) {
                 string_size_in_buffer = tag->byte_order->str_total_length;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String is fixed size, so use the total length %d as the size in the buffer.",
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL,
+                       "String is fixed size, so use the total length %d as the size in the buffer.",
                        tag->byte_order->str_total_length);
                 break;
             } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN,
+                pdebug(
+                    DEBUG_MODULE_LIB, DEBUG_WARN,
                     "Unsupported configuration.  You must set the total string length if you set the flag for string is fixed size!");
                 rc = PLCTAG_ERR_BAD_CONFIG;
                 break;
@@ -4670,27 +4691,28 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
 
         /* add the incoming string size. */
         string_size_in_buffer = (unsigned int)string_length;
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String size in buffer is at least %u after the incoming string length %u.", string_size_in_buffer,
-               string_length);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String size in buffer is at least %u after the incoming string length %u.",
+               string_size_in_buffer, string_length);
 
         /* OK the string will fit, now lets add the count word if any. */
         if(tag->byte_order->str_count_word_bytes) {
             string_size_in_buffer += tag->byte_order->str_count_word_bytes;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String size in buffer is %u after adding count word size, %u.", string_size_in_buffer,
-                   tag->byte_order->str_count_word_bytes);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String size in buffer is %u after adding count word size, %u.",
+                   string_size_in_buffer, tag->byte_order->str_count_word_bytes);
         }
 
         /* any terminator byte? */
         if(tag->byte_order->str_is_zero_terminated) {
             string_size_in_buffer += 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String is zero terminated so the string size in the tag buffer is at least %u.",
-                   string_size_in_buffer);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL,
+                   "String is zero terminated so the string size in the tag buffer is at least %u.", string_size_in_buffer);
         }
 
         /* any pad bytes? */
         if(tag->byte_order->str_pad_bytes) {
             string_size_in_buffer += tag->byte_order->str_pad_bytes;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String has %u padding bytes so the string size in the tag buffer is at least %u.",
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL,
+                   "String has %u padding bytes so the string size in the tag buffer is at least %u.",
                    tag->byte_order->str_pad_bytes, string_size_in_buffer);
         }
 
@@ -4710,7 +4732,8 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Done with size %d.", string_size_in_buffer);
         return (int)string_size_in_buffer;
     } else {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s found while calculating the new string size in the tag buffer.", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Error %s found while calculating the new string size in the tag buffer.",
+               plc_tag_decode_error(rc));
         return rc;
     }
 }

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -65,17 +65,24 @@ extern int debug_level_id(const char *level_name);
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, const char *templ, ...);
 
 #if defined(_WIN32) && defined(_MSC_VER)
-    /* MinGW on Windows does not need this. */
-    #define __func__ __FUNCTION__
+/* MinGW on Windows does not need this. */
+#    define __func__ __FUNCTION__
 #endif
 
 
 /* New style: pdebug(modules, level, msg, ...) - modules parameter is REQUIRED */
-#define pdebug(modules, dbg, ...)                                                \
-   do { if((dbg) != DEBUG_NONE && debug_is_enabled(modules, dbg)) pdebug_impl(__func__, __LINE__, dbg, modules, __VA_ARGS__); } while(0)
+#define pdebug(modules, dbg, ...)                                                                                             \
+    do {                                                                                                                      \
+        if((dbg) != DEBUG_NONE && debug_is_enabled(modules, dbg)) pdebug_impl(__func__, __LINE__, dbg, modules, __VA_ARGS__); \
+    } while(0)
 
-extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, uint8_t *data, int count);
-#define pdebug_dump_bytes(modules, dbg, d, c)  do { if((dbg) != DEBUG_NONE && debug_is_enabled(modules, dbg)) pdebug_dump_bytes_impl(__func__, __LINE__, dbg, modules, d, c); } while(0)
+extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, uint8_t *data,
+                                   int count);
+#define pdebug_dump_bytes(modules, dbg, d, c)                               \
+    do {                                                                    \
+        if((dbg) != DEBUG_NONE && debug_is_enabled(modules, dbg))           \
+            pdebug_dump_bytes_impl(__func__, __LINE__, dbg, modules, d, c); \
+    } while(0)
 
 extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));
 extern int debug_unregister_logger(void);

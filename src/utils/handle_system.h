@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -52,25 +52,19 @@
 
 typedef uint64_t handle_t;
 
-#define HANDLE_INVALID       0ULL
-#define HANDLE_INDEX_BITS    48
-#define HANDLE_GEN_BITS      16
-#define HANDLE_INDEX_MASK    ((1ULL << HANDLE_INDEX_BITS) - 1)
-#define HANDLE_GEN_MASK      ((1ULL << HANDLE_GEN_BITS) - 1)
+#define HANDLE_INVALID 0ULL
+#define HANDLE_INDEX_BITS 48
+#define HANDLE_GEN_BITS 16
+#define HANDLE_INDEX_MASK ((1ULL << HANDLE_INDEX_BITS) - 1)
+#define HANDLE_GEN_MASK ((1ULL << HANDLE_GEN_BITS) - 1)
 
 /* Extract components from handle */
-static inline uint64_t handle_index(handle_t h) {
-    return h >> HANDLE_GEN_BITS;
-}
+static inline uint64_t handle_index(handle_t h) { return h >> HANDLE_GEN_BITS; }
 
-static inline uint16_t handle_gen(handle_t h) {
-    return h & HANDLE_GEN_MASK;
-}
+static inline uint16_t handle_gen(handle_t h) { return h & HANDLE_GEN_MASK; }
 
 /* Create handle from index and generation */
-static inline handle_t handle_make(uint64_t index, uint16_t gen) {
-    return (index << HANDLE_GEN_BITS) | (gen & HANDLE_GEN_MASK);
-}
+static inline handle_t handle_make(uint64_t index, uint16_t gen) { return (index << HANDLE_GEN_BITS) | (gen & HANDLE_GEN_MASK); }
 
 /* Destructor function type for cleanup when handle is destroyed */
 typedef void (*handle_destructor_f)(void *);
@@ -119,7 +113,7 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor);
  *
  *   PLCTAG_ERR_NULL_PTR: data_out was NULL
  */
-int handle_acquire(handle_t h, void** data_out);
+int handle_acquire(handle_t h, void **data_out);
 
 /*
  * Release a handle after use (unlock and decrement refcount)
@@ -177,8 +171,6 @@ void handle_system_teardown(void);
  * The handle is automatically released when leaving the block.
  * If the handle is invalid, plc will be NULL.
  */
-#define handle_scoped(h, ptr_var) \
-    for(int _h_acq = (handle_acquire((h), (void**)&(ptr_var))), \
-            _h_rel = 0; \
-        _h_acq == PLCTAG_STATUS_OK && !_h_rel; \
+#define handle_scoped(h, ptr_var)                                                                                   \
+    for(int _h_acq = (handle_acquire((h), (void **)&(ptr_var))), _h_rel = 0; _h_acq == PLCTAG_STATUS_OK && !_h_rel; \
         _h_rel = 1, handle_release((h)))
