@@ -1697,18 +1697,6 @@ static int check_write_status_unconnected(ab_tag_p tag) {
     cip_resp = (eip_cip_uc_resp *)(tag->req->data);
 
     do {
-        if(le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
@@ -1716,7 +1704,6 @@ static int check_write_status_unconnected(ab_tag_p tag) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
-
 
         if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status,
