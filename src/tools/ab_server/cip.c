@@ -51,6 +51,7 @@
 #define CIP_SRV_WRITE_NAMED_TAG ((uint8_t)0x4d)
 #define CIP_SRV_FORWARD_CLOSE ((uint8_t)0x4e)
 #define CIP_SRV_READ_NAMED_TAG_FRAG ((uint8_t)0x52)
+#define CIP_SRV_UNCONNECTED_SEND ((uint8_t)0x52)
 #define CIP_SRV_WRITE_NAMED_TAG_FRAG ((uint8_t)0x53)
 #define CIP_SRV_FORWARD_OPEN ((uint8_t)0x54)
 #define CIP_SRV_INSTANCES_ATTRIBS ((uint8_t)0x55)
@@ -136,6 +137,56 @@ static bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num
                                                     size_t *request_end_byte_offset);
 
 
+slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *plc) {
+    uint8_t cip_service = 0;
+    slice_s cip_service_path = {0};
+    slice_s cip_service_payload = {0};
+
+    log_info("Got packet:");
+    log_info_slice(input);
+
+    if(!parse_cip_request(input, &cip_service, &cip_service_path, &cip_service_payload)) {
+        log_info("Unable to parse CIP request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    log_info("CIP Service: %02x", cip_service);
+    log_info("CIP Path:");
+    log_info_slice(cip_service_path);
+    log_info("CIP Payload:");
+    log_info_slice(cip_service_payload);
+
+    switch(cip_service) {
+        case CIP_SRV_FORWARD_OPEN:
+        case CIP_SRV_FORWARD_OPEN_EX:
+            return handle_forward_open(cip_service, cip_service_path, cip_service_payload, output, plc);
+            break;
+
+        case CIP_SRV_FORWARD_CLOSE:
+            return handle_forward_close(cip_service, cip_service_path, cip_service_payload, output, plc);
+            break;
+
+        case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
+
+        case CIP_SRV_UNCONNECTED_SEND:
+            /* we've stripped off the CM part, but there is a byte count of the remaining data that we need. */
+            uint16_t embedded_cip_service_length = slice_get_uint16_le(cip_service_payload, 2);
+
+            log_info("Unconnected Send: embedded CIP service length %d", embedded_cip_service_length);
+
+            if(slice_len(cip_service_payload) < 2 + embedded_cip_service_length) {
+                log_info("CIP service payload too short for embedded service length");
+                return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+            }
+
+            return cip_dispatch_request(slice_from_slice(cip_service_payload, 4, embedded_cip_service_length), output, plc);
+            break;
+
+        default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
+    }
+}
+
+
 slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     uint8_t cip_service = 0;
     slice_s cip_service_path = {0};
@@ -158,15 +209,6 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     switch(cip_service) {
         case CIP_SRV_MULTI: return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc); break;
 
-        case CIP_SRV_FORWARD_OPEN:
-        case CIP_SRV_FORWARD_OPEN_EX:
-            return handle_forward_open(cip_service, cip_service_path, cip_service_payload, output, plc);
-            break;
-
-        case CIP_SRV_FORWARD_CLOSE:
-            return handle_forward_close(cip_service, cip_service_path, cip_service_payload, output, plc);
-            break;
-
         case CIP_SRV_READ_NAMED_TAG:
         case CIP_SRV_READ_NAMED_TAG_FRAG:
             return handle_read_request(cip_service, cip_service_path, cip_service_payload, output, plc);
@@ -176,8 +218,6 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
         case CIP_SRV_WRITE_NAMED_TAG_FRAG:
             return handle_write_request(cip_service, cip_service_path, cip_service_payload, output, plc);
             break;
-
-        case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
 
         default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
     }

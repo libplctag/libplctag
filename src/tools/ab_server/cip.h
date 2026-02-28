@@ -37,3 +37,4 @@
 #include "slice.h"
 
 extern slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *context);
+extern slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *context);

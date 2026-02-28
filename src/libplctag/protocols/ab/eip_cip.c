@@ -1697,18 +1697,6 @@ static int check_write_status_unconnected(ab_tag_p tag) {
     cip_resp = (eip_cip_uc_resp *)(tag->req->data);
 
     do {
-        if(le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
@@ -1716,7 +1704,6 @@ static int check_write_status_unconnected(ab_tag_p tag) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
-
 
         if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status,
@@ -1769,13 +1756,18 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     } else {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, "Unconnected tag.");
-        overhead = 1                                  /* service request, one byte */
-                   + tag->encoded_name_size           /* full encoded name */
-                   + tag->encoded_type_info_size      /* encoded type size */
-                   + tag->session->conn_path_size + 2 /* encoded device path size plus two bytes for length and padding */
-                   + 2                                /* element count, 16-bit int */
-                   + 4                                /* byte offset, 32-bit int */
-                   + 8;                               /* MAGIC fudge factor */
+        overhead = 1                             /* CIP service Unconnected Send */
+                   + 1                           /* path size */
+                   + 4                           /* Connection Manager 20 06 24 1 */
+                   + 1                           /* seconds per tick */
+                   + 1                           /* timeout ticks */
+                   + 2                           /* Embedded payload size */
+                   + 1                           /* service request, one byte */
+                   + tag->encoded_name_size      /* full encoded name */
+                   + tag->encoded_type_info_size /* encoded type size */
+                   + 2                           /* element count, 16-bit int */
+                   + 4                           /* byte offset, 32-bit int */
+                   + 8;                          /* MAGIC fudge factor */
     }
 
     /* make sure that overhead is an even number of bytes */
