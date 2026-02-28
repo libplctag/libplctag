@@ -323,7 +323,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
             result -= (int)sizeof(cpf_connected_data_item);
         } else {
             result -= (int)sizeof(cpf_unconnected_data_item);
-            result -= (int)(session->conn_path_size);
+            result -= (int)(session->conn_path_size) + 2; /* encoded path size plus two bytes for length and padding */
         }
     }
     if(result < 0) {
