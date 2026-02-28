@@ -123,7 +123,7 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
     }
 
     /* dispatch and handle the result. */
-    result = cip_dispatch_request(
+    result = cip_dispatch_unconnected_request(
         slice_from_slice(input, (size_t)CPF_UCONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(input) - CPF_UCONN_HEADER_SIZE)),
         slice_from_slice(output, (size_t)CPF_UCONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(output) - CPF_UCONN_HEADER_SIZE)),
         plc);
