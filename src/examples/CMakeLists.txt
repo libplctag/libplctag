@@ -18,9 +18,6 @@ endif()
   busy_test
   data_dumper
   get_identity
-  list_tags_logix
-  list_tags_micro8x0
-  list_tags_omron_incomplete
   multithread
   multithread_cached_read
   multithread_plc5
@@ -30,45 +27,11 @@ endif()
   simple_cpp
   simple_dual
   slc500
-  stress_api_lock
-  stress_rc_mem
-  stress_test
   string_non_standard_udt
   string_standard
-  test_alternate_tag_listing
-  test_array_notation
-  test_auto_sync
-  test_auto_sync_modbus
-  test_idle_disconnect
-  test_reconnect_after_outage_async
-  test_reconnect_after_outage_sync
-  test_callback
-  test_callback_ex
-  test_callback_ex_logix
-  test_callback_ex_modbus
-  test_connection_group
-  test_connection_stress
-  test_emulator_performance
-  test_event
-  test_fairness
-  test_indexed_tags
-  test_modbus_multiple
-  test_raw_cip
-  test_reconnect
-  test_shutdown_cip
-  test_shutdown_modbus
-  test_shutdown_restart
-  test_special
-  test_string
-  test_tag_attributes
-  test_tag_type_attribute
-  thread_stress
   toggle_bit
   toggle_bool
-  trigger_double_free
   write_string
-  tag_rw_deprecated
-  tag_rw2
 )
 
 foreach(example ${EXAMPLE_EXECUTABLES})
@@ -111,17 +74,3 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     #     target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
     # endif()
 endforeach()
-
-# test_fairness needs stats.c for statistics calculations
-target_sources(test_fairness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stats.c")
-
-# Link math library for tests that use sqrt() and other math functions
-# Math functions are in libm on Unix but in the C runtime on Windows
-if(UNIX)
-    target_link_libraries(test_fairness m)
-endif()
-
-# Install only the tag_rw2 tool into the devel component
-install(TARGETS tag_rw2
-    RUNTIME DESTINATION bin
-    COMPONENT devel)

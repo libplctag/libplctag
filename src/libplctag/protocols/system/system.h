@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,13 +32,14 @@
  ***************************************************************************/
 
 #ifndef __PROTOCOL_SYSTEM_H__
-#define __PROTOCOL_SYSTEM_H__ 1
+#    define __PROTOCOL_SYSTEM_H__ 1
 
-#include <utils/attr.h>
-#include <utils/debug.h>
-#include <platform.h>
-#include <libplctag/lib/tag.h>
+#    include <utils/attr.h>
+#    include <utils/debug.h>
+#    include <platform.h>
+#    include <libplctag/lib/tag.h>
 
-extern plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
+extern plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata);
 
 #endif

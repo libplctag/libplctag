@@ -85,7 +85,40 @@ fi
 sleep 3
 
 let TEST++
-echo -n "  Test $TEST: basic large tag read/write... "
+echo -n "  Test $TEST: basic unconnected tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=10&name=TestBigArray&use_connected_msg=0' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "$LOG_DIR/${TEST}_big_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: basic unconnected large tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1000&name=TestBigArray&use_connected_msg=0' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "$LOG_DIR/${TEST}_big_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: basic connected tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=10&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "$LOG_DIR/${TEST}_big_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: basic connected large tag read/write... "
 $VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1000&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "$LOG_DIR/${TEST}_big_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"

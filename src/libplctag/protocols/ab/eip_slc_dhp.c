@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,17 +34,14 @@
 
 #include <libplctag/protocols/ab/tag.h>
 
-struct tag_vtable_t eip_slc_dhp_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
-    .read = (tag_vtable_func)pccc_dhp_tag_read_start,
-    .status = (tag_vtable_func)pccc_dhp_tag_status,
-    .tickler = (tag_vtable_func)pccc_dhp_tag_tickler,
-    .write = (tag_vtable_func)pccc_dhp_tag_write_start,
-    .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
+struct tag_vtable_t eip_slc_dhp_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
+                                          .read = (tag_vtable_func)pccc_dhp_tag_read_start,
+                                          .status = (tag_vtable_func)pccc_dhp_tag_status,
+                                          .tickler = (tag_vtable_func)pccc_dhp_tag_tickler,
+                                          .write = (tag_vtable_func)pccc_dhp_tag_write_start,
+                                          .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
 
-    /* data accessors */
-    .get_int_attrib = ab_get_int_attrib,
-    .set_int_attrib = ab_set_int_attrib,
-    .get_byte_array_attrib = ab_get_byte_array_attrib
-};
-
+                                          /* data accessors */
+                                          .get_int_attrib = ab_get_int_attrib,
+                                          .set_int_attrib = ab_set_int_attrib,
+                                          .get_byte_array_attrib = ab_get_byte_array_attrib};

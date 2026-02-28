@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -325,7 +325,8 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     }
 
     if(tag->size > conn_get_max_payload(tag->conn)) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Amount to write exceeds negotiated conn size %d!", conn_get_max_payload(tag->conn));
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, "Amount to write exceeds negotiated conn size %d!",
+               conn_get_max_payload(tag->conn));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -373,7 +374,8 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+               tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -492,7 +494,8 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
+               tag->tag_id);
         tag->req = rc_dec(req);
         return rc;
     }

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -216,7 +216,8 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_READ_COMPLETED raised with status %s.", plc_tag_decode_error(status));
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_READ_COMPLETED raised with status %s.",
+                   plc_tag_decode_error(status));
             if(!tag->had_created_event) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising synthesized created event on read completed event.");
                 tag->had_created_event = 1;
@@ -233,7 +234,8 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_READ_STARTED raised with status %s.", plc_tag_decode_error(status));
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_READ_STARTED raised with status %s.",
+                   plc_tag_decode_error(status));
             tag->event_read_started = 1;
             tag->event_read_started_status = status;
             tag->event_read_complete_enable = 1;
@@ -241,7 +243,8 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_COMPLETED raised with status %s.", plc_tag_decode_error(status));
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_COMPLETED raised with status %s.",
+                   plc_tag_decode_error(status));
             if(!tag->had_created_event) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising synthesized created event on write completed event.");
                 tag->had_created_event = 1;
@@ -258,7 +261,8 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_STARTED raised with status %s.", plc_tag_decode_error(status));
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_STARTED raised with status %s.",
+                   plc_tag_decode_error(status));
             tag->event_write_started = 1;
             tag->event_write_started_status = status;
             tag->event_write_complete_enable = 1;

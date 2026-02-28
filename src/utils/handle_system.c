@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -44,39 +44,35 @@
 
 /* Metadata header (embedded before user data) */
 typedef struct {
-    mutex_p mutex;              /* Protection for this slot */
-    atomic_int32_t refcount;    /* External references */
-    int8_t destroying;          /* Destruction in progress */
-    handle_destructor_f destructor;  /* User cleanup function */
+    mutex_p mutex;                  /* Protection for this slot */
+    atomic_int32_t refcount;        /* External references */
+    int8_t destroying;              /* Destruction in progress */
+    handle_destructor_f destructor; /* User cleanup function */
 } handle_header_t;
 
 /* Array slot - tracks current handle value and data pointer */
 typedef struct {
-    handle_t handle;            /* Current handle value (generation included) */
-    void *data;                 /* Pointer to user data (NULL if free) */
+    handle_t handle; /* Current handle value (generation included) */
+    void *data;      /* Pointer to user data (NULL if free) */
 } handle_slot_t;
 
 /* Global handle array management */
 typedef struct {
-    handle_slot_t *slots;       /* Dynamic array of slots */
-    uint64_t num_slots;         /* Current capacity */
-    uint64_t next_free;         /* Hint: first potentially free slot */
-    mutex_p array_mutex;        /* Protects array resizing and slot allocation */
-    atomic_int32_t active_count;/* Count of allocated slots */
+    handle_slot_t *slots;        /* Dynamic array of slots */
+    uint64_t num_slots;          /* Current capacity */
+    uint64_t next_free;          /* Hint: first potentially free slot */
+    mutex_p array_mutex;         /* Protects array resizing and slot allocation */
+    atomic_int32_t active_count; /* Count of allocated slots */
 } handle_array_t;
 
 static handle_array_t handle_array = {0};
 static mutex_p handle_array_init_mutex = NULL;
-static cond_p handle_cleanup_cond = NULL;  /* Signaled when last handle destroyed */
+static cond_p handle_cleanup_cond = NULL; /* Signaled when last handle destroyed */
 
 
 int handle_system_init(void) {
-    if(handle_array_init_mutex == NULL) {
-        handle_array_init_mutex = mutex_create();
-    }
-    if(handle_cleanup_cond == NULL) {
-        handle_cleanup_cond = cond_create();
-    }
+    if(handle_array_init_mutex == NULL) { handle_array_init_mutex = mutex_create(); }
+    if(handle_cleanup_cond == NULL) { handle_cleanup_cond = cond_create(); }
     return PLCTAG_STATUS_OK;
 }
 
@@ -88,20 +84,17 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
     uint16_t gen;
     handle_slot_t *slot;
 
-    if(!handle_array_init_mutex) {
-        handle_system_init();
-    }
+    if(!handle_array_init_mutex) { handle_system_init(); }
 
     /* Allocate header + data as single block */
-    header = (handle_header_t *)mem_alloc(
-        sizeof(handle_header_t) + data_size);
+    header = (handle_header_t *)mem_alloc(sizeof(handle_header_t) + data_size);
     if(!header) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Failed to allocate handle");
         return HANDLE_INVALID;
     }
 
     /* Initialize header */
-    header->refcount = 1;           /* Caller owns initial reference */
+    header->refcount = 1; /* Caller owns initial reference */
     header->destroying = 0;
     header->destructor = destructor;
     header->mutex = mutex_create();
@@ -115,47 +108,38 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
         /* Initialize array if needed */
         if(!handle_array.slots) {
             handle_array.num_slots = 256;
-            handle_array.slots = (handle_slot_t *)mem_alloc(
-                handle_array.num_slots * sizeof(handle_slot_t));
+            handle_array.slots = (handle_slot_t *)mem_alloc(handle_array.num_slots * sizeof(handle_slot_t));
             if(!handle_array.slots) {
                 pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Failed to allocate handle array");
                 mem_free(header);
                 return HANDLE_INVALID;
             }
-            memset(handle_array.slots, 0,
-                   handle_array.num_slots * sizeof(handle_slot_t));
+            memset(handle_array.slots, 0, handle_array.num_slots * sizeof(handle_slot_t));
             handle_array.next_free = 0;
         }
 
         /* Find next free slot */
         index = handle_array.next_free;
-        while(index < handle_array.num_slots &&
-              handle_array.slots[index].data != NULL) {
-            index++;
-        }
+        while(index < handle_array.num_slots && handle_array.slots[index].data != NULL) { index++; }
 
         /* Grow array if at capacity */
         if(index >= handle_array.num_slots) {
             uint64_t new_size = handle_array.num_slots * 2;
-            handle_slot_t *new_slots = (handle_slot_t *)mem_alloc(
-                new_size * sizeof(handle_slot_t));
+            handle_slot_t *new_slots = (handle_slot_t *)mem_alloc(new_size * sizeof(handle_slot_t));
             if(!new_slots) {
                 pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Failed to grow handle array");
                 mem_free(header);
                 return HANDLE_INVALID;
             }
-            memcpy(new_slots, handle_array.slots,
-                   handle_array.num_slots * sizeof(handle_slot_t));
-            memset(new_slots + handle_array.num_slots, 0,
-                   (new_size - handle_array.num_slots) * sizeof(handle_slot_t));
+            memcpy(new_slots, handle_array.slots, handle_array.num_slots * sizeof(handle_slot_t));
+            memset(new_slots + handle_array.num_slots, 0, (new_size - handle_array.num_slots) * sizeof(handle_slot_t));
             mem_free(handle_array.slots);
             handle_array.slots = new_slots;
             handle_array.num_slots = new_size;
         }
 
         /* Get next generation from existing handle at this index, or start at 0 */
-        gen = (index < handle_array.num_slots) ?
-              handle_gen(handle_array.slots[index].handle) : 0;
+        gen = (index < handle_array.num_slots) ? handle_gen(handle_array.slots[index].handle) : 0;
 
         /* Create new handle with same index but potentially updated generation */
         handle_t new_handle = handle_make(index, gen);
@@ -168,23 +152,21 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
         handle_array.next_free = index + 1;
         atomic_add_int32(&handle_array.active_count, 1);
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle allocated: index=%llu gen=%u active=%d",
-               index, gen, atomic_get_int32(&handle_array.active_count));
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle allocated: index=%llu gen=%u active=%d", index, gen,
+               atomic_get_int32(&handle_array.active_count));
     }
 
     return slot->handle;
 }
 
 
-int handle_acquire(handle_t h, void** data_out) {
+int handle_acquire(handle_t h, void **data_out) {
     uint64_t index = handle_index(h);
     uint16_t gen = handle_gen(h);
     handle_slot_t *slot;
     handle_header_t *header;
 
-    if(!data_out) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
+    if(!data_out) { return PLCTAG_ERR_NULL_PTR; }
 
     *data_out = NULL;
 
@@ -198,7 +180,7 @@ int handle_acquire(handle_t h, void** data_out) {
     /* Validate handle: check if handle matches current slot handle */
     if(slot->data == NULL || slot->handle != h) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle acquire failed: handle mismatch or free slot");
-        return PLCTAG_ERR_NOT_FOUND;  /* Slot is free or generation mismatch */
+        return PLCTAG_ERR_NOT_FOUND; /* Slot is free or generation mismatch */
     }
 
     header = (handle_header_t *)slot->data - 1;
@@ -245,7 +227,7 @@ void handle_release(handle_t h) {
 
     if(!slot->data || slot->handle != h) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle release: handle invalid or already freed");
-        return;  /* Handle is invalid */
+        return; /* Handle is invalid */
     }
 
     header = (handle_header_t *)slot->data - 1;
@@ -276,7 +258,7 @@ int handle_destroy(handle_t h) {
 
         if(!slot->data || slot->handle != h) {
             pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle destroy: already freed or wrong generation");
-            return PLCTAG_ERR_NOT_FOUND;  /* Already freed or wrong generation */
+            return PLCTAG_ERR_NOT_FOUND; /* Already freed or wrong generation */
         }
 
         header = (handle_header_t *)slot->data - 1;
@@ -286,8 +268,8 @@ int handle_destroy(handle_t h) {
         header->destroying = 1;
         mutex_unlock(header->mutex);
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle destroy: index=%llu marked destroying, refcount=%d",
-               index, atomic_get_int32(&header->refcount));
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle destroy: index=%llu marked destroying, refcount=%d", index,
+               atomic_get_int32(&header->refcount));
 
         /* Wait for refcount to reach 1 (only the initial refcount remains) */
         while(atomic_get_int32(&header->refcount) > 1) {
@@ -315,13 +297,12 @@ int handle_destroy(handle_t h) {
         slot->handle = handle_make(index, next_gen);
         slot->data = NULL;
 
-        handle_array.next_free = (index < handle_array.next_free) ?
-                                  index : handle_array.next_free;
+        handle_array.next_free = (index < handle_array.next_free) ? index : handle_array.next_free;
 
         atomic_add_int32(&handle_array.active_count, -1);
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle destroyed: index=%llu new_gen=%u active=%d",
-               index, next_gen, atomic_get_int32(&handle_array.active_count));
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle destroyed: index=%llu new_gen=%u active=%d", index, next_gen,
+               atomic_get_int32(&handle_array.active_count));
     }
 
     /* Call destructor outside critical section */
@@ -332,9 +313,7 @@ int handle_destroy(handle_t h) {
 
     /* Free header + data */
     if(header) {
-        if(header->mutex) {
-            mutex_destroy(header->mutex);
-        }
+        if(header->mutex) { mutex_destroy(header->mutex); }
         mem_free(header);
     }
 

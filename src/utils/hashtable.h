@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,11 +32,11 @@
  ***************************************************************************/
 
 #ifndef __UTIL_HASHTABLE_H__
-#define __UTIL_HASHTABLE_H__ 1
+#    define __UTIL_HASHTABLE_H__ 1
 
-#include <stdint.h>
+#    include <stdint.h>
 
-//struct hashtable_entry_t;
+// struct hashtable_entry_t;
 //
 
 
@@ -48,7 +48,8 @@ extern int hashtable_put(hashtable_p table, int64_t key, void *arg);
 extern void *hashtable_get_index(hashtable_p table, int index);
 extern int hashtable_capacity(hashtable_p table);
 extern int hashtable_entries(hashtable_p table);
-extern int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, int64_t key, void *data, void *context), void *context);
+extern int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, int64_t key, void *data, void *context),
+                             void *context);
 extern void *hashtable_remove(hashtable_p table, int64_t key);
 extern int hashtable_destroy(hashtable_p table);
 

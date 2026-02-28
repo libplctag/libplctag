@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -92,22 +92,23 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
             /* check if it is last. */
             if(path_index < path_len) {
-                pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "DH+ address must be the last segment in a path! %d %d", (int)(ssize_t)path_index,
-                       (int)(ssize_t)path_len);
+                pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "DH+ address must be the last segment in a path! %d %d",
+                       (int)(ssize_t)path_index, (int)(ssize_t)path_len);
                 return PLCTAG_ERR_BAD_PARAM;
             }
 
             *is_dhp = 1;
         } else {
             /* unknown, cannot parse this! */
-            pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Unable to parse remaining path string from position %d, \"%s\".", (int)(ssize_t)path_index,
-                   (char *)&path[path_index]);
+            pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Unable to parse remaining path string from position %d, \"%s\".",
+                   (int)(ssize_t)path_index, (char *)&path[path_index]);
             return PLCTAG_ERR_BAD_PARAM;
         }
     }
 
     if(conn_path_index >= max_conn_path_size) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index, max_conn_path_size);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index,
+               max_conn_path_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -193,7 +194,8 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* was the numeric segment valid? */
     if(val < 0 || val > 0x0F) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!", (int)(ssize_t)(*path_index));
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!",
+               (int)(ssize_t)(*path_index));
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -238,7 +240,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val != 18 && val != 19) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Path segment at %d does not match IP address segment.", (int)(ssize_t)*path_index);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Path segment at %d does not match IP address segment.",
+               (int)(ssize_t)*path_index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -253,8 +256,9 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* is the next character a comma? */
     if(path[p_index] != ',') {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".",
-               (int)(ssize_t)p_index, &path[p_index]);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL,
+               "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".", (int)(ssize_t)p_index,
+               &path[p_index]);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -294,7 +298,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in first IP address part.", path[p_index], p_index);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in first IP address part.",
+               path[p_index], p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -318,7 +323,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Second IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Second IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.",
+               val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -329,7 +335,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in second IP address part.", path[p_index], p_index);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in second IP address part.",
+               path[p_index], p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -364,7 +371,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in third IP address part.", path[p_index], p_index);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in third IP address part.",
+               path[p_index], p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -388,7 +396,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Fourth IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Fourth IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.",
+               val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -442,8 +451,8 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
         case '3': *port = 2; break;
 
         default:
-            pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match start of DH+ segment.", path[p_index],
-                   (int)(ssize_t)p_index);
+            pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match start of DH+ segment.",
+                   path[p_index], (int)(ssize_t)p_index);
             return PLCTAG_ERR_NOT_FOUND;
             break;
     }
@@ -455,7 +464,8 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* is the next character a colon? */
     if(path[p_index] != ':') {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index],
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL,
+               "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index],
                (int)(ssize_t)p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -485,8 +495,9 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* is the next character a colon? */
     if(path[p_index] != ':') {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match the second colon expected in DH+ segment.",
-               path[p_index], (int)(ssize_t)p_index);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL,
+               "Character '%c' at position %d does not match the second colon expected in DH+ segment.", path[p_index],
+               (int)(ssize_t)p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -514,8 +525,8 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     *dest_node = (uint8_t)(unsigned int)val;
     *path_index = p_index;
 
-    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Found DH+ path port:%d, source node:%d, destination node:%d.", (int)(unsigned int)*port,
-           (int)(unsigned int)*src_node, (int)(unsigned int)*dest_node);
+    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Found DH+ path port:%d, source node:%d, destination node:%d.",
+           (int)(unsigned int)*port, (int)(unsigned int)*src_node, (int)(unsigned int)*dest_node);
 
     pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Done.");
 
@@ -569,8 +580,8 @@ int cip_encode_tag_name(ab_tag_p tag, const char *name) {
                     pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Found bit identifier %u.", tag->bit);
                     break;
                 } else {
-                    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Expected a symbolic segment or a bit identifier at position %d in tag name %s",
-                           name_index, name);
+                    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN,
+                           "Expected a symbolic segment or a bit identifier at position %d in tag name %s", name_index, name);
                     return PLCTAG_ERR_BAD_PARAM;
                 }
             } else {
@@ -590,7 +601,8 @@ int cip_encode_tag_name(ab_tag_p tag, const char *name) {
 
             /* must terminate with a closing ']' */
             if(name[name_index] != ']') {
-                pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Bad tag name format, expected closing array bracket at %d in tag name %s!", name_index, name);
+                pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN,
+                       "Bad tag name format, expected closing array bracket at %d in tag name %s!", name_index, name);
                 return PLCTAG_ERR_BAD_PARAM;
             }
 
@@ -637,7 +649,8 @@ int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index) {
     /* sanity checks. */
     if(p == q) {
         /* no number. */
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Expected bit identifier or symbolic segment at position %d in tag name %s!", *name_index, name);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, "Expected bit identifier or symbolic segment at position %d in tag name %s!",
+               *name_index, name);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -716,7 +729,8 @@ int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, in
     const char *p, *q;
     long val;
 
-    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", *name_index, *encoded_index);
+    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", *name_index,
+           *encoded_index);
 
     p = &name[*name_index];
     q = p;

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -172,15 +172,15 @@ int tag_read_start(ab_tag_p tag) {
 
         tag->read_in_progress = 1;
 
-        int request_overhead = (int)sizeof(eip_cip_uc_req)
-                             + (int)sizeof(embedded_pccc)
-                             + tag->encoded_name_size
-                             + (int)sizeof(uint16_le);
+        int request_overhead =
+            (int)sizeof(eip_cip_uc_req) + (int)sizeof(embedded_pccc) + tag->encoded_name_size + (int)sizeof(uint16_le);
 
         int request_payload_space = session_payload_space - request_overhead;
 
         if(request_payload_space < 0 || request_payload_space < tag->size) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Request overhead (%d bytes) exceeds session payload space (%d bytes) or tag size too large.", request_overhead, session_payload_space);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN,
+                   "Request overhead (%d bytes) exceeds session payload space (%d bytes) or tag size too large.",
+                   request_overhead, session_payload_space);
             tag->read_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
@@ -260,9 +260,7 @@ int tag_read_start(ab_tag_p tag) {
         rc = PLCTAG_STATUS_PENDING;
     } while(0);
 
-    if(rc != PLCTAG_STATUS_PENDING) {
-        tag->read_in_progress = 0;
-    }
+    if(rc != PLCTAG_STATUS_PENDING) { tag->read_in_progress = 0; }
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, "Done.");
     return rc;
@@ -343,7 +341,8 @@ static int check_read_status(ab_tag_p tag) {
 
         if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
             if(!(data = pccc_decode_dt_byte(data, (int)(data_end - data), &pccc_res_type, &pccc_res_length))) {
-                pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Unable to decode PCCC response array element data type and data size!");
+                pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN,
+                       "Unable to decode PCCC response array element data type and data size!");
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
             }
@@ -410,23 +409,24 @@ int tag_write_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         if(tag->first_read) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL, "No read has completed yet, doing pre-read to get type information.");
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL,
+                   "No read has completed yet, doing pre-read to get type information.");
             tag->pre_write_read = 1;
             tag->write_in_progress = 0;
             rc = tag_read_start(tag);
             break;
         }
 
-        int request_overhead = (int)sizeof(eip_cip_uc_req)
-                             + (int)sizeof(embedded_pccc)
-                             + tag->encoded_name_size
-                             + tag->encoded_type_info_size
-                             + (int)((tag->session->conn_path_size > 0) ? (2 + tag->session->conn_path_size) : 0);
+        int request_overhead = (int)sizeof(eip_cip_uc_req) + (int)sizeof(embedded_pccc) + tag->encoded_name_size
+                               + tag->encoded_type_info_size
+                               + (int)((tag->session->conn_path_size > 0) ? (2 + tag->session->conn_path_size) : 0);
 
         int request_payload_space = session_payload_space - request_overhead;
 
         if(request_payload_space < 0 || request_payload_space < tag->size) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Request overhead (%d bytes) exceeds session payload space (%d bytes) or tag size too large.", request_overhead, session_payload_space);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN,
+                   "Request overhead (%d bytes) exceeds session payload space (%d bytes) or tag size too large.",
+                   request_overhead, session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
@@ -508,9 +508,7 @@ int tag_write_start(ab_tag_p tag) {
         rc = PLCTAG_STATUS_PENDING;
     } while(0);
 
-    if(rc != PLCTAG_STATUS_PENDING) {
-        tag->write_in_progress = 0;
-    }
+    if(rc != PLCTAG_STATUS_PENDING) { tag->write_in_progress = 0; }
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, "Done.");
     return rc;

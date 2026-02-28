@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -440,8 +440,8 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
     int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
-               available_payload);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!",
+               packet_payload_size, available_payload);
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -587,8 +587,8 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
     int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
-               available_payload);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!",
+               packet_payload_size, available_payload);
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -635,7 +635,8 @@ int build_write_bit_request_connected(ab_tag_p tag) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -789,7 +790,8 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -979,7 +981,8 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1128,7 +1131,8 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1361,7 +1365,8 @@ static int check_read_status_connected(ab_tag_p tag) {
                     if(type_length == 0) { type_length = *(data + 1) + 2; }
 
                     if(type_length <= 0) {
-                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!",
+                               *data);
                         rc = PLCTAG_ERR_UNSUPPORTED;
                         break;
                     }
@@ -1438,7 +1443,7 @@ static int check_read_status_connected(ab_tag_p tag) {
                 tag->pre_write_read = 0;
                 rc = tag_write_start((plc_tag_p)tag);
             } else {
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, "Read complete.");  
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, "Read complete.");
             }
         }
     }
@@ -1523,7 +1528,8 @@ static int check_read_status_unconnected(ab_tag_p tag) {
                     if(type_length == 0) { type_length = *(data + 1) + 2; }
 
                     if(type_length <= 0) {
-                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!",
+                               *data);
                         rc = PLCTAG_ERR_UNSUPPORTED;
                         break;
                     }
@@ -1691,18 +1697,6 @@ static int check_write_status_unconnected(ab_tag_p tag) {
     cip_resp = (eip_cip_uc_resp *)(tag->req->data);
 
     do {
-        if(le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
@@ -1710,7 +1704,6 @@ static int check_write_status_unconnected(ab_tag_p tag) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
-
 
         if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status,
@@ -1763,13 +1756,18 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     } else {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, "Unconnected tag.");
-        overhead = 1                                  /* service request, one byte */
-                   + tag->encoded_name_size           /* full encoded name */
-                   + tag->encoded_type_info_size      /* encoded type size */
-                   + tag->session->conn_path_size + 2 /* encoded device path size plus two bytes for length and padding */
-                   + 2                                /* element count, 16-bit int */
-                   + 4                                /* byte offset, 32-bit int */
-                   + 8;                               /* MAGIC fudge factor */
+        overhead = 1                             /* CIP service Unconnected Send */
+                   + 1                           /* path size */
+                   + 4                           /* Connection Manager 20 06 24 1 */
+                   + 1                           /* seconds per tick */
+                   + 1                           /* timeout ticks */
+                   + 2                           /* Embedded payload size */
+                   + 1                           /* service request, one byte */
+                   + tag->encoded_name_size      /* full encoded name */
+                   + tag->encoded_type_info_size /* encoded type size */
+                   + 2                           /* element count, 16-bit int */
+                   + 4                           /* byte offset, 32-bit int */
+                   + 8;                          /* MAGIC fudge factor */
     }
 
     /* make sure that overhead is an even number of bytes */
@@ -1779,12 +1777,14 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
 
     data_per_packet = available_payload - overhead;
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, "Write packet available payload is %d, write overhead is %d, and write data per packet is %d.",
-           available_payload, overhead, data_per_packet);
+    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL,
+           "Write packet available payload is %d, write overhead is %d, and write data per packet is %d.", available_payload,
+           overhead, data_per_packet);
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
-               overhead, available_payload);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN,
+               "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!", overhead,
+               available_payload);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -1807,7 +1807,8 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
     }
 
     if(elements_per_packet < 1) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN,
+               "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
                available_payload, element_size);
         return PLCTAG_ERR_TOO_LARGE;
     }

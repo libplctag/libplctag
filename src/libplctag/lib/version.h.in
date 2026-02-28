@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -42,6 +42,7 @@
  * checking them against a dynamically linked library.
  */
 
+// clang-format off
 #define LIB_VER_STRING "@VERSION@"
 #define LIB_VER_MAJOR (@libplctag_VERSION_MAJOR@)
 #define LIB_VER_MINOR (@libplctag_VERSION_MINOR@)
