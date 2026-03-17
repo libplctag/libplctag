@@ -42,8 +42,10 @@
  *   perf_benchmark --mode=sync|async --groups=N --threads=M --tags=T
  *                  [--duration=S] [--gateway=IP] [--port=PORT]
  *
+ * Tags is the primary axis.  Threads and groups must be <= tags (groups
+ * also capped at 100).  Each thread owns an exclusive slice of the tags
+ * array -- no tag is shared across threads, so no locking is needed.
  * Tags are distributed across connection groups round-robin.
- * Threads cycle through tags round-robin (each starting at a different offset).
  *
  * Sync:  thread calls plc_tag_read(tag, timeout) in a blocking loop.
  * Async: thread calls plc_tag_read(tag, 0) then polls plc_tag_status().
@@ -130,8 +132,8 @@ static void handle_interrupt(void) {
 
 typedef struct {
     int thread_id;
-    int32_t *tags; /* shared array of tag handles */
-    int num_tags;
+    int32_t *tags; /* pointer to this thread's exclusive slice of tags */
+    int num_tags;  /* number of tags in this thread's slice */
     int is_async;
     int64_t read_count;  /* successful reads */
     int64_t error_count; /* failed reads */
@@ -142,7 +144,8 @@ typedef struct {
 
 static void *thread_func(void *arg) {
     thread_data_t *td = (thread_data_t *)arg;
-    int tag_idx = td->thread_id % td->num_tags;
+    /* Each thread starts at the first tag in its own exclusive slice. */
+    int tag_idx = 0;
 
     td->read_count = 0;
     td->error_count = 0;
@@ -151,22 +154,14 @@ static void *thread_func(void *arg) {
     while(!go && !done) { compat_thread_yield(); }
 
     if(td->is_async) {
-        /* Async: lock tag, fire read with timeout=0, poll status, unlock. */
+        /* Async: fire read with timeout=0, poll status.
+         * No locking needed -- this thread exclusively owns its tags. */
         while(!done) {
             int32_t tag = td->tags[tag_idx];
-            int rc = plc_tag_lock(tag);
-
-            if(rc != PLCTAG_STATUS_OK) {
-                td->error_count++;
-                tag_idx = (tag_idx + 1) % td->num_tags;
-                continue;
-            }
-
-            rc = plc_tag_read(tag, 0);
+            int rc = plc_tag_read(tag, 0);
 
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 td->error_count++;
-                plc_tag_unlock(tag);
             } else {
                 /* Poll until complete or done. */
                 int status = plc_tag_status(tag);
@@ -180,24 +175,16 @@ static void *thread_func(void *arg) {
                 } else if(!done) {
                     td->error_count++;
                 }
-                plc_tag_unlock(tag);
             }
 
             tag_idx = (tag_idx + 1) % td->num_tags;
         }
     } else {
-        /* Sync: lock tag, blocking read, unlock. */
+        /* Sync: blocking read.
+         * No locking needed -- this thread exclusively owns its tags. */
         while(!done) {
             int32_t tag = td->tags[tag_idx];
-            int rc = plc_tag_lock(tag);
-
-            if(rc != PLCTAG_STATUS_OK) {
-                td->error_count++;
-                tag_idx = (tag_idx + 1) % td->num_tags;
-                continue;
-            }
-
-            rc = plc_tag_read(tag, TAG_READ_TIMEOUT_MS);
+            int rc = plc_tag_read(tag, TAG_READ_TIMEOUT_MS);
 
             if(rc == PLCTAG_STATUS_OK) {
                 td->read_count++;
@@ -208,7 +195,6 @@ static void *thread_func(void *arg) {
                 }
             }
 
-            plc_tag_unlock(tag);
             tag_idx = (tag_idx + 1) % td->num_tags;
         }
     }
@@ -332,14 +318,21 @@ int main(int argc, char **argv) {
         if(rc != PLCTAG_STATUS_OK) { fprintf(stderr, "WARNING: prime read failed on tag %d: %s\n", i, plc_tag_decode_error(rc)); }
     }
 
-    /*--- Set up thread data ---*/
-    for(int i = 0; i < num_threads; i++) {
-        tdata[i].thread_id = i;
-        tdata[i].tags = tag_handles;
-        tdata[i].num_tags = num_tags;
-        tdata[i].is_async = is_async;
-        tdata[i].read_count = 0;
-        tdata[i].error_count = 0;
+    /*--- Assign an exclusive slice of tags to each thread ---*/
+    {
+        int base = num_tags / num_threads;
+        int remainder = num_tags % num_threads;
+        int offset = 0;
+        for(int i = 0; i < num_threads; i++) {
+            int count = base + (i < remainder ? 1 : 0);
+            tdata[i].thread_id = i;
+            tdata[i].tags = &tag_handles[offset];
+            tdata[i].num_tags = count;
+            tdata[i].is_async = is_async;
+            tdata[i].read_count = 0;
+            tdata[i].error_count = 0;
+            offset += count;
+        }
     }
 
     /*--- Create threads (they spin-wait on go flag) ---*/

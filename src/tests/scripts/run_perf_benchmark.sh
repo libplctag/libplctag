@@ -4,13 +4,16 @@
 # parameter matrix and produce a CSV results file.
 #
 # Usage:
-#   run_perf_benchmark.sh <BUILD_DIR> [RESULTS_FILE] [DURATION_PER_TEST]
+#   run_perf_benchmark.sh <EXECUTABLE_DIR> [RESULTS_FILE] [DURATION_PER_TEST]
 #
-#   BUILD_DIR          - directory containing perf_benchmark and ab_server binaries
+#   EXECUTABLE_DIR          - directory containing perf_benchmark and ab_server binaries
 #   RESULTS_FILE       - output CSV path (default: perf_results_<timestamp>.csv)
 #   DURATION_PER_TEST  - seconds per test case (default: 10)
 #
-# The script starts ab_server automatically and cleans it up on exit.
+# Tags drive the matrix:
+#   - threads iterate through standard steps, clamped at the tag count
+#   - connection groups iterate through standard steps, clamped at min(tags, 100)
+#   - each thread owns an exclusive slice of tags (no sharing, no locking)
 #
 # Example:
 #   ./run_perf_benchmark.sh ../../build/bin_dist
@@ -21,28 +24,62 @@ set -euo pipefail
 
 #--- Configuration ---
 
-CONNECTION_GROUPS=(1 33 66 100)
-THREAD_COUNTS=(1 50 100 500 1000)
+# Standard step values for all three axes.
+STEPS=(1 50 100 500 1000)
 TAG_COUNTS=(1 50 100 500 1000)
 MODES=(sync async)
+
+MAX_GROUPS=100
 
 AB_SERVER_PORT=44818
 AB_SERVER_PID=""
 
 #--- Parse arguments ---
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <BUILD_DIR> [RESULTS_FILE] [DURATION_PER_TEST]" >&2
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+EXECUTABLE_DIR=""
+RESULTS_FILE=""
+OUTPUT_DIR=""
+DURATION="10"
+
+for arg in "$@"; do
+    case "$arg" in
+        --duration=*)     DURATION="${arg#--duration=}" ;;
+        --output-dir=*)   OUTPUT_DIR="${arg#--output-dir=}" ;;
+        --results-file=*) RESULTS_FILE="${arg#--results-file=}" ;;
+        --executable-dir=*)   EXECUTABLE_DIR="${arg#--executable-dir=}" ;;
+        --*)              echo "ERROR: Unknown flag: $arg" >&2; exit 1 ;;
+        *)                echo "ERROR: Unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+
+
+if [ -z "$EXECUTABLE_DIR" ]; then
+    echo "ERROR: --executable-dir is required." >&2
     exit 1
 fi
 
-BUILD_DIR="$1"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-RESULTS_FILE="${2:-perf_results_${TIMESTAMP}.csv}"
-DURATION="${3:-10}"
+# Expand a leading ~ since tilde expansion doesn't happen inside quoted strings.
+EXECUTABLE_DIR="${EXECUTABLE_DIR/#\~/$HOME}"
 
-PERF_BENCHMARK="${BUILD_DIR}/perf_benchmark"
-AB_SERVER="${BUILD_DIR}/ab_server"
+
+if ! [[ "$DURATION" =~ ^[0-9]+$ ]] || [ "$DURATION" -le 0 ]; then
+    echo "ERROR: --duration must be a positive integer, got: '$DURATION'" >&2
+    exit 1
+fi
+
+# Determine results file path.
+if [ -z "$RESULTS_FILE" ]; then
+    if [ -n "$OUTPUT_DIR" ]; then
+        mkdir -p "$OUTPUT_DIR"
+        RESULTS_FILE="${OUTPUT_DIR}/perf_results_${TIMESTAMP}.csv"
+    else
+        RESULTS_FILE="perf_results_${TIMESTAMP}.csv"
+    fi
+fi
+
+PERF_BENCHMARK="${EXECUTABLE_DIR}/perf_benchmark"
+AB_SERVER="${EXECUTABLE_DIR}/ab_server"
 
 # Verify binaries exist.
 for bin in "$PERF_BENCHMARK" "$AB_SERVER"; do
@@ -123,13 +160,13 @@ failed=0
 completed=0
 
 # Count valid combinations first.
-for mode in "${MODES[@]}"; do
-    for groups in "${CONNECTION_GROUPS[@]}"; do
-        for threads in "${THREAD_COUNTS[@]}"; do
-            for tags in "${TAG_COUNTS[@]}"; do
-                if [ "$threads" -lt "$groups" ]; then
-                    continue
-                fi
+for tags in "${TAG_COUNTS[@]}"; do
+    max_groups=$(( tags < MAX_GROUPS ? tags : MAX_GROUPS ))
+    for threads in "${STEPS[@]}"; do
+        [ "$threads" -gt "$tags" ] && continue
+        for groups in "${STEPS[@]}"; do
+            [ "$groups" -gt "$max_groups" ] && continue
+            for mode in "${MODES[@]}"; do
                 total_combos=$((total_combos + 1))
             done
         done
@@ -142,37 +179,31 @@ echo "" >&2
 
 run_index=0
 
-for mode in "${MODES[@]}"; do
-    for groups in "${CONNECTION_GROUPS[@]}"; do
-        for threads in "${THREAD_COUNTS[@]}"; do
-            for tags in "${TAG_COUNTS[@]}"; do
-                # Skip invalid: fewer threads than connection groups.
-                if [ "$threads" -lt "$groups" ]; then
-                    skipped=$((skipped + 1))
-                    continue
-                fi
-
+for tags in "${TAG_COUNTS[@]}"; do
+    max_groups=$(( tags < MAX_GROUPS ? tags : MAX_GROUPS ))
+    for threads in "${STEPS[@]}"; do
+        [ "$threads" -gt "$tags" ] && { skipped=$((skipped + 1)); continue; }
+        for groups in "${STEPS[@]}"; do
+            [ "$groups" -gt "$max_groups" ] && { skipped=$((skipped + 1)); continue; }
+            for mode in "${MODES[@]}"; do
                 run_index=$((run_index + 1))
-                echo "[$run_index/$total_combos] mode=$mode groups=$groups threads=$threads tags=$tags ..." >&2
+                echo "[$run_index/$total_combos] mode=$mode tags=$tags threads=$threads groups=$groups ..." >&2
 
-                csv_line=$("$PERF_BENCHMARK" \
+                # Use if/else so set -e doesn't exit on a failed test run.
+                if csv_line=$("$PERF_BENCHMARK" \
                     --mode="$mode" \
                     --groups="$groups" \
                     --threads="$threads" \
                     --tags="$tags" \
                     --duration="$DURATION" \
                     --port="$AB_SERVER_PORT" \
-                    2>/dev/null)
-
-                rc=$?
-                if [ $rc -eq 0 ] && [ -n "$csv_line" ]; then
+                    2>/dev/null) && [ -n "$csv_line" ]; then
                     echo "$csv_line" >> "$RESULTS_FILE"
-                    # Extract reads/sec for progress display.
                     rps=$(echo "$csv_line" | cut -d',' -f8)
                     echo "  -> reads/sec=$rps" >&2
                     completed=$((completed + 1))
                 else
-                    echo "  -> FAILED (exit code $rc)" >&2
+                    echo "  -> FAILED" >&2
                     failed=$((failed + 1))
 
                     # Restart ab_server in case it crashed.
@@ -193,7 +224,7 @@ echo "========================================" >&2
 echo "Benchmark complete." >&2
 echo "  Completed: $completed" >&2
 echo "  Failed:    $failed" >&2
-echo "  Skipped:   $skipped (threads < groups)" >&2
+echo "  Skipped:   $skipped (exceeded tag/group limits)" >&2
 echo "  Results:   $RESULTS_FILE" >&2
 echo "========================================" >&2
 
