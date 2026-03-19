@@ -33,31 +33,10 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
+#include <utils/atomic_utils.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
-
-
-//~ #ifndef container_of
-//~ #define container_of(ptr, type, member) ((type *)((char *)(1 ? (ptr) : &((type *)0)->member) - offsetof(type, member)))
-//~ #endif
-
-
-/*
- * Handle clean up functions.
- */
-
-// typedef struct cleanup_t *cleanup_p;
-//
-// struct cleanup_t {
-//     cleanup_p next;
-//     const char *function_name;
-//     int line_num;
-//     int extra_arg_count;
-//     void **extra_args;
-//     rc_cleanup_func cleanup_func;
-//     void *dummy[]; /* force alignment */
-// };
 
 
 /*
@@ -66,11 +45,9 @@
  */
 
 struct refcount_t {
-    lock_t lock;
-    int count;
+    atomic_int32_t count;
     const char *function_name;
     int line_num;
-    // cleanup_p cleaners;
     rc_cleanup_func cleanup_func;
 
     /* FIXME - needed for alignment, this is a hack! */
@@ -123,8 +100,8 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
         return NULL;
     }
 
-    rc->count = 1; /* start with a reference count. */
-    rc->lock = LOCK_INIT;
+    /* start with a reference count. */
+    atomic_set_int32(&rc->count, 1);
 
     rc->cleanup_func = cleaner_func;
 
@@ -154,41 +131,28 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
  */
 
 void *rc_inc_impl(const char *func, int line_num, void *data) {
-    int count = 0;
+    int old_count = 0;
     refcount_p rc = NULL;
-    char *result = NULL;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting, called from %s:%d for %p", func, line_num, data);
 
     if(!data) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Invalid pointer passed from %s:%d!", func, line_num);
-        return result;
+        return NULL;
     }
 
     /* get the refcount structure. */
     rc = ((refcount_p)data) - 1;
 
-    /* spin until we have ownership */
-    spin_block(&rc->lock) {
-        if(rc->count > 0) {
-            rc->count++;
-            count = rc->count;
-            result = data;
-        } else {
-            count = rc->count;
-            result = NULL;
-        }
-    }
+    /* Increment the reference count atomically */
+    do {
+        old_count = atomic_get_int32(&rc->count);
 
-    if(!result) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN,
-               "Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
-    } else {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Ref count is %d for %p.", count, data);
-    }
+        if(old_count <= 0) { return NULL; }
+    } while(atomic_compare_and_set_int32(&rc->count, old_count, old_count + 1) != old_count);
 
-    /* return the result pointer. */
-    return result;
+    /* return the data pointer. */
+    return data;
 }
 
 
@@ -204,8 +168,7 @@ void *rc_inc_impl(const char *func, int line_num, void *data) {
  */
 
 void *rc_dec_impl(const char *func, int line_num, void *data) {
-    int count = 0;
-    int invalid = 0;
+    int32_t old_count = 0;
     refcount_p rc = NULL;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting, called from %s:%d for %p", func, line_num, data);
@@ -218,49 +181,34 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
     /* get the refcount structure. */
     rc = ((refcount_p)data) - 1;
 
-    /* do this sorta atomically */
-    spin_block(&rc->lock) {
-        if(rc->count > 0) {
-            rc->count--;
-            count = rc->count;
-        } else {
-            count = rc->count;
-            invalid = 1;
-        }
-    }
+    old_count = atomic_add_int32(&rc->count, -1); /* returns OLD value */
+    int count = old_count - 1;
+    if(count == 0) {
+        /* queue cleanup */
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.", func,
+               line_num, data, rc->function_name, rc->line_num);
 
-    if(invalid) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Reference has invalid count %d!", count);
-    } else {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Ref count is %d for %p.", count, data);
-
-        /* clean up only if count is zero. */
-        if(rc && count <= 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.",
-                   func, line_num, data, rc->function_name, rc->line_num);
-
-            /*
-             * Queue the cleanup instead of doing it immediately.
-             * This ensures cleanup happens in a separate thread, not in the caller's thread.
-             */
-            if(cleanup_thread_running && cleanup_mutex && cleanup_queue) {
-                int vec_len = 0;
-                critical_block(cleanup_mutex) {
-                    vec_len = vector_length(cleanup_queue);
-                    if(vector_insert(cleanup_queue, vec_len, rc) == PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Cleanup queued, signaling cleanup thread.");
-                        cond_signal(cleanup_cond);
-                    } else {
-                        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Unable to queue cleanup, falling back to immediate cleanup!");
-                        /* Fallback: clean up immediately if we can't queue */
-                        refcount_cleanup(rc);
-                    }
+        /*
+         * Queue the cleanup instead of doing it immediately.
+         * This ensures cleanup happens in a separate thread, not in the caller's thread.
+         */
+        if(cleanup_thread_running && cleanup_mutex && cleanup_queue) {
+            int vec_len = 0;
+            critical_block(cleanup_mutex) {
+                vec_len = vector_length(cleanup_queue);
+                if(vector_insert(cleanup_queue, vec_len, rc) == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Cleanup queued, signaling cleanup thread.");
+                    cond_signal(cleanup_cond);
+                } else {
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Unable to queue cleanup, falling back to immediate cleanup!");
+                    /* Fallback: clean up immediately if we can't queue */
+                    refcount_cleanup(rc);
                 }
-            } else {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Cleanup thread not running, performing immediate cleanup.");
-                /* Cleanup thread not available, clean up immediately */
-                refcount_cleanup(rc);
             }
+        } else {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Cleanup thread not running, performing immediate cleanup.");
+            /* Cleanup thread not available, clean up immediately */
+            refcount_cleanup(rc);
         }
     }
 
