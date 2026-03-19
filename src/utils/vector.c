@@ -236,6 +236,24 @@ void *vector_remove(vector_p vec, int index) {
 }
 
 
+int vector_reset(vector_p vec) {
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
+
+    /* check to see if the vector ref is valid */
+    if(!vec) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* reset the length, we do not clear the data. */
+    vec->len = 0;
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int vector_destroy(vector_p vec) {
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting.");
 

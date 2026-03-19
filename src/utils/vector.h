@@ -44,5 +44,6 @@ extern int vector_insert(vector_p vec, int index, void *data);
 extern int vector_set(vector_p vec, int index, void *ref);
 extern void *vector_get(vector_p vec, int index);
 extern void *vector_remove(vector_p vec, int index);
+extern int vector_reset(vector_p vec);
 extern int vector_destroy(vector_p vec);
 extern int vector_sort(vector_p vec, vector_compare_func compare);
