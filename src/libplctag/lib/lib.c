@@ -402,76 +402,77 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 
 
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
+    /* punt if not needed. */
+    if(!tag || !tag->callback) { return; }
+
     critical_block(tag->api_mutex) {
         /* call the callbacks outside the API mutex. */
-        if(tag && tag->callback) {
-            debug_set_tag_id(tag->tag_id);
+        debug_set_tag_id(tag->tag_id);
 
-            /* trigger this if there is any other event. Only once. */
-            if(tag->event_creation_complete) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag creation complete with status %s.",
-                       plc_tag_decode_error(tag->event_creation_complete_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
-                tag->event_creation_complete = 0;
-                tag->event_creation_complete_status = PLCTAG_STATUS_OK;
-            }
-
-            /* was there a read start? */
-            if(tag->event_read_started) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read started with status %s.",
-                       plc_tag_decode_error(tag->event_read_started_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
-                tag->event_read_started = 0;
-                tag->event_read_started_status = PLCTAG_STATUS_OK;
-            }
-
-            /* was there a write start? */
-            if(tag->event_write_started) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag write started with status %s.",
-                       plc_tag_decode_error(tag->event_write_started_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
-                tag->event_write_started = 0;
-                tag->event_write_started_status = PLCTAG_STATUS_OK;
-            }
-
-            /* was there an abort? */
-            if(tag->event_operation_aborted) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag operation aborted with status %s.",
-                       plc_tag_decode_error(tag->event_operation_aborted_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
-                tag->event_operation_aborted = 0;
-                tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
-            }
-
-            /* was there a read completion? */
-            if(tag->event_read_complete) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read completed with status %s.",
-                       plc_tag_decode_error(tag->event_read_complete_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
-                tag->event_read_complete = 0;
-                tag->event_read_complete_status = PLCTAG_STATUS_OK;
-            }
-
-            /* was there a write completion? */
-            if(tag->event_write_complete) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag write completed with status %s.",
-                       plc_tag_decode_error(tag->event_write_complete_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
-                tag->event_write_complete = 0;
-                tag->event_write_complete_status = PLCTAG_STATUS_OK;
-            }
-
-            /* do this last so that we raise all other events first. we only start deletion events. */
-            if(tag->event_deletion_started) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag deletion started with status %s.",
-                       plc_tag_decode_error(tag->event_creation_complete_status));
-                tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
-                tag->event_deletion_started = 0;
-                tag->event_deletion_started_status = PLCTAG_STATUS_OK;
-            }
-
-            debug_set_tag_id(0);
+        /* trigger this if there is any other event. Only once. */
+        if(tag->event_creation_complete) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag creation complete with status %s.",
+                   plc_tag_decode_error(tag->event_creation_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
+            tag->event_creation_complete = 0;
+            tag->event_creation_complete_status = PLCTAG_STATUS_OK;
         }
+
+        /* was there a read start? */
+        if(tag->event_read_started) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read started with status %s.",
+                   plc_tag_decode_error(tag->event_read_started_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
+            tag->event_read_started = 0;
+            tag->event_read_started_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a write start? */
+        if(tag->event_write_started) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag write started with status %s.",
+                   plc_tag_decode_error(tag->event_write_started_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
+            tag->event_write_started = 0;
+            tag->event_write_started_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there an abort? */
+        if(tag->event_operation_aborted) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag operation aborted with status %s.",
+                   plc_tag_decode_error(tag->event_operation_aborted_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
+            tag->event_operation_aborted = 0;
+            tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a read completion? */
+        if(tag->event_read_complete) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag read completed with status %s.",
+                   plc_tag_decode_error(tag->event_read_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
+            tag->event_read_complete = 0;
+            tag->event_read_complete_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a write completion? */
+        if(tag->event_write_complete) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag write completed with status %s.",
+                   plc_tag_decode_error(tag->event_write_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
+            tag->event_write_complete = 0;
+            tag->event_write_complete_status = PLCTAG_STATUS_OK;
+        }
+
+        /* do this last so that we raise all other events first. we only start deletion events. */
+        if(tag->event_deletion_started) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag deletion started with status %s.",
+                   plc_tag_decode_error(tag->event_creation_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
+            tag->event_deletion_started = 0;
+            tag->event_deletion_started_status = PLCTAG_STATUS_OK;
+        }
+
+        debug_set_tag_id(0);
     } /* end of API mutex critical area. */
 }
 
@@ -518,8 +519,21 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
 }
 
 
+static vector_p THREAD_LOCAL active_tags = NULL;
+
+
 THREAD_FUNC(tag_tickler_func) {
     (void)arg;
+
+    if(!active_tags) { active_tags = vector_create(100, 100); }
+
+    if(!active_tags) {
+        /* ERROR! This is terminal.*/
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, "Unable to create active tags vector for tag tickler thread!");
+
+        /* shut down the app, can't call plc_tag_shutdown() */
+        exit(1);
+    }
 
     debug_set_tag_id(0);
 
@@ -532,114 +546,92 @@ THREAD_FUNC(tag_tickler_func) {
         /* what is the maximum time we will wait until */
         tag_tickler_wait_timeout_end = time_ms() + timeout_wait_ms;
 
-        critical_block(tag_lookup_mutex) { max_index = hashtable_capacity(tags); }
+        critical_block(tag_lookup_mutex) {
+            max_index = hashtable_capacity(tags);
 
-        for(int i = 0; i < max_index; i++) {
-            plc_tag_p tag = NULL;
+            for(int i = 0; i < max_index; i++) {
+                plc_tag_p tag = hashtable_get_index(tags, i);
 
-            critical_block(tag_lookup_mutex) {
-                /* look up the max index again. it may have changed. */
-                max_index = hashtable_capacity(tags);
-
-                if(i < max_index) {
-                    tag = hashtable_get_index(tags, i);
-
-                    if(tag) {
-                        debug_set_tag_id(tag->tag_id);
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, "rc_inc: Acquiring reference to tag %" PRId32 ".", tag->tag_id);
-                        tag = rc_inc(tag);
-                    }
-                } else {
-                    debug_set_tag_id(0);
-                    tag = NULL;
+                if(tag && !tag->skip_tickler && rc_inc(tag) != NULL) {
+                    vector_insert(active_tags, vector_length(active_tags), tag);
                 }
             }
+        }
 
-            if(tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tickling %d active tags.", vector_length(active_tags));
+
+        int num_active_tags = vector_length(active_tags);
+
+        for(int tag_index = 0; tag_index < num_active_tags; tag_index++) {
+            plc_tag_p tag = vector_get(active_tags, tag_index);
+
+            /* try to hold the tag API mutex while all this goes on. */
+            if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                /* we are going to process this tag, so set the debug tag ID */
                 debug_set_tag_id(tag->tag_id);
 
-                if(!tag->skip_tickler) {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tickling tag %d.", tag->tag_id);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "calling generic tag tickler for tag %" PRId32 ".", tag->tag_id);
 
-                    /* try to hold the tag API mutex while all this goes on. */
-                    if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "calling generic tag tickler for tag %" PRId32 ".", tag->tag_id);
-                        plc_tag_generic_tickler(tag);
+                plc_tag_generic_tickler(tag);
 
-                        /* call the tickler function if we can. */
-                        if(tag->vtable && tag->vtable->tickler) {
-                            /* call the tickler on the tag. */
+                /* call the tickler function if we can. */
+                if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
-                            /* TEMP DEBUG */
-                            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Calling protocol-specific tickler for tag %d.", tag->tag_id);
-                            tag->vtable->tickler(tag);
+                if(tag->read_complete) {
+                    tag->read_complete = 0;
+                    tag->read_in_flight = 0;
 
-                            if(tag->read_complete) {
-                                tag->read_complete = 0;
-                                tag->read_in_flight = 0;
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising read complete event for tag %d.", tag->tag_id);
 
-                                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising read complete event for tag %d.", tag->tag_id);
+                    // tag->event_read_complete = 1;
+                    tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
 
-                                // tag->event_read_complete = 1;
-                                tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
-
-                                /* wake immediately */
-                                plc_tag_tickler_wake();
-                                cond_signal(tag->tag_cond_wait);
-                            }
-
-                            if(tag->write_complete) {
-                                tag->write_complete = 0;
-                                tag->write_in_flight = 0;
-                                tag->auto_sync_next_write = 0;
-
-                                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising write complete event for tag %d.", tag->tag_id);
-
-                                // tag->event_write_complete = 1;
-                                tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
-
-                                /* wake immediately */
-                                plc_tag_tickler_wake();
-                                cond_signal(tag->tag_cond_wait);
-                            }
-                        }
-
-                        /* wake up earlier if the time until the next write wake up is sooner. */
-                        if(tag->auto_sync_next_write && tag->auto_sync_next_write < tag_tickler_wait_timeout_end) {
-                            tag_tickler_wait_timeout_end = tag->auto_sync_next_write;
-                        }
-
-                        /* wake up earlier if the time until the next read wake up is sooner. */
-                        if(tag->auto_sync_next_read && tag->auto_sync_next_read < tag_tickler_wait_timeout_end) {
-                            tag_tickler_wait_timeout_end = tag->auto_sync_next_read;
-                        }
-
-                        /* we are done with the tag API mutex now. */
-                        mutex_unlock(tag->api_mutex);
-
-                        /* call callbacks */
-                        plc_tag_generic_handle_event_callbacks(tag);
-                    } else {
-
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Skipping tag as it is already locked.");
-                    }
-
-                } else {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag has its own tickler.");
+                    /* wake immediately */
+                    // plc_tag_tickler_wake();
+                    cond_signal(tag->tag_cond_wait);
                 }
 
-                // pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Current time %" PRId64 ".", time_ms());
-                // pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Time to wake %" PRId64 ".", tag_tickler_wait_timeout_end);
-                // pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Auto read time %" PRId64 ".", tag->auto_sync_next_read);
-                // pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Auto write time %" PRId64 ".", tag->auto_sync_next_write);
+                if(tag->write_complete) {
+                    tag->write_complete = 0;
+                    tag->write_in_flight = 0;
+                    tag->auto_sync_next_write = 0;
+
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising write complete event for tag %d.", tag->tag_id);
+
+                    // tag->event_write_complete = 1;
+                    tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
+
+                    /* wake immediately */
+                    //  plc_tag_tickler_wake();
+                    cond_signal(tag->tag_cond_wait);
+                }
+
+                /* wake up earlier if the time until the next write wake up is sooner. */
+                if(tag->auto_sync_next_write && tag->auto_sync_next_write < tag_tickler_wait_timeout_end) {
+                    tag_tickler_wait_timeout_end = tag->auto_sync_next_write;
+                }
+
+                /* wake up earlier if the time until the next read wake up is sooner. */
+                if(tag->auto_sync_next_read && tag->auto_sync_next_read < tag_tickler_wait_timeout_end) {
+                    tag_tickler_wait_timeout_end = tag->auto_sync_next_read;
+                }
+
+                /* we are done with the tag API mutex now. */
+                mutex_unlock(tag->api_mutex);
+
+                /* call callbacks */
+                plc_tag_generic_handle_event_callbacks(tag);
 
                 debug_set_tag_id(0);
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Skipping tag as it is already locked.");
             }
 
             if(tag) { rc_dec(tag); }
-
-            debug_set_tag_id(0);
         }
+
+        /* clear the active tags vector */
+        vector_reset(active_tags);
 
         if(tag_tickler_wait) {
             int64_t time_to_wait = tag_tickler_wait_timeout_end - time_ms();
@@ -647,13 +639,11 @@ THREAD_FUNC(tag_tickler_func) {
 
             if(time_to_wait < TAG_TICKLER_TIMEOUT_MIN_MS) { time_to_wait = TAG_TICKLER_TIMEOUT_MIN_MS; }
 
-            if(time_to_wait > 0) {
-                wait_rc = cond_wait(tag_tickler_wait, (int)time_to_wait);
-                if(wait_rc == PLCTAG_ERR_TIMEOUT) {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag tickler thread timed out waiting for something to do.");
-                }
-            } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Not waiting as time to wake is in the past.");
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Waiting for %" PRId64 "ms until next tickler wake up.", time_to_wait);
+
+            wait_rc = cond_wait(tag_tickler_wait, (int)time_to_wait);
+            if(wait_rc == PLCTAG_ERR_TIMEOUT) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Tag tickler thread timed out waiting for something to do.");
             }
         }
     }
@@ -661,6 +651,9 @@ THREAD_FUNC(tag_tickler_func) {
     debug_set_tag_id(0);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "Terminating.");
+
+    vector_destroy(active_tags);
+    active_tags = NULL;
 
     THREAD_RETURN(0);
 }
