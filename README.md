@@ -23,6 +23,7 @@
     - [libplctag Forum](#libplctag-forum)
     - [GitHub](#github)
   - [License](#license)
+  - [Use of AI/LLM](#use-of-aillm)
   - [Attributions and Trademarks](#attributions-and-trademarks)
   - [End Note](#end-note)
 
@@ -70,6 +71,10 @@ Download it from the [releases page](https://github.com/libplctag/libplctag/rele
 If you find libplctag useful, consider supporting its development:
 
 - [GitHub Sponsors](https://github.com/sponsors/libplctag)
+
+Thanks to our $25+/month sponsors:
+
+- @jspinks8144 - thanks!
 
 ## Features
 
@@ -233,6 +238,10 @@ to use of this library.  This code is **dual licensed** under the Mozilla Public
 Lesser/Library General Public License 2 or later (LGPL 2+).
 
 This dual license applies to the core C library.  Additional wrappers for other languages may be under different licenses.   Please see those projects for more information.
+
+## Use of AI/LLM
+
+See the [AI Policy](AI-POLICY.md) document.
 
 ## Attributions and Trademarks
 
