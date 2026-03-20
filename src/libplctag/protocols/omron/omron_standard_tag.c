@@ -65,15 +65,20 @@ static int tag_tickler(omron_tag_p tag);
 static int tag_write_start(omron_tag_p tag);
 
 /* define the exported vtable for this tag type. */
-struct tag_vtable_t omron_standard_tag_vtable = {(tag_vtable_func)omron_tag_abort,                                   /* shared */
-                                                 (tag_vtable_func)tag_read_start, (tag_vtable_func)omron_tag_status, /* shared */
-                                                 (tag_vtable_func)tag_tickler, (tag_vtable_func)tag_write_start,
-                                                 (tag_vtable_func)NULL, /* wake_plc */
+struct tag_vtable_t omron_standard_tag_vtable = {
+    .abort = (tag_vtable_func)omron_tag_abort,
+    .read = (tag_vtable_func)tag_read_start,
+    .status = (tag_vtable_func)omron_tag_status,
+    .tickler = (tag_vtable_func)tag_tickler,
+    .write = (tag_vtable_func)tag_write_start,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                                 /* attribute accessors */
-                                                 omron_get_int_attrib, omron_set_int_attrib,
-
-                                                 omron_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = omron_get_int_attrib,
+    .set_int_attrib = omron_set_int_attrib,
+    .get_byte_array_attrib = omron_get_byte_array_attrib,
+};
 
 // /* default string types used for ControlLogix-class PLCs. */
 // tag_byte_order_t omron_udt_tag_byte_order = {

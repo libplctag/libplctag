@@ -158,39 +158,53 @@ static int udt_tag_build_read_fields_request_connected(ab_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
-struct tag_vtable_t raw_tag_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
-                                      (tag_vtable_func)NULL,                 /* read */
-                                      (tag_vtable_func)ab_tag_status,        /* shared */
-                                      (tag_vtable_func)raw_tag_tickler, (tag_vtable_func)raw_tag_write_start,
-                                      (tag_vtable_func)NULL, /* wake_plc */
+struct tag_vtable_t raw_tag_vtable = {
+    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .read = NULL,
+    .status = (tag_vtable_func)ab_tag_status,
+    .tickler = (tag_vtable_func)raw_tag_tickler,
+    .write = (tag_vtable_func)raw_tag_write_start,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                      /* attribute accessors */
-                                      ab_get_int_attrib, ab_set_int_attrib,
-
-                                      ab_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib,
+};
 
 /* define the vtable for listing tag type. */
-struct tag_vtable_t listing_tag_vtable = {(tag_vtable_func)ab_tag_abort_request,                                   /* shared */
-                                          (tag_vtable_func)listing_tag_read_start, (tag_vtable_func)ab_tag_status, /* shared */
-                                          (tag_vtable_func)listing_tag_tickler, (tag_vtable_func)NULL,             /* write */
-                                          (tag_vtable_func)NULL,                                                   /* wake_plc */
+struct tag_vtable_t listing_tag_vtable = {
+    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .read = (tag_vtable_func)listing_tag_read_start,
+    .status = (tag_vtable_func)ab_tag_status,
+    .tickler = (tag_vtable_func)listing_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                          /* attribute accessors */
-                                          ab_get_int_attrib, ab_set_int_attrib,
-
-                                          ab_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib,
+};
 
 
 /* define the vtable for udt tag type. */
-struct tag_vtable_t udt_tag_vtable = {(tag_vtable_func)ab_tag_abort_request,                               /* shared */
-                                      (tag_vtable_func)udt_tag_read_start, (tag_vtable_func)ab_tag_status, /* shared */
-                                      (tag_vtable_func)udt_tag_tickler, (tag_vtable_func)NULL,             /* write */
-                                      (tag_vtable_func)NULL,                                               /* wake_plc */
+struct tag_vtable_t udt_tag_vtable = {
+    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .read = (tag_vtable_func)udt_tag_read_start,
+    .status = (tag_vtable_func)ab_tag_status,
+    .tickler = (tag_vtable_func)udt_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                      /* attribute accessors */
-                                      ab_get_int_attrib, ab_set_int_attrib,
-
-                                      ab_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib,
+};
 
 
 tag_byte_order_t listing_tag_logix_byte_order = {.is_allocated = 0,

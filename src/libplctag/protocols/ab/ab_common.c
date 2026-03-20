@@ -97,13 +97,20 @@ static int default_write(plc_tag_p tag);
 
 
 /* vtables for different kinds of tags */
-struct tag_vtable_t default_vtable = {default_abort, default_read, default_status, default_tickler, default_write,
-                                      (tag_vtable_func)NULL, /* this is not portable! */
+struct tag_vtable_t default_vtable = {
+    .abort = default_abort,
+    .read = default_read,
+    .status = default_status,
+    .tickler = default_tickler,
+    .write = default_write,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                      /* attribute accessors */
-                                      ab_get_int_attrib, ab_set_int_attrib,
-
-                                      ab_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib,
+};
 
 
 /*

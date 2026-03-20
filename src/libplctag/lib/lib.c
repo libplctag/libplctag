@@ -2418,6 +2418,18 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
     return res;
 }
 
+/*
+ * tag_set_dirty - mark a tag as having locally-modified data and notify
+ * the protocol layer so it can schedule a write without waiting for the
+ * generic tickler (which is not called for some protocols, e.g. Modbus).
+ * Must be called while tag->api_mutex is held.
+ */
+static void tag_set_dirty(plc_tag_p tag) {
+    tag->tag_is_dirty = 1;
+    if(tag->vtable && tag->vtable->tag_data_written) { tag->vtable->tag_data_written(tag); }
+}
+
+
 static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
     int res = PLCTAG_STATUS_OK;
     int real_offset = offset_bit;
@@ -2443,7 +2455,7 @@ static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
                (real_offset / 8), tag->data[real_offset / 8]);
 
         if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
-            if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+            if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
             if(val) {
                 tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
@@ -2560,7 +2572,7 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0) & 0xFF);
                 tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -2669,7 +2681,7 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0) & 0xFF);
                 tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -2770,7 +2782,7 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0) & 0xFF);
                 tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -2868,7 +2880,7 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0) & 0xFF);
                 tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -2965,7 +2977,7 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0) & 0xFF);
                 tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -3061,7 +3073,7 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0) & 0xFF);
                 tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -3155,7 +3167,7 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset] = val;
 
@@ -3249,7 +3261,7 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
 
         if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int8_t)) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset] = val;
 
@@ -3359,7 +3371,7 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
         }
 
         if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
-            if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+            if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
             uint64_t val;
             /* copy the data into the uint64 value */
@@ -3470,7 +3482,7 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
         }
 
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
-            if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+            if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
             uint32_t val;
             /* copy the data into the uint32 value */
@@ -3802,8 +3814,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "String data in buffer:");
         pdebug_dump_bytes(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->data + string_start_offset, new_string_size_in_buffer);
 
-        /* if this is an auto-write tag, set the dirty flag to eventually trigger a write */
-        if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+        /* if this is an auto-write tag, mark dirty and notify the protocol layer */
+        if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
         /* set the return and tag status. */
         rc = PLCTAG_STATUS_OK;
@@ -4005,7 +4017,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && ((offset + buffer_size) <= tag->size)) {
-                if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 int i;
                 for(i = 0; i < buffer_size; i++) { tag->data[offset + i] = buffer[i]; }

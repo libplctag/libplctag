@@ -58,16 +58,20 @@ static int raw_tag_build_write_request_unconnected(omron_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
-static struct tag_vtable_t omron_raw_tag_vtable = {(tag_vtable_func)omron_tag_abort,  /* shared */
-                                                   (tag_vtable_func)NULL,             /* read */
-                                                   (tag_vtable_func)omron_tag_status, /* shared */
-                                                   (tag_vtable_func)raw_tag_tickler, (tag_vtable_func)raw_tag_write_start,
-                                                   (tag_vtable_func)NULL, /* wake_plc */
+static struct tag_vtable_t omron_raw_tag_vtable = {
+    .abort = (tag_vtable_func)omron_tag_abort,
+    .read = NULL,
+    .status = (tag_vtable_func)omron_tag_status,
+    .tickler = (tag_vtable_func)raw_tag_tickler,
+    .write = (tag_vtable_func)raw_tag_write_start,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                                   /* attribute accessors */
-                                                   omron_get_int_attrib, omron_set_int_attrib,
-
-                                                   omron_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = omron_get_int_attrib,
+    .set_int_attrib = omron_set_int_attrib,
+    .get_byte_array_attrib = omron_get_byte_array_attrib,
+};
 
 // tag_byte_order_t omron_tag_listing_byte_order = {
 //     .is_allocated = 0,

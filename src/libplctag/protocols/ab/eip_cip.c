@@ -145,15 +145,20 @@ static int tag_tickler(plc_tag_p tag_arg);
 static int tag_write_start(plc_tag_p tag_arg);
 
 /* define the exported vtable for this tag type. */
-struct tag_vtable_t eip_cip_vtable = {(tag_vtable_func)ab_tag_abort_request,                           /* shared */
-                                      (tag_vtable_func)tag_read_start, (tag_vtable_func)ab_tag_status, /* shared */
-                                      (tag_vtable_func)tag_tickler, (tag_vtable_func)tag_write_start,
-                                      (tag_vtable_func)NULL, /* wake_plc */
+struct tag_vtable_t eip_cip_vtable = {
+    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .read = (tag_vtable_func)tag_read_start,
+    .status = (tag_vtable_func)ab_tag_status,
+    .tickler = (tag_vtable_func)tag_tickler,
+    .write = (tag_vtable_func)tag_write_start,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
-                                      /* attribute accessors */
-                                      ab_get_int_attrib, ab_set_int_attrib,
-
-                                      ab_get_byte_array_attrib};
+    /* attribute accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib,
+};
 
 /* default string types used for ControlLogix-class PLCs. */
 tag_byte_order_t logix_tag_byte_order = {.is_allocated = 0,

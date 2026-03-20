@@ -53,19 +53,19 @@ static int system_tag_status(plc_tag_p tag);
 static int system_tag_write(plc_tag_p tag);
 
 struct tag_vtable_t system_tag_vtable = {
-    /* abort */ system_tag_abort,
-    /* read */ system_tag_read,
-    /* status */ system_tag_status,
-    /* tickler */ NULL,
-    /* write */ system_tag_write,
-    /* wake_plc */ (tag_vtable_func)NULL,
+    .abort = system_tag_abort,
+    .read = system_tag_read,
+    .status = system_tag_status,
+    .tickler = NULL,
+    .write = system_tag_write,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
 
     /* data accessors */
-
-    /* get_int_attrib */ NULL,
-    /* set_int_attrib */ NULL,
-
-    /* get_byte_array_attrib */ NULL};
+    .get_int_attrib = NULL,
+    .set_int_attrib = NULL,
+    .get_byte_array_attrib = NULL,
+};
 
 tag_byte_order_t system_tag_byte_order = {.is_allocated = 0,
 

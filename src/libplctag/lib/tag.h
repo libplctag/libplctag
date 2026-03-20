@@ -57,6 +57,13 @@ struct tag_vtable_t {
 
     tag_vtable_func wake_plc;
 
+    /*
+     * Called from data-setter functions (plc_tag_set_int8 etc.) when
+     * auto_sync_write_ms > 0 and the tag has just been marked dirty.
+     * Called while api_mutex is held.  NULL if not implemented.
+     */
+    tag_vtable_func tag_data_written;
+
     /* attribute accessors. */
     int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
     int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
