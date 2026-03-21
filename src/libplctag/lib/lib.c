@@ -758,6 +758,28 @@ static int plc_tag_status_impl(plc_tag_p tag) {
     critical_block(tag->api_mutex) {
         if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
+        /* If the vtable tickler just completed a read or write, finalize it
+         * here rather than waiting for the background tickler thread to wake
+         * up and do it.  This mirrors what tag_tickler_func does after calling
+         * both ticklers, and is what allows async polling via plc_tag_status()
+         * to observe completion in the same call instead of paying an extra OS
+         * scheduling round-trip. */
+        if(tag->read_complete) {
+            tag->read_complete = 0;
+            tag->read_in_flight = 0;
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising read complete event for tag %d.", tag->tag_id);
+            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
+            cond_signal(tag->tag_cond_wait);
+        }
+
+        if(tag->write_complete) {
+            tag->write_complete = 0;
+            tag->write_in_flight = 0;
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising write complete event for tag %d.", tag->tag_id);
+            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
+            cond_signal(tag->tag_cond_wait);
+        }
+
         if(tag->vtable && tag->vtable->status) {
             rc = tag->vtable->status(tag);
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "vtable->status returned %d (%s)", rc, plc_tag_decode_error(rc));
@@ -774,6 +796,8 @@ static int plc_tag_status_impl(plc_tag_p tag) {
         }
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "final rc=%d (%s)", rc, plc_tag_decode_error(rc));
     }
+
+    plc_tag_generic_handle_event_callbacks(tag);
 
     return rc;
 }
