@@ -154,30 +154,48 @@ static void *thread_func(void *arg) {
     while(!go && !done) { compat_thread_yield(); }
 
     if(td->is_async) {
-        /* Async: fire read with timeout=0, poll status.
+        /* Async: fire reads on all tags, then poll all for completion.
+         * Batching all reads before polling allows the library to have all
+         * requests in-flight simultaneously rather than serializing them.
          * No locking needed -- this thread exclusively owns its tags. */
+        int read_rc[td->num_tags];
+
         while(!done) {
-            int32_t tag = td->tags[tag_idx];
-            int rc = plc_tag_read(tag, 0);
-
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                td->error_count++;
-            } else {
-                /* Poll until complete or done. */
-                int status = plc_tag_status(tag);
-                while(status == PLCTAG_STATUS_PENDING && !done) {
-                    compat_thread_yield();
-                    status = plc_tag_status(tag);
-                }
-
-                if(status == PLCTAG_STATUS_OK) {
-                    td->read_count++;
-                } else if(!done) {
+            /* Phase 1: Start reads on all tags. */
+            for(int i = 0; i < td->num_tags; i++) {
+                read_rc[i] = plc_tag_read(td->tags[i], 0);
+                if(read_rc[i] != PLCTAG_STATUS_OK && read_rc[i] != PLCTAG_STATUS_PENDING) {
                     td->error_count++;
                 }
             }
 
-            tag_idx = (tag_idx + 1) % td->num_tags;
+            /* Phase 2: Poll until all successfully-started reads are done. */
+            int pending;
+            do {
+                pending = 0;
+                for(int i = 0; i < td->num_tags; i++) {
+                    if(read_rc[i] == PLCTAG_STATUS_OK || read_rc[i] == PLCTAG_STATUS_PENDING) {
+                        if(plc_tag_status(td->tags[i]) == PLCTAG_STATUS_PENDING) {
+                            pending = 1;
+                        }
+                    }
+                }
+                if(pending) {
+                    compat_thread_yield();
+                }
+            } while(pending && !done);
+
+            /* Phase 3: Tally completed reads. */
+            for(int i = 0; i < td->num_tags; i++) {
+                if(read_rc[i] == PLCTAG_STATUS_OK || read_rc[i] == PLCTAG_STATUS_PENDING) {
+                    int status = plc_tag_status(td->tags[i]);
+                    if(status == PLCTAG_STATUS_OK) {
+                        td->read_count++;
+                    } else if(!done) {
+                        td->error_count++;
+                    }
+                }
+            }
         }
     } else {
         /* Sync: blocking read.
