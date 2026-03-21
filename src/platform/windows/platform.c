@@ -1528,7 +1528,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
          * The value 0 is used here since it's ignored anyway. */
         num_sockets = select(0, &read_set, &write_set, &err_set, &tv);
     } else {
-        num_sockets = select(0, &read_set, &write_set, &err_set, NULL);
+        struct timeval tv = {0, 0};
+        num_sockets = select(0, &read_set, &write_set, &err_set, &tv);
     }
 
     if(num_sockets == 0) {

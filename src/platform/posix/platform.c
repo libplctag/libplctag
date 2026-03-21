@@ -1564,8 +1564,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
     } else {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "calling select with infinite timeout");
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
+        struct timeval tv = {0, 0};
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "calling select with zero timeout (poll)");
+        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
     }
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "select() returned num_sockets=%d for sock->fd=%d", num_sockets, sock->fd);
