@@ -309,6 +309,7 @@ static int remove_tag(modbus_plc_p plc, modbus_tag_p tag);
 
 /* active tag vector management -- all callers must hold plc->mutex */
 static void insert_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int64_t op_time);
+static void move_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int current_index, int64_t new_op_time);
 static void remove_tag_from_active(modbus_plc_p plc, modbus_tag_p tag);
 static modbus_tag_p find_response_tag(modbus_plc_p plc, uint16_t transaction_id);
 
@@ -810,7 +811,8 @@ void modbus_plc_destructor(void *plc_arg) {
     /* destroy the active tag vector */
     if(plc->active_tags) {
         if(vector_length(plc->active_tags) > 0) {
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "There are tags still remaining in the active tag list, memory leak possible!");
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
+                   "There are tags still remaining in the active tag list, memory leak possible!");
         }
         vector_destroy(plc->active_tags);
         plc->active_tags = NULL;
@@ -867,8 +869,8 @@ static int reset_plc(modbus_plc_p plc) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
                "Clearing all pending transaction IDs due to socket disconnect. In-flight was: %" PRId32,
                atomic_get_int32(&plc->pending_request_count));
-        size_t active_count = (size_t)vector_length(plc->active_tags);
-        for(size_t i = 0; i < active_count; i++) {
+        int active_count = vector_length(plc->active_tags);
+        for(int i = 0; i < active_count; i++) {
             modbus_tag_p cur = vector_get(plc->active_tags, i);
             if(!cur) { continue; }
 
@@ -1101,8 +1103,9 @@ THREAD_FUNC(modbus_plc_handler) {
                     int64_t idle_time = current_time - plc->last_packet_time_ms;
                     int32_t inactivity_timeout_ms = plc->cached_inactivity_timeout_ms;
 
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Socket wait timed out. Idle for %" PRId64 "ms. Pending requests: %" PRId32,
-                           idle_time, atomic_get_int32(&plc->pending_request_count));
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW,
+                           "Socket wait timed out. Idle for %" PRId64 "ms. Pending requests: %" PRId32, idle_time,
+                           atomic_get_int32(&plc->pending_request_count));
 
                     /* Only disconnect if truly idle AND no pending responses expected */
                     if(idle_time >= inactivity_timeout_ms && atomic_get_int32(&plc->pending_request_count) == 0) {
@@ -1432,10 +1435,11 @@ int connect_plc(modbus_plc_p plc) {
 
 static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     int rc = PLCTAG_STATUS_OK;
-    modbus_tag_p response_tag = NULL;      /* matched RESPONSE-state tag, ref incremented */
+    modbus_tag_p response_tag = NULL;          /* matched RESPONSE-state tag, ref incremented */
     modbus_tag_p deferred_response_tag = NULL; /* matched tag whose api_mutex was busy */
     int64_t min_wait_time = MODBUS_IDLE_WAIT_TIMEOUT;
     int64_t now = time_ms();
+    bool has_due_request_pending = false; /* REQUEST-state tag is due now but was not sent this cycle */
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting.");
 
@@ -1464,8 +1468,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
             modbus_tag_p candidate = find_response_tag(plc, response_transaction_id);
             if(candidate) {
                 response_tag = rc_inc(candidate);
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Response TID %u matched tag %" PRId32 ".",
-                       response_transaction_id, response_tag->tag_id);
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Response TID %u matched tag %" PRId32 ".", response_transaction_id,
+                       response_tag->tag_id);
             }
         }
 
@@ -1486,8 +1490,7 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
          * Only one request is queued per tickle call because request_ready is a
          * single-entry buffer; pipelining happens across successive main-loop iterations.
          */
-        if(!plc->flags.request_ready
-           && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
+        if(!plc->flags.request_ready && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
             for(int i = 0; i < active_count; i++) {
                 modbus_tag_p candidate = vector_get(plc->active_tags, i);
                 if(!candidate) { continue; }
@@ -1506,8 +1509,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                         debug_set_tag_id(candidate->tag_id);
 
                         rc = tickle_tag(plc, candidate, now, &min_wait_time);
-                        if(rc == PLCTAG_STATUS_PENDING) { rc = PLCTAG_STATUS_OK; }
-                        else if(rc != PLCTAG_STATUS_OK) {
+                        if(rc == PLCTAG_STATUS_PENDING) {
+                            rc = PLCTAG_STATUS_OK;
+                        } else if(rc != PLCTAG_STATUS_OK) {
                             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s sending request for tag %" PRId32 "!",
                                    plc_tag_decode_error(rc), candidate->tag_id);
                         }
@@ -1515,8 +1519,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                         debug_set_tag_id(0);
                         mutex_unlock(candidate->api_mutex);
                     } else {
-                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW,
-                               "Tag %" PRId32 " api_mutex busy; skipping request send.", candidate->tag_id);
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Tag %" PRId32 " api_mutex busy; skipping request send.",
+                               candidate->tag_id);
                     }
                     candidate = rc_dec(candidate);
                 }
@@ -1541,6 +1545,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
             if(candidate->op_time > now) {
                 int64_t wait = candidate->op_time - now;
                 if(wait < min_wait_time) { min_wait_time = wait; }
+            } else {
+                /* Tag is already due but could not be sent this cycle (at capacity or request_ready set). */
+                has_due_request_pending = true;
             }
             break; /* sorted, so only need the first REQUEST-state entry */
         }
@@ -1562,16 +1569,17 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
              * while we were outside the mutex.
              */
             if(plc->flags.response_ready && response_tag->pending_transaction_id != 0) {
-                uint16_t resp_tid = (plc->read_data_len >= 2)
-                                        ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
-                                        : 0;
+                uint16_t resp_tid =
+                    (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
 
+                /* Did the tag get aborted before we cause it here? */
                 if(resp_tid == response_tag->pending_transaction_id) {
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Processing response TID %u for tag %" PRId32 ".",
-                           resp_tid, response_tag->tag_id);
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Processing response TID %u for tag %" PRId32 ".", resp_tid,
+                           response_tag->tag_id);
                     rc = tickle_tag(plc, response_tag, time_ms(), &min_wait_time);
-                    if(rc == PLCTAG_STATUS_PENDING) { rc = PLCTAG_STATUS_OK; }
-                    else if(rc != PLCTAG_STATUS_OK) {
+                    if(rc == PLCTAG_STATUS_PENDING) {
+                        rc = PLCTAG_STATUS_OK;
+                    } else if(rc != PLCTAG_STATUS_OK) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s processing response for tag %" PRId32 "!",
                                plc_tag_decode_error(rc), response_tag->tag_id);
                     }
@@ -1600,8 +1608,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
             response_tag = rc_dec(response_tag);
         } else {
             /* api_mutex busy -- hand off to Phase 3 deferred path. */
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
-                   "Tag %" PRId32 " api_mutex busy; deferring response processing.", response_tag->tag_id);
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Tag %" PRId32 " api_mutex busy; deferring response processing.",
+                   response_tag->tag_id);
             deferred_response_tag = response_tag;
             response_tag = NULL; /* ownership transferred; don't release here */
         }
@@ -1622,16 +1630,16 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         mutex_lock(deferred_response_tag->api_mutex);
 
         if(plc->flags.response_ready && deferred_response_tag->pending_transaction_id != 0) {
-            uint16_t resp_tid = (plc->read_data_len >= 2)
-                                    ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
-                                    : 0;
+            uint16_t resp_tid =
+                (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
 
             if(resp_tid == deferred_response_tag->pending_transaction_id) {
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Deferred: processing response TID %u for tag %" PRId32 ".",
-                       resp_tid, deferred_response_tag->tag_id);
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Deferred: processing response TID %u for tag %" PRId32 ".", resp_tid,
+                       deferred_response_tag->tag_id);
                 rc = tickle_tag(plc, deferred_response_tag, time_ms(), &min_wait_time);
-                if(rc == PLCTAG_STATUS_PENDING) { rc = PLCTAG_STATUS_OK; }
-                else if(rc != PLCTAG_STATUS_OK) {
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    rc = PLCTAG_STATUS_OK;
+                } else if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s in deferred response for tag %" PRId32 "!",
                            plc_tag_decode_error(rc), deferred_response_tag->tag_id);
                 }
@@ -1659,6 +1667,20 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         deferred_response_tag = rc_dec(deferred_response_tag);
     }
 
+    /*
+     * min_wait_time was computed in Phase 1 before any response was processed.
+     * If a response was just handled (pending_request_count decremented), capacity
+     * may now be available for a tag that was due but unsent.  Only override to 0
+     * when there is actually a due REQUEST-state tag waiting (has_due_request_pending),
+     * to avoid spinning when all active tags have future op_times.
+     */
+    critical_block(plc->mutex) {
+        if(!plc->flags.response_ready && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight
+           && has_due_request_pending) {
+            min_wait_time = 0;
+        }
+    }
+
     *out_wait_time_ms = min_wait_time;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Done: %s, wait time %" PRId64 "ms.", plc_tag_decode_error(rc), min_wait_time);
@@ -1670,19 +1692,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting read request operation for tag %d. In-flight: %" PRId32 "/%d.",
-           tag->tag_id, atomic_get_int32(&plc->pending_request_count), plc->max_requests_in_flight);
-
-    /* Pre-flight checks */
-    if(plc->flags.request_ready) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Request already queued for sending.");
-        return PLCTAG_STATUS_PENDING;
-    }
-
-    if(plc->state != PLC_READY) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "PLC not ready.");
-        return PLCTAG_STATUS_PENDING;
-    }
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting read request operation for tag %d. In-flight: %" PRId32 "/%d.", tag->tag_id,
+           atomic_get_int32(&plc->pending_request_count), plc->max_requests_in_flight);
 
     if(tag->tag_id == 0) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Tag not ready.");
@@ -1725,6 +1736,10 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
         tag->op_changed_time = time_ms();
         plc->flags.request_ready = 1;
 
+        /* For auto-sync reads, plc_tag_read() is never called so lib.c does not raise
+         * READ_STARTED.  Raise it here when the request is built and sent. */
+        if(tag->auto_sync_read_ms > 0) { tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK); }
+
         rc = PLCTAG_STATUS_PENDING;
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s creating read request!", plc_tag_decode_error(rc));
@@ -1751,7 +1766,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int64_t now = time_ms();
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting read response for tag %d.", tag->tag_id);
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Starting read response for tag %d.", tag->tag_id);
 
     /*
      * Called only after find_response_tag() confirmed a match and response_ready is set.
@@ -1777,6 +1792,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             tag->op_changed_time = now;
             tag->request_start_time = now;
             tag->op_time = now; /* ensure it fires immediately on next pass */
+            tag->status = PLCTAG_STATUS_PENDING;
 
             rc = PLCTAG_STATUS_PENDING;
             break;
@@ -1791,6 +1807,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                        tag->tag_id);
             }
 
+            tag->status = (int8_t)rc;
+
             decrement_request_count(plc);
 
             plc->flags.response_ready = 0;
@@ -1803,6 +1821,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             tag->status = (int8_t)rc;
 
             /* Calculate and accumulate timing statistics */
+            // #if 0
             {
                 int64_t queue_time = plc->last_request_sent_time - tag->request_start_time;
                 int64_t network_time = now - plc->last_request_sent_time;
@@ -1834,8 +1853,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO,
                                "TIMING STATS (%" PRId64 " samples): Queue: min=%" PRId64 " max=%" PRId64 " avg=%" PRId64
-                               " var=%" PRId64 "ms | Network: min=%" PRId64 " max=%" PRId64 " avg=%" PRId64 " var=%" PRId64
-                               "ms",
+                               " var=%" PRId64 "ms | Network: min=%" PRId64 " max=%" PRId64 " avg=%" PRId64 " var=%" PRId64 "ms",
                                n, plc->queue_time_min, plc->queue_time_max, q_avg, q_var, plc->network_time_min,
                                plc->network_time_max, n_avg, n_var);
 
@@ -1844,8 +1862,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                             int64_t avg_wait_us = plc->cycle_wait_time_sum_us / plc->cycle_count;
                             int64_t avg_send_us = plc->cycle_send_time_sum_us / plc->cycle_count;
                             pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO,
-                                   "CYCLE BREAKDOWN (%" PRId64 " cycles): tickle=%" PRId64 "us wait=%" PRId64
-                                   "us send=%" PRId64 "us total=%" PRId64 "us",
+                                   "CYCLE BREAKDOWN (%" PRId64 " cycles): tickle=%" PRId64 "us wait=%" PRId64 "us send=%" PRId64
+                                   "us total=%" PRId64 "us",
                                    plc->cycle_count, avg_tickle_us, avg_wait_us, avg_send_us,
                                    avg_tickle_us + avg_wait_us + avg_send_us);
                         }
@@ -1853,29 +1871,38 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                     plc->last_stats_report_time = now;
                 }
             }
-
-            /* Remove from active_tags.  For auto-sync reads, set the next op and
-             * re-insert at the scheduled time so the handler self-schedules.
-             * One-shot explicit reads stay out of active_tags (tag is now idle). */
+            // #endif
+            /* Reschedule or remove from active_tags.
+             * Auto-sync reads: advance next_read past now and move the tag to its
+             * new scheduled slot (single rotate instead of remove + insert).
+             * One-shot explicit reads: remove -- tag returns to idle. */
             critical_block(plc->mutex) {
-                remove_tag_from_active(plc, tag);
                 if(tag->auto_sync_read_ms > 0) {
                     while(tag->auto_sync_next_read <= now) { tag->auto_sync_next_read += tag->auto_sync_read_ms; }
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Rescheduling auto-sync tag %d for next read in %dms.", tag->tag_id,
+                           (int)(tag->auto_sync_next_read - now));
                     tag->op = TAG_OP_READ_REQUEST;
                     tag->op_changed_time = now;
                     tag->request_start_time = now;
-                    insert_tag_sorted(plc, tag, tag->auto_sync_next_read);
+                    int idx = vector_find_index(plc->active_tags, tag);
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
+                           "Rotating tag %d from index %d to new index based on auto_sync_next_read.", tag->tag_id, idx);
+                    move_tag_sorted(plc, tag, idx, tag->auto_sync_next_read);
+                } else {
+                    remove_tag_from_active(plc, tag);
                 }
             }
 
             tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
 
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Read completed event raised for tag %d with status %s.", tag->tag_id,
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Read completed event raised for tag %d with status %s.", tag->tag_id,
                    plc_tag_decode_error((int8_t)rc));
 
             rc = PLCTAG_STATUS_OK;
             break;
     }
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
 }
@@ -1886,17 +1913,6 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting write request operation for tag %d. In-flight: %" PRId32 "/%d.",
            tag->tag_id, atomic_get_int32(&plc->pending_request_count), plc->max_requests_in_flight);
-
-    /* Pre-flight checks */
-    if(plc->flags.request_ready) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Request already queued for sending.");
-        return PLCTAG_STATUS_PENDING;
-    }
-
-    if(plc->state != PLC_READY) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "PLC not ready.");
-        return PLCTAG_STATUS_PENDING;
-    }
 
     if(tag->tag_id == 0) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Tag not ready.");
@@ -1932,6 +1948,10 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
         tag->op = TAG_OP_WRITE_RESPONSE;
         tag->op_changed_time = time_ms();
         plc->flags.request_ready = 1;
+
+        /* For auto-sync writes, plc_tag_write() is never called so lib.c does not raise
+         * WRITE_STARTED.  Raise it here when the request is built and sent. */
+        if(tag->auto_sync_write_ms > 0) { tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK); }
 
         rc = PLCTAG_STATUS_PENDING;
     } else {
@@ -2009,15 +2029,18 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
             tag->write_in_flight = 0;
             tag->status = (int8_t)rc;
 
-            /* Remove from active_tags.  If the user wrote new data while this write
-             * was in flight (tag_is_dirty was set again after tag_op_write_request
-             * cleared it), schedule a follow-up write immediately. */
+            /* Reschedule or remove from active_tags.
+             * If a dirty write arrived while this write was in-flight, move the tag
+             * to its follow-up slot (single rotate instead of remove + insert).
+             * Otherwise remove -- tag returns to idle. */
             critical_block(plc->mutex) {
-                remove_tag_from_active(plc, tag);
                 if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
                     tag->op = TAG_OP_WRITE_REQUEST;
                     tag->op_changed_time = now;
-                    insert_tag_sorted(plc, tag, now + tag->auto_sync_write_ms);
+                    int idx = vector_find_index(plc->active_tags, tag);
+                    move_tag_sorted(plc, tag, idx, now + tag->auto_sync_write_ms);
+                } else {
+                    remove_tag_from_active(plc, tag);
                 }
             }
 
@@ -2404,7 +2427,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
     uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
     int partial_read = 0;
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Starting.");
 
     if(seq_id == tag->seq_id) {
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
@@ -2425,23 +2448,23 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             int copy_size = ((tag->size - byte_offset) < payload_size ? (tag->size - byte_offset) : payload_size);
 
             /* no error. So copy the data. */
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Got read response %u of length %d with payload of size %d.",
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Got read response %u of length %d with payload of size %d.",
                    (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "registers_per_request = %d", registers_per_request);
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "register_offset = %d", register_offset);
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "byte_offset = %d", byte_offset);
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "copy_size = %d", copy_size);
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "register_offset = %d", register_offset);
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "byte_offset = %d", byte_offset);
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "copy_size = %d", copy_size);
 
             mem_copy(tag->data + byte_offset, &plc->read_data[9], copy_size);
 
             /* are we done? */
             if(tag->size > (byte_offset + copy_size)) {
                 /* Not yet. */
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Not done reading entire tag.");
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Not done reading entire tag.");
                 partial_read = 1;
             } else {
                 /* read is done. */
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Read is complete.");
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Read is complete.");
                 partial_read = 0;
             }
 
@@ -2814,8 +2837,8 @@ static void debug_vector(modbus_plc_p plc) {
         for(int i = 0; i < count; i++) {
             modbus_tag_p tag = vector_get(plc->active_tags, i);
             if(tag) {
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "  [%d] Tag ID %" PRId32 " op=%s op_time=%" PRId64 " %p.",
-                       i, tag->tag_id, op_to_str(tag->op), tag->op_time, tag);
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "  [%d] Tag ID %" PRId32 " op=%s op_time=%" PRId64 " %p.", i,
+                       tag->tag_id, op_to_str(tag->op), tag->op_time, tag);
             } else {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "  [%d] NULL tag pointer!", i);
             }
@@ -2879,6 +2902,56 @@ static void insert_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int64_t op_tim
 
 
 /*
+ * move_tag_sorted
+ *
+ * Reposition a tag that is already in active_tags to its correct sorted position
+ * for the given new_op_time, using vector_swap_element for efficiency (single
+ * memmove instead of remove + reinsert).
+ * Must be called while holding plc->mutex.
+ */
+static void move_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int current_index, int64_t new_op_time) {
+    int count = vector_length(plc->active_tags);
+    int lo = 0;
+    int hi = count;
+    int new_index = 0;
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Moving tag %" PRId32 " from index %d to new op_time %" PRId64 ".", tag->tag_id,
+           current_index, new_op_time);
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Current active vector length: %d.", count);
+
+    if(current_index < 0 || current_index >= count) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Tag %" PRId32 " not found in active_tags (index=%d)!", tag->tag_id,
+               current_index);
+        tag->in_active_vector = false;
+        return;
+    }
+
+    /* Binary search: find the insert-before index for new_op_time. */
+    while(lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        modbus_tag_p mid_tag = vector_get(plc->active_tags, mid);
+        if(mid_tag && mid_tag->op_time <= new_op_time) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    /* lo is the insert-before index: the element belongs just before index lo.
+     * This works correctly in both directions without any correction:
+     *   moving right (current_index < lo): element lands at lo-1, shifting [cur+1..lo-1] left.
+     *   moving left  (current_index > lo): element lands at lo,   shifting [lo..cur-1]  right. */
+    new_index = lo;
+
+    tag->op_time = new_op_time;
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "New index for tag %" PRId32 " is %d.", tag->tag_id, new_index);
+
+    vector_swap_element(plc->active_tags, current_index, new_index);
+}
+
+
+/*
  * remove_tag_from_active
  *
  * Remove a tag from active_tags by linear scan.
@@ -2888,18 +2961,15 @@ static void insert_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int64_t op_tim
 static void remove_tag_from_active(modbus_plc_p plc, modbus_tag_p tag) {
     if(!tag->in_active_vector) { return; }
 
-    int count = vector_length(plc->active_tags);
-    for(int i = 0; i < count; i++) {
-        if(vector_get(plc->active_tags, i) == tag) {
-            vector_remove(plc->active_tags, i);
-            tag->in_active_vector = false;
-            return;
-        }
+    int idx = vector_find_index(plc->active_tags, tag);
+    if(idx >= 0) {
+        vector_remove(plc->active_tags, idx);
+    } else {
+        /* in_active_vector was set but tag was not found -- fix the flag. */
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Tag %" PRId32 " had in_active_vector set but was not found in active_tags!",
+               tag->tag_id);
     }
 
-    /* in_active_vector was set but tag was not found -- fix the flag. */
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Tag %" PRId32 " had in_active_vector set but was not found in active_tags!",
-           tag->tag_id);
     tag->in_active_vector = false;
 }
 
@@ -3105,11 +3175,15 @@ int mb_read_start(plc_tag_p p_tag) {
         /*
          * Insert or move to front of active_tags so this read fires immediately.
          * If the tag is already in active_tags (e.g., auto-sync waiting for a
-         * future op_time), remove it first then re-insert at op_time=now.
+         * future op_time), move it to now (single rotate); otherwise insert fresh.
          */
         critical_block(tag->plc->mutex) {
-            if(tag->in_active_vector) { remove_tag_from_active(tag->plc, tag); }
-            insert_tag_sorted(tag->plc, tag, now);
+            if(tag->in_active_vector) {
+                int idx = vector_find_index(tag->plc->active_tags, tag);
+                move_tag_sorted(tag->plc, tag, idx, now);
+            } else {
+                insert_tag_sorted(tag->plc, tag, now);
+            }
         }
     }
 
@@ -3185,11 +3259,15 @@ static int mb_write_start(plc_tag_p p_tag) {
         /*
          * Insert or move to front of active_tags so this write fires immediately.
          * If the tag is already in active_tags (e.g., auto-sync waiting for a
-         * future op_time), remove it first then re-insert at op_time=now.
+         * future op_time), move it to now (single rotate); otherwise insert fresh.
          */
         critical_block(tag->plc->mutex) {
-            if(tag->in_active_vector) { remove_tag_from_active(tag->plc, tag); }
-            insert_tag_sorted(tag->plc, tag, now);
+            if(tag->in_active_vector) {
+                int idx = vector_find_index(tag->plc->active_tags, tag);
+                move_tag_sorted(tag->plc, tag, idx, now);
+            } else {
+                insert_tag_sorted(tag->plc, tag, now);
+            }
         }
     }
 
@@ -3251,55 +3329,58 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
 
     if(tag->auto_sync_write_ms <= 0) { return PLCTAG_STATUS_OK; }
 
-    {
-        int64_t now = time_ms();
-        int64_t write_time = now + (int64_t)tag->auto_sync_write_ms;
+    int64_t now = time_ms();
+    int64_t write_time = now + (int64_t)tag->auto_sync_write_ms;
 
-        critical_block(tag->plc->mutex) {
-            switch(tag->op) {
-                case TAG_OP_IDLE:
-                    /* Insert as a new WRITE_REQUEST. */
-                    tag->op = TAG_OP_WRITE_REQUEST;
-                    tag->op_changed_time = now;
-                    insert_tag_sorted(tag->plc, tag, write_time);
-                    wake_plc_thread(tag->plc);
-                    break;
+    critical_block(tag->plc->mutex) {
+        switch(tag->op) {
+            case TAG_OP_IDLE:
+                /* Insert as a new WRITE_REQUEST. */
+                tag->op = TAG_OP_WRITE_REQUEST;
+                tag->op_changed_time = now;
+                insert_tag_sorted(tag->plc, tag, write_time);
+                wake_plc_thread(tag->plc);
+                break;
 
-                case TAG_OP_READ_REQUEST:
-                    /* Auto-sync read queued but not yet sent; replace with write. */
-                    remove_tag_from_active(tag->plc, tag);
-                    tag->op = TAG_OP_WRITE_REQUEST;
-                    tag->op_changed_time = now;
-                    insert_tag_sorted(tag->plc, tag, write_time);
-                    wake_plc_thread(tag->plc);
-                    break;
-
-                case TAG_OP_READ_RESPONSE:
-                    /* Read is in-flight.  Orphan the response by clearing the
-                     * transaction ID -- when tickle_all_tags processes the reply
-                     * the re-verify check will fail and the response is discarded. */
-                    decrement_request_count(tag->plc);
-                    tag->pending_transaction_id = 0;
-                    remove_tag_from_active(tag->plc, tag);
-                    tag->op = TAG_OP_WRITE_REQUEST;
-                    tag->op_changed_time = now;
-                    insert_tag_sorted(tag->plc, tag, write_time);
-                    wake_plc_thread(tag->plc);
-                    break;
-
-                case TAG_OP_WRITE_REQUEST:
-                    /* Write already queued; the latest data will be captured
-                     * when the request fires.  No action needed. */
-                    break;
-
-                case TAG_OP_WRITE_RESPONSE:
-                    /* Write in-flight; tag_is_dirty is set so tag_op_write_response
-                     * will re-schedule a follow-up write after completion. */
-                    break;
-
-                default:
-                    break;
+            case TAG_OP_READ_REQUEST: {
+                /* Auto-sync read queued but not yet sent; replace with write. */
+                int idx = vector_find_index(tag->plc->active_tags, tag);
+                tag->op = TAG_OP_WRITE_REQUEST;
+                tag->op_changed_time = now;
+                move_tag_sorted(tag->plc, tag, idx, write_time);
+                wake_plc_thread(tag->plc);
+                break;
             }
+
+            case TAG_OP_READ_RESPONSE: {
+                /* Read is in-flight.  Orphan the response by clearing the
+                 * transaction ID -- when tickle_all_tags processes the reply
+                 * the re-verify check will fail and the response is discarded. */
+                decrement_request_count(tag->plc);
+                tag->pending_transaction_id = 0;
+                int idx = vector_find_index(tag->plc->active_tags, tag);
+                tag->op = TAG_OP_WRITE_REQUEST;
+                tag->op_changed_time = now;
+                move_tag_sorted(tag->plc, tag, idx, write_time);
+                wake_plc_thread(tag->plc);
+                break;
+            }
+
+            case TAG_OP_WRITE_REQUEST:
+                /*
+                 * Write already queued; the latest data will be captured
+                 * when the request fires.  No action needed.
+                 */
+                break;
+
+            case TAG_OP_WRITE_RESPONSE:
+                /*
+                 * Write in-flight; tag_is_dirty is set so tag_op_write_response
+                 * will re-schedule a follow-up write after completion.
+                 */
+                break;
+
+            default: break;
         }
     }
 
