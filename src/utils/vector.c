@@ -236,6 +236,26 @@ void *vector_remove(vector_p vec, int index) {
 }
 
 
+int vector_find_index(vector_p vec, void *val) {
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
+
+    if(!vec) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    for(int i = 0; i < vec->len; i++) {
+        if(vec->data[i] == val) {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
+            return i;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done (not found)");
+    return -1;
+}
+
+
 int vector_reset(vector_p vec) {
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
@@ -288,6 +308,71 @@ int vector_sort(vector_p vec, vector_compare_func compare) {
         /* Sort directly on internal array - no overhead */
         qsort(vec->data, (size_t)vec->len, sizeof(void *), compare);
     }
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int vector_swap_element(vector_p vec, int current_index, int insert_before_index) {
+    void *elem = NULL;
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Starting with current_index=%d, insert_before_index=%d", current_index,
+           insert_before_index);
+
+    if(!vec) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(current_index < 0 || current_index >= vec->len) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "current_index %d is out of bounds!", current_index);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(insert_before_index < 0 || insert_before_index > vec->len) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "insert_before_index %d is out of bounds!", insert_before_index);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    /* The element's final slot depends on direction:
+     *   moving right (current < insert_before): lands at insert_before_index - 1
+     *   moving left  (current > insert_before): lands at insert_before_index
+     * If the final slot is already current_index, nothing to do. */
+    int final_index = (current_index < insert_before_index) ? insert_before_index - 1 : insert_before_index;
+    if(final_index == current_index) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Done (no-op)");
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* Save the element to move before the shift overwrites its slot. */
+    elem = vec->data[current_index];
+
+    if(current_index < insert_before_index) {
+        /*
+         * Moving right: shift [current_index+1 .. insert_before_index-1] one slot left,
+         * then place elem at insert_before_index-1.
+         *
+         * Before: [... A B C D E ...]   A at current_index, E at insert_before_index-1
+         *                               (insert_before_index points one past E)
+         * After:  [... B C D E A ...]
+         */
+        mem_move(&vec->data[current_index], &vec->data[current_index + 1],
+                 (int)(sizeof(void *) * (size_t)(insert_before_index - 1 - current_index)));
+    } else {
+        /*
+         * Moving left: shift [insert_before_index .. current_index-1] one slot right,
+         * then place elem at insert_before_index.
+         *
+         * Before: [... A B C D E ...]   A at insert_before_index, E at current_index
+         * After:  [... E A B C D ...]
+         */
+        mem_move(&vec->data[insert_before_index + 1], &vec->data[insert_before_index],
+                 (int)(sizeof(void *) * (size_t)(current_index - insert_before_index)));
+    }
+
+    vec->data[final_index] = elem;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
