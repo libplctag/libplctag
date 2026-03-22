@@ -881,124 +881,19 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level) {
 }
 
 
-/*
- * Set the debug level for a specific module.
- *
- * This function allows fine-grained control over debug output by setting the debug level
- * for a specific module.
- *
- * Returns PLCTAG_STATUS_OK on success, PLCTAG_ERR_NOT_FOUND if the module name is not recognized.
- */
-LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug_level) {
-    /* We need to map module names to their enum values and call debug_module_set_level */
-
-    if(!module_name || debug_level < PLCTAG_DEBUG_NONE || debug_level > PLCTAG_DEBUG_SPEW) { return PLCTAG_ERR_BAD_PARAM; }
-
-/* Map module name strings to enum values */
-#define MODULE_CASE(name, enum_val)                    \
-    if(str_cmp_i(module_name, #name) == 0) {           \
-        debug_module_set_level(enum_val, debug_level); \
-        return PLCTAG_STATUS_OK;                       \
-    }
-
-    MODULE_CASE(LIB, DEBUG_MODULE_LIB)
-    MODULE_CASE(INIT, DEBUG_MODULE_INIT)
-    MODULE_CASE(VERSION, DEBUG_MODULE_VERSION)
-    MODULE_CASE(UTILS, DEBUG_MODULE_UTILS)
-    MODULE_CASE(AB_SESSION, DEBUG_MODULE_AB_SESSION)
-    MODULE_CASE(AB_PCCC, DEBUG_MODULE_AB_PCCC)
-    MODULE_CASE(AB_CIP, DEBUG_MODULE_AB_CIP)
-    MODULE_CASE(AB_COMMON, DEBUG_MODULE_AB_COMMON)
-    MODULE_CASE(AB_EIP_CIP, DEBUG_MODULE_AB_EIP_CIP)
-    MODULE_CASE(AB_EIP_CIP_SPECIAL, DEBUG_MODULE_AB_EIP_CIP_SPECIAL)
-    MODULE_CASE(AB_EIP_LGX_PCCC, DEBUG_MODULE_AB_EIP_LGX_PCCC)
-    MODULE_CASE(AB_EIP_PLC5_PCCC, DEBUG_MODULE_AB_EIP_PLC5_PCCC)
-    MODULE_CASE(AB_EIP_PLC5_DHP, DEBUG_MODULE_AB_EIP_PLC5_DHP)
-    MODULE_CASE(AB_EIP_SLC_PCCC, DEBUG_MODULE_AB_EIP_SLC_PCCC)
-    MODULE_CASE(AB_EIP_SLC_DHP, DEBUG_MODULE_AB_EIP_SLC_DHP)
-    MODULE_CASE(AB_ERROR, DEBUG_MODULE_AB_ERROR)
-    MODULE_CASE(OMRON_CONN, DEBUG_MODULE_OMRON_CONN)
-    MODULE_CASE(OMRON_CIP, DEBUG_MODULE_OMRON_CIP)
-    MODULE_CASE(OMRON_COMMON, DEBUG_MODULE_OMRON_COMMON)
-    MODULE_CASE(OMRON_STANDARD_TAG, DEBUG_MODULE_OMRON_STANDARD_TAG)
-    MODULE_CASE(OMRON_RAW_TAG, DEBUG_MODULE_OMRON_RAW_TAG)
-    MODULE_CASE(MODBUS, DEBUG_MODULE_MODBUS)
-    MODULE_CASE(SYSTEM, DEBUG_MODULE_SYSTEM)
-
-#undef MODULE_CASE
-
-    return PLCTAG_ERR_NOT_FOUND;
+LIB_EXPORT int plc_tag_set_debug_module_level(plctag_debug_module_t module, int debug_level) {
+    if(debug_level < PLCTAG_DEBUG_NONE || debug_level > PLCTAG_DEBUG_SPEW) { return PLCTAG_ERR_BAD_PARAM; }
+    debug_module_set_level((debug_module_t)module, debug_level);
+    return PLCTAG_STATUS_OK;
 }
 
 
-/*
- * Get the debug level for a specific module.
- *
- * Returns the current debug level for the specified module, or PLCTAG_ERR_NOT_FOUND if
- * the module name is not recognized.
- */
-LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name) {
-    if(!module_name) { return PLCTAG_ERR_BAD_PARAM; }
-
-/* Map module name strings to enum values */
-#define MODULE_CASE(name, enum_val) \
-    if(str_cmp_i(module_name, #name) == 0) { return debug_module_get_level(enum_val); }
-
-    MODULE_CASE(LIB, DEBUG_MODULE_LIB)
-    MODULE_CASE(INIT, DEBUG_MODULE_INIT)
-    MODULE_CASE(VERSION, DEBUG_MODULE_VERSION)
-    MODULE_CASE(UTILS, DEBUG_MODULE_UTILS)
-    MODULE_CASE(AB_SESSION, DEBUG_MODULE_AB_SESSION)
-    MODULE_CASE(AB_PCCC, DEBUG_MODULE_AB_PCCC)
-    MODULE_CASE(AB_CIP, DEBUG_MODULE_AB_CIP)
-    MODULE_CASE(AB_COMMON, DEBUG_MODULE_AB_COMMON)
-    MODULE_CASE(AB_EIP_CIP, DEBUG_MODULE_AB_EIP_CIP)
-    MODULE_CASE(AB_EIP_CIP_SPECIAL, DEBUG_MODULE_AB_EIP_CIP_SPECIAL)
-    MODULE_CASE(AB_EIP_LGX_PCCC, DEBUG_MODULE_AB_EIP_LGX_PCCC)
-    MODULE_CASE(AB_EIP_PLC5_PCCC, DEBUG_MODULE_AB_EIP_PLC5_PCCC)
-    MODULE_CASE(AB_EIP_PLC5_DHP, DEBUG_MODULE_AB_EIP_PLC5_DHP)
-    MODULE_CASE(AB_EIP_SLC_PCCC, DEBUG_MODULE_AB_EIP_SLC_PCCC)
-    MODULE_CASE(AB_EIP_SLC_DHP, DEBUG_MODULE_AB_EIP_SLC_DHP)
-    MODULE_CASE(AB_ERROR, DEBUG_MODULE_AB_ERROR)
-    MODULE_CASE(OMRON_CONN, DEBUG_MODULE_OMRON_CONN)
-    MODULE_CASE(OMRON_CIP, DEBUG_MODULE_OMRON_CIP)
-    MODULE_CASE(OMRON_COMMON, DEBUG_MODULE_OMRON_COMMON)
-    MODULE_CASE(OMRON_STANDARD_TAG, DEBUG_MODULE_OMRON_STANDARD_TAG)
-    MODULE_CASE(OMRON_RAW_TAG, DEBUG_MODULE_OMRON_RAW_TAG)
-    MODULE_CASE(MODBUS, DEBUG_MODULE_MODBUS)
-    MODULE_CASE(SYSTEM, DEBUG_MODULE_SYSTEM)
-
-#undef MODULE_CASE
-
-    return PLCTAG_ERR_NOT_FOUND;
+LIB_EXPORT int plc_tag_get_debug_module_level(plctag_debug_module_t module) {
+    return debug_module_get_level((debug_module_t)module);
 }
 
 
-/*
- * Get the current global debug level.
- *
- * Returns the current global debug level set by plc_tag_set_debug_level().
- */
 LIB_EXPORT int plc_tag_get_debug_level(void) { return get_debug_level(); }
-
-
-/*
- * Convert a debug module name to a module ID.
- *
- * This function takes a string like "AB_SESSION" or "OMRON_CONN" and returns
- * the corresponding module ID. Returns 0 if the module name is not recognized.
- */
-LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name) { return (uint64_t)debug_module_id(module_name); }
-
-
-/*
- * Convert a debug level name to a debug level ID.
- *
- * This function takes a string like "ERROR", "DEBUG_DETAIL", "SPEW", etc.
- * and returns the corresponding debug level ID. Returns -1 if the level name
- * is not recognized.
- */
-LIB_EXPORT int plc_tag_debug_level_id(const char *level_name) { return debug_level_id(level_name); }
 
 
 /*
