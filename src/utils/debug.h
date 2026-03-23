@@ -48,7 +48,7 @@
 
 extern int set_debug_level(int debug_level);
 extern int get_debug_level(void);
-extern void debug_set_tag_id(int32_t tag_id);
+// extern void debug_set_tag_id(int32_t tag_id);
 
 /* Module configuration API */
 extern void debug_module_set_level(debug_module_t module, int level);
@@ -63,12 +63,11 @@ extern void debug_set_all_modules(int level);
 extern volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
 
 static inline bool debug_is_enabled(debug_module_t module, int level) {
-    return level > DEBUG_NONE
-           && (unsigned)module < DEBUG_MODULE_COUNT
-           && level <= (int)debug_module_levels[module];
+    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= (int)debug_module_levels[module];
 }
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, const char *templ, ...);
+extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
+                        ...);
 
 #if defined(_WIN32) && defined(_MSC_VER)
 /* MinGW on Windows does not need this. */
@@ -76,18 +75,16 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 #endif
 
 
-#define pdebug(module, dbg, ...)                                                                    \
-    do {                                                                                             \
-        if(debug_is_enabled((module), (dbg)))                                                       \
-            pdebug_impl(__func__, __LINE__, (dbg), (module), __VA_ARGS__);                         \
+#define pdebug(module, dbg, tag_id, ...)                                                                               \
+    do {                                                                                                               \
+        if(debug_is_enabled((module), (dbg))) pdebug_impl(__func__, __LINE__, (dbg), (module), (tag_id), __VA_ARGS__); \
     } while(0)
 
-extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, uint8_t *data,
-                                   int count);
-#define pdebug_dump_bytes(module, dbg, d, c)                                        \
-    do {                                                                             \
-        if(debug_is_enabled((module), (dbg)))                                        \
-            pdebug_dump_bytes_impl(__func__, __LINE__, (dbg), (module), (d), (c));  \
+extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
+                                   uint8_t *data, int count);
+#define pdebug_dump_bytes(module, dbg, tag_id, d, c)                                                                           \
+    do {                                                                                                                       \
+        if(debug_is_enabled((module), (dbg))) pdebug_dump_bytes_impl(__func__, __LINE__, (dbg), (module), (tag_id), (d), (c)); \
     } while(0)
 
 extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));

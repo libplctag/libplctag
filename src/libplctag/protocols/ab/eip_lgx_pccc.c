@@ -112,13 +112,13 @@ int tag_status(ab_tag_p tag) {
 int tag_tickler(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     rc = check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Read in progress.");
+        pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Read in progress.");
         rc = check_read_status(tag);
         tag->status = (int8_t)rc;
 
@@ -137,7 +137,7 @@ int tag_tickler(ab_tag_p tag) {
     }
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Write in progress.");
+        pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Write in progress.");
         rc = check_write_status(tag);
         tag->status = (int8_t)rc;
 
@@ -147,7 +147,7 @@ int tag_tickler(ab_tag_p tag) {
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 
     return tag->status;
 }
@@ -167,11 +167,11 @@ int tag_read_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
     do {
         if(tag->read_in_progress || tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Read or write operation already in flight!");
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
             rc = PLCTAG_ERR_BUSY;
             break;
         }
@@ -184,7 +184,7 @@ int tag_read_start(ab_tag_p tag) {
         int request_payload_space = session_payload_space - request_overhead;
 
         if(request_payload_space < 0 || request_payload_space < tag->size) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN,
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id,
                    "Request overhead (%d bytes) exceeds session payload space (%d bytes) or tag size too large.",
                    request_overhead, session_payload_space);
             tag->read_in_progress = 0;
@@ -195,7 +195,7 @@ int tag_read_start(ab_tag_p tag) {
         rc = session_create_request(tag->session, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             tag->read_in_progress = 0;
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Unable to get new request. rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request. rc=%d", rc);
             break;
         }
 
@@ -257,7 +257,7 @@ int tag_read_start(ab_tag_p tag) {
         req->allow_packing = tag->allow_packing;
         rc = session_add_request(tag->session, req);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
             req = rc_dec(req);
             ab_tag_abort_request(tag);
             break;
@@ -268,7 +268,7 @@ int tag_read_start(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_PENDING) { tag->read_in_progress = 0; }
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
     return rc;
 }
 
@@ -284,7 +284,7 @@ int tag_read_start(ab_tag_p tag) {
 static int check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
 
     /* the request reference is valid. */
 
@@ -306,27 +306,29 @@ static int check_read_status(ab_tag_p tag) {
         data_end = (tag->req->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
 
         if(le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Unexpected EIP packet type received: %d!", pccc->encap_command);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected EIP packet type received: %d!",
+                   pccc->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(pccc->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "EIP command failed, response code: %d", le2h32(pccc->encap_status));
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
+                   le2h32(pccc->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "PCCC command failed, response code: (%d) %s", pccc->general_status,
-                   decode_cip_error_long((uint8_t *)&(pccc->general_status)));
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
+                   pccc->general_status, decode_cip_error_long((uint8_t *)&(pccc->general_status)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(pccc->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc->pccc_status,
-                   pccc_decode_error(&pccc->pccc_status));
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
+                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -334,7 +336,8 @@ static int check_read_status(ab_tag_p tag) {
         type_start = data;
 
         if(!(data = pccc_decode_dt_byte(data, (int)(data_end - data), &pccc_res_type, &pccc_res_length))) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Unable to decode PCCC response data type and data size!");
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id,
+                   "Unable to decode PCCC response data type and data size!");
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -347,7 +350,7 @@ static int check_read_status(ab_tag_p tag) {
 
         if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
             if(!(data = pccc_decode_dt_byte(data, (int)(data_end - data), &pccc_res_type, &pccc_res_length))) {
-                pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN,
+                pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id,
                        "Unable to decode PCCC response array element data type and data size!");
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
@@ -383,13 +386,13 @@ static int check_read_status(ab_tag_p tag) {
 
     /* if this is a pre-read for a write, then pass off the the write routine */
     if(rc == PLCTAG_STATUS_OK && tag->pre_write_read) {
-        pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL, "Restarting write call now.");
+        pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
 
         tag->pre_write_read = 0;
         rc = tag_write_start(tag);
     }
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 
     return rc;
 }
@@ -403,11 +406,11 @@ int tag_write_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
     do {
         if(tag->read_in_progress || tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Read or write operation already in flight!");
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
             rc = PLCTAG_ERR_BUSY;
             break;
         }
@@ -415,7 +418,7 @@ int tag_write_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         if(tag->first_read) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL,
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_DETAIL, tag->tag_id,
                    "No read has completed yet, doing pre-read to get type information.");
             tag->pre_write_read = 1;
             tag->write_in_progress = 0;
@@ -430,7 +433,7 @@ int tag_write_start(ab_tag_p tag) {
         int request_payload_space = session_payload_space - request_overhead;
 
         if(request_payload_space < 0 || request_payload_space < tag->size) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN,
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id,
                    "Request overhead (%d bytes) exceeds session payload space (%d bytes) or tag size too large.",
                    request_overhead, session_payload_space);
             tag->write_in_progress = 0;
@@ -441,7 +444,7 @@ int tag_write_start(ab_tag_p tag) {
         rc = session_create_request(tag->session, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             tag->write_in_progress = 0;
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "Unable to get new request. rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request. rc=%d", rc);
             break;
         }
 
@@ -505,7 +508,7 @@ int tag_write_start(ab_tag_p tag) {
         req->allow_packing = tag->allow_packing;
         rc = session_add_request(tag->session, req);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
             req = rc_dec(req);
             ab_tag_abort_request(tag);
             break;
@@ -516,7 +519,7 @@ int tag_write_start(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_PENDING) { tag->write_in_progress = 0; }
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
     return rc;
 }
 
@@ -529,20 +532,21 @@ int tag_write_start(ab_tag_p tag) {
 static int check_write_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
 
     do {
         pccc_resp *pccc = (pccc_resp *)(tag->req->data);
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "PCCC command failed, response code: %d", pccc->general_status);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d",
+                   pccc->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(pccc->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc->pccc_status,
-                   pccc_decode_error(&pccc->pccc_status));
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
+                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -552,7 +556,7 @@ static int check_write_status(ab_tag_p tag) {
 
     ab_tag_abort_request(tag);
 
-    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 
     return rc;
 }

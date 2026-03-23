@@ -99,7 +99,7 @@ tag_create_function find_tag_create_func(attr attributes) {
     if(protocol && str_length(protocol) > 0) {
         for(i = 0; i < num_entries; i++) {
             if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched protocol=%s", protocol);
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s", protocol);
                 return tag_type_map[i].tag_constructor;
             }
         }
@@ -107,24 +107,25 @@ tag_create_function find_tag_create_func(attr attributes) {
         /* match make/family/model */
         for(i = 0; i < num_entries; i++) {
             if(tag_type_map[i].make && make && str_cmp_i(tag_type_map[i].make, make) == 0) {
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s", make);
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s", make);
                 if(tag_type_map[i].family) {
                     if(family && str_cmp_i(tag_type_map[i].family, family) == 0) {
-                        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=%s", make, family);
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s", make, family);
                         if(tag_type_map[i].model) {
                             if(model && str_cmp_i(tag_type_map[i].model, model) == 0) {
-                                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=%s model=%s", make, family, model);
+                                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s model=%s", make, family,
+                                       model);
                                 return tag_type_map[i].tag_constructor;
                             }
                         } else {
                             /* matches until a NULL */
-                            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=%s model=NULL", make, family);
+                            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s model=NULL", make, family);
                             return tag_type_map[i].tag_constructor;
                         }
                     }
                 } else {
                     /* matched until a NULL, so we matched */
-                    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=NULL model=NULL", make);
+                    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=NULL model=NULL", make);
                     return tag_type_map[i].tag_constructor;
                 }
             }
@@ -146,7 +147,7 @@ tag_create_function find_tag_create_func(attr attributes) {
 void destroy_modules(void) {
     int32_t old_state;
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting.");
 
     /*
      * Try to transition from RUNNING to SHUTTING_DOWN.
@@ -155,36 +156,36 @@ void destroy_modules(void) {
      */
     old_state = atomic_compare_and_set_int32(&library_state, LIB_STATE_RUNNING, LIB_STATE_SHUTTING_DOWN);
     if(old_state != LIB_STATE_RUNNING) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_WARN, "Cannot shutdown - library state is %" PRId32 ", not RUNNING.", old_state);
+        pdebug(DEBUG_MODULE_INIT, DEBUG_WARN, 0, "Cannot shutdown - library state is %" PRId32 ", not RUNNING.", old_state);
         return;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down AB module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
     ab_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down Modbus module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down Omron module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down library module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
     lib_teardown();
 
     /* last so that we continue to process deferred destructors until the end. */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down refcount infrastructure.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
     refcount_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Unregistering logger.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Flushing debug output.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Flushing debug output.");
     debug_flush();
 
     /* Mark as uninitialized - ready for potential re-initialization */
     atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Done.");
 }
 
 
@@ -199,11 +200,11 @@ int initialize_modules(void) {
     int rc = PLCTAG_STATUS_OK;
     int32_t old_state;
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting.");
 
     /* Fast path: already running */
     if(atomic_get_int32(&library_state) == LIB_STATE_RUNNING) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Library already initialized, returning.");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Library already initialized, returning.");
         return PLCTAG_STATUS_OK;
     }
 
@@ -220,70 +221,70 @@ int initialize_modules(void) {
         switch(old_state) {
             case LIB_STATE_RUNNING:
                 /* Another thread finished initialization */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Library initialized by another thread.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Library initialized by another thread.");
                 return PLCTAG_STATUS_OK;
 
             case LIB_STATE_INITIALIZING:
                 /* Another thread is initializing, wait for it */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Waiting for another thread to complete initialization...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for another thread to complete initialization...");
                 sleep_ms(10);
                 break;
 
             case LIB_STATE_SHUTTING_DOWN:
                 /* Shutdown in progress, wait for it to complete */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Waiting for library shutdown to complete...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for library shutdown to complete...");
                 sleep_ms(10);
                 break;
 
             default:
-                pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unknown library state %" PRId32 "!", old_state);
+                pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unknown library state %" PRId32 "!", old_state);
                 return PLCTAG_ERR_BAD_STATUS;
         }
     }
 
     /* We won the CAS - we are now responsible for initialization */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "This thread will initialize the library.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "This thread will initialize the library.");
 
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
 
     /* Start the refcount cleanup thread first */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting refcount cleanup infrastructure.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
     rc = refcount_startup();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start refcount cleanup infrastructure!");
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing library modules.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing library modules.");
     rc = lib_init();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize library module!");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize library module!");
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing AB module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing AB module.");
     rc = ab_init();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize AB module!");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize AB module!");
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Modbus module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Modbus module.");
     rc = mb_init();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Modbus module!");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Omron module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Omron module.");
     rc = omron_init();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Omron module!");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -294,7 +295,7 @@ int initialize_modules(void) {
     /* Transition to RUNNING - initialization complete */
     atomic_set_int32(&library_state, LIB_STATE_RUNNING);
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done initializing library modules.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Done initializing library modules.");
 
     return PLCTAG_STATUS_OK;
 }

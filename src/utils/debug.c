@@ -76,12 +76,7 @@ static volatile int log_call_count = 0;
 volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
 
 
-/*
- * Keep the thread ID and the tag ID thread local.
- */
-
 static THREAD_LOCAL uint32_t this_thread_num = 0;
-static THREAD_LOCAL int32_t tag_id = 0;
 
 
 // /* only output the version once */
@@ -103,8 +98,6 @@ int set_debug_level(int level) {
 
 int get_debug_level(void) { return global_debug_level; }
 
-
-void debug_set_tag_id(int32_t t_id) { tag_id = t_id; }
 
 
 void debug_module_set_level(debug_module_t module, int level) {
@@ -187,7 +180,7 @@ static void ensure_stderr_buffering(void) {
     }
 }
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, const char *templ, ...) {
+extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
     va_list va;
     struct tm t;
     time_t epoch;
@@ -243,8 +236,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 
 #define COLUMNS (16)
 
-void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, uint8_t *data,
-                            int count) {
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
+                            uint8_t *data, int count) {
     int max_row, row, column;
     char row_buf[(COLUMNS * 3) + 5 + 1];
 
@@ -269,7 +262,7 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
         row_buf[sizeof(row_buf) - 1] = 0; /* just in case */
 
         /* output it, finally */
-        pdebug_impl(func, line_num, debug_level, module, row_buf);
+        pdebug_impl(func, line_num, debug_level, module, tag_id, row_buf);
     }
 }
 
