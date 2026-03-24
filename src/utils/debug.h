@@ -42,6 +42,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <libplctag/lib/libplctag.h>
 
 /* Generated debug constants - parsed from libplctag.h at build time */
 #include "debug_generated.h"
@@ -65,17 +66,27 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 #    define __func__ __FUNCTION__
 #endif
 
+/* set the compile-time max debug level if not already defined*/
+#ifndef PLCTAG_COMPILE_DEBUG_LEVEL
+#    define PLCTAG_COMPILE_DEBUG_LEVEL PLCTAG_DEBUG_DETAIL
+#endif
 
-#define pdebug(module, dbg, tag_id, ...)                                                                               \
-    do {                                                                                                               \
-        if(debug_is_enabled((module), (dbg))) pdebug_impl(__func__, __LINE__, (dbg), (module), (tag_id), __VA_ARGS__); \
+#define pdebug(module, dbg, tag_id, ...)                                                                                       \
+    do {                                                                                                                       \
+        if((dbg) <= PLCTAG_COMPILE_DEBUG_LEVEL) {                                                                              \
+            if(debug_is_enabled((module), (dbg))) { pdebug_impl(__func__, __LINE__, (dbg), (module), (tag_id), __VA_ARGS__); } \
+        }                                                                                                                      \
     } while(0)
 
 extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
                                    uint8_t *data, int count);
-#define pdebug_dump_bytes(module, dbg, tag_id, d, c)                                                                           \
-    do {                                                                                                                       \
-        if(debug_is_enabled((module), (dbg))) pdebug_dump_bytes_impl(__func__, __LINE__, (dbg), (module), (tag_id), (d), (c)); \
+#define pdebug_dump_bytes(module, dbg, tag_id, d, c)                                             \
+    do {                                                                                         \
+        if((dbg) <= PLCTAG_COMPILE_DEBUG_LEVEL) {                                                \
+            if(debug_is_enabled((module), (dbg))) {                                              \
+                pdebug_dump_bytes_impl(__func__, __LINE__, (dbg), (module), (tag_id), (d), (c)); \
+            }                                                                                    \
+        }                                                                                        \
     } while(0)
 
 extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));
