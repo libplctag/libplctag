@@ -6,7 +6,7 @@ Usage:
     plot_perf.py <results.csv> [--output-dir=DIR]
 
 Produces:
-    1. Heatmaps: threads x tags, color = reads/sec (one per mode x groups)
+    1. Heatmaps: threads x tags, color = reads/sec (one per mode)
     2. Scaling plots: reads/sec vs threads, lines per tag count
     3. Efficiency plot: reads/sec vs CPU load
     4. Fairness overview
@@ -34,17 +34,15 @@ def load_csv(path):
 
 
 def plot_heatmaps(df, metric, label, fmt, outdir):
-    """Heatmap grid: rows=sync/async, cols=connection_groups, cells=threads x tags."""
+    """Heatmap per mode: rows=threads, cols=tags, color=metric."""
     modes = sorted(df["mode"].unique())
-    groups = sorted(df["connection_groups"].unique())
 
-    # Use the full sorted axis values so every panel has the same shape.
     all_threads = sorted(df["threads"].unique(), reverse=True)  # descending: 1000 at top
     all_tags    = sorted(df["tags"].unique())
 
     fig, axes = plt.subplots(
-        len(modes), len(groups),
-        figsize=(4 * len(groups), 3.5 * len(modes)),
+        len(modes), 1,
+        figsize=(8, 3.5 * len(modes)),
         squeeze=False,
     )
     fig.suptitle(f"{label} by Configuration", fontsize=14, y=1.02)
@@ -53,51 +51,50 @@ def plot_heatmaps(df, metric, label, fmt, outdir):
     vmax = df[metric].max()
 
     for row, mode in enumerate(modes):
-        for col, grp in enumerate(groups):
-            ax = axes[row][col]
-            subset = df[(df["mode"] == mode) & (df["connection_groups"] == grp)]
+        ax = axes[row][0]
+        subset = df[df["mode"] == mode]
 
-            if subset.empty:
-                ax.set_visible(False)
-                continue
+        if subset.empty:
+            ax.set_visible(False)
+            continue
 
-            pivot = subset.pivot_table(
-                index="threads", columns="tags", values=metric, aggfunc="mean"
-            )
-            # Reindex to full axis range; missing cells (threads < groups) become NaN.
-            pivot = pivot.reindex(index=all_threads, columns=all_tags)
+        pivot = subset.pivot_table(
+            index="threads", columns="tags", values=metric, aggfunc="mean"
+        )
+        # Reindex to full axis range; missing cells (threads > tags) become NaN.
+        pivot = pivot.reindex(index=all_threads, columns=all_tags)
 
-            # Build annotation array: show value or "N/A" for invalid combos.
-            annot = pivot.copy().astype(object)
-            for t in all_threads:
-                for tag in all_tags:
-                    if pd.isna(pivot.loc[t, tag]):
-                        annot.loc[t, tag] = "N/A"
-                    else:
-                        val = pivot.loc[t, tag]
-                        annot.loc[t, tag] = f"{val:{fmt}}"
+        # Build annotation array: show value or "N/A" for invalid combos.
+        annot = pivot.copy().astype(object)
+        for t in all_threads:
+            for tag in all_tags:
+                if pd.isna(pivot.loc[t, tag]):
+                    annot.loc[t, tag] = "N/A"
+                else:
+                    val = pivot.loc[t, tag]
+                    annot.loc[t, tag] = f"{val:{fmt}}"
 
+        sns.heatmap(
+            pivot, ax=ax, annot=annot, fmt="",
+            cmap="YlOrRd" if "cpu" in metric else "YlGnBu",
+            vmin=vmin, vmax=vmax,
+            cbar=True,
+            linewidths=0.5,
+            mask=pivot.isna(),
+        )
+        # Shade invalid cells gray.
+        pivot_nan = pivot.isna()
+        if pivot_nan.any().any():
             sns.heatmap(
-                pivot, ax=ax, annot=annot, fmt="",
-                cmap="YlOrRd" if "cpu" in metric else "YlGnBu",
-                vmin=vmin, vmax=vmax,
-                cbar=col == len(groups) - 1,
-                linewidths=0.5,
-                mask=pivot.isna(),
+                pivot_nan.astype(float).where(pivot_nan, other=np.nan),
+                ax=ax, annot=annot.where(pivot_nan, other=""), fmt="",
+                cmap=mcolors.ListedColormap(["#cccccc"]),
+                vmin=0, vmax=1, cbar=False, linewidths=0.5,
             )
-            # Shade invalid cells gray.
-            pivot_nan = pivot.isna()
-            if pivot_nan.any().any():
-                sns.heatmap(
-                    pivot_nan.astype(float).where(pivot_nan, other=np.nan),
-                    ax=ax, annot=annot.where(pivot_nan, other=""), fmt="",
-                    cmap=mcolors.ListedColormap(["#cccccc"]),
-                    vmin=0, vmax=1, cbar=False, linewidths=0.5,
-                )
 
-            ax.set_title(f"{mode}, {grp} groups", fontsize=10)
-            ax.set_xlabel("tags" if row == len(modes) - 1 else "")
-            ax.set_ylabel("threads" if col == 0 else "")
+        ax.set_title(mode, fontsize=10)
+        ax.set_xlabel("tags" if row == len(modes) - 1 else "")
+        ax.set_ylabel("threads")
 
     fig.tight_layout()
     fname = os.path.join(outdir, f"heatmap_{metric}.png")
@@ -107,13 +104,12 @@ def plot_heatmaps(df, metric, label, fmt, outdir):
 
 
 def plot_scaling(df, outdir):
-    """Line plots: reads/sec vs threads, one line per tag count, faceted by mode x groups."""
+    """Line plots: reads/sec vs threads, one line per tag count, one subplot per mode."""
     modes = sorted(df["mode"].unique())
-    groups = sorted(df["connection_groups"].unique())
 
     fig, axes = plt.subplots(
-        len(modes), len(groups),
-        figsize=(4 * len(groups), 3.5 * len(modes)),
+        1, len(modes),
+        figsize=(5 * len(modes), 4),
         squeeze=False, sharex=True,
     )
     fig.suptitle("Throughput Scaling: Reads/sec vs Threads", fontsize=14, y=1.02)
@@ -121,32 +117,30 @@ def plot_scaling(df, outdir):
     palette = sns.color_palette("tab10", n_colors=df["tags"].nunique())
     tag_vals = sorted(df["tags"].unique())
 
-    for row, mode in enumerate(modes):
-        for col, grp in enumerate(groups):
-            ax = axes[row][col]
-            subset = df[(df["mode"] == mode) & (df["connection_groups"] == grp)]
+    for col, mode in enumerate(modes):
+        ax = axes[0][col]
+        subset = df[df["mode"] == mode]
 
-            for i, t in enumerate(tag_vals):
-                data = subset[subset["tags"] == t].sort_values("threads")
-                if data.empty:
-                    continue
-                ax.plot(
-                    data["threads"], data["reads_per_sec"],
-                    marker="o", markersize=4, label=f"{t} tags",
-                    color=palette[i], linewidth=1.5,
-                )
+        for i, t in enumerate(tag_vals):
+            data = subset[subset["tags"] == t].sort_values("threads")
+            if data.empty:
+                continue
+            ax.plot(
+                data["threads"], data["reads_per_sec"],
+                marker="o", markersize=4, label=f"{t} tags",
+                color=palette[i], linewidth=1.5,
+            )
 
-            ax.set_title(f"{mode}, {grp} groups", fontsize=10)
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
-            ax.yaxis.set_major_formatter(ticker.EngFormatter())
-            if row == len(modes) - 1:
-                ax.set_xlabel("threads")
-            if col == 0:
-                ax.set_ylabel("reads/sec")
-            if row == 0 and col == len(groups) - 1:
-                ax.legend(fontsize=7, loc="best")
+        ax.set_title(mode, fontsize=10)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
+        ax.yaxis.set_major_formatter(ticker.EngFormatter())
+        ax.set_xlabel("threads")
+        if col == 0:
+            ax.set_ylabel("reads/sec")
+        if col == len(modes) - 1:
+            ax.legend(fontsize=7, loc="best")
 
     fig.tight_layout()
     fname = os.path.join(outdir, "scaling_reads_per_sec.png")
@@ -157,17 +151,18 @@ def plot_scaling(df, outdir):
 
 def plot_efficiency(df, outdir):
     """Scatter: reads/sec vs CPU load, color=mode, size=threads."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(8, 5))
 
+    palette = {"sync": "steelblue", "async": "darkorange"}
     for mode, marker in [("sync", "o"), ("async", "^")]:
         subset = df[df["mode"] == mode]
         if subset.empty:
             continue
-        sc = ax.scatter(
+        ax.scatter(
             subset["cpu_load_pct"], subset["reads_per_sec"],
             s=subset["threads"] / subset["threads"].max() * 200 + 20,
             alpha=0.6, marker=marker, label=mode,
-            c=subset["connection_groups"], cmap="viridis",
+            color=palette[mode],
             edgecolors="k", linewidths=0.3,
         )
 
@@ -177,7 +172,6 @@ def plot_efficiency(df, outdir):
     ax.set_yscale("log")
     ax.yaxis.set_major_formatter(ticker.EngFormatter())
     ax.legend()
-    cb = fig.colorbar(sc, ax=ax, label="connection groups")
 
     fig.tight_layout()
     fname = os.path.join(outdir, "efficiency.png")
@@ -187,16 +181,15 @@ def plot_efficiency(df, outdir):
 
 
 def plot_fairness(df, outdir):
-    """Fairness CV heatmaps, same layout as throughput heatmaps."""
+    """Fairness CV heatmaps, one per mode."""
     modes = sorted(df["mode"].unique())
-    groups = sorted(df["connection_groups"].unique())
 
     all_threads = sorted(df["threads"].unique(), reverse=True)
     all_tags    = sorted(df["tags"].unique())
 
     fig, axes = plt.subplots(
-        len(modes), len(groups),
-        figsize=(4 * len(groups), 3.5 * len(modes)),
+        len(modes), 1,
+        figsize=(8, 3.5 * len(modes)),
         squeeze=False,
     )
     fig.suptitle("Fairness (CV %): lower = more fair", fontsize=14, y=1.02)
@@ -204,45 +197,44 @@ def plot_fairness(df, outdir):
     vmax = min(df["fairness_cv"].quantile(0.95), 100)
 
     for row, mode in enumerate(modes):
-        for col, grp in enumerate(groups):
-            ax = axes[row][col]
-            subset = df[(df["mode"] == mode) & (df["connection_groups"] == grp)]
+        ax = axes[row][0]
+        subset = df[df["mode"] == mode]
 
-            if subset.empty:
-                ax.set_visible(False)
-                continue
+        if subset.empty:
+            ax.set_visible(False)
+            continue
 
-            pivot = subset.pivot_table(
-                index="threads", columns="tags", values="fairness_cv", aggfunc="mean"
-            )
-            pivot = pivot.reindex(index=all_threads, columns=all_tags)
+        pivot = subset.pivot_table(
+            index="threads", columns="tags", values="fairness_cv", aggfunc="mean"
+        )
+        pivot = pivot.reindex(index=all_threads, columns=all_tags)
 
-            annot = pivot.copy().astype(object)
-            for t in all_threads:
-                for tag in all_tags:
-                    if pd.isna(pivot.loc[t, tag]):
-                        annot.loc[t, tag] = "N/A"
-                    else:
-                        annot.loc[t, tag] = f"{pivot.loc[t, tag]:.0f}"
+        annot = pivot.copy().astype(object)
+        for t in all_threads:
+            for tag in all_tags:
+                if pd.isna(pivot.loc[t, tag]):
+                    annot.loc[t, tag] = "N/A"
+                else:
+                    annot.loc[t, tag] = f"{pivot.loc[t, tag]:.0f}"
 
+        sns.heatmap(
+            pivot, ax=ax, annot=annot, fmt="",
+            cmap="RdYlGn_r", vmin=0, vmax=vmax,
+            cbar=True,
+            linewidths=0.5,
+            mask=pivot.isna(),
+        )
+        if pivot.isna().any().any():
             sns.heatmap(
-                pivot, ax=ax, annot=annot, fmt="",
-                cmap="RdYlGn_r", vmin=0, vmax=vmax,
-                cbar=col == len(groups) - 1,
-                linewidths=0.5,
-                mask=pivot.isna(),
+                pivot.isna().astype(float).where(pivot.isna(), other=np.nan),
+                ax=ax, annot=annot.where(pivot.isna(), other=""), fmt="",
+                cmap=mcolors.ListedColormap(["#cccccc"]),
+                vmin=0, vmax=1, cbar=False, linewidths=0.5,
             )
-            if pivot.isna().any().any():
-                sns.heatmap(
-                    pivot.isna().astype(float).where(pivot.isna(), other=np.nan),
-                    ax=ax, annot=annot.where(pivot.isna(), other=""), fmt="",
-                    cmap=mcolors.ListedColormap(["#cccccc"]),
-                    vmin=0, vmax=1, cbar=False, linewidths=0.5,
-                )
 
-            ax.set_title(f"{mode}, {grp} groups", fontsize=10)
-            ax.set_xlabel("tags" if row == len(modes) - 1 else "")
-            ax.set_ylabel("threads" if col == 0 else "")
+        ax.set_title(mode, fontsize=10)
+        ax.set_xlabel("tags" if row == len(modes) - 1 else "")
+        ax.set_ylabel("threads")
 
     fig.tight_layout()
     fname = os.path.join(outdir, "fairness_cv.png")
@@ -274,7 +266,7 @@ def main():
     plot_efficiency(df, outdir)
     plot_fairness(df, outdir)
 
-    print(f"\nDone. {5} charts in {outdir}/")
+    print(f"\nDone. 5 charts in {outdir}/")
 
 
 if __name__ == "__main__":
