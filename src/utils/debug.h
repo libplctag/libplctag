@@ -55,16 +55,7 @@ extern void debug_module_set_level(debug_module_t module, int level);
 extern int debug_module_get_level(debug_module_t module);
 extern void debug_set_all_modules(int level);
 
-/*
- * Per-module debug level array - exposed here so debug_is_enabled can be inlined
- * at every call site, eliminating function call overhead on the hot path.
- * Indexed directly by debug_module_t value.
- */
-extern volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
-
-static inline bool debug_is_enabled(debug_module_t module, int level) {
-    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= (int)debug_module_levels[module];
-}
+extern bool debug_is_enabled(debug_module_t module, int level);
 
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
                         ...);

@@ -1231,15 +1231,15 @@ void session_destroy(void *session_arg) {
 int session_add_request(ab_session_p session, ab_request_p req) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting. session=%p, req=%p", session, req);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
 
     critical_block(session->session_mutex) {
         if(!session) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session is null!");
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, req->tag_id, "Session is null!");
             return PLCTAG_ERR_NULL_PTR;
         }
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_inc: Acquiring request reference.");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, req->tag_id, "rc_inc: Acquiring request reference.");
         req = rc_inc(req);
 
         if(!req) {
@@ -1254,7 +1254,7 @@ int session_add_request(ab_session_p session, ab_request_p req) {
     /* wake up the session thread because we added something to process. */
     cond_signal(session->session_wait_cond);
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Done.");
 
     return rc;
 }
@@ -2301,11 +2301,17 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
         /* set up the offset */
         multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
 
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "new_req=%p", requests[i]);
+
+        /* get a pointer to the request. */
+        new_req = (eip_cip_co_req *)(requests[i]->data);
+
         /* calculate the request start and length */
         pkt_start = (uint8_t *)(&new_req->cpf_conn_seq_num) + sizeof(new_req->cpf_conn_seq_num);
         pkt_len = (int)le2h16(new_req->cpf_cdi_item_length) - (int)sizeof(new_req->cpf_conn_seq_num);
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[i]->tag_id, "packet %d is of length %d.", i, pkt_len);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "packet %d is of length %d.", i,
+               pkt_len);
 
         /* copy the request into the session buffer. */
         mem_copy(next_pkt_data, pkt_start, pkt_len);
@@ -3031,11 +3037,11 @@ int session_request_increase_buffer(ab_request_p request, int new_capacity) {
     uint8_t *old_buffer = NULL;
     uint8_t *new_buffer = NULL;
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, request->tag_id, "Starting.");
 
     new_buffer = (uint8_t *)mem_alloc(new_capacity);
     if(!new_buffer) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to allocate larger request buffer!");
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id, "Unable to allocate larger request buffer!");
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -3047,7 +3053,7 @@ int session_request_increase_buffer(ab_request_p request, int new_capacity) {
 
     mem_free(old_buffer);
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, request->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
 }

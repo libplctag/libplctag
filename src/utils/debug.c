@@ -69,11 +69,13 @@ static volatile int log_call_count = 0;
 
 /* Module name lookup table is now defined in debug_generated.h */
 
-/*
- * Per-module debug levels - indexed directly by debug_module_t value.
- * Exposed as extern so debug_is_enabled() can be inlined in debug.h.
- */
-volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
+/* Per-module debug levels - indexed directly by debug_module_t value. */
+static volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
+
+
+bool debug_is_enabled(debug_module_t module, int level) {
+    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= (int)debug_module_levels[module];
+}
 
 
 static THREAD_LOCAL uint32_t this_thread_num = 0;
