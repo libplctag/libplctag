@@ -126,10 +126,12 @@ int vector_insert(vector_p vec, int index, void *data) {
         }
 
         /* make sure we have room */
-        rc = ensure_capacity(vec, vec->len + 1);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to ensure capacity!");
-            break;
+        if(vec->len >= vec->capacity) {
+            rc = ensure_capacity(vec, vec->len + 1);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to ensure capacity!");
+                break;
+            }
         }
 
         /* move everything up one slot */
@@ -164,10 +166,12 @@ int vector_set(vector_p vec, int index, void *data) {
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    rc = ensure_capacity(vec, index + 1);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to ensure capacity!");
-        return rc;
+    if(index >= vec->capacity) {
+        rc = ensure_capacity(vec, index + 1);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to ensure capacity!");
+            return rc;
+        }
     }
 
     /* reference the new data. */
@@ -395,36 +399,27 @@ int ensure_capacity(vector_p vec, int capacity) {
     }
 
     /* is there anything to do? */
-    if(capacity <= vec->capacity) {
-        /* release the reference */
-        return PLCTAG_STATUS_OK;
-    }
+    if(capacity <= vec->capacity) { return PLCTAG_STATUS_OK; }
 
-    /* calculate the new capacity
-     *
-     * Start by guessing 50% larger.  Clamp that against 1 at the
-     * low end and the max increment passed when the vector was created.
-     */
-    new_inc = vec->capacity / 2;
-
-    if(new_inc > vec->max_inc) { new_inc = vec->max_inc; }
-
-    if(new_inc < 1) { new_inc = 1; }
+    /* determine how many increments to use */
+    int num_incs = ((capacity - vec->capacity) + (vec->max_inc - 1)) / vec->max_inc; /* round up division */
+    new_inc = num_incs * vec->max_inc;
 
     /* allocate the new data area */
-    new_data = (void **)mem_alloc((int)((sizeof(void *) * (size_t)(vec->capacity + new_inc))));
+    new_data = (void **)mem_realloc(vec->data, (int)((sizeof(void *) * (size_t)(vec->capacity + new_inc))));
     if(!new_data) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to allocate new data area!");
         return PLCTAG_ERR_NO_MEM;
     }
 
-    mem_copy(new_data, vec->data, (int)((size_t)(vec->capacity) * sizeof(void *)));
-
-    mem_free(vec->data);
+    /* clear the new area */
+    mem_set(&new_data[vec->capacity], 0, (int)(sizeof(void *) * (size_t)new_inc)); /* clear the new area */
 
     vec->data = new_data;
 
     vec->capacity += new_inc;
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Increased vector capacity to %d (added %d)", vec->capacity, new_inc);
 
     return PLCTAG_STATUS_OK;
 }
