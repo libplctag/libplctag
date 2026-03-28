@@ -195,7 +195,7 @@ Each phase produces a buildable, testable result. Phases are strictly incrementa
    #include <libplctag/lib/tag.h>
    #include <utils/attr.h>
 
-   int enip_tcp_init(void);
+   plctag_error_code_t enip_tcp_init(void);
    void enip_tcp_teardown(void);
    plc_tag_p enip_tcp_tag_create(attr attribs,
        void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
@@ -263,15 +263,15 @@ on shutdown. Also verify that `plc_tag_create("protocol=enip-tcp&gateway=127.0.0
        /* CIP tag identity */
        char *name;                 /* symbolic tag name (e.g. "MyTag") */
        uint16_t elem_type;         /* CIP type code */
-       int elem_count;             /* number of elements */
-       int elem_size;              /* bytes per element */
+       int32_t elem_count;         /* number of elements */
+       int32_t elem_size;          /* bytes per element */
 
        /* fragmentation state */
-       int offset;                 /* current byte offset into tag data (for fragmented reads/writes) */
+       int32_t offset;             /* current byte offset into tag data (for fragmented reads/writes) */
 
        /* operation tracking */
-       int read_in_progress;
-       int write_in_progress;
+       bool read_in_progress;
+       bool write_in_progress;
    };
    ```
 
@@ -302,9 +302,9 @@ on shutdown. Also verify that `plc_tag_create("protocol=enip-tcp&gateway=127.0.0
    struct enip_tcp_conn_t {
        /* identity — used for connection sharing */
        char *host;
-       int port;                       /* default 44818 */
+       uint16_t port;                  /* default 44818 */
        char *path;                     /* e.g. "1,0" for backplane port 1, slot 0 */
-       int connection_group_id;
+       int32_t connection_group_id;
 
        /* encoded CIP path (backplane/slot → port/link segment) */
        uint8_t *conn_path;
@@ -324,7 +324,7 @@ on shutdown. Also verify that `plc_tag_create("protocol=enip-tcp&gateway=127.0.0
 
        /* thread management */
        thread_p handler_thread;
-       volatile int terminating;
+       volatile bool terminating;
        mutex_p conn_mutex;
        cond_p conn_wait_cond;
 
@@ -333,12 +333,12 @@ on shutdown. Also verify that `plc_tag_create("protocol=enip-tcp&gateway=127.0.0
        atomic_int32_t connection_status;
 
        /* timing */
-       int auto_disconnect_enabled;
-       int auto_disconnect_timeout_ms;
+       bool auto_disconnect_enabled;
+       int32_t auto_disconnect_timeout_ms;
        atomic_int32_t connection_inactivity_timeout_ms;
 
        /* on the global list? */
-       int on_list;
+       bool on_list;
    };
    ```
 
@@ -492,14 +492,14 @@ Update `enip_tcp_conn.c` to replace the stub handler thread with a real blocking
 ```c
 THREAD_FUNC(enip_tcp_conn_handler) {
     enip_tcp_conn_p conn = (enip_tcp_conn_p)arg;
-    int retry_count = 0;
+    int32_t retry_count = 0;
 
     while (!conn->terminating) {
         conn->sock = async_stream_create();
         if (conn->sock == INVALID_SOCKET) goto retry_wait;
 
         /* --- Stage 1: TCP Connect --- */
-        int rc = async_stream_connect(conn->async, conn->sock, conn->host, (uint16_t)conn->port, 5000);
+        plctag_error_code_t rc = async_stream_connect(conn->async, conn->sock, conn->host, conn->port, 5000);
         if (rc != PLCTAG_STATUS_OK) goto close_socket;
 
         /* --- Stages 2-3: EIP Register + Forward Open (Phase 4+) --- */
@@ -1029,10 +1029,10 @@ Verify Forward Open succeeds (check connection IDs in debug log), reads/writes w
 
    ```c
    /* Encode CIP Multiple Service Packet (service 0x0A to Message Router) */
-   Bytes cip_encode_multi_request(Arena *a, Bytes *requests, int request_count);
+   Bytes cip_encode_multi_request(Arena *a, Bytes *requests, int32_t request_count);
 
    /* Parse CIP Multiple Service Packet response — returns array of individual CipResponses */
-   int cip_parse_multi_response(Bytes response, CipResponse *responses_out, int max_responses);
+   int32_t cip_parse_multi_response(Bytes response, CipResponse *responses_out, int32_t max_responses);
    ```
 
    Format: `[0x0A][path_words][class 0x02 instance 0x01][service_count:2][offsets:2*N][request_1][request_2]...`
