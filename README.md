@@ -32,7 +32,7 @@
 **libplctag** is an open source C library for Linux, Windows and macOS using **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
 | **Latest Stable Release:** |
-|             :-:            | 
+|             :-:            |
 | ![Latest Release](https://img.shields.io/github/v/release/libplctag/libplctag) |
 
 ## Tier One Platforms
@@ -145,9 +145,9 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
   - Java [libplctag4j](https://github.com/libplctag/libplctag4j)
   - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl)
 - Minimal wrappers included with the C source:
-  -  C++
-  -  Python
-  -  Pascal
+  - C++
+  - Python
+  - Pascal
 - Other wrappers on GitHub:
   - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet)
   - C#, [Mesta Automation](https://github.com/mesta1/libplctag-csharp)
