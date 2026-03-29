@@ -158,7 +158,8 @@ static void *thread_func(void *arg) {
          * Batching all reads before polling allows the library to have all
          * requests in-flight simultaneously rather than serializing them.
          * No locking needed -- this thread exclusively owns its tags. */
-        int read_rc[td->num_tags];
+        int *read_rc = (int *)calloc((size_t)td->num_tags, sizeof(int));
+        if(!read_rc) { return NULL; }
 
         while(!done) {
             /* Phase 1: Start reads on all tags. */
@@ -197,6 +198,8 @@ static void *thread_func(void *arg) {
                 }
             }
         }
+
+        free(read_rc);
     } else {
         /* Sync: blocking read.
          * No locking needed -- this thread exclusively owns its tags. */
