@@ -71,16 +71,16 @@ static int expand_table(hashtable_p table);
 hashtable_p hashtable_create(int initial_capacity) {
     hashtable_p tab = NULL;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Starting");
 
     if(initial_capacity <= 0) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Size is less than or equal to zero!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Size is less than or equal to zero!");
         return NULL;
     }
 
     tab = mem_alloc(sizeof(struct hashtable_t));
     if(!tab) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate memory for hash table!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to allocate memory for hash table!");
         return NULL;
     }
 
@@ -90,12 +90,12 @@ hashtable_p hashtable_create(int initial_capacity) {
 
     tab->entries = mem_alloc(initial_capacity * (int)sizeof(struct hashtable_entry_t));
     if(!tab->entries) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate entry array!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to allocate entry array!");
         hashtable_destroy(tab);
         return NULL;
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Done");
 
     return tab;
 }
@@ -105,22 +105,22 @@ void *hashtable_get(hashtable_p table, int64_t key) {
     int index = 0;
     void *result = NULL;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid.");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid.");
         return NULL;
     }
 
     index = find_key(table, key);
     if(index != PLCTAG_ERR_NOT_FOUND) {
         result = table->entries[index].data;
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "found data %p", result);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "found data %p", result);
     } else {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "key not found!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "key not found!");
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Done");
 
     return result;
 }
@@ -130,10 +130,10 @@ int hashtable_put(hashtable_p table, int64_t key, void *data) {
     int rc = PLCTAG_STATUS_OK;
     int index = 0;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid.");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -142,20 +142,20 @@ int hashtable_put(hashtable_p table, int64_t key, void *data) {
     while(index == PLCTAG_ERR_NOT_FOUND) {
         rc = expand_table(table);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Unable to expand table to make entry unique!");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to expand table to make entry unique!");
             return rc;
         }
 
         index = find_empty(table, key);
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Putting value at index %d", index);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Putting value at index %d", index);
 
     table->entries[index].key = key;
     table->entries[index].data = data;
     table->used_entries++;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -163,12 +163,12 @@ int hashtable_put(hashtable_p table, int64_t key, void *data) {
 
 void *hashtable_get_index(hashtable_p table, int index) {
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid");
         return NULL;
     }
 
     if(index < 0 || index >= table->total_entries) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Out of bounds index!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Out of bounds index!");
         return NULL;
     }
 
@@ -178,7 +178,7 @@ void *hashtable_get_index(hashtable_p table, int index) {
 
 int hashtable_capacity(hashtable_p table) {
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -188,7 +188,7 @@ int hashtable_capacity(hashtable_p table) {
 
 int hashtable_entries(hashtable_p table) {
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -200,7 +200,7 @@ int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table,
                       void *context_arg) {
     int rc = PLCTAG_STATUS_OK;
 
-    if(!table) { pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid"); }
+    if(!table) { pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid"); }
 
     for(int i = 0; i < table->total_entries && rc == PLCTAG_STATUS_OK; i++) {
         if(table->entries[i].data) { rc = callback_func(table, table->entries[i].key, table->entries[i].data, context_arg); }
@@ -214,16 +214,16 @@ void *hashtable_remove(hashtable_p table, int64_t key) {
     int index = 0;
     void *result = NULL;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Hashtable pointer null or invalid.");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid.");
         return result;
     }
 
     index = find_key(table, key);
     if(index == PLCTAG_ERR_NOT_FOUND) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Not found.");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Not found.");
         return result;
     }
 
@@ -232,17 +232,17 @@ void *hashtable_remove(hashtable_p table, int64_t key) {
     table->entries[index].data = NULL;
     table->used_entries--;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Done");
 
     return result;
 }
 
 
 int hashtable_destroy(hashtable_p table) {
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Called with null pointer!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Called with null pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -251,7 +251,7 @@ int hashtable_destroy(hashtable_p table) {
 
     mem_free(table);
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -270,7 +270,7 @@ int find_key(hashtable_p table, int64_t key) {
     int index = 0;
     int iteration = 0;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting.");
 
     /*
      * search for the hash value.
@@ -287,13 +287,13 @@ int find_key(hashtable_p table, int64_t key) {
 
     if(iteration >= MAX_ITERATIONS) {
         /* FIXME - does not work on Windows. */
-        // pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Key %ld not found.", key);
+        // pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Key %ld not found.", key);
         return PLCTAG_ERR_NOT_FOUND;
     } else {
-        // pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Key %d found at index %d.", (int)table->entries[index].key, index);
+        // pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Key %d found at index %d.", (int)table->entries[index].key, index);
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Done.");
 
     return index;
 }
@@ -304,22 +304,22 @@ int find_empty(hashtable_p table, int64_t key) {
     int index = 0;
     int iteration = 0;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting.");
 
     /* search for the hash value. */
     for(iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
         index = ((int)initial_index + iteration) % table->total_entries;
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Trying index %d for key %ld.", index, key);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Trying index %d for key %ld.", index, key);
         if(table->entries[index].data == NULL) { break; }
     }
 
     if(iteration >= MAX_ITERATIONS) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "No empty entry found in %d iterations!", MAX_ITERATIONS);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "No empty entry found in %d iterations!", MAX_ITERATIONS);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Done.");
 
     return index;
 }
@@ -330,9 +330,9 @@ int expand_table(hashtable_p table) {
     int total_entries = table->total_entries;
     int index = PLCTAG_ERR_NOT_FOUND;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting.");
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Table using %d entries of %d.", table->used_entries, table->total_entries);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Table using %d entries of %d.", table->used_entries, table->total_entries);
 
     do {
         /* double entries unless already at max doubling, then increment. */
@@ -342,11 +342,11 @@ int expand_table(hashtable_p table) {
         new_table.used_entries = 0;
         new_table.hash_salt = table->hash_salt;
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "trying new size = %d", total_entries);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "trying new size = %d", total_entries);
 
         new_table.entries = mem_alloc(total_entries * (int)sizeof(struct hashtable_entry_t));
         if(!new_table.entries) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate new entry array!");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to allocate new entry array!");
             return PLCTAG_ERR_NO_MEM;
         }
 
@@ -356,7 +356,7 @@ int expand_table(hashtable_p table) {
                 index = find_empty(&new_table, table->entries[i].key);
                 if(index == PLCTAG_ERR_NOT_FOUND) {
                     /* oops, still cannot insert all the entries! Try again. */
-                    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Unable to insert existing entry into expanded table. Retrying.");
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Unable to insert existing entry into expanded table. Retrying.");
                     mem_free(new_table.entries);
                     break;
                 } else {
@@ -374,7 +374,7 @@ int expand_table(hashtable_p table) {
     table->total_entries = new_table.total_entries;
     table->used_entries = new_table.used_entries;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Done.");
 
     return PLCTAG_STATUS_OK;
 }

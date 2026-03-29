@@ -23,6 +23,7 @@
     - [libplctag Forum](#libplctag-forum)
     - [GitHub](#github)
   - [License](#license)
+  - [Use of AI/LLM](#use-of-aillm)
   - [Attributions and Trademarks](#attributions-and-trademarks)
   - [End Note](#end-note)
 
@@ -31,7 +32,7 @@
 **libplctag** is an open source C library for Linux, Windows and macOS using **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
 | **Latest Stable Release:** |
-|             :-:            | 
+|             :-:            |
 | ![Latest Release](https://img.shields.io/github/v/release/libplctag/libplctag) |
 
 ## Tier One Platforms
@@ -69,7 +70,12 @@ Download it from the [releases page](https://github.com/libplctag/libplctag/rele
 
 If you find libplctag useful, consider supporting its development:
 
+- [Support on Polar.sh](https://polar.sh/checkout/polar_c_UqpJ9sropeuDdWfwsS4ESJRE4aCYGU9IFmLjA3x8Sjx)
 - [GitHub Sponsors](https://github.com/sponsors/libplctag)
+
+Thanks to our $25+/month sponsors:
+
+- @jspinks8144 - thanks!
 
 ## Features
 
@@ -139,9 +145,9 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
   - Java [libplctag4j](https://github.com/libplctag/libplctag4j)
   - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl)
 - Minimal wrappers included with the C source:
-  -  C++
-  -  Python
-  -  Pascal
+  - C++
+  - Python
+  - Pascal
 - Other wrappers on GitHub:
   - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet)
   - C#, [Mesta Automation](https://github.com/mesta1/libplctag-csharp)
@@ -233,6 +239,10 @@ to use of this library.  This code is **dual licensed** under the Mozilla Public
 Lesser/Library General Public License 2 or later (LGPL 2+).
 
 This dual license applies to the core C library.  Additional wrappers for other languages may be under different licenses.   Please see those projects for more information.
+
+## Use of AI/LLM
+
+See the [AI Policy](AI-POLICY.md) document.
 
 ## Attributions and Trademarks
 

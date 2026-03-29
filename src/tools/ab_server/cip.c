@@ -141,6 +141,7 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
     uint8_t cip_service = 0;
     slice_s cip_service_path = {0};
     slice_s cip_service_payload = {0};
+    uint16_t embedded_cip_service_length = 0;
 
     log_info("Got packet:");
     log_info_slice(input);
@@ -170,7 +171,7 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
 
         case CIP_SRV_UNCONNECTED_SEND:
             /* we've stripped off the CM part, but there is a byte count of the remaining data that we need. */
-            uint16_t embedded_cip_service_length = slice_get_uint16_le(cip_service_payload, 2);
+            embedded_cip_service_length = slice_get_uint16_le(cip_service_payload, 2);
 
             log_info("Unconnected Send: embedded CIP service length %d", embedded_cip_service_length);
 

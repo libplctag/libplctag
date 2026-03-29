@@ -77,19 +77,19 @@ function(parse_libplctag_header_impl INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     set(MODULE_ENUM_ENTRIES "")
     set(MODULE_NAME_TABLE "")
     set(MODULE_COUNT 0)
-    string(REGEX MATCHALL "PLCTAG_MODULE_[A-Z_0-9]+[ \t]*=[ \t]*\\(1ULL << [0-9]+\\)" MODULE_MATCHES "${HEADER_CONTENT}")
+    string(REGEX MATCHALL "PLCTAG_MODULE_[A-Z_0-9]+[ \t]*=[ \t]*[0-9]+" MODULE_MATCHES "${HEADER_CONTENT}")
     foreach(MATCH ${MODULE_MATCHES})
         # Extract module name
         string(REGEX MATCH "PLCTAG_MODULE_([A-Z_0-9]+)" MODULE_NAME_MATCH "${MATCH}")
         set(MODULE_NAME "${CMAKE_MATCH_1}")
 
-        # Extract bit position
-        string(REGEX MATCH "1ULL << ([0-9]+)" BIT_MATCH "${MATCH}")
-        set(BIT_POS "${CMAKE_MATCH_1}")
+        # Extract sequential index
+        string(REGEX MATCH "=[ \t]*([0-9]+)" IDX_MATCH "${MATCH}")
+        set(MODULE_IDX "${CMAKE_MATCH_1}")
 
-        if(MODULE_NAME AND DEFINED BIT_POS)
-            set(MODULE_ENUM_ENTRIES "${MODULE_ENUM_ENTRIES}    DEBUG_MODULE_${MODULE_NAME} = (1ULL << ${BIT_POS}),\n")
-            set(MODULE_NAME_TABLE "${MODULE_NAME_TABLE}    [${BIT_POS}] = \"${MODULE_NAME}\",\n")
+        if(MODULE_NAME AND MODULE_IDX GREATER_EQUAL 0)
+            set(MODULE_ENUM_ENTRIES "${MODULE_ENUM_ENTRIES}    DEBUG_MODULE_${MODULE_NAME} = ${MODULE_IDX},\n")
+            set(MODULE_NAME_TABLE "${MODULE_NAME_TABLE}    [${MODULE_IDX}] = \"${MODULE_NAME}\",\n")
             math(EXPR MODULE_COUNT "${MODULE_COUNT} + 1")
         endif()
     endforeach()
@@ -113,12 +113,11 @@ function(parse_libplctag_header_impl INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     set(GENERATED_HEADER "${GENERATED_HEADER}typedef enum {\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}${MODULE_ENUM_ENTRIES}")
     set(GENERATED_HEADER "${GENERATED_HEADER}} debug_module_t;\n\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}typedef uint64_t debug_module_mask_t;\n\n")
-    
-    # Module name table - declaration (in header)
-    set(GENERATED_HEADER "${GENERATED_HEADER}/* Module name lookup table */\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}extern const char *debug_module_names[];\n\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}#define DEBUG_MODULE_COUNT ${MODULE_COUNT}\n\n")
+
+    # Module name table - declaration (in header)
+    set(GENERATED_HEADER "${GENERATED_HEADER}/* Module name lookup table - indexed by debug_module_t value */\n")
+    set(GENERATED_HEADER "${GENERATED_HEADER}extern const char *debug_module_names[DEBUG_MODULE_COUNT];\n\n")
 
     # Error codes (for potential use)
     set(GENERATED_HEADER "${GENERATED_HEADER}/* Error codes - generated from plctag_error_code_t enum */\n")
