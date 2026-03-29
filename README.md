@@ -70,7 +70,7 @@ Download it from the [releases page](https://github.com/libplctag/libplctag/rele
 
 If you find libplctag useful, consider supporting its development:
 
-- [![Support on Polar](https://img.shields.io/badge/Support-Polar.sh-blue)](https://polar.sh/libplctag)
+- [![Support on Polar](https://img.shields.io/badge/Support-Polar.sh-blue)](https://polar.sh/checkout/polar_c_UqpJ9sropeuDdWfwsS4ESJRE4aCYGU9IFmLjA3x8Sjx)
 - [GitHub Sponsors](https://github.com/sponsors/libplctag)
 
 Thanks to our $25+/month sponsors:
