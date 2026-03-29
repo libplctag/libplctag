@@ -146,7 +146,7 @@ int main(int argc, const char **argv) {
     /* set up handler for ^C etc. */
     setup_break_handler();
 
-    log_set_level(LOG_LEVEL_DETAIL);
+    //    log_set_level(LOG_LEVEL_DETAIL);
 
     /* clear out context to make sure we do not get gremlins */
     // NOLINTNEXTLINE

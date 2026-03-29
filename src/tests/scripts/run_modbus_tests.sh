@@ -105,6 +105,29 @@ fi
 
 
 let TEST++
+echo -n "  Test $TEST: Modbus tag scheduling fairness... "
+$VALGRIND$TEST_DIR/test_fairness "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10&auto_sync_read_ms=200" --num-tags=1100 --test-duration-secs=5 > "$LOG_DIR/${TEST}_modbus_fairness_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "  Test $TEST: Modbus large tag test... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint16 "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10&elem_count=500" > "$LOG_DIR/${TEST}_modbus_large_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
 echo -n "  Test $TEST: test idle disconnect with Modbus... "
 $VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" > "$LOG_DIR/${TEST}_modbus_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
@@ -160,18 +183,6 @@ fi
 let TEST++
 echo -n "  Test $TEST: hard library shutdown... "
 $VALGRIND$TEST_DIR/test_shutdown_modbus > "$LOG_DIR/${TEST}_shutdown.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
-
-let TEST++
-echo -n "  Test $TEST: Modbus tag scheduling fairness... "
-$VALGRIND$TEST_DIR/test_fairness "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10&auto_sync_read_ms=200" --num-tags=200 --test-duration-secs=10 > "$LOG_DIR/${TEST}_modbus_fairness_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

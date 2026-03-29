@@ -19,38 +19,36 @@ typedef enum {
 
 /* Debug modules - generated from PLCTAG_MODULE_* defines */
 typedef enum {
-    DEBUG_MODULE_LIB = (1ULL << 0),
-    DEBUG_MODULE_INIT = (1ULL << 1),
-    DEBUG_MODULE_VERSION = (1ULL << 2),
-    DEBUG_MODULE_UTILS = (1ULL << 3),
-    DEBUG_MODULE_AB_SESSION = (1ULL << 4),
-    DEBUG_MODULE_AB_PCCC = (1ULL << 5),
-    DEBUG_MODULE_AB_CIP = (1ULL << 6),
-    DEBUG_MODULE_AB_COMMON = (1ULL << 7),
-    DEBUG_MODULE_AB_EIP_CIP = (1ULL << 8),
-    DEBUG_MODULE_AB_EIP_CIP_SPECIAL = (1ULL << 9),
-    DEBUG_MODULE_AB_EIP_LGX_PCCC = (1ULL << 10),
-    DEBUG_MODULE_AB_EIP_PLC5_PCCC = (1ULL << 11),
-    DEBUG_MODULE_AB_EIP_PLC5_DHP = (1ULL << 12),
-    DEBUG_MODULE_AB_EIP_SLC_PCCC = (1ULL << 13),
-    DEBUG_MODULE_AB_EIP_SLC_DHP = (1ULL << 14),
-    DEBUG_MODULE_AB_ERROR = (1ULL << 15),
-    DEBUG_MODULE_OMRON_CONN = (1ULL << 16),
-    DEBUG_MODULE_OMRON_CIP = (1ULL << 17),
-    DEBUG_MODULE_OMRON_COMMON = (1ULL << 18),
-    DEBUG_MODULE_OMRON_STANDARD_TAG = (1ULL << 19),
-    DEBUG_MODULE_OMRON_RAW_TAG = (1ULL << 20),
-    DEBUG_MODULE_MODBUS = (1ULL << 21),
-    DEBUG_MODULE_SYSTEM = (1ULL << 22),
-    DEBUG_MODULE_PLATFORM = (1ULL << 23),
+    DEBUG_MODULE_LIB = 0,
+    DEBUG_MODULE_INIT = 1,
+    DEBUG_MODULE_VERSION = 2,
+    DEBUG_MODULE_UTILS = 3,
+    DEBUG_MODULE_AB_SESSION = 4,
+    DEBUG_MODULE_AB_PCCC = 5,
+    DEBUG_MODULE_AB_CIP = 6,
+    DEBUG_MODULE_AB_COMMON = 7,
+    DEBUG_MODULE_AB_EIP_CIP = 8,
+    DEBUG_MODULE_AB_EIP_CIP_SPECIAL = 9,
+    DEBUG_MODULE_AB_EIP_LGX_PCCC = 10,
+    DEBUG_MODULE_AB_EIP_PLC5_PCCC = 11,
+    DEBUG_MODULE_AB_EIP_PLC5_DHP = 12,
+    DEBUG_MODULE_AB_EIP_SLC_PCCC = 13,
+    DEBUG_MODULE_AB_EIP_SLC_DHP = 14,
+    DEBUG_MODULE_AB_ERROR = 15,
+    DEBUG_MODULE_OMRON_CONN = 16,
+    DEBUG_MODULE_OMRON_CIP = 17,
+    DEBUG_MODULE_OMRON_COMMON = 18,
+    DEBUG_MODULE_OMRON_STANDARD_TAG = 19,
+    DEBUG_MODULE_OMRON_RAW_TAG = 20,
+    DEBUG_MODULE_MODBUS = 21,
+    DEBUG_MODULE_SYSTEM = 22,
+    DEBUG_MODULE_PLATFORM = 23,
 } debug_module_t;
 
-typedef uint64_t debug_module_mask_t;
-
-/* Module name lookup table */
-extern const char *debug_module_names[];
-
 #define DEBUG_MODULE_COUNT 24
+
+/* Module name lookup table - indexed by debug_module_t value */
+extern const char *debug_module_names[DEBUG_MODULE_COUNT];
 
 /* Error codes - generated from plctag_error_code_t enum */
 /* (Available if needed for internal error handling) */
