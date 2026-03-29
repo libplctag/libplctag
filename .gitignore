@@ -62,3 +62,4 @@ src/tests/log.txt
 .claude
 .vscode
 external_docs/
+build_perf/*

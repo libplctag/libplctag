@@ -89,7 +89,7 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
     /* Allocate header + data as single block */
     header = (handle_header_t *)mem_alloc(sizeof(handle_header_t) + data_size);
     if(!header) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Failed to allocate handle");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Failed to allocate handle");
         return HANDLE_INVALID;
     }
 
@@ -110,7 +110,7 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
             handle_array.num_slots = 256;
             handle_array.slots = (handle_slot_t *)mem_alloc(handle_array.num_slots * sizeof(handle_slot_t));
             if(!handle_array.slots) {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Failed to allocate handle array");
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Failed to allocate handle array");
                 mem_free(header);
                 return HANDLE_INVALID;
             }
@@ -127,7 +127,7 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
             uint64_t new_size = handle_array.num_slots * 2;
             handle_slot_t *new_slots = (handle_slot_t *)mem_alloc(new_size * sizeof(handle_slot_t));
             if(!new_slots) {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Failed to grow handle array");
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Failed to grow handle array");
                 mem_free(header);
                 return HANDLE_INVALID;
             }
@@ -152,7 +152,7 @@ handle_t handle_alloc(size_t data_size, handle_destructor_f destructor) {
         handle_array.next_free = index + 1;
         atomic_add_int32(&handle_array.active_count, 1);
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle allocated: index=%llu gen=%u active=%d", index, gen,
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle allocated: index=%llu gen=%u active=%d", index, gen,
                atomic_get_int32(&handle_array.active_count));
     }
 
@@ -171,7 +171,7 @@ int handle_acquire(handle_t h, void **data_out) {
     *data_out = NULL;
 
     if(!handle_array.slots || index >= handle_array.num_slots) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle acquire failed: invalid index %llu", index);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle acquire failed: invalid index %llu", index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -179,7 +179,7 @@ int handle_acquire(handle_t h, void **data_out) {
 
     /* Validate handle: check if handle matches current slot handle */
     if(slot->data == NULL || slot->handle != h) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle acquire failed: handle mismatch or free slot");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle acquire failed: handle mismatch or free slot");
         return PLCTAG_ERR_NOT_FOUND; /* Slot is free or generation mismatch */
     }
 
@@ -187,7 +187,7 @@ int handle_acquire(handle_t h, void **data_out) {
 
     /* Check destruction flag without lock first (fast path) */
     if(header->destroying) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle acquire failed: object being destroyed");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle acquire failed: object being destroyed");
         return PLCTAG_ERR_OBJECT_FREED;
     }
 
@@ -197,7 +197,7 @@ int handle_acquire(handle_t h, void **data_out) {
     /* Double-check destruction after acquiring lock */
     if(header->destroying) {
         mutex_unlock(header->mutex);
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle acquire failed: object marked destroying after lock");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle acquire failed: object marked destroying after lock");
         return PLCTAG_ERR_OBJECT_FREED;
     }
 
@@ -219,14 +219,14 @@ void handle_release(handle_t h) {
     handle_header_t *header;
 
     if(!handle_array.slots || index >= handle_array.num_slots) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle release: invalid index %llu", index);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Handle release: invalid index %llu", index);
         return;
     }
 
     slot = &handle_array.slots[index];
 
     if(!slot->data || slot->handle != h) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle release: handle invalid or already freed");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Handle release: handle invalid or already freed");
         return; /* Handle is invalid */
     }
 
@@ -249,7 +249,7 @@ int handle_destroy(handle_t h) {
     int wait_count = 0;
 
     if(!handle_array.slots || index >= handle_array.num_slots) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle destroy: invalid index %llu", index);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Handle destroy: invalid index %llu", index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -257,7 +257,7 @@ int handle_destroy(handle_t h) {
         slot = &handle_array.slots[index];
 
         if(!slot->data || slot->handle != h) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle destroy: already freed or wrong generation");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Handle destroy: already freed or wrong generation");
             return PLCTAG_ERR_NOT_FOUND; /* Already freed or wrong generation */
         }
 
@@ -268,7 +268,7 @@ int handle_destroy(handle_t h) {
         header->destroying = 1;
         mutex_unlock(header->mutex);
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle destroy: index=%llu marked destroying, refcount=%d", index,
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle destroy: index=%llu marked destroying, refcount=%d", index,
                atomic_get_int32(&header->refcount));
 
         /* Wait for refcount to reach 1 (only the initial refcount remains) */
@@ -279,7 +279,7 @@ int handle_destroy(handle_t h) {
             critical_block_re_enter(handle_array_init_mutex);
 
             if(wait_count > 10000) {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Handle destroy: timeout waiting for refcount, count=%d",
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Handle destroy: timeout waiting for refcount, count=%d",
                        atomic_get_int32(&header->refcount));
                 break;
             }
@@ -301,13 +301,13 @@ int handle_destroy(handle_t h) {
 
         atomic_add_int32(&handle_array.active_count, -1);
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle destroyed: index=%llu new_gen=%u active=%d", index, next_gen,
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle destroyed: index=%llu new_gen=%u active=%d", index, next_gen,
                atomic_get_int32(&handle_array.active_count));
     }
 
     /* Call destructor outside critical section */
     if(destructor && data) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Calling destructor for handle");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Calling destructor for handle");
         destructor(data);
     }
 
@@ -319,7 +319,7 @@ int handle_destroy(handle_t h) {
 
     /* Signal cleanup waiters if no more handles */
     if(atomic_get_int32(&handle_array.active_count) == 0) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "All handles destroyed, signaling cleanup");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "All handles destroyed, signaling cleanup");
         cond_signal(handle_cleanup_cond);
     }
 
@@ -330,22 +330,22 @@ int handle_destroy(handle_t h) {
 void handle_system_teardown(void) {
     int wait_count = 0;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Handle system teardown starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Handle system teardown starting");
 
     while(atomic_get_int32(&handle_array.active_count) > 0) {
         wait_count++;
         int rc = cond_wait(handle_cleanup_cond, 5000);
         if(rc == PLCTAG_ERR_TIMEOUT) {
             if(wait_count >= 3) {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Timeout waiting for handles to cleanup, giving up (active=%d)",
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Timeout waiting for handles to cleanup, giving up (active=%d)",
                        atomic_get_int32(&handle_array.active_count));
                 break;
             } else {
-                pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Timeout waiting for handles, retrying... (active=%d)",
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Timeout waiting for handles, retrying... (active=%d)",
                        atomic_get_int32(&handle_array.active_count));
             }
         } else {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Handle cleanup signaled (active=%d)",
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Handle cleanup signaled (active=%d)",
                    atomic_get_int32(&handle_array.active_count));
         }
     }
@@ -365,5 +365,5 @@ void handle_system_teardown(void) {
         handle_cleanup_cond = NULL;
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Handle system teardown complete");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Handle system teardown complete");
 }

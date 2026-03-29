@@ -42,46 +42,51 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <libplctag/lib/libplctag.h>
 
 /* Generated debug constants - parsed from libplctag.h at build time */
 #include "debug_generated.h"
 
-typedef uint64_t debug_module_mask_t;
-
 extern int set_debug_level(int debug_level);
 extern int get_debug_level(void);
-extern void debug_set_tag_id(int32_t tag_id);
+// extern void debug_set_tag_id(int32_t tag_id);
 
 /* Module configuration API */
 extern void debug_module_set_level(debug_module_t module, int level);
 extern int debug_module_get_level(debug_module_t module);
 extern void debug_set_all_modules(int level);
-extern bool debug_is_enabled(debug_module_mask_t modules, int level);
 
-/* Module and level name conversion API */
-extern debug_module_t debug_module_id(const char *module_name);
-extern int debug_level_id(const char *level_name);
+extern bool debug_is_enabled(debug_module_t module, int level);
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, const char *templ, ...);
+extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
+                        ...);
 
 #if defined(_WIN32) && defined(_MSC_VER)
 /* MinGW on Windows does not need this. */
 #    define __func__ __FUNCTION__
 #endif
 
+/* set the compile-time max debug level if not already defined*/
+#ifndef PLCTAG_COMPILE_DEBUG_LEVEL
+#    define PLCTAG_COMPILE_DEBUG_LEVEL PLCTAG_DEBUG_DETAIL
+#endif
 
-/* New style: pdebug(modules, level, msg, ...) - modules parameter is REQUIRED */
-#define pdebug(modules, dbg, ...)                                                                                             \
-    do {                                                                                                                      \
-        if((dbg) != DEBUG_NONE && debug_is_enabled(modules, dbg)) pdebug_impl(__func__, __LINE__, dbg, modules, __VA_ARGS__); \
+#define pdebug(module, dbg, tag_id, ...)                                                                                       \
+    do {                                                                                                                       \
+        if((dbg) <= PLCTAG_COMPILE_DEBUG_LEVEL) {                                                                              \
+            if(debug_is_enabled((module), (dbg))) { pdebug_impl(__func__, __LINE__, (dbg), (module), (tag_id), __VA_ARGS__); } \
+        }                                                                                                                      \
     } while(0)
 
-extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, uint8_t *data,
-                                   int count);
-#define pdebug_dump_bytes(modules, dbg, d, c)                               \
-    do {                                                                    \
-        if((dbg) != DEBUG_NONE && debug_is_enabled(modules, dbg))           \
-            pdebug_dump_bytes_impl(__func__, __LINE__, dbg, modules, d, c); \
+extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
+                                   uint8_t *data, int count);
+#define pdebug_dump_bytes(module, dbg, tag_id, d, c)                                             \
+    do {                                                                                         \
+        if((dbg) <= PLCTAG_COMPILE_DEBUG_LEVEL) {                                                \
+            if(debug_is_enabled((module), (dbg))) {                                              \
+                pdebug_dump_bytes_impl(__func__, __LINE__, (dbg), (module), (tag_id), (d), (c)); \
+            }                                                                                    \
+        }                                                                                        \
     } while(0)
 
 extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));

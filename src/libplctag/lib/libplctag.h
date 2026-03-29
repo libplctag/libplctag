@@ -178,32 +178,32 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
  *       as they will likely be added to in future releases.
  */
 
-/** Debug module IDs - these are 64-bit pre-shifted values for bitmask operations */
+/** Debug module IDs - sequential integer values, used as array indices */
 typedef enum {
-    PLCTAG_MODULE_LIB = (1ULL << 0),
-    PLCTAG_MODULE_INIT = (1ULL << 1),
-    PLCTAG_MODULE_VERSION = (1ULL << 2),
-    PLCTAG_MODULE_UTILS = (1ULL << 3),
-    PLCTAG_MODULE_AB_SESSION = (1ULL << 4),
-    PLCTAG_MODULE_AB_PCCC = (1ULL << 5),
-    PLCTAG_MODULE_AB_CIP = (1ULL << 6),
-    PLCTAG_MODULE_AB_COMMON = (1ULL << 7),
-    PLCTAG_MODULE_AB_EIP_CIP = (1ULL << 8),
-    PLCTAG_MODULE_AB_EIP_CIP_SPECIAL = (1ULL << 9),
-    PLCTAG_MODULE_AB_EIP_LGX_PCCC = (1ULL << 10),
-    PLCTAG_MODULE_AB_EIP_PLC5_PCCC = (1ULL << 11),
-    PLCTAG_MODULE_AB_EIP_PLC5_DHP = (1ULL << 12),
-    PLCTAG_MODULE_AB_EIP_SLC_PCCC = (1ULL << 13),
-    PLCTAG_MODULE_AB_EIP_SLC_DHP = (1ULL << 14),
-    PLCTAG_MODULE_AB_ERROR = (1ULL << 15),
-    PLCTAG_MODULE_OMRON_CONN = (1ULL << 16),
-    PLCTAG_MODULE_OMRON_CIP = (1ULL << 17),
-    PLCTAG_MODULE_OMRON_COMMON = (1ULL << 18),
-    PLCTAG_MODULE_OMRON_STANDARD_TAG = (1ULL << 19),
-    PLCTAG_MODULE_OMRON_RAW_TAG = (1ULL << 20),
-    PLCTAG_MODULE_MODBUS = (1ULL << 21),
-    PLCTAG_MODULE_SYSTEM = (1ULL << 22),
-    PLCTAG_MODULE_PLATFORM = (1ULL << 23)
+    PLCTAG_MODULE_LIB = 0,
+    PLCTAG_MODULE_INIT = 1,
+    PLCTAG_MODULE_VERSION = 2,
+    PLCTAG_MODULE_UTILS = 3,
+    PLCTAG_MODULE_AB_SESSION = 4,
+    PLCTAG_MODULE_AB_PCCC = 5,
+    PLCTAG_MODULE_AB_CIP = 6,
+    PLCTAG_MODULE_AB_COMMON = 7,
+    PLCTAG_MODULE_AB_EIP_CIP = 8,
+    PLCTAG_MODULE_AB_EIP_CIP_SPECIAL = 9,
+    PLCTAG_MODULE_AB_EIP_LGX_PCCC = 10,
+    PLCTAG_MODULE_AB_EIP_PLC5_PCCC = 11,
+    PLCTAG_MODULE_AB_EIP_PLC5_DHP = 12,
+    PLCTAG_MODULE_AB_EIP_SLC_PCCC = 13,
+    PLCTAG_MODULE_AB_EIP_SLC_DHP = 14,
+    PLCTAG_MODULE_AB_ERROR = 15,
+    PLCTAG_MODULE_OMRON_CONN = 16,
+    PLCTAG_MODULE_OMRON_CIP = 17,
+    PLCTAG_MODULE_OMRON_COMMON = 18,
+    PLCTAG_MODULE_OMRON_STANDARD_TAG = 19,
+    PLCTAG_MODULE_OMRON_RAW_TAG = 20,
+    PLCTAG_MODULE_MODBUS = 21,
+    PLCTAG_MODULE_SYSTEM = 22,
+    PLCTAG_MODULE_PLATFORM = 23
 } plctag_debug_module_t;
 
 
@@ -211,28 +211,24 @@ typedef enum {
  * @brief Set debug level for a specific module.
  *
  * Allows fine-grained control over debug output by setting the debug level
- * for a specific module. Module names are case-insensitive strings such as:
- * "LIB", "INIT", "VERSION", "UTILS", "AB_SESSION", "AB_PCCC", "AB_CIP", "AB_COMMON",
- * "AB_EIP_CIP", "AB_EIP_CIP_SPECIAL", "AB_EIP_LGX_PCCC", "AB_EIP_PLC5_PCCC", "AB_EIP_PLC5_DHP",
- * "AB_EIP_SLC_PCCC", "AB_EIP_SLC_DHP", "AB_ERROR", "OMRON_CONN", "OMRON_CIP", "OMRON_COMMON",
- * "OMRON_STANDARD_TAG", "OMRON_RAW_TAG", "MODBUS", "SYSTEM", and "PLATFORM".
+ * for a specific module independently of the global debug level.
  *
- * @param module_name Case-insensitive module name string.
+ * @param module Module ID from the plctag_debug_module_t enum.
  * @param debug_level Debug level value (same as plc_tag_set_debug_level()).
- * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_NOT_FOUND if module name is not recognized.
+ * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_BAD_PARAM if arguments are out of range.
  */
 LIBPLCTAG_EXPERIMENTAL
-LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug_level);
+LIB_EXPORT int plc_tag_set_debug_module_level(plctag_debug_module_t module, int debug_level);
 
 
 /**
  * @brief Get the debug level for a specific module.
  *
- * @param module_name Case-insensitive module name string.
- * @return Current debug level for the specified module, or PLCTAG_ERR_NOT_FOUND if module name is not recognized.
+ * @param module Module ID from the plctag_debug_module_t enum.
+ * @return Current debug level for the specified module.
  */
 LIBPLCTAG_EXPERIMENTAL
-LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name);
+LIB_EXPORT int plc_tag_get_debug_module_level(plctag_debug_module_t module);
 
 
 /**
@@ -243,32 +239,6 @@ LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name);
 LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_get_debug_level(void);
 
-
-/**
- * @brief Convert a debug module name to a module ID.
- *
- * Takes a string like "AB_SESSION" or "OMRON_CONN" and returns
- * the corresponding module ID. Module names are case-insensitive.
- *
- * @param module_name Case-insensitive module name string.
- * @return Corresponding module ID bitmask, or 0 if the module name is not recognized.
- */
-LIBPLCTAG_EXPERIMENTAL
-LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name);
-
-
-/**
- * @brief Convert a debug level name to a debug level ID.
- *
- * Takes a string like "ERROR", "DEBUG_DETAIL", "SPEW", etc.
- * and returns the corresponding debug level ID. Level names are case-insensitive
- * and can be prefixed with "DEBUG_" or used without it.
- *
- * @param level_name Case-insensitive debug level name string.
- * @return Corresponding debug level ID, or -1 if the level name is not recognized.
- */
-LIBPLCTAG_EXPERIMENTAL
-LIB_EXPORT int plc_tag_debug_level_id(const char *level_name);
 
 
 /**

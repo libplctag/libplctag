@@ -105,24 +105,24 @@ extern attr attr_create_from_str(const char *attr_str) {
     attr res = NULL;
     char **kv_pairs = NULL;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Starting.");
 
     if(!str_length(attr_str)) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Attribute string needs to be longer than zero characters!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Attribute string needs to be longer than zero characters!");
         return NULL;
     }
 
     /* split the string on "&" */
     kv_pairs = str_split(attr_str, "&");
     if(!kv_pairs) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "No key-value pairs!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "No key-value pairs!");
         return NULL;
     }
 
     /* set up the attribute list head */
     res = attr_create();
     if(!res) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate memory for attribute list!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to allocate memory for attribute list!");
         mem_free(kv_pairs);
         return NULL;
     }
@@ -134,10 +134,10 @@ extern attr attr_create_from_str(const char *attr_str) {
         char *key = *kv_pair;
         char *value = separator;
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Key-value pair \"%s\".", *kv_pair);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Key-value pair \"%s\".", *kv_pair);
 
         if(separator == NULL) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!", attr_str,
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!", attr_str,
                    *kv_pair);
             mem_free(kv_pairs);
             attr_destroy(res);
@@ -150,7 +150,7 @@ extern attr attr_create_from_str(const char *attr_str) {
         /* cut the string at the separator. */
         *separator = (char)0;
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Key-value pair before trimming \"%s\":\"%s\".", key, value);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Key-value pair before trimming \"%s\":\"%s\".", key, value);
 
         /* skip leading spaces in the key */
         while(*key == ' ') { key++; }
@@ -158,12 +158,12 @@ extern attr attr_create_from_str(const char *attr_str) {
         /* zero out all trailing spaces in the key */
         for(int i = str_length(key) - 1; i > 0 && key[i] == ' '; i--) { key[i] = (char)0; }
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Key-value pair after trimming \"%s\":\"%s\".", key, value);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Key-value pair after trimming \"%s\":\"%s\".", key, value);
 
         /* check the string lengths */
 
         if(str_length(key) <= 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN,
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0,
                    "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Key must not be zero length!", attr_str,
                    *kv_pair);
             mem_free(kv_pairs);
@@ -172,7 +172,7 @@ extern attr attr_create_from_str(const char *attr_str) {
         }
 
         if(str_length(value) <= 0) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN,
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0,
                    "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Value must not be zero length!", attr_str,
                    *kv_pair);
             mem_free(kv_pairs);
@@ -182,7 +182,7 @@ extern attr attr_create_from_str(const char *attr_str) {
 
         /* add the key-value pair to the attribute list */
         if(attr_set_str(res, key, value)) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Unable to add key-value pair \"%s\":\"%s\" to attribute list!", key, value);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to add key-value pair \"%s\":\"%s\" to attribute list!", key, value);
             mem_free(kv_pairs);
             attr_destroy(res);
             return NULL;
@@ -191,7 +191,7 @@ extern attr attr_create_from_str(const char *attr_str) {
 
     if(kv_pairs) { mem_free(kv_pairs); }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Done.");
 
     return res;
 }
