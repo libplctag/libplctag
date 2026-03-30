@@ -121,7 +121,8 @@ struct ab_session_t {
     int auto_disconnect_timeout_ms;
 
     /* connection status - readable by tags via atomics */
-    atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
+    atomic_int32_t connection_status;        /* plc_tag_conn_status_t values */
+    atomic_int32_t connection_status_reason; /* additional info about the connection status, such as error codes */
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */

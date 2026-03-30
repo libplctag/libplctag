@@ -458,6 +458,16 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
             tag->event_write_complete_status = PLCTAG_STATUS_OK;
         }
 
+        /* was there a connection state change? */
+        if(tag->event_connection_state_changed) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag connection state changed with status %s.",
+                   plc_tag_decode_error(tag->event_connection_state_changed_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_CONNECTION_CHANGED_STATE, tag->event_connection_state_changed_status,
+                          tag->userdata);
+            tag->event_connection_state_changed = 0;
+            tag->event_connection_state_changed_status = PLCTAG_STATUS_OK;
+        }
+
         /* do this last so that we raise all other events first. we only start deletion events. */
         if(tag->event_deletion_started) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag deletion started with status %s.",
