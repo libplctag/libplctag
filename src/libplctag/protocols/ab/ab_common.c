@@ -40,6 +40,7 @@
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
+#include <libplctag/protocols/ab/device_tag.h>
 #include <libplctag/protocols/ab/eip_cip.h>
 #include <libplctag/protocols/ab/eip_cip_special.h>
 #include <libplctag/protocols/ab/eip_lgx_pccc.h>
@@ -173,6 +174,12 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     /* short circuit for split Omron*/
     if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata); }
+
+    /* short circuit for device tag */
+    plc_type_t plc_type = get_plc_type(attribs);
+    if((plc_type == AB_PLC_LGX || plc_type == AB_PLC_MICRO800) && str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
+        return (plc_tag_p)ab_device_tag_create(attribs, tag_callback_func, userdata);
+    }
 
     /*
      * allocate memory for the new tag.  Do this first so that

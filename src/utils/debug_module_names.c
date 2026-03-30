@@ -30,4 +30,5 @@ const char *debug_module_names[] = {
     [21] = "MODBUS",
     [22] = "SYSTEM",
     [23] = "PLATFORM",
+    [24] = "AB_DEVICE",
 };
