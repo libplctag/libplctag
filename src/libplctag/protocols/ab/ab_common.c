@@ -176,7 +176,6 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata); }
 
     /* short circuit for device tag */
-    plc_type_t plc_type = get_plc_type(attribs);
     if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
         return (plc_tag_p)ab_device_tag_create(attribs, tag_callback_func, userdata);
     }
