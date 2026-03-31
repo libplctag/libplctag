@@ -51,7 +51,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_idle_disconnect test_modbus_multiple test_reconnect_after_outage_async test_reconnect_after_outage_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress get_identity"
+EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_device_tag test_idle_disconnect test_modbus_multiple test_reconnect_after_outage_async test_reconnect_after_outage_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress get_identity"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -391,6 +391,18 @@ fi
 let TEST++
 echo -n "Test $TEST: generic CIP device identity query... "
 $VALGRIND$TEST_DIR/get_identity "--tag=protocol=ab_eip&gateway=10.206.1.40&plc=generic&name=@identity&debug=3" > "$LOG_DIR/${TEST}_get_identity_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "Test $TEST: device tag connection state transitions (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@device" > "$LOG_DIR/${TEST}_device_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
