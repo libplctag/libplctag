@@ -53,7 +53,7 @@ typedef struct ab_device_tag_s {
 
 typedef ab_device_tag_t *ab_device_tag_p;
 
-
+static int device_tag_abort(plc_tag_p tag);
 static int device_tag_status(plc_tag_p tag);
 static int device_tag_tickler(plc_tag_p tag);
 static int device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
@@ -61,7 +61,7 @@ static void ab_device_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
 
 static struct tag_vtable_t device_tag_vtable = {
-    .abort = NULL,                           /* Not used */
+    .abort = device_tag_abort,               /* Not used */
     .read = NULL,                            /* Not used */
     .status = device_tag_status,             /* returns last connection status value */
     .tickler = device_tag_tickler,           /* polls connection_status, raises events */
@@ -110,12 +110,23 @@ extern plc_tag_p ab_device_tag_create(attr attribs,
     tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
     tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
 
+    /*
+     * Queue the CREATED event. plc_tag_create_ex() will dispatch it via
+     * plc_tag_generic_handle_event_callbacks() after tag->tag_id is assigned.
+     */
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+
     pdebug(DEBUG_MODULE_AB_DEVICE, DEBUG_DETAIL, 0, "Done with initial connection status=%s.",
            conn_status_name(tag->last_conn_state));
 
     return (plc_tag_p)tag;
 }
 
+
+static int device_tag_abort(plc_tag_p tag) {
+    (void)tag;
+    return PLCTAG_STATUS_OK;
+}
 
 static int device_tag_status(plc_tag_p tag) {
     ab_device_tag_t *device_tag = (ab_device_tag_t *)tag;
@@ -130,6 +141,17 @@ static int device_tag_tickler(plc_tag_p raw_tag) {
 
     if(!device_tag->session) { return PLCTAG_STATUS_OK; }
 
+    /*
+     * Wait until the CREATED event has been dispatched before firing any connection state events.
+     * The generic tickler calls vtable->tickler before plc_tag_generic_handle_event_callbacks,
+     * so draining the ring buffer here would dispatch CONNECTING before CREATED.
+     *
+     * FIXME:
+     * This event system is getting far too complicated and should be refactored.
+     * Maybe using a ring buffer as we do for the session connection status?
+     */
+    if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
+
     int32_t write_idx = atomic_get_int32(&device_tag->session->conn_status_ring_write_idx);
     int32_t read_idx = device_tag->status_ring_read_idx;
 
@@ -141,7 +163,7 @@ static int device_tag_tickler(plc_tag_p raw_tag) {
         device_tag->last_conn_state = status;
         /* api_mutex is already held by the generic tickler so dispatch each entry directly */
         if(device_tag->callback) {
-            device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_CONNECTION_CHANGED_STATE, (int)reason, device_tag->userdata);
+            device_tag->callback(device_tag->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, (int)reason, device_tag->userdata);
         }
     }
 
@@ -203,6 +225,8 @@ static void ab_device_tag_destructor(void *ptr) {
 
 
 static const char *conn_status_name(int32_t conn_status) {
+    if(conn_status >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { conn_status -= PLCTAG_EVENT_CONN_STATUS_OFFSET; }
+
     switch(conn_status) {
         case PLCTAG_CONN_STATUS_UP: return "UP";
         case PLCTAG_CONN_STATUS_DOWN: return "DOWN";
