@@ -45,9 +45,7 @@
 typedef struct ab_device_tag_s {
     TAG_BASE_STRUCT;
     ab_session_p session;
-    int32_t use_connected_msg;    /* if true, raise a PLCTAG_EVENT_CONNECTION_CHANGED_STATE event when the tag is created with the
-                                     initial connection state */
-    int32_t allow_packing;        /* if true, allow this tag to be packed with other tags in the same request */
+    int32_t use_connected_msg;    /* sets up a CIP connection with Forward Open if set */
     int32_t last_conn_state;      /* previous value; used to detect changes */
     int32_t io_events;            /* 1 = fire READ/WRITE events for session IO, 0 = suppress */
     int32_t status_ring_read_idx; /* index of the last ring buffer entry this tag has processed */
@@ -56,24 +54,22 @@ typedef struct ab_device_tag_s {
 typedef ab_device_tag_t *ab_device_tag_p;
 
 
-static int device_tag_abort(plc_tag_p tag);
-static int device_tag_read(plc_tag_p tag);
 static int device_tag_status(plc_tag_p tag);
 static int device_tag_tickler(plc_tag_p tag);
-static int device_tag_write(plc_tag_p tag);
 static int device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
 static void ab_device_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
 
 static struct tag_vtable_t device_tag_vtable = {
-    .abort = device_tag_abort,               /* return PLCTAG_ERR_NOT_IMPLEMENTED */
-    .read = device_tag_read,                 /* returns PLCTAG_ERR_NOT_IMPLEMENTED */
+    .abort = NULL,                           /* Not used */
+    .read = NULL,                            /* Not used */
     .status = device_tag_status,             /* returns last connection status value */
     .tickler = device_tag_tickler,           /* polls connection_status, raises events */
-    .write = device_tag_write,               /* returns PLCTAG_ERR_NOT_IMPLEMENTED */
-    .wake_plc = NULL,                        /* not used */
+    .write = NULL,                           /* Not used */
+    .wake_plc = NULL,                        /* Not used */
+    .tag_data_written = NULL,                /* Not used */
     .get_int_attrib = device_get_int_attrib, /* get connection status attribute */
-    .set_int_attrib = NULL,                  /* not used */
+    .set_int_attrib = NULL,                  /* Not used */
 };
 
 
@@ -88,7 +84,6 @@ extern plc_tag_p ab_device_tag_create(attr attribs,
     tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
     tag->io_events = attr_get_int(attribs, "io_events", 1); /* FIXME does not do anything yet. */
     tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
-    tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
 
     /* set the vtable to the device tag vtable. */
     tag->vtable = &device_tag_vtable;
@@ -121,16 +116,6 @@ extern plc_tag_p ab_device_tag_create(attr attribs,
     return (plc_tag_p)tag;
 }
 
-
-static int device_tag_abort(plc_tag_p tag) {
-    (void)tag;
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
-
-static int device_tag_read(plc_tag_p tag) {
-    (void)tag;
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
 
 static int device_tag_status(plc_tag_p tag) {
     ab_device_tag_t *device_tag = (ab_device_tag_t *)tag;
@@ -165,10 +150,6 @@ static int device_tag_tickler(plc_tag_p raw_tag) {
     return PLCTAG_STATUS_OK;
 }
 
-static int device_tag_write(plc_tag_p tag) {
-    (void)tag;
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
 
 static int device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
     ab_device_tag_t *device_tag = (ab_device_tag_t *)tag;
