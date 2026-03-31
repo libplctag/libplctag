@@ -402,7 +402,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: device tag connection state transitions (ControlLogix)... "
-$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@device" > "$LOG_DIR/${TEST}_device_tag_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@device" > "$LOG_DIR/${TEST}_logix_device_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -411,6 +411,27 @@ else
     let SUCCESSES++
 fi
 
+let TEST++
+echo -n "Test $TEST: device tag connection state transitions (Micrologix)... "
+$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=10.206.1.36&plc=Micrologix&name=@device" > "$LOG_DIR/${TEST}_micrologix_device_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: device tag connection state transitions (PLC5)... "
+$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=10.206.1.38&plc=plc5&name=@device" > "$LOG_DIR/${TEST}_plc5_device_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 echo ""
 echo "$TEST tests."
