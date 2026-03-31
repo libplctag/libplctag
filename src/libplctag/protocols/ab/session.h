@@ -55,6 +55,14 @@
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
 
+#    define SESSION_CONN_STATUS_RING_SIZE (8)
+#    define SESSION_CONN_STATUS_RING_SIZE_MASK (SESSION_CONN_STATUS_RING_SIZE - 1)
+
+typedef struct session_conn_status_entry_s {
+    int32_t status;
+    int32_t reason;
+} session_conn_status_entry_t;
+
 
 struct ab_session_t {
     //    int status;
@@ -123,6 +131,10 @@ struct ab_session_t {
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status;        /* plc_tag_conn_status_t values */
     atomic_int32_t connection_status_reason; /* additional info about the connection status, such as error codes */
+
+    /* ring buffer of connection status changes; single writer (session thread), multiple independent readers */
+    session_conn_status_entry_t conn_status_ring[SESSION_CONN_STATUS_RING_SIZE];
+    atomic_int32_t conn_status_ring_write_idx; /* index of last written entry; wraps via & 0x07; tags drain by advancing their read idx */
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */

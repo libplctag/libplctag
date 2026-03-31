@@ -282,6 +282,13 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_WRITE_COMPLETE.");
             break;
 
+        case PLCTAG_EVENT_CONNECTION_CHANGED_STATE:
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CONNECTION_CHANGED_STATE raised with status %s.",
+                   plc_tag_decode_error(status));
+            tag->event_connection_state_changed = 1;
+            tag->event_connection_state_changed_status = status;
+            break;
+
         default: pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported event %d!", status); break;
     }
 }
