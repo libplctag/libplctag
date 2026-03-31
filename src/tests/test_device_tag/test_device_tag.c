@@ -3,7 +3,7 @@
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever   *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -35,12 +35,18 @@
  * Test program for the @device tag type.
  *
  * Creates a device tag using a user-supplied attribute string, registers a
- * callback that handles every possible event (including the new
- * CONNECTION_CHANGED_STATE event), and runs for RUN_DURATION_MS milliseconds
- * before destroying the tag and exiting.
+ * callback that checks connection state transitions in order, and runs until
+ * all expected transitions are seen or the timeout expires.
+ *
+ * Expected sequence: CONNECTING -> UP -> DISCONNECTING -> DOWN -> IDLE_WAIT
+ * The last three occur when the session idle-disconnect timeout fires (~30s).
+ *
+ * Returns 0 (pass) if all expected transitions are received in order.
+ * Returns 1 (fail) if an unexpected transition is received or the timeout
+ * expires before all transitions are seen.
  *
  * Usage:
- *   test_device_tag --tag=<attribute-string>
+ *   test_device_tag --tag=<attribute-string> [--debug=N]
  *
  * Example:
  *   test_device_tag \
@@ -59,9 +65,18 @@
 #define RUN_DURATION_MS ((int64_t)40000)
 #define POLL_INTERVAL_MS ((uint32_t)500)
 
+/* Expected connection state sequence for one connect + idle-disconnect cycle. */
+static const int32_t expected_states[] = {
+    PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_CONN_STATUS_UP,        PLCTAG_CONN_STATUS_DISCONNECTING,
+    PLCTAG_CONN_STATUS_DOWN,       PLCTAG_CONN_STATUS_IDLE_WAIT,
+};
+
+#define NUM_EXPECTED_STATES ((int)(sizeof(expected_states) / sizeof(expected_states[0])))
 
 static const char *tag_path = NULL;
 static volatile bool running = true;
+static volatile int next_expected_idx = 0;
+static volatile bool test_failed = false;
 
 
 static void interrupt_handler(void) { running = false; }
@@ -83,6 +98,7 @@ static const char *conn_status_name(int32_t conn_status) {
 static void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     int32_t conn = 0;
     int32_t reason = 0;
+    int idx = 0;
 
     (void)userdata;
 
@@ -112,6 +128,22 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             reason = (int32_t)status;
             fprintf(stderr, "EVENT CONNECTION_CHANGED_STATE: state=%s (%d), reason=%s.\n", conn_status_name(conn), (int)conn,
                     plc_tag_decode_error((int)reason));
+
+            idx = next_expected_idx;
+            if(idx < NUM_EXPECTED_STATES) {
+                if(conn == expected_states[idx]) {
+                    next_expected_idx = idx + 1;
+                    if(next_expected_idx == NUM_EXPECTED_STATES) {
+                        fprintf(stderr, "All %d expected state transitions received.\n", NUM_EXPECTED_STATES);
+                        running = false;
+                    }
+                } else {
+                    fprintf(stderr, "ERROR: expected state %s but got %s.\n", conn_status_name(expected_states[idx]),
+                            conn_status_name(conn));
+                    test_failed = true;
+                    running = false;
+                }
+            }
             break;
 
         default: fprintf(stderr, "EVENT unknown (%d): status=%s.\n", event, plc_tag_decode_error(status)); break;
@@ -123,14 +155,19 @@ static void parse_args(int argc, char **argv) {
     int i = 0;
 
     if(argc < 2) {
-        fprintf(stderr, "Usage: test_device_tag --tag=TAG_ATTRIBUTE_STRING\n");
+        fprintf(stderr, "Usage: test_device_tag --tag=TAG_ATTRIBUTE_STRING [--debug=N]\n");
         fprintf(stderr, "  --tag=TAG_ATTRIBUTE_STRING  device tag attribute string, e.g.\n");
         fprintf(stderr, "    \"protocol=ab-eip&gateway=10.0.0.1&path=1,0&plc=ControlLogix&name=@device\"\n");
+        fprintf(stderr, "  --debug=N                   debug level (0=none, 4=detail)\n");
         exit(1);
     }
 
     for(i = 1; i < argc; i++) {
-        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
+        if(strncmp(argv[i], "--tag=", 6) == 0) {
+            tag_path = &argv[i][6];
+        } else if(strncmp(argv[i], "--debug=", 8) == 0) {
+            plc_tag_set_debug_level(atoi(&argv[i][8]));
+        }
     }
 
     if(tag_path == NULL || tag_path[0] == '\0') {
@@ -143,7 +180,6 @@ static void parse_args(int argc, char **argv) {
 int main(int argc, char **argv) {
     int32_t tag = 0;
     int64_t end_time = 0;
-    int32_t conn = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -158,8 +194,6 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "Library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
-
     compat_set_interrupt_handler(interrupt_handler);
 
     fprintf(stderr, "Creating device tag: %s\n", tag_path);
@@ -170,14 +204,14 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    fprintf(stderr, "Device tag created (id=%d). Running for %d seconds. Press Ctrl+C to stop early.\n", (int)tag,
+    fprintf(stderr, "Device tag created (id=%d). Waiting up to %d seconds for expected state transitions.\n", (int)tag,
             (int)(RUN_DURATION_MS / 1000));
 
     end_time = compat_time_ms() + RUN_DURATION_MS;
 
     while(running && compat_time_ms() < end_time) {
-        conn = plc_tag_get_int_attribute(tag, "connection_status", -1);
-        fprintf(stderr, "POLL: connection_status=%s (%d)\n", conn_status_name(conn), (int)conn);
+        // int conn = plc_tag_get_int_attribute(tag, "connection_status", -1);
+        // fprintf(stderr, "POLL: connection_status=%s (%d)\n", conn_status_name(conn), (int)conn);
         compat_sleep_ms(POLL_INTERVAL_MS, NULL);
     }
 
@@ -185,7 +219,17 @@ int main(int argc, char **argv) {
 
     plc_tag_destroy(tag);
 
-    fprintf(stderr, "Done.\n");
+    if(test_failed) {
+        fprintf(stderr, "RESULT: FAIL - received unexpected state transition.\n");
+        return 1;
+    }
 
+    if(next_expected_idx < NUM_EXPECTED_STATES) {
+        fprintf(stderr, "RESULT: FAIL - only %d of %d expected state transitions received (last expected: %s).\n",
+                next_expected_idx, NUM_EXPECTED_STATES, conn_status_name(expected_states[next_expected_idx]));
+        return 1;
+    }
+
+    fprintf(stderr, "RESULT: PASS\n");
     return 0;
 }
