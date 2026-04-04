@@ -1,9 +1,14 @@
+#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -32,29 +37,48 @@
  ***************************************************************************/
 
 /*
- * X-macro list of all log modules.
- * To add a new module, simply add a new LOG_MODULE_ENTRY line here.
- * 
- * Format: LOG_MODULE_ENTRY(name, bit_position)
- * 
- * The name will be used to create LOG_MODULE_<name> constants.
- * The bit_position should be unique (0-63) and determines the bit in the mask.
+ * Copied from modbus_server/log.h.  buf_t dependency removed:
+ *   - #include "buf.h" removed
+ *   - log_bytes_impl() declaration removed
+ *   - pdlog_bytes() macro removed
  */
 
-LOG_MODULE_ENTRY(SOCKET,                0)
-LOG_MODULE_ENTRY(REACTOR,               1)
-LOG_MODULE_ENTRY(FSM,                   2)
-LOG_MODULE_ENTRY(ARGS,                  3)
-LOG_MODULE_ENTRY(BUF,                   4)
-LOG_MODULE_ENTRY(UTILS,                 5)
-LOG_MODULE_ENTRY(MODBUS_PROTOCOL,       6)
-LOG_MODULE_ENTRY(MODBUS_SERVER,         7)
-LOG_MODULE_ENTRY(REGISTER_STORAGE,      8)
-LOG_MODULE_ENTRY(CONFIG,                9)
-LOG_MODULE_ENTRY(CORO_NET,              10)
-LOG_MODULE_ENTRY(MODBUS_CORO_CLIENT,    11)
-LOG_MODULE_ENTRY(MODBUS_CORO_LISTENER,  12)
-LOG_MODULE_ENTRY(SCAN_EIP_NETWORK,      13)
-LOG_MODULE_ENTRY(FIBER_NET,             14)
-LOG_MODULE_ENTRY(MODBUS3_CLIENT,        15)
-LOG_MODULE_ENTRY(MODBUS3_LISTENER,      16)
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef enum {
+    LOG_LEVEL_NONE = 0,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_WARN,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_DETAIL,
+    LOG_LEVEL_SPEW,
+
+    LOG_LEVEL_END
+} log_level_t;
+
+/* Log modules - generated from log_modules.def */
+typedef enum {
+#define LOG_MODULE_ENTRY(name, bit) LOG_MODULE_##name = (1ULL << bit),
+#include "log_modules.def"
+#undef LOG_MODULE_ENTRY
+} log_module_t;
+
+typedef uint64_t log_module_mask_t;
+
+void log_module_set_level(log_module_t module, log_level_t level);
+log_level_t log_module_get_level(log_module_t module);
+void log_set_all_modules(log_level_t level);
+bool log_is_enabled(log_module_mask_t modules, log_level_t level);
+
+void log_impl(const char *func, int line_num, log_level_t lvl,
+              log_module_mask_t modules, const char *templ, ...);
+
+#define pdlog(modules, level, ...) \
+    do { if (log_is_enabled(modules, level)) \
+        log_impl(__func__, __LINE__, level, modules, __VA_ARGS__); } while (0)
+
+#ifdef __cplusplus
+}
+#endif

@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -32,29 +34,50 @@
  ***************************************************************************/
 
 /*
- * X-macro list of all log modules.
- * To add a new module, simply add a new LOG_MODULE_ENTRY line here.
- * 
- * Format: LOG_MODULE_ENTRY(name, bit_position)
- * 
- * The name will be used to create LOG_MODULE_<name> constants.
- * The bit_position should be unique (0-63) and determines the bit in the mask.
+ * Fixed-size bump allocator.  All allocations are sequential; the only
+ * "free" is arena_reset() which resets the cursor to zero.
+ *
+ * Copied from ~/Projects/data_table and modified:
+ *   - arena_init() returns util_err_t instead of panicking on malloc failure.
+ *   - arena_alloc() returns NULL on overflow instead of calling exit().
+ *   - arena_free() no longer prints stats to stderr.
  */
 
-LOG_MODULE_ENTRY(SOCKET,                0)
-LOG_MODULE_ENTRY(REACTOR,               1)
-LOG_MODULE_ENTRY(FSM,                   2)
-LOG_MODULE_ENTRY(ARGS,                  3)
-LOG_MODULE_ENTRY(BUF,                   4)
-LOG_MODULE_ENTRY(UTILS,                 5)
-LOG_MODULE_ENTRY(MODBUS_PROTOCOL,       6)
-LOG_MODULE_ENTRY(MODBUS_SERVER,         7)
-LOG_MODULE_ENTRY(REGISTER_STORAGE,      8)
-LOG_MODULE_ENTRY(CONFIG,                9)
-LOG_MODULE_ENTRY(CORO_NET,              10)
-LOG_MODULE_ENTRY(MODBUS_CORO_CLIENT,    11)
-LOG_MODULE_ENTRY(MODBUS_CORO_LISTENER,  12)
-LOG_MODULE_ENTRY(SCAN_EIP_NETWORK,      13)
-LOG_MODULE_ENTRY(FIBER_NET,             14)
-LOG_MODULE_ENTRY(MODBUS3_CLIENT,        15)
-LOG_MODULE_ENTRY(MODBUS3_LISTENER,      16)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "err.h"
+
+typedef struct {
+    uint8_t *buffer;
+    size_t length;
+    size_t capacity;
+    size_t high_water; /* peak usage across all resets */
+} Arena;
+
+/* Initialize arena with a fixed size.  Returns UTIL_ERESOURCE on malloc failure. */
+extern util_err_t arena_init(Arena *out, size_t size);
+
+/* Allocate size bytes from arena.  Returns NULL if out of space; caller must check. */
+extern void *arena_alloc(Arena *a, size_t size);
+
+/* Reset arena cursor to zero without freeing the backing buffer. */
+extern void arena_reset(Arena *a);
+
+/* Save current cursor position. */
+extern size_t arena_save(Arena *a);
+
+/* Restore arena cursor to a previously saved position. */
+extern void arena_restore(Arena *a, size_t saved);
+
+/* Free arena backing buffer. */
+extern void arena_free(Arena *a);
+
+#ifdef __cplusplus
+}
+#endif
+
