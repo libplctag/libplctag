@@ -174,3 +174,106 @@ Perf Test
 ║  10-50ms      │                              │     26 (  0.0%)
 ║  >50ms        │                              │      4 (  0.0%)
 ╚══════════════════════════════════════════════════════════════════╝
+
+
+Modbus Server Fiber Implementation
+
+
+Functional Tests
+
+╔══════════════════════════════════════════════════════════════════╗
+║          MODBUS SERVER (FIBER) PERFORMANCE STATISTICS            ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Runtime: 92.41 seconds
+║ Total requests: 72488
+║ Throughput: 784.43 requests/sec
+╠══════════════════════════════════════════════════════════════════╣
+║ Clients connected:    209
+║ Clients disconnected: 209
+╠══════════════════════════════════════════════════════════════════╣
+║ Average response:    37.39 us
+║ Std deviation:      154.59 us
+║ Minimum:                17 us
+║ Maximum:             16462 us
+║ Avg process time:    24.36 us
+╠══════════════════════════════════════════════════════════════════╣
+║                  RESPONSE TIME HISTOGRAM
+╠══════════════════════════════════════════════════════════════════╣
+║  0-100us      │██████████████████████████████│  70458 ( 97.2%)
+║  100-500us    │                              │   1921 (  2.7%)
+║  500us-1ms    │                              │     43 (  0.1%)
+║  1-2ms        │                              │     21 (  0.0%)
+║  2-5ms        │                              │     30 (  0.0%)
+║  5-10ms       │                              │     10 (  0.0%)
+║  10-50ms      │                              │      5 (  0.0%)
+║  >50ms        │                              │      0 (  0.0%)
+╚══════════════════════════════════════════════════════════════════╝
+
+
+Performance Tests
+
+~/Projects/libplctag/src/tests/scripts/run_perf_modbus3.sh --executable-dir=~/Projects/libplctag/build/bin_dist/
+
+╔══════════════════════════════════════════════════════════════════╗
+║          MODBUS SERVER (FIBER) PERFORMANCE STATISTICS            ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Runtime: 308.52 seconds
+║ Total requests: 5708517
+║ Throughput: 18503.20 requests/sec
+╠══════════════════════════════════════════════════════════════════╣
+║ Clients connected:    30
+║ Clients disconnected: 30
+╠══════════════════════════════════════════════════════════════════╣
+╠══════════════════════════════════════════════════════════════════╣
+║                     RESPONSE TIME SUMMARY                        ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Average (active):      4.62 us   (data-ready → send-complete)
+║ Std Dev:              46.13 us
+║ Minimum:               -106 us
+║ Maximum:              57173 us
+║ Average (roundtrip):  52.91 us   (recv-start → send-complete)
+╠══════════════════════════════════════════════════════════════════╣
+║                   LATENCY BREAKDOWN (avg)                        ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Recv (socket):       48.29 us ( 91.3% of roundtrip)
+║    incl. wait for data + actual I/O across both recv calls
+║  Process (modbus):     1.25 us (  2.4% of roundtrip,  27.1% of active)
+║  Encode (response):    0.39 us (  0.7% of roundtrip,   8.4% of active)
+║  Send (socket):        2.98 us (  5.6% of roundtrip,  64.6% of active)
+╠══════════════════════════════════════════════════════════════════╣
+║                  RESPONSE TIME HISTOGRAM
+╠══════════════════════════════════════════════════════════════════╣
+║  0-100us      │██████████████████████████████│ 5706291 (100.0%)
+║  100-500us    │                              │   1942 (  0.0%)
+║  500us-1ms    │                              │    143 (  0.0%)
+║  1-2ms        │                              │     54 (  0.0%)
+║  2-5ms        │                              │     42 (  0.0%)
+║  5-10ms       │                              │     25 (  0.0%)
+║  10-50ms      │                              │     19 (  0.0%)
+║  >50ms        │                              │      1 (  0.0%)
+╠══════════════════════════════════════════════════════════════════╣
+║              FIBER_NET EVENT LOOP INSTRUMENTATION                ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Loop iterations:      5703484
+║ Poll timeouts:             89  (  0.0% of iters)
+║ Poll wakeups:         5703394  (100.0% of iters)
+║ Total resumes:        5703395
+║ Resumes/request:         1.00
+╠══════════════════════════════════════════════════════════════════╣
+║              LOOP PHASE BREAKDOWN (avg µs / iteration)           ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Step 1 — pending-start scan + initial resumes:    2.876 us
+║  Step 2 — pollfd array build:                      3.203 us
+║  Step 3 — poll() [includes idle blocking time]:     35.8 us
+║  Step 4 — wakeup pipe drain:                       0.082 us
+║  Step 5 — ready-fd scan (no resumes):              0.480 us
+║  Step 5 — fiber resumes (exec + ctx switch):      11.577 us
+║  ──────────────────────────────────────────────────────────
+║  Total non-poll overhead / iteration:             18.219 us
+╠══════════════════════════════════════════════════════════════════╣
+║              PER RESUME STATISTICS                               ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Avg duration (exec + 2× ctx switch):    11.58 us
+║  Minimum:                                    5 us
+║  Maximum:                                66812 us
+╚══════════════════════════════════════════════════════════════════╝

@@ -9,6 +9,7 @@ endif()
 # Build POC programs
 add_subdirectory("modbus_server")
 add_subdirectory("modbus_server2")
+add_subdirectory("modbus_server3")
 add_subdirectory("scan_eip_network")
 add_subdirectory("test_alternate_tag_listing")
 add_subdirectory("list_tags_omron")

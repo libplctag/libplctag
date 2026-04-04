@@ -32,29 +32,72 @@
  ***************************************************************************/
 
 /*
- * X-macro list of all log modules.
- * To add a new module, simply add a new LOG_MODULE_ENTRY line here.
- * 
- * Format: LOG_MODULE_ENTRY(name, bit_position)
- * 
- * The name will be used to create LOG_MODULE_<name> constants.
- * The bit_position should be unique (0-63) and determines the bit in the mask.
+ * Fixed-size bump allocator implementation.
+ * Copied from ~/Projects/data_table and modified to return errors instead
+ * of calling exit().
  */
 
-LOG_MODULE_ENTRY(SOCKET,                0)
-LOG_MODULE_ENTRY(REACTOR,               1)
-LOG_MODULE_ENTRY(FSM,                   2)
-LOG_MODULE_ENTRY(ARGS,                  3)
-LOG_MODULE_ENTRY(BUF,                   4)
-LOG_MODULE_ENTRY(UTILS,                 5)
-LOG_MODULE_ENTRY(MODBUS_PROTOCOL,       6)
-LOG_MODULE_ENTRY(MODBUS_SERVER,         7)
-LOG_MODULE_ENTRY(REGISTER_STORAGE,      8)
-LOG_MODULE_ENTRY(CONFIG,                9)
-LOG_MODULE_ENTRY(CORO_NET,              10)
-LOG_MODULE_ENTRY(MODBUS_CORO_CLIENT,    11)
-LOG_MODULE_ENTRY(MODBUS_CORO_LISTENER,  12)
-LOG_MODULE_ENTRY(SCAN_EIP_NETWORK,      13)
-LOG_MODULE_ENTRY(FIBER_NET,             14)
-LOG_MODULE_ENTRY(MODBUS3_CLIENT,        15)
-LOG_MODULE_ENTRY(MODBUS3_LISTENER,      16)
+#include <stdlib.h>
+#include <string.h>
+
+#include "arena.h"
+
+
+util_err_t arena_init(Arena *out, size_t size) {
+    if(!out) { return UTIL_EINVAL; }
+
+    out->buffer = (uint8_t *)malloc(size);
+    if(!out->buffer) {
+        out->length = 0;
+        out->capacity = 0;
+        out->high_water = 0;
+        return UTIL_ERESOURCE;
+    }
+
+    out->length = 0;
+    out->capacity = size;
+    out->high_water = 0;
+
+    return UTIL_OK;
+}
+
+
+void *arena_alloc(Arena *a, size_t size) {
+    if(!a || !a->buffer) { return NULL; }
+
+    if(a->length + size > a->capacity) { return NULL; }
+
+    void *ptr = a->buffer + a->length;
+    a->length += size;
+
+    if(a->length > a->high_water) { a->high_water = a->length; }
+
+    return ptr;
+}
+
+
+void arena_reset(Arena *a) {
+    if(a) { a->length = 0; }
+}
+
+
+size_t arena_save(Arena *a) {
+    return a ? a->length : 0;
+}
+
+
+void arena_restore(Arena *a, size_t saved) {
+    if(a && saved <= a->capacity) { a->length = saved; }
+}
+
+
+void arena_free(Arena *a) {
+    if(!a) { return; }
+
+    free(a->buffer);
+    a->buffer = NULL;
+    a->length = 0;
+    a->capacity = 0;
+    a->high_water = 0;
+}
+
