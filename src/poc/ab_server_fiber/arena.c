@@ -81,9 +81,26 @@ void arena_reset(Arena *a) {
 }
 
 
-size_t arena_save(Arena *a) {
-    return a ? a->length : 0;
+uint8_t *arena_current(Arena *a) {
+    if(!a || !a->buffer) { return NULL; }
+    return a->buffer + a->length;
 }
+
+
+size_t arena_remaining(Arena *a) {
+    if(!a || !a->buffer) { return 0; }
+    return a->capacity - a->length;
+}
+
+
+void arena_commit(Arena *a, size_t n) {
+    if(!a) { return; }
+    a->length += n;
+    if(a->length > a->high_water) { a->high_water = a->length; }
+}
+
+
+size_t arena_save(Arena *a) { return a ? a->length : 0; }
 
 
 void arena_restore(Arena *a, size_t saved) {
@@ -100,4 +117,3 @@ void arena_free(Arena *a) {
     a->capacity = 0;
     a->high_water = 0;
 }
-

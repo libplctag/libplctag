@@ -65,6 +65,15 @@ extern util_err_t arena_init(Arena *out, size_t size);
 /* Allocate size bytes from arena.  Returns NULL if out of space; caller must check. */
 extern void *arena_alloc(Arena *a, size_t size);
 
+/* Pointer to next free byte (for single-pass pack-then-commit). */
+extern uint8_t *arena_current(Arena *a);
+
+/* Bytes remaining in arena. */
+extern size_t arena_remaining(Arena *a);
+
+/* Advance arena cursor by n bytes.  Caller must ensure n <= arena_remaining(). */
+extern void arena_commit(Arena *a, size_t n);
+
 /* Reset arena cursor to zero without freeing the backing buffer. */
 extern void arena_reset(Arena *a);
 
@@ -80,4 +89,3 @@ extern void arena_free(Arena *a);
 #ifdef __cplusplus
 }
 #endif
-
