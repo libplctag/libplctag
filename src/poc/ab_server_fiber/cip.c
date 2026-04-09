@@ -231,16 +231,16 @@ static bool parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes 
           (unsigned)*svc, (unsigned)path_len_words, path_bytes, rest.len);
 
     if(path_bytes > rest.len) {
-        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN,
-              "parse_cip_request: path_bytes=%zu exceeds remaining buffer rest.len=%zu", path_bytes, rest.len);
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_cip_request: path_bytes=%zu exceeds remaining buffer rest.len=%zu",
+              path_bytes, rest.len);
         return false;
     }
 
-    *svc_path    = bytes_slice(rest, 0, path_bytes);
+    *svc_path = bytes_slice(rest, 0, path_bytes);
     *svc_payload = bytes_slice(rest, path_bytes, rest.len - path_bytes);
 
-    pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "parse_cip_request: done svc_path.len=%zu svc_payload.len=%zu",
-          svc_path->len, svc_payload->len);
+    pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "parse_cip_request: done svc_path.len=%zu svc_payload.len=%zu", svc_path->len,
+          svc_payload->len);
     return true;
 }
 
@@ -253,8 +253,8 @@ static bool parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes 
 static bool extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_path) {
     uint8_t path_len_words = 0;
 
-    pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "extract_path: starting offset=%zu input.len=%zu padded=%d",
-          *offset, input.len, (int)padded);
+    pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "extract_path: starting offset=%zu input.len=%zu padded=%d", *offset, input.len,
+          (int)padded);
 
     Bytes at_offset = bytes_slice(input, *offset, input.len - *offset);
     if(bytes_is_null(at_offset)) {
@@ -501,8 +501,8 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes, ui
  * With ext=false: 4 bytes.  With ext=true: 6 bytes (adds 2-byte extended status).
  */
 static Bytes cip_error(Arena *a, uint8_t svc, uint8_t err, bool ext, uint16_t ext_err) {
-    if(ext) { return bytes_pack(a, "<BBBBH", (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)1, ext_err); }
-    return bytes_pack(a, "<BBBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)0);
+    if(ext) { return bytes_pack_fmt(a, "<BBBBH", (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)1, ext_err); }
+    return bytes_pack_fmt(a, "<BBBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)0);
 }
 
 
@@ -616,9 +616,9 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
      *   O→T API / c2s_rpi (4), T→O API / s2c_rpi (4)
      *   app reply size (1), reserved (1)
      */
-    return bytes_pack(a, "<BBBBIIHHIIIBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0,
-                      sess->server_connection_id, sess->client_connection_id, conn_serial, orig_vendor_id, orig_serial,
-                      c2s_rpi, s2c_rpi, (uint8_t)0, (uint8_t)0);
+    return bytes_pack_fmt(a, "<BBBBIIHHIIIBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, sess->server_connection_id,
+                      sess->client_connection_id, conn_serial, orig_vendor_id, orig_serial, c2s_rpi, s2c_rpi, (uint8_t)0,
+                      (uint8_t)0);
 }
 
 
@@ -670,7 +670,7 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
     sess->client_connection_seq = 0;
 
     /* Build success response (14 bytes). */
-    return bytes_pack(a, "<BBBBHHIBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, conn_serial, vendor_id,
+    return bytes_pack_fmt(a, "<BBBBHHIBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, conn_serial, vendor_id,
                       client_serial, (uint8_t)0, (uint8_t)0);
 }
 
@@ -681,8 +681,7 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
  * Payload: elem_count(2) [frag_offset(4)]
  * Response: service|0x80 reserved status ext_size type_code(2) data...
  */
-static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess,
-                         plc_config_t *cfg) {
+static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg) {
     tag_def_t *tag = NULL;
     uint32_t num_idx = 3;
     uint32_t indexes[3] = {0};
@@ -721,25 +720,26 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
      * The CIP response overhead is CIP_RESP_HDR_SIZE (4) + 2 bytes of type code.
      */
     size_t max_packet = (sess->server_to_client_max_packet > 0) ? (size_t)sess->server_to_client_max_packet :
-                                                                   (size_t)cfg->server_to_client_max_packet;
+                                                                  (size_t)cfg->server_to_client_max_packet;
     size_t resp_overhead = CIP_RESP_HDR_SIZE + 2;
     size_t max_data = (max_packet > resp_overhead) ? (max_packet - resp_overhead) : 0;
 
     /* Align max_data down to an element boundary to avoid splitting elements. */
-    if(tag->elem_size > 0 && max_data > 0) { max_data = (max_data / tag->elem_size) * tag->elem_size; }
+    size_t elem_bytes = (tag->elem_size < 8) ? tag->elem_size : 8;
+    if(tag->elem_size > 0 && max_data > 0) { max_data = (max_data / elem_bytes) * elem_bytes; }
 
     copy_len = byte_end - byte_start;
     if(copy_len > max_data) { copy_len = max_data; }
 
     /* Align copy_len down to element boundary. */
-    if(tag->elem_size > 0 && copy_len > 0) { copy_len = (copy_len / tag->elem_size) * tag->elem_size; }
+    if(tag->elem_size > 0 && copy_len > 0) { copy_len = (copy_len / elem_bytes) * elem_bytes; }
 
     if(copy_len == 0) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
     fragmented = (byte_start + copy_len < byte_end);
 
     /* Build response: header(4) + type(2) + data. */
-    Bytes hdr = bytes_pack(a, "<BBBBh", (uint8_t)(svc | CIP_DONE), (uint8_t)0, (uint8_t)(fragmented ? CIP_ERR_FRAG : CIP_OK),
+    Bytes hdr = bytes_pack_fmt(a, "<BBBBh", (uint8_t)(svc | CIP_DONE), (uint8_t)0, (uint8_t)(fragmented ? CIP_ERR_FRAG : CIP_OK),
                            (uint8_t)0, (int16_t)tag->tag_type);
     if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
@@ -816,7 +816,7 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
 
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "Write '%s': %zu bytes", tag->name, write_len);
 
-    return bytes_pack(a, "<BBBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+    return bytes_pack_fmt(a, "<BBBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
 }
 
 
@@ -883,12 +883,9 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload, eip_session_
     Bytes result = bytes_alloc(a, resp_size);
     if(bytes_is_null(result)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
-    Bytes rest = bytes_pack_into(result, "<BBBBH",
-                                 (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, svc_count);
+    Bytes rest = bytes_pack_into_fmt(result, "<BBBBH", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, svc_count);
 
-    for(uint16_t i = 0; i < svc_count; i++) {
-        rest = bytes_pack_into(rest, "<H", (uint16_t)response_offsets[i]);
-    }
+    for(uint16_t i = 0; i < svc_count; i++) { rest = bytes_pack_into_fmt(rest, "<H", (uint16_t)response_offsets[i]); }
 
     for(uint16_t i = 0; i < svc_count; i++) {
         if(sub_responses[i].len > 0) {

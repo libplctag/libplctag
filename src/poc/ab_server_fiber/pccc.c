@@ -192,7 +192,7 @@ build_response:
  * Build a 5-byte PCCC error response (prepended prefix not included here).
  */
 static Bytes pccc_error(Arena *a, uint8_t err, uint16_t seq_id) {
-    return bytes_pack(a, "<BBHb", PCCC_RESP_CMD, (uint8_t)0xf0, seq_id, (int8_t)err);
+    return bytes_pack_fmt(a, "<BBHb", PCCC_RESP_CMD, (uint8_t)0xf0, seq_id, (int8_t)err);
 }
 
 
@@ -243,7 +243,7 @@ static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, plc_config_t
     size_t data_bytes = transfer_size * tag->elem_size;
     if(data_bytes > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
 
-    Bytes hdr = bytes_pack(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
+    Bytes hdr = bytes_pack_fmt(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
     Bytes data = bytes_from_buf(tag->data + start, data_bytes);
     return bytes_concat(a, hdr, data);
 }
@@ -291,7 +291,7 @@ static Bytes handle_plc5_write(Arena *a, Bytes cmd, uint16_t seq_id, plc_config_
 
     memcpy(tag->data + start, write_data.data, data_bytes);
 
-    return bytes_pack(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
+    return bytes_pack_fmt(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }
 
 
@@ -333,7 +333,7 @@ static Bytes handle_plc5_rmw(Arena *a, Bytes cmd, uint16_t seq_id, plc_config_t 
         tag->data[start + i] = (uint8_t)((tag->data[start + i] & and_mask) | or_mask);
     }
 
-    return bytes_pack(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
+    return bytes_pack_fmt(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }
 
 
@@ -379,7 +379,7 @@ static Bytes handle_slc_read(Arena *a, Bytes cmd, uint16_t seq_id, plc_config_t 
 
     if(transfer_size > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
 
-    Bytes hdr = bytes_pack(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
+    Bytes hdr = bytes_pack_fmt(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
     Bytes data = bytes_from_buf(tag->data + start, transfer_size);
     return bytes_concat(a, hdr, data);
 }
@@ -428,7 +428,7 @@ static Bytes handle_slc_write(Arena *a, Bytes cmd, uint16_t seq_id, plc_config_t
 
     memcpy(tag->data + start, write_data.data, transfer_size);
 
-    return bytes_pack(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
+    return bytes_pack_fmt(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }
 
 
@@ -481,5 +481,5 @@ static Bytes handle_slc_rmw(Arena *a, Bytes cmd, uint16_t seq_id, plc_config_t *
         tag->data[start + i] = (uint8_t)((tag->data[start + i] & (uint8_t)~mask) | (new_data & mask));
     }
 
-    return bytes_pack(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
+    return bytes_pack_fmt(a, "<BBH", PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }

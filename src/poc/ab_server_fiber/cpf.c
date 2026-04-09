@@ -210,7 +210,7 @@ extern Bytes cpf_handle_connected(Arena *a, Bytes payload, eip_session_t *sess, 
  *   uconn-data: type(2) len(2) <cip_response>
  */
 static Bytes wrap_unconnected(Arena *a, Bytes cip_response) {
-    Bytes hdr = bytes_pack(a, "<IHHHHHH", (uint32_t)0, /* interface handle */
+    Bytes hdr = bytes_pack_fmt(a, "<IHHHHHH", (uint32_t)0, /* interface handle */
                           (uint16_t)0,                /* timeout */
                           (uint16_t)2,                /* item count */
                           CPF_ITEM_NULL_ADDR,         /* item 0 type */
@@ -231,18 +231,18 @@ static Bytes wrap_connected(Arena *a, Bytes cip_response, uint32_t conn_id, uint
     /* Connected data item length = 2 (seq) + cip_response.len */
     uint16_t data_item_len = (uint16_t)(2 + cip_response.len);
 
-    Bytes addr_hdr = bytes_pack(a, "<HHIHH", CPF_ITEM_CONN_ADDR, /* item 0 type */
+    Bytes addr_hdr = bytes_pack_fmt(a, "<HHIHH", CPF_ITEM_CONN_ADDR, /* item 0 type */
                                 (uint16_t)4,                     /* item 0 length */
                                 conn_id, CPF_ITEM_CONN_DATA,     /* item 1 type */
                                 data_item_len);
     if(bytes_is_null(addr_hdr)) { return (Bytes){0}; }
 
-    Bytes outer_hdr = bytes_pack(a, "<IHH", (uint32_t)0, /* interface handle */
+    Bytes outer_hdr = bytes_pack_fmt(a, "<IHH", (uint32_t)0, /* interface handle */
                                  (uint16_t)0,            /* timeout */
                                  (uint16_t)2);           /* item count */
     if(bytes_is_null(outer_hdr)) { return (Bytes){0}; }
 
-    Bytes seq_bytes = bytes_pack(a, "<H", seq);
+    Bytes seq_bytes = bytes_pack_fmt(a, "<H", seq);
     if(bytes_is_null(seq_bytes)) { return (Bytes){0}; }
 
     return bytes_concat(a, outer_hdr, addr_hdr, seq_bytes, cip_response);
