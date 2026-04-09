@@ -397,10 +397,44 @@ static void write_array_elem(void *ptr, size_t i, char c, uint64_t val) {
 
 
 /* ============================================================================
- * bytes_pack
+ * Type-safe pack implementation
  * ============================================================================ */
 
-Bytes bytes_pack(Arena *a, const char *fmt, ...) {
+static size_t write_typed_args(uint8_t *dst, size_t cap, int endian, va_list args);
+
+Bytes bytes_pack_impl(Arena *a, int endian, ...) {
+    uint8_t *dst = arena_current(a);
+    size_t   cap = arena_remaining(a);
+
+    va_list args;
+    va_start(args, endian);
+    size_t written = write_typed_args(dst, cap, endian, args);
+    va_end(args);
+
+    if(written == SIZE_MAX) { return (Bytes){NULL, 0}; }
+    arena_commit(a, written);
+    return (Bytes){dst, written};
+}
+
+
+Bytes bytes_pack_into_impl(Bytes buf, int endian, ...) {
+    if(!buf.data) { return (Bytes){NULL, 0}; }
+
+    va_list args;
+    va_start(args, endian);
+    size_t written = write_typed_args(buf.data, buf.len, endian, args);
+    va_end(args);
+
+    if(written == SIZE_MAX) { return (Bytes){NULL, 0}; }
+    return bytes_slice(buf, written, buf.len - written);
+}
+
+
+/* ============================================================================
+ * bytes_pack_fmt (old format-string API)
+ * ============================================================================ */
+
+Bytes bytes_pack_fmt(Arena *a, const char *fmt, ...) {
     if(!fmt || !*fmt) { return (Bytes){NULL, 0}; }
 
     int byte_order = get_byte_order(fmt);
@@ -532,10 +566,10 @@ Bytes bytes_pack(Arena *a, const char *fmt, ...) {
 
 
 /* ============================================================================
- * bytes_pack_into
+ * bytes_pack_into_fmt (old format-string API)
  * ============================================================================ */
 
-Bytes bytes_pack_into(Bytes buf, const char *fmt, ...) {
+Bytes bytes_pack_into_fmt(Bytes buf, const char *fmt, ...) {
     if(!fmt || !*fmt || !buf.data) { return (Bytes){NULL, 0}; }
 
     int byte_order = get_byte_order(fmt);
@@ -659,10 +693,10 @@ Bytes bytes_pack_into(Bytes buf, const char *fmt, ...) {
 
 
 /* ============================================================================
- * bytes_unpack
+ * bytes_unpack_fmt (old format-string API)
  * ============================================================================ */
 
-Bytes bytes_unpack(Bytes data, const char *fmt, ...) {
+Bytes bytes_unpack_fmt(Bytes data, const char *fmt, ...) {
     if(!fmt || !*fmt || !data.data) { return (Bytes){NULL, 0}; }
 
     int byte_order = get_byte_order(fmt);
@@ -811,6 +845,423 @@ Bytes bytes_pad_even(Arena *a, Bytes b) {
     memcpy(pad.data, b.data, b.len);
     pad.data[b.len] = 0x00;
     return pad;
+}
+
+
+/* ============================================================================
+ * Type-safe unpack implementation
+ * ============================================================================ */
+
+static size_t read_typed_args(const uint8_t *src, size_t len, int endian, va_list args);
+
+Bytes bytes_unpack_impl(Bytes data, int endian, ...) {
+    if(!data.data) { return (Bytes){NULL, 0}; }
+
+    va_list args;
+    va_start(args, endian);
+    size_t consumed = read_typed_args(data.data, data.len, endian, args);
+    va_end(args);
+
+    if(consumed == SIZE_MAX) { return (Bytes){NULL, 0}; }
+    return bytes_slice(data, consumed, data.len - consumed);
+}
+
+
+/* ============================================================================
+ * write_typed_args — single-pass typed writer for bytes_pack_impl
+ * ============================================================================ */
+
+static size_t write_typed_args(uint8_t *dst, size_t cap, int endian, va_list args) {
+    size_t off = 0;
+
+    for(;;) {
+        int tag = va_arg(args, int);
+        if(tag == (int)BYTES_TYPE_END) { break; }
+
+        switch((BytesPackType)tag) {
+            case BYTES_TYPE_U8: {
+                if(off + 1 > cap) { return SIZE_MAX; }
+                dst[off++] = (uint8_t)va_arg(args, unsigned int);
+                break;
+            }
+            case BYTES_TYPE_I8: {
+                if(off + 1 > cap) { return SIZE_MAX; }
+                dst[off++] = (uint8_t)(int8_t)va_arg(args, int);
+                break;
+            }
+            case BYTES_TYPE_U16:
+            case BYTES_TYPE_I16: {
+                if(off + 2 > cap) { return SIZE_MAX; }
+                uint16_t v = (uint16_t)va_arg(args, unsigned int);
+                if(endian == (int)BYTES_LE) {
+                    dst[off]   = (uint8_t) v;
+                    dst[off+1] = (uint8_t)(v >> 8);
+                } else {
+                    dst[off]   = (uint8_t)(v >> 8);
+                    dst[off+1] = (uint8_t) v;
+                }
+                off += 2;
+                break;
+            }
+            case BYTES_TYPE_U32:
+            case BYTES_TYPE_I32: {
+                if(off + 4 > cap) { return SIZE_MAX; }
+                uint32_t v = va_arg(args, uint32_t);
+                if(endian == (int)BYTES_LE) {
+                    dst[off]   = (uint8_t) v;
+                    dst[off+1] = (uint8_t)(v >>  8);
+                    dst[off+2] = (uint8_t)(v >> 16);
+                    dst[off+3] = (uint8_t)(v >> 24);
+                } else {
+                    dst[off]   = (uint8_t)(v >> 24);
+                    dst[off+1] = (uint8_t)(v >> 16);
+                    dst[off+2] = (uint8_t)(v >>  8);
+                    dst[off+3] = (uint8_t) v;
+                }
+                off += 4;
+                break;
+            }
+            case BYTES_TYPE_U64:
+            case BYTES_TYPE_I64: {
+                if(off + 8 > cap) { return SIZE_MAX; }
+                uint64_t v = va_arg(args, uint64_t);
+                if(endian == (int)BYTES_LE) {
+                    for(size_t i = 0; i < 8; i++) { dst[off + i] = (uint8_t)(v >> (i * 8)); }
+                } else {
+                    for(size_t i = 0; i < 8; i++) { dst[off + i] = (uint8_t)(v >> ((7 - i) * 8)); }
+                }
+                off += 8;
+                break;
+            }
+            case BYTES_TYPE_F32: {
+                if(off + 4 > cap) { return SIZE_MAX; }
+                double   d = va_arg(args, double);
+                float    f = (float)d;
+                uint32_t bits;
+                memcpy(&bits, &f, 4);
+                if(endian == (int)BYTES_LE) {
+                    dst[off]   = (uint8_t) bits;
+                    dst[off+1] = (uint8_t)(bits >>  8);
+                    dst[off+2] = (uint8_t)(bits >> 16);
+                    dst[off+3] = (uint8_t)(bits >> 24);
+                } else {
+                    dst[off]   = (uint8_t)(bits >> 24);
+                    dst[off+1] = (uint8_t)(bits >> 16);
+                    dst[off+2] = (uint8_t)(bits >>  8);
+                    dst[off+3] = (uint8_t) bits;
+                }
+                off += 4;
+                break;
+            }
+            case BYTES_TYPE_F64: {
+                if(off + 8 > cap) { return SIZE_MAX; }
+                double   d = va_arg(args, double);
+                uint64_t bits;
+                memcpy(&bits, &d, 8);
+                if(endian == (int)BYTES_LE) {
+                    for(size_t i = 0; i < 8; i++) { dst[off + i] = (uint8_t)(bits >> (i * 8)); }
+                } else {
+                    for(size_t i = 0; i < 8; i++) { dst[off + i] = (uint8_t)(bits >> ((7 - i) * 8)); }
+                }
+                off += 8;
+                break;
+            }
+            case BYTES_TYPE_BYTES: {
+                Bytes b = va_arg(args, Bytes);
+                if(b.data && b.len > 0) {
+                    if(off + b.len > cap) { return SIZE_MAX; }
+                    memcpy(dst + off, b.data, b.len);
+                    off += b.len;
+                }
+                break;
+            }
+            case BYTES_TYPE_ARRAY: {
+                BytesArray ba = va_arg(args, BytesArray);
+                if(!ba.data || ba.count == 0) { break; }
+                for(size_t i = 0; i < ba.count; i++) {
+                    switch(ba.elem_type) {
+                        case BYTES_TYPE_U8:
+                        case BYTES_TYPE_I8: {
+                            if(off + 1 > cap) { return SIZE_MAX; }
+                            dst[off++] = ((uint8_t *)ba.data)[i];
+                            break;
+                        }
+                        case BYTES_TYPE_U16:
+                        case BYTES_TYPE_I16: {
+                            if(off + 2 > cap) { return SIZE_MAX; }
+                            uint16_t v;
+                            memcpy(&v, (uint8_t *)ba.data + i * 2, 2);
+                            if(endian == (int)BYTES_LE) {
+                                dst[off]   = (uint8_t) v;
+                                dst[off+1] = (uint8_t)(v >> 8);
+                            } else {
+                                dst[off]   = (uint8_t)(v >> 8);
+                                dst[off+1] = (uint8_t) v;
+                            }
+                            off += 2;
+                            break;
+                        }
+                        case BYTES_TYPE_U32:
+                        case BYTES_TYPE_I32: {
+                            if(off + 4 > cap) { return SIZE_MAX; }
+                            uint32_t v;
+                            memcpy(&v, (uint8_t *)ba.data + i * 4, 4);
+                            if(endian == (int)BYTES_LE) {
+                                dst[off]   = (uint8_t) v;
+                                dst[off+1] = (uint8_t)(v >>  8);
+                                dst[off+2] = (uint8_t)(v >> 16);
+                                dst[off+3] = (uint8_t)(v >> 24);
+                            } else {
+                                dst[off]   = (uint8_t)(v >> 24);
+                                dst[off+1] = (uint8_t)(v >> 16);
+                                dst[off+2] = (uint8_t)(v >>  8);
+                                dst[off+3] = (uint8_t) v;
+                            }
+                            off += 4;
+                            break;
+                        }
+                        case BYTES_TYPE_U64:
+                        case BYTES_TYPE_I64: {
+                            if(off + 8 > cap) { return SIZE_MAX; }
+                            uint64_t v;
+                            memcpy(&v, (uint8_t *)ba.data + i * 8, 8);
+                            if(endian == (int)BYTES_LE) {
+                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(v >> (j * 8)); }
+                            } else {
+                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(v >> ((7 - j) * 8)); }
+                            }
+                            off += 8;
+                            break;
+                        }
+                        case BYTES_TYPE_F32: {
+                            if(off + 4 > cap) { return SIZE_MAX; }
+                            uint32_t bits;
+                            memcpy(&bits, (uint8_t *)ba.data + i * 4, 4);
+                            if(endian == (int)BYTES_LE) {
+                                dst[off]   = (uint8_t) bits;
+                                dst[off+1] = (uint8_t)(bits >>  8);
+                                dst[off+2] = (uint8_t)(bits >> 16);
+                                dst[off+3] = (uint8_t)(bits >> 24);
+                            } else {
+                                dst[off]   = (uint8_t)(bits >> 24);
+                                dst[off+1] = (uint8_t)(bits >> 16);
+                                dst[off+2] = (uint8_t)(bits >>  8);
+                                dst[off+3] = (uint8_t) bits;
+                            }
+                            off += 4;
+                            break;
+                        }
+                        case BYTES_TYPE_F64: {
+                            if(off + 8 > cap) { return SIZE_MAX; }
+                            uint64_t bits;
+                            memcpy(&bits, (uint8_t *)ba.data + i * 8, 8);
+                            if(endian == (int)BYTES_LE) {
+                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(bits >> (j * 8)); }
+                            } else {
+                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(bits >> ((7 - j) * 8)); }
+                            }
+                            off += 8;
+                            break;
+                        }
+                        default: break;
+                    }
+                }
+                break;
+            }
+            default: break;
+        }
+    }
+
+    return off;
+}
+
+
+/* ============================================================================
+ * read_typed_args — single-pass typed reader for bytes_unpack_impl
+ * ============================================================================ */
+
+static size_t read_typed_args(const uint8_t *src, size_t len, int endian, va_list args) {
+    size_t off = 0;
+
+    for(;;) {
+        int   tag = va_arg(args, int);
+        if(tag == (int)BYTES_TYPE_END) { break; }
+        void *ptr = va_arg(args, void *);
+
+        switch((BytesPackType)tag) {
+            case BYTES_TYPE_U8: {
+                if(off + 1 > len) { return SIZE_MAX; }
+                *(uint8_t *)ptr = src[off++];
+                break;
+            }
+            case BYTES_TYPE_I8: {
+                if(off + 1 > len) { return SIZE_MAX; }
+                *(int8_t *)ptr = (int8_t)src[off++];
+                break;
+            }
+            case BYTES_TYPE_U16: {
+                if(off + 2 > len) { return SIZE_MAX; }
+                uint16_t v = (endian == (int)BYTES_LE)
+                    ? (uint16_t)((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
+                    : (uint16_t)(((uint16_t)src[off] << 8) | (uint16_t)src[off+1]);
+                *(uint16_t *)ptr = v;
+                off += 2;
+                break;
+            }
+            case BYTES_TYPE_I16: {
+                if(off + 2 > len) { return SIZE_MAX; }
+                uint16_t v = (endian == (int)BYTES_LE)
+                    ? (uint16_t)((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
+                    : (uint16_t)(((uint16_t)src[off] << 8) | (uint16_t)src[off+1]);
+                *(int16_t *)ptr = (int16_t)v;
+                off += 2;
+                break;
+            }
+            case BYTES_TYPE_U32: {
+                if(off + 4 > len) { return SIZE_MAX; }
+                uint32_t v = (endian == (int)BYTES_LE)
+                    ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
+                    : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
+                *(uint32_t *)ptr = v;
+                off += 4;
+                break;
+            }
+            case BYTES_TYPE_I32: {
+                if(off + 4 > len) { return SIZE_MAX; }
+                uint32_t v = (endian == (int)BYTES_LE)
+                    ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
+                    : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
+                *(int32_t *)ptr = (int32_t)v;
+                off += 4;
+                break;
+            }
+            case BYTES_TYPE_U64: {
+                if(off + 8 > len) { return SIZE_MAX; }
+                uint64_t v = 0;
+                if(endian == (int)BYTES_LE) {
+                    for(size_t i = 0; i < 8; i++) { v |= ((uint64_t)src[off + i] << (i * 8)); }
+                } else {
+                    for(size_t i = 0; i < 8; i++) { v |= ((uint64_t)src[off + i] << ((7 - i) * 8)); }
+                }
+                *(uint64_t *)ptr = v;
+                off += 8;
+                break;
+            }
+            case BYTES_TYPE_I64: {
+                if(off + 8 > len) { return SIZE_MAX; }
+                uint64_t v = 0;
+                if(endian == (int)BYTES_LE) {
+                    for(size_t i = 0; i < 8; i++) { v |= ((uint64_t)src[off + i] << (i * 8)); }
+                } else {
+                    for(size_t i = 0; i < 8; i++) { v |= ((uint64_t)src[off + i] << ((7 - i) * 8)); }
+                }
+                *(int64_t *)ptr = (int64_t)v;
+                off += 8;
+                break;
+            }
+            case BYTES_TYPE_F32: {
+                if(off + 4 > len) { return SIZE_MAX; }
+                uint32_t bits = (endian == (int)BYTES_LE)
+                    ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
+                    : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
+                memcpy(ptr, &bits, 4);
+                off += 4;
+                break;
+            }
+            case BYTES_TYPE_F64: {
+                if(off + 8 > len) { return SIZE_MAX; }
+                uint64_t bits = 0;
+                if(endian == (int)BYTES_LE) {
+                    for(size_t i = 0; i < 8; i++) { bits |= ((uint64_t)src[off + i] << (i * 8)); }
+                } else {
+                    for(size_t i = 0; i < 8; i++) { bits |= ((uint64_t)src[off + i] << ((7 - i) * 8)); }
+                }
+                memcpy(ptr, &bits, 8);
+                off += 8;
+                break;
+            }
+            case BYTES_TYPE_BYTES: {
+                Bytes *bp = (Bytes *)ptr;
+                if(off + bp->len > len) { return SIZE_MAX; }
+                bp->data = (uint8_t *)src + off;
+                off += bp->len;
+                break;
+            }
+            case BYTES_TYPE_ARRAY: {
+                BytesArray *bap = (BytesArray *)ptr;
+                if(!bap->data || bap->count == 0) { break; }
+                for(size_t i = 0; i < bap->count; i++) {
+                    switch(bap->elem_type) {
+                        case BYTES_TYPE_U8:
+                        case BYTES_TYPE_I8: {
+                            if(off + 1 > len) { return SIZE_MAX; }
+                            ((uint8_t *)bap->data)[i] = src[off++];
+                            break;
+                        }
+                        case BYTES_TYPE_U16:
+                        case BYTES_TYPE_I16: {
+                            if(off + 2 > len) { return SIZE_MAX; }
+                            uint16_t v = (endian == (int)BYTES_LE)
+                                ? (uint16_t)((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
+                                : (uint16_t)(((uint16_t)src[off] << 8) | (uint16_t)src[off+1]);
+                            memcpy((uint8_t *)bap->data + i * 2, &v, 2);
+                            off += 2;
+                            break;
+                        }
+                        case BYTES_TYPE_U32:
+                        case BYTES_TYPE_I32: {
+                            if(off + 4 > len) { return SIZE_MAX; }
+                            uint32_t v = (endian == (int)BYTES_LE)
+                                ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
+                                : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
+                            memcpy((uint8_t *)bap->data + i * 4, &v, 4);
+                            off += 4;
+                            break;
+                        }
+                        case BYTES_TYPE_U64:
+                        case BYTES_TYPE_I64: {
+                            if(off + 8 > len) { return SIZE_MAX; }
+                            uint64_t v = 0;
+                            if(endian == (int)BYTES_LE) {
+                                for(size_t j = 0; j < 8; j++) { v |= ((uint64_t)src[off + j] << (j * 8)); }
+                            } else {
+                                for(size_t j = 0; j < 8; j++) { v |= ((uint64_t)src[off + j] << ((7 - j) * 8)); }
+                            }
+                            memcpy((uint8_t *)bap->data + i * 8, &v, 8);
+                            off += 8;
+                            break;
+                        }
+                        case BYTES_TYPE_F32: {
+                            if(off + 4 > len) { return SIZE_MAX; }
+                            uint32_t bits = (endian == (int)BYTES_LE)
+                                ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
+                                : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
+                            memcpy((uint8_t *)bap->data + i * 4, &bits, 4);
+                            off += 4;
+                            break;
+                        }
+                        case BYTES_TYPE_F64: {
+                            if(off + 8 > len) { return SIZE_MAX; }
+                            uint64_t bits = 0;
+                            if(endian == (int)BYTES_LE) {
+                                for(size_t j = 0; j < 8; j++) { bits |= ((uint64_t)src[off + j] << (j * 8)); }
+                            } else {
+                                for(size_t j = 0; j < 8; j++) { bits |= ((uint64_t)src[off + j] << ((7 - j) * 8)); }
+                            }
+                            memcpy((uint8_t *)bap->data + i * 8, &bits, 8);
+                            off += 8;
+                            break;
+                        }
+                        default: break;
+                    }
+                }
+                break;
+            }
+            default: break;
+        }
+    }
+
+    return off;
 }
 
 

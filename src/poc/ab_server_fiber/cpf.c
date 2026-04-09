@@ -94,13 +94,13 @@ extern Bytes cpf_handle_unconnected(Arena *a, Bytes payload, eip_session_t *sess
 
     pdlog(LOG_MODULE_CPF, LOG_LEVEL_DETAIL, "cpf_handle_unconnected: payload len=%zu", payload.len);
 
-    Bytes rest = bytes_unpack(payload, "<IHHH", &iface_handle, &timeout, &item_count, &item0_type);
+    Bytes rest = bytes_unpack_fmt(payload, "<IHHH", &iface_handle, &timeout, &item_count, &item0_type);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CPF, LOG_LEVEL_WARN, "CPF unconnected: header unpack failed");
         return (Bytes){0};
     }
 
-    rest = bytes_unpack(rest, "<HHH", &item0_len, &item1_type, &item1_len);
+    rest = bytes_unpack_fmt(rest, "<HHH", &item0_len, &item1_type, &item1_len);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CPF, LOG_LEVEL_WARN, "CPF unconnected: item headers unpack failed");
         return (Bytes){0};
@@ -143,19 +143,19 @@ extern Bytes cpf_handle_connected(Arena *a, Bytes payload, eip_session_t *sess, 
 
     pdlog(LOG_MODULE_CPF, LOG_LEVEL_DETAIL, "cpf_handle_connected: payload len=%zu", payload.len);
 
-    Bytes rest = bytes_unpack(payload, "<IHHH", &iface_handle, &timeout, &item_count, &item0_type);
+    Bytes rest = bytes_unpack_fmt(payload, "<IHHH", &iface_handle, &timeout, &item_count, &item0_type);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CPF, LOG_LEVEL_WARN, "CPF connected: header unpack failed");
         return (Bytes){0};
     }
 
-    rest = bytes_unpack(rest, "<HIH", &item0_len, &conn_id, &item1_type);
+    rest = bytes_unpack_fmt(rest, "<HIH", &item0_len, &conn_id, &item1_type);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CPF, LOG_LEVEL_WARN, "CPF connected: address item unpack failed");
         return (Bytes){0};
     }
 
-    rest = bytes_unpack(rest, "<HH", &item1_len, &seq_num);
+    rest = bytes_unpack_fmt(rest, "<HH", &item1_len, &seq_num);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CPF, LOG_LEVEL_WARN, "CPF connected: data item header unpack failed");
         return (Bytes){0};

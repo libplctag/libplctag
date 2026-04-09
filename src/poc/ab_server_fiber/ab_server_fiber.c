@@ -461,7 +461,7 @@ static void *client_fiber(void *arg) {
         uint32_t eip_session_val = 0;
         uint32_t eip_status_val = 0;
         uint32_t eip_options_val = 0;
-        Bytes hdr_rest = bytes_unpack(hdr_buf, "<HHIIQI",
+        Bytes hdr_rest = bytes_unpack_fmt(hdr_buf, "<HHIIQI",
                                       &cmd, &payload_len,
                                       &eip_session_val, &eip_status_val,
                                       &sess.sender_context, &eip_options_val);

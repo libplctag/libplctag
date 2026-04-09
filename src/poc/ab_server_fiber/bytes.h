@@ -74,6 +74,10 @@ extern void bytes_zero(Bytes b);
 /* True when b.data is NULL. */
 static inline bool bytes_is_null(Bytes b) { return b.data == NULL; }
 
+/* Return the filled portion of original given the unfilled remainder.
+ * Typical use: Bytes packet = bytes_filled(buf, rest_after_pack_into); */
+static inline Bytes bytes_filled(Bytes original, Bytes rest) { return (Bytes){original.data, original.len - rest.len}; }
+
 /* ============================================================================
  * Concatenation
  * ============================================================================ */
@@ -90,7 +94,154 @@ extern Bytes bytes_concat_impl(Arena *a, int count, ...);
 #define bytes_concat(a_, ...) bytes_concat_impl((a_), (int)BYTES_NARGS(__VA_ARGS__), __VA_ARGS__)
 
 /* ============================================================================
- * Struct pack / unpack  (Python struct module style)
+ * Type-safe pack (C11 _Generic dispatch)
+ *
+ * BytesEndian selects byte order.  Each value is tagged at compile time via
+ * BYTES_TYPE_OF/_Generic; the implementation does a single pass with no
+ * format-string parsing.
+ *
+ * Scalar values are passed directly.  Typed arrays use BYTES_ARRAY() for
+ * per-element endian conversion.  Raw byte blobs use a Bytes struct (no
+ * endian conversion).
+ *
+ * Usage:
+ *   bytes_pack(arena, BYTES_LE, (uint8_t)cmd, (uint16_t)len, someBytes)
+ *   bytes_pack(arena, BYTES_LE, (uint8_t)cmd, BYTES_ARRAY(my_u32_arr, 5))
+ *   bytes_pack_into(buf, BYTES_BE, (uint32_t)val)
+ * ============================================================================ */
+
+typedef enum {
+    BYTES_LE =  1,
+    BYTES_BE = -1,
+} BytesEndian;
+
+typedef enum {
+    BYTES_TYPE_END   = 0,
+    BYTES_TYPE_U8,
+    BYTES_TYPE_U16,
+    BYTES_TYPE_U32,
+    BYTES_TYPE_U64,
+    BYTES_TYPE_I8,
+    BYTES_TYPE_I16,
+    BYTES_TYPE_I32,
+    BYTES_TYPE_I64,
+    BYTES_TYPE_F32,       /* float  — passed as double via vararg promotion */
+    BYTES_TYPE_F64,       /* double */
+    BYTES_TYPE_BYTES,     /* Bytes struct — raw memcpy, no endian conversion */
+    BYTES_TYPE_ARRAY,     /* BytesArray struct — per-element endian conversion */
+} BytesPackType;
+
+/*
+ * Typed array descriptor for BYTES_TYPE_ARRAY.
+ * elem_type must be one of the scalar tags (U8..F64).
+ */
+typedef struct {
+    void         *data;
+    size_t        count;
+    BytesPackType elem_type;
+} BytesArray;
+
+/*
+ * Resolve a C expression to its BytesPackType tag at compile time.
+ * Unrecognised types fall through to BYTES_TYPE_BYTES (raw copy).
+ */
+#define BYTES_TYPE_OF(x) _Generic((x),    \
+    uint8_t:    BYTES_TYPE_U8,            \
+    uint16_t:   BYTES_TYPE_U16,           \
+    uint32_t:   BYTES_TYPE_U32,           \
+    uint64_t:   BYTES_TYPE_U64,           \
+    int8_t:     BYTES_TYPE_I8,            \
+    int16_t:    BYTES_TYPE_I16,           \
+    int32_t:    BYTES_TYPE_I32,           \
+    int64_t:    BYTES_TYPE_I64,           \
+    float:      BYTES_TYPE_F32,           \
+    double:     BYTES_TYPE_F64,           \
+    Bytes:      BYTES_TYPE_BYTES,         \
+    BytesArray: BYTES_TYPE_ARRAY,         \
+    default:    BYTES_TYPE_BYTES          \
+)
+
+/* Expand one user argument to a (type-tag, value) pair. */
+#define BYTES_WRAP(x)  (int)BYTES_TYPE_OF(x), (x)
+
+/*
+ * Wrap any typed array pointer + element count into a BytesArray.
+ * Element type is derived from the pointer type at compile time.
+ * Endian conversion is applied per-element in write_typed_args.
+ */
+#define BYTES_ARRAY(ptr_, count_) \
+    ((BytesArray){ \
+        .data      = (void *)(ptr_), \
+        .count     = (count_), \
+        .elem_type = BYTES_TYPE_OF(*(ptr_)) \
+    })
+
+/* Count up to 32 arguments. */
+#define BYTES_NARGS32_(_1,_2,_3,_4,_5,_6,_7,_8,          \
+                       _9,_10,_11,_12,_13,_14,_15,_16,    \
+                       _17,_18,_19,_20,_21,_22,_23,_24,   \
+                       _25,_26,_27,_28,_29,_30,_31,_32,N,...) N
+#define BYTES_NARGS32(...) \
+    BYTES_NARGS32_(__VA_ARGS__,                            \
+        32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,  \
+        16,15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+
+#define BYTES_FOREACH_1(_1)       BYTES_WRAP(_1)
+#define BYTES_FOREACH_2(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_1(__VA_ARGS__)
+#define BYTES_FOREACH_3(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_2(__VA_ARGS__)
+#define BYTES_FOREACH_4(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_3(__VA_ARGS__)
+#define BYTES_FOREACH_5(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_4(__VA_ARGS__)
+#define BYTES_FOREACH_6(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_5(__VA_ARGS__)
+#define BYTES_FOREACH_7(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_6(__VA_ARGS__)
+#define BYTES_FOREACH_8(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_7(__VA_ARGS__)
+#define BYTES_FOREACH_9(_1,...)   BYTES_WRAP(_1), BYTES_FOREACH_8(__VA_ARGS__)
+#define BYTES_FOREACH_10(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_9(__VA_ARGS__)
+#define BYTES_FOREACH_11(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_10(__VA_ARGS__)
+#define BYTES_FOREACH_12(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_11(__VA_ARGS__)
+#define BYTES_FOREACH_13(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_12(__VA_ARGS__)
+#define BYTES_FOREACH_14(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_13(__VA_ARGS__)
+#define BYTES_FOREACH_15(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_14(__VA_ARGS__)
+#define BYTES_FOREACH_16(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_15(__VA_ARGS__)
+#define BYTES_FOREACH_17(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_16(__VA_ARGS__)
+#define BYTES_FOREACH_18(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_17(__VA_ARGS__)
+#define BYTES_FOREACH_19(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_18(__VA_ARGS__)
+#define BYTES_FOREACH_20(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_19(__VA_ARGS__)
+#define BYTES_FOREACH_21(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_20(__VA_ARGS__)
+#define BYTES_FOREACH_22(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_21(__VA_ARGS__)
+#define BYTES_FOREACH_23(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_22(__VA_ARGS__)
+#define BYTES_FOREACH_24(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_23(__VA_ARGS__)
+#define BYTES_FOREACH_25(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_24(__VA_ARGS__)
+#define BYTES_FOREACH_26(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_25(__VA_ARGS__)
+#define BYTES_FOREACH_27(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_26(__VA_ARGS__)
+#define BYTES_FOREACH_28(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_27(__VA_ARGS__)
+#define BYTES_FOREACH_29(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_28(__VA_ARGS__)
+#define BYTES_FOREACH_30(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_29(__VA_ARGS__)
+#define BYTES_FOREACH_31(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_30(__VA_ARGS__)
+#define BYTES_FOREACH_32(_1,...)  BYTES_WRAP(_1), BYTES_FOREACH_31(__VA_ARGS__)
+
+#define BYTES_FOREACH_CAT_(a,b)  a##b
+#define BYTES_FOREACH_CAT(a,b)   BYTES_FOREACH_CAT_(a,b)
+#define BYTES_FOREACH(...)  BYTES_FOREACH_CAT(BYTES_FOREACH_, BYTES_NARGS32(__VA_ARGS__))(__VA_ARGS__)
+
+/* Implementation functions — call via macros below, not directly. */
+extern Bytes bytes_pack_impl(Arena *a, int endian, ...);
+extern Bytes bytes_pack_into_impl(Bytes buf, int endian, ...);
+
+/*
+ * Type-safe pack into a fresh arena allocation.  Returns {NULL,0} on OOM.
+ */
+#define bytes_pack(a_, endian_, ...) \
+    bytes_pack_impl((a_), (int)(endian_), BYTES_FOREACH(__VA_ARGS__), (int)BYTES_TYPE_END)
+
+/*
+ * Type-safe pack into an existing Bytes buffer.
+ * Returns the remaining unfilled slice; use bytes_filled(buf, rest) to recover what was written.
+ */
+#define bytes_pack_into(buf_, endian_, ...) \
+    bytes_pack_into_impl((buf_), (int)(endian_), BYTES_FOREACH(__VA_ARGS__), (int)BYTES_TYPE_END)
+
+/* ============================================================================
+ * Format-string pack / unpack  (Python struct module style, old API)
  *
  * Byte-order prefix: "<" little-endian, ">" big-endian, "=" / "@" native.
  * Format chars:
@@ -106,26 +257,99 @@ extern Bytes bytes_concat_impl(Arena *a, int count, ...);
  *        writes/reads count elements of type T (b/B/h/H/i/I/q/Q/f/d).
  *   *x   dynamic zero padding — next arg is (size_t count); writes count
  *        zero bytes with no array pointer argument.
- *
- * Example: bytes_pack(arena, ">HHHb", txn_id, proto_id, length, unit_id)
  * ============================================================================ */
 
 /* Pack values into an arena-allocated Bytes.  Returns {NULL,0} on OOM. */
-extern Bytes bytes_pack(Arena *a, const char *fmt, ...);
+extern Bytes bytes_pack_fmt(Arena *a, const char *fmt, ...);
 
 /*
  * Pack values into an existing Bytes buffer.
  * Returns the remaining (unfilled) slice, or {NULL,0} if buf is too small.
- * Same format string as bytes_pack(); no arena needed.
  */
-extern Bytes bytes_pack_into(Bytes buf, const char *fmt, ...);
+extern Bytes bytes_pack_into_fmt(Bytes buf, const char *fmt, ...);
+
+/* ============================================================================
+ * Type-safe unpack (C11 _Generic dispatch)
+ *
+ * Each output argument must be a typed pointer: uint16_t*, uint32_t*, etc.
+ * For Bytes*: pre-set ptr->len; a zero-copy slice is assigned to ptr->data.
+ * For BytesArray*: pre-set count, elem_type, and data (pre-allocated storage).
+ * For padding bytes: call bytes_skip() before the next bytes_unpack call.
+ *
+ * Usage:
+ *   uint16_t cmd; uint32_t session; uint64_t ctx;
+ *   Bytes rest = bytes_unpack(data, BYTES_LE, &cmd, &session, &ctx);
+ * ============================================================================ */
 
 /*
- * Unpack values from data according to fmt.
- * Output pointers are passed as variadic args in format order.
- * Returns a Bytes slice of remaining unread data, or {NULL,0} on error.
+ * Resolve an output pointer to its BytesPackType tag at compile time.
  */
-extern Bytes bytes_unpack(Bytes data, const char *fmt, ...);
+#define BYTES_OUT_TYPE_OF(ptr_) _Generic((ptr_),  \
+    uint8_t*:    BYTES_TYPE_U8,                   \
+    uint16_t*:   BYTES_TYPE_U16,                  \
+    uint32_t*:   BYTES_TYPE_U32,                  \
+    uint64_t*:   BYTES_TYPE_U64,                  \
+    int8_t*:     BYTES_TYPE_I8,                   \
+    int16_t*:    BYTES_TYPE_I16,                  \
+    int32_t*:    BYTES_TYPE_I32,                  \
+    int64_t*:    BYTES_TYPE_I64,                  \
+    float*:      BYTES_TYPE_F32,                  \
+    double*:     BYTES_TYPE_F64,                  \
+    Bytes*:      BYTES_TYPE_BYTES,                \
+    BytesArray*: BYTES_TYPE_ARRAY,                \
+    default:     BYTES_TYPE_BYTES                 \
+)
+
+/* Expand one output pointer to a (type-tag, void*) pair. */
+#define BYTES_UNWRAP(ptr_)  (int)BYTES_OUT_TYPE_OF(ptr_), (void *)(ptr_)
+
+#define BYTES_FOREACH_OUT_1(_1)       BYTES_UNWRAP(_1)
+#define BYTES_FOREACH_OUT_2(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_1(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_3(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_2(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_4(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_3(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_5(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_4(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_6(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_5(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_7(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_6(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_8(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_7(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_9(_1,...)   BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_8(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_10(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_9(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_11(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_10(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_12(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_11(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_13(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_12(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_14(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_13(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_15(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_14(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_16(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_15(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_17(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_16(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_18(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_17(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_19(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_18(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_20(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_19(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_21(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_20(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_22(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_21(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_23(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_22(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_24(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_23(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_25(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_24(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_26(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_25(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_27(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_26(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_28(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_27(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_29(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_28(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_30(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_29(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_31(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_30(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_32(_1,...)  BYTES_UNWRAP(_1), BYTES_FOREACH_OUT_31(__VA_ARGS__)
+
+#define BYTES_FOREACH_OUT(...)  BYTES_FOREACH_CAT(BYTES_FOREACH_OUT_, BYTES_NARGS32(__VA_ARGS__))(__VA_ARGS__)
+
+/* Implementation function — call via macro below, not directly. */
+extern Bytes bytes_unpack_impl(Bytes data, int endian, ...);
+
+/*
+ * Type-safe unpack from a Bytes source.
+ * Returns the remaining unread slice, or {NULL,0} on underflow.
+ */
+#define bytes_unpack(data_, endian_, ...) \
+    bytes_unpack_impl((data_), (int)(endian_), BYTES_FOREACH_OUT(__VA_ARGS__), (int)BYTES_TYPE_END)
+
+/* Format-string variant (old API). */
+extern Bytes bytes_unpack_fmt(Bytes data, const char *fmt, ...);
 
 /* ============================================================================
  * Slicing (no allocation)
@@ -139,6 +363,12 @@ extern Bytes bytes_slice(Bytes b, size_t offset, size_t len);
 
 /* Pad to even length by appending one zero byte if len is odd. */
 extern Bytes bytes_pad_even(Arena *a, Bytes b);
+
+/* Advance past n bytes; returns remaining slice or {NULL,0} if out of range. */
+static inline Bytes bytes_skip(Bytes b, size_t n) {
+    if(n > b.len) { return (Bytes){NULL, 0}; }
+    return bytes_slice(b, n, b.len - n);
+}
 
 /* ============================================================================
  * Debug

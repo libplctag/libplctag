@@ -154,7 +154,7 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
             if(svc_path.len == sizeof(CIP_CONN_MGR_PATH)
                && memcmp(svc_path.data, CIP_CONN_MGR_PATH, sizeof(CIP_CONN_MGR_PATH)) == 0) {
                 uint16_t embedded_len = 0;
-                Bytes embedded_rest = bytes_unpack(svc_payload, "<xxH", &embedded_len);
+                Bytes embedded_rest = bytes_unpack_fmt(svc_payload, "<xxH", &embedded_len);
                 if(bytes_is_null(embedded_rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
                 Bytes embedded = bytes_slice(embedded_rest, 0, embedded_len);
                 if(bytes_is_null(embedded)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
@@ -218,7 +218,7 @@ static bool parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes 
 
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "parse_cip_request: starting, input.len=%zu", input.len);
 
-    Bytes rest = bytes_unpack(input, "<BB", svc, &path_len_words);
+    Bytes rest = bytes_unpack_fmt(input, "<BB", svc, &path_len_words);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_cip_request: too short to read service and path length (len=%zu)",
               input.len);
@@ -262,7 +262,7 @@ static bool extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_pa
         return false;
     }
 
-    Bytes rest = bytes_unpack(at_offset, "<B", &path_len_words);
+    Bytes rest = bytes_unpack_fmt(at_offset, "<B", &path_len_words);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "extract_path: cannot read path_len_words at offset=%zu", *offset);
         return false;
@@ -282,7 +282,7 @@ static bool extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_pa
             return false;
         }
         uint8_t pad = 0;
-        after_pad = bytes_unpack(after_pad, "<B", &pad);
+        after_pad = bytes_unpack_fmt(after_pad, "<B", &pad);
         if(bytes_is_null(after_pad)) {
             pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "extract_path: cannot read pad byte at offset=%zu", *offset);
             return false;
@@ -323,7 +323,7 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "parse_tag_path: starting, path.len=%zu", tag_path.len);
 
     /* Symbolic segment: 0x91 <name_len> <name_bytes> [pad] */
-    Bytes rest = bytes_unpack(tag_path, "<BB", &seg_type, &name_len_u8);
+    Bytes rest = bytes_unpack_fmt(tag_path, "<BB", &seg_type, &name_len_u8);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: too short to read segment type and name length");
         return false;
@@ -347,7 +347,7 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
     /* Align to 16-bit boundary: if name_len is odd, skip one pad byte. */
     if(name_len % 2 != 0) {
         uint8_t pad = 0;
-        Bytes after_pad = bytes_unpack(rest, "<B", &pad);
+        Bytes after_pad = bytes_unpack_fmt(rest, "<B", &pad);
         if(bytes_is_null(after_pad)) {
             pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: no room for alignment pad byte");
             return false;
@@ -384,13 +384,13 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
             return false;
         }
 
-        Bytes after_type = bytes_unpack(rest, "<B", &idx_type);
+        Bytes after_type = bytes_unpack_fmt(rest, "<B", &idx_type);
         if(bytes_is_null(after_type)) { break; }
 
         switch(idx_type) {
             case 0x28: {
                 /* 8-bit index: type(1) val(1) */
-                Bytes after_val = bytes_unpack(after_type, "<B", &idx_val8);
+                Bytes after_val = bytes_unpack_fmt(after_type, "<B", &idx_val8);
                 if(bytes_is_null(after_val)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated 8-bit index segment");
                     return false;
@@ -403,12 +403,12 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
             case 0x29: {
                 /* 16-bit index: type(1) pad(1) val(2) */
                 uint8_t pad = 0;
-                Bytes after_pad = bytes_unpack(after_type, "<B", &pad);
+                Bytes after_pad = bytes_unpack_fmt(after_type, "<B", &pad);
                 if(bytes_is_null(after_pad)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated pad in 16-bit index segment");
                     return false;
                 }
-                Bytes after_val = bytes_unpack(after_pad, "<H", &idx_val16);
+                Bytes after_val = bytes_unpack_fmt(after_pad, "<H", &idx_val16);
                 if(bytes_is_null(after_val)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated 16-bit index value");
                     return false;
@@ -421,12 +421,12 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
             case 0x2A: {
                 /* 32-bit index: type(1) pad(1) val(4) */
                 uint8_t pad = 0;
-                Bytes after_pad = bytes_unpack(after_type, "<B", &pad);
+                Bytes after_pad = bytes_unpack_fmt(after_type, "<B", &pad);
                 if(bytes_is_null(after_pad)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated pad in 32-bit index segment");
                     return false;
                 }
-                Bytes after_val = bytes_unpack(after_pad, "<I", &idx_val32);
+                Bytes after_val = bytes_unpack_fmt(after_pad, "<I", &idx_val32);
                 if(bytes_is_null(after_val)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated 32-bit index value");
                     return false;
@@ -538,7 +538,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     }
 
     /* Parse fixed fields. */
-    Bytes rest = bytes_unpack(svc_payload, "<BBIIHHIBxxxI", &secs_per_tick, &timeout_ticks, &server_conn_id, &client_conn_id,
+    Bytes rest = bytes_unpack_fmt(svc_payload, "<BBIIHHIBxxxI", &secs_per_tick, &timeout_ticks, &server_conn_id, &client_conn_id,
                               &conn_serial, &orig_vendor_id, &orig_serial, &conn_timeout_mult, &c2s_rpi);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Forward Open: fixed field unpack failed");
@@ -548,11 +548,11 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     /* c2s_params and s2c_params differ in width: 2B for standard FO, 4B for extended. */
     if(svc == CIP_SRV_FORWARD_OPEN) {
         uint16_t p1 = 0, p2 = 0;
-        rest = bytes_unpack(rest, "<HIH", &p1, &s2c_rpi, &p2);
+        rest = bytes_unpack_fmt(rest, "<HIH", &p1, &s2c_rpi, &p2);
         c2s_params = p1;
         s2c_params = p2;
     } else {
-        rest = bytes_unpack(rest, "<III", &c2s_params, &s2c_rpi, &s2c_params);
+        rest = bytes_unpack_fmt(rest, "<III", &c2s_params, &s2c_rpi, &s2c_params);
     }
 
     if(bytes_is_null(rest)) {
@@ -560,7 +560,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
-    rest = bytes_unpack(rest, "<B", &transport_class);
+    rest = bytes_unpack_fmt(rest, "<B", &transport_class);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Forward Open: transport class unpack failed");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
@@ -642,7 +642,7 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
         return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
-    Bytes rest = bytes_unpack(svc_payload, "<BBHHI", &secs_per_tick, &timeout_ticks, &conn_serial, &vendor_id, &client_serial);
+    Bytes rest = bytes_unpack_fmt(svc_payload, "<BBHHI", &secs_per_tick, &timeout_ticks, &conn_serial, &vendor_id, &client_serial);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Forward Close: header unpack failed");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
@@ -697,11 +697,11 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
 
     t_start = util_time_us();
 
-    Bytes rest = bytes_unpack(svc_payload, "<H", &elem_count);
+    Bytes rest = bytes_unpack_fmt(svc_payload, "<H", &elem_count);
     if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
     if(svc == CIP_SRV_READ_FRAG) {
-        rest = bytes_unpack(rest, "<I", &frag_offset);
+        rest = bytes_unpack_fmt(rest, "<I", &frag_offset);
         if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
     }
 
@@ -780,7 +780,7 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
 
     t_start = util_time_us();
 
-    Bytes rest = bytes_unpack(svc_payload, "<HH", &req_type, &elem_count);
+    Bytes rest = bytes_unpack_fmt(svc_payload, "<HH", &req_type, &elem_count);
     if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
     if(req_type != tag->tag_type) {
@@ -789,7 +789,7 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     }
 
     if(svc == CIP_SRV_WRITE_FRAG) {
-        rest = bytes_unpack(rest, "<I", &frag_offset);
+        rest = bytes_unpack_fmt(rest, "<I", &frag_offset);
         if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
     }
 
@@ -834,12 +834,12 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload, eip_session_
     uint16_t svc_count = 0;
     uint16_t req_offsets[MAX_SUB_REQUESTS];
 
-    Bytes payload_rest = bytes_unpack(svc_payload, "<H", &svc_count);
+    Bytes payload_rest = bytes_unpack_fmt(svc_payload, "<H", &svc_count);
     if(bytes_is_null(payload_rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
     if(svc_count == 0 || svc_count > MAX_SUB_REQUESTS) { return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0); }
 
-    payload_rest = bytes_unpack(payload_rest, "<*H", (size_t)svc_count, req_offsets);
+    payload_rest = bytes_unpack_fmt(payload_rest, "<*H", (size_t)svc_count, req_offsets);
     if(bytes_is_null(payload_rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
     /*
