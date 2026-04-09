@@ -129,7 +129,7 @@ static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *ses
     proto_version = EIP_REG_SESSION_VERSION;
     proto_options = 0;
 
-    return bytes_pack(a, "<HH", proto_version, proto_options);
+    return bytes_pack(a, BYTES_LE, proto_version, proto_options);
 }
 
 static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
@@ -143,8 +143,7 @@ static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
  * Build a complete EIP response: 24-byte header with status=0, then body.
  */
 static Bytes make_eip_response(Arena *a, uint16_t cmd, uint32_t session, uint64_t context, Bytes body) {
-    Bytes hdr = bytes_pack(a, "<HHIIQI", cmd, (uint16_t)body.len, session, (uint32_t)0, /* status = success */
-                           context, (uint32_t)0);                                       /* options */
+    Bytes hdr = bytes_pack(a, BYTES_LE, cmd, (uint16_t)body.len, session, (uint32_t)0, context, (uint32_t)0);
     if(bytes_is_null(hdr)) { return (Bytes){0}; }
     return bytes_concat(a, hdr, body);
 }
@@ -154,5 +153,5 @@ static Bytes make_eip_response(Arena *a, uint16_t cmd, uint32_t session, uint64_
  * Returns an EIP header with empty payload and non-zero status.
  */
 static Bytes make_eip_error(Arena *a, uint16_t cmd, uint64_t context) {
-    return bytes_pack(a, "<HHIIQI", cmd, (uint16_t)0, (uint32_t)0, (uint32_t)0x0065, context, (uint32_t)0);
+    return bytes_pack(a, BYTES_LE, cmd, (uint16_t)0, (uint32_t)0, (uint32_t)0x0065, context, (uint32_t)0);
 }
