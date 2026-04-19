@@ -46,6 +46,8 @@
  *   offset 20 uint32  options
  */
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "arena.h"
@@ -69,56 +71,152 @@ static uint32_t s_next_session_handle = 1;
 #define EIP_REG_SESSION_VERSION ((uint16_t)1)
 
 /* ============================================================================
+ * Struct types
+ * ============================================================================ */
+
+typedef struct {
+    uint16_t cmd;
+    uint16_t payload_len;
+    uint32_t session_handle;
+    uint32_t status;
+    uint64_t sender_context;
+    uint32_t options;
+} eip_hdr_t;
+
+/* ============================================================================
  * Forward declarations
  * ============================================================================ */
 
+static bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr);
+static Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr);
 static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *sess);
 static Bytes handle_unregister_session(Arena *a, eip_session_t *sess);
-static Bytes make_eip_response(Arena *a, uint16_t cmd, uint32_t session, uint64_t context, Bytes body);
-static Bytes make_eip_error(Arena *a, uint16_t cmd, uint64_t context);
+static Bytes make_eip_response(Arena *a, eip_hdr_t *req_hdr, eip_session_t *sess, Bytes body);
+static Bytes make_eip_error(Arena *a, eip_hdr_t *req_hdr);
 
 /* ============================================================================
  * Public functions
  * ============================================================================ */
 
-extern Bytes eip_dispatch(Arena *a, uint16_t cmd, Bytes payload, eip_session_t *sess, plc_config_t *cfg) {
+extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, plc_config_t *cfg) {
+    eip_hdr_t req_hdr = {0};
     Bytes response_body = {0};
 
-    pdlog(LOG_MODULE_EIP, LOG_LEVEL_DETAIL, "eip_dispatch: cmd=0x%04x payload len=%zu", cmd, payload.len);
+    if(!eip_parse_hdr(hdr, &req_hdr)) {
+        return (Bytes){0};
+    }
 
-    switch(cmd) {
-        case EIP_CMD_REGISTER_SESSION: response_body = handle_register_session(a, payload, sess); break;
+    sess->sender_context = req_hdr.sender_context;
+
+    if(sess->max_eip_packet_size > 0 && (size_t)req_hdr.payload_len > sess->max_eip_packet_size) {
+        pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN,
+              "EIP payload_len=%u exceeds negotiated max %zu — closing connection",
+              req_hdr.payload_len, sess->max_eip_packet_size);
+        return (Bytes){0};
+    }
+
+    if(payload.len != (size_t)req_hdr.payload_len) {
+        pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN,
+              "EIP payload size mismatch: declared %u received %zu — closing connection",
+              req_hdr.payload_len, payload.len);
+        return (Bytes){0};
+    }
+
+    pdlog(LOG_MODULE_EIP, LOG_LEVEL_DETAIL, "eip_dispatch: cmd=0x%04x payload len=%zu", req_hdr.cmd, payload.len);
+
+    switch(req_hdr.cmd) {
+        case EIP_CMD_REGISTER_SESSION:
+            response_body = handle_register_session(a, payload, sess);
+            break;
 
         case EIP_CMD_UNREGISTER_SESSION:
             handle_unregister_session(a, sess);
             /* UnregisterSession has no response per spec — signal caller to close. */
             return (Bytes){0};
 
-        case EIP_CMD_UNCONNECTED_SEND: response_body = cpf_handle_unconnected(a, payload, sess, cfg); break;
+        case EIP_CMD_UNCONNECTED_SEND:
+            response_body = cpf_handle_unconnected(a, payload, sess, cfg);
+            break;
 
-        case EIP_CMD_CONNECTED_SEND: response_body = cpf_handle_connected(a, payload, sess, cfg); break;
+        case EIP_CMD_CONNECTED_SEND:
+            response_body = cpf_handle_connected(a, payload, sess, cfg);
+            break;
 
         default:
-            pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN, "Unknown EIP command 0x%04x", cmd);
-            return make_eip_error(a, cmd, sess->sender_context);
+            pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN, "Unknown EIP command 0x%04x", req_hdr.cmd);
+            return make_eip_error(a, &req_hdr);
     }
 
     if(bytes_is_null(response_body)) {
-        pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN, "EIP handler returned null body for cmd=0x%04x", cmd);
-        return make_eip_error(a, cmd, sess->sender_context);
+        pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN, "EIP handler returned null body for cmd=0x%04x", req_hdr.cmd);
+        return make_eip_error(a, &req_hdr);
     }
 
-    return make_eip_response(a, cmd, sess->session_handle, sess->sender_context, response_body);
+    return make_eip_response(a, &req_hdr, sess, response_body);
 }
+
+extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size) {
+    sess->raw_packet_size = raw_packet_size;
+
+    size_t eip_payload = (raw_packet_size > EIP_HEADER_SIZE) ? (size_t)raw_packet_size - EIP_HEADER_SIZE : (size_t)0;
+    sess->max_eip_packet_size = eip_payload;
+
+    size_t cpf_unc_framing = CPF_HEADER_SIZE + CPF_UNCONNECTED_ADDR_ITEM_SIZE + CPF_UNCONNECTED_DATA_ITEM_SIZE;
+    sess->max_cpf_packet_size = (eip_payload > cpf_unc_framing) ? eip_payload - cpf_unc_framing : (size_t)0;
+
+    sess->max_cip_packet_size = sess->max_cpf_packet_size;
+}
+
+
+extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size) {
+    sess->raw_packet_size = raw_packet_size;
+
+    size_t eip_payload = (raw_packet_size > EIP_HEADER_SIZE) ? (size_t)raw_packet_size - EIP_HEADER_SIZE : (size_t)0;
+    sess->max_eip_packet_size = eip_payload;
+
+    size_t cpf_conn_framing = CPF_HEADER_SIZE + CPF_CONNECTED_ADDR_ITEM_SIZE + CPF_CONNECTED_DATA_ITEM_SIZE + CPF_CONN_SEQ_NUM_SIZE;
+    sess->max_cpf_packet_size = (eip_payload > cpf_conn_framing) ? eip_payload - cpf_conn_framing : (size_t)0;
+
+    sess->max_cip_packet_size = sess->max_cpf_packet_size;
+}
+
 
 /* ============================================================================
  * Static functions
  * ============================================================================ */
 
-static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *sess) {
-    uint16_t proto_version = 0;
-    uint16_t proto_options = 0;
+static bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr) {
+    Bytes rest = bytes_unpack(hdr_buf, BYTES_LE,
+        &hdr->cmd,
+        &hdr->payload_len,
+        &hdr->session_handle,
+        &hdr->status,
+        &hdr->sender_context,
+        &hdr->options
+    );
 
+    if(bytes_is_null(rest)) {
+        pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN, "eip_parse_hdr: header unpack failed");
+        return false;
+    }
+
+    return true;
+}
+
+
+static Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr) {
+    return bytes_pack(a, BYTES_LE,
+        hdr->cmd,
+        hdr->payload_len,
+        hdr->session_handle,
+        hdr->status,
+        hdr->sender_context,
+        hdr->options
+    );
+}
+
+
+static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *sess) {
     (void)payload;
 
     sess->session_handle = s_next_session_handle++;
@@ -126,11 +224,9 @@ static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *ses
 
     pdlog(LOG_MODULE_EIP, LOG_LEVEL_INFO, "RegisterSession: assigned handle 0x%08x", sess->session_handle);
 
-    proto_version = EIP_REG_SESSION_VERSION;
-    proto_options = 0;
-
-    return bytes_pack(a, BYTES_LE, proto_version, proto_options);
+    return bytes_pack(a, BYTES_LE, EIP_REG_SESSION_VERSION, (uint16_t)0);
 }
+
 
 static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
     (void)a;
@@ -139,19 +235,40 @@ static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
     return (Bytes){0};
 }
 
+
 /*
  * Build a complete EIP response: 24-byte header with status=0, then body.
  */
-static Bytes make_eip_response(Arena *a, uint16_t cmd, uint32_t session, uint64_t context, Bytes body) {
-    Bytes hdr = bytes_pack(a, BYTES_LE, cmd, (uint16_t)body.len, session, (uint32_t)0, context, (uint32_t)0);
-    if(bytes_is_null(hdr)) { return (Bytes){0}; }
-    return bytes_concat(a, hdr, body);
+static Bytes make_eip_response(Arena *a, eip_hdr_t *req_hdr, eip_session_t *sess, Bytes body) {
+    eip_hdr_t resp = {0};
+    resp.cmd            = req_hdr->cmd;
+    resp.payload_len    = (uint16_t)body.len;
+    resp.session_handle = sess->session_handle;
+    resp.status         = 0;
+    resp.sender_context = req_hdr->sender_context;
+    resp.options        = 0;
+
+    Bytes hdr_bytes = eip_encode_hdr(a, &resp);
+    if(bytes_is_null(hdr_bytes)) {
+        pdlog(LOG_MODULE_EIP, LOG_LEVEL_WARN, "make_eip_response: arena alloc failed");
+        return (Bytes){0};
+    }
+    return bytes_concat(a, hdr_bytes, body);
 }
+
 
 /*
  * Build a minimal EIP error response with status = 0x0065 (unsupported).
  * Returns an EIP header with empty payload and non-zero status.
  */
-static Bytes make_eip_error(Arena *a, uint16_t cmd, uint64_t context) {
-    return bytes_pack(a, BYTES_LE, cmd, (uint16_t)0, (uint32_t)0, (uint32_t)0x0065, context, (uint32_t)0);
+static Bytes make_eip_error(Arena *a, eip_hdr_t *req_hdr) {
+    eip_hdr_t resp = {0};
+    resp.cmd            = req_hdr->cmd;
+    resp.payload_len    = 0;
+    resp.session_handle = 0;
+    resp.status         = 0x0065;
+    resp.sender_context = req_hdr->sender_context;
+    resp.options        = 0;
+
+    return eip_encode_hdr(a, &resp);
 }

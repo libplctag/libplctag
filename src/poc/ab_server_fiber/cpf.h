@@ -57,6 +57,25 @@
 #define CPF_ITEM_UCONN_DATA ((uint16_t)0x00B2) /* unconnected data item */
 
 /* ============================================================================
+ * CPF framing sizes (bytes)
+ * ============================================================================ */
+
+/* Common CPF prefix: iface_handle(4) + timeout(2) + item_count(2) */
+#define CPF_HEADER_SIZE               ((size_t)8)
+
+/* Null address item: type(2) + len(2) */
+#define CPF_UNCONNECTED_ADDR_ITEM_SIZE ((size_t)4)
+/* Unconnected data item header: type(2) + len(2) */
+#define CPF_UNCONNECTED_DATA_ITEM_SIZE ((size_t)4)
+
+/* Connected address item: type(2) + len(2) + conn_id(4) */
+#define CPF_CONNECTED_ADDR_ITEM_SIZE  ((size_t)8)
+/* Connected data item header: type(2) + len(2) */
+#define CPF_CONNECTED_DATA_ITEM_SIZE  ((size_t)4)
+/* Sequence number field inside connected data item */
+#define CPF_CONN_SEQ_NUM_SIZE         ((size_t)2)
+
+/* ============================================================================
  * Public API
  * ============================================================================ */
 

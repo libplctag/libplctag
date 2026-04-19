@@ -3,7 +3,7 @@
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -45,6 +45,7 @@
 #include "arena.h"
 #include "bytes.h"
 #include "cip.h"
+#include "eip.h"
 #include "log.h"
 #include "pccc.h"
 #include "plc.h"
@@ -113,8 +114,8 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes, ui
 static Bytes cip_error(Arena *a, uint8_t svc, uint8_t err, bool ext, uint16_t ext_err);
 static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess,
                                  plc_config_t *cfg);
-static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess);
-static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg);
+static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg);
+static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, plc_config_t *cfg, size_t max_resp);
 static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, plc_config_t *cfg);
 static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg);
 
@@ -140,7 +141,7 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
         case CIP_SRV_FORWARD_OPEN:
         case CIP_SRV_FORWARD_OPEN_EX: return handle_forward_open(a, svc, svc_path, svc_payload, sess, cfg);
 
-        case CIP_SRV_FORWARD_CLOSE: return handle_forward_close(a, svc, svc_path, svc_payload, sess);
+        case CIP_SRV_FORWARD_CLOSE: return handle_forward_close(a, svc, svc_path, svc_payload, sess, cfg);
 
         case CIP_SRV_PCCC_EXECUTE: return pccc_dispatch(a, payload, sess, cfg);
 
@@ -154,18 +155,29 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
             if(svc_path.len == sizeof(CIP_CONN_MGR_PATH)
                && memcmp(svc_path.data, CIP_CONN_MGR_PATH, sizeof(CIP_CONN_MGR_PATH)) == 0) {
                 uint16_t embedded_len = 0;
-                Bytes embedded_rest = bytes_unpack_fmt(svc_payload, "<xxH", &embedded_len);
-                if(bytes_is_null(embedded_rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+                Bytes embedded_rest = bytes_unpack(svc_payload, BYTES_LE, BYTES_SKIP(2), &embedded_len);
+                if(bytes_is_null(embedded_rest)) {
+                    pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Unconnected Send: failed to unpack embedded length");
+                    return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+                }
                 Bytes embedded = bytes_slice(embedded_rest, 0, embedded_len);
-                if(bytes_is_null(embedded)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+                if(bytes_is_null(embedded)) {
+                    pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Unconnected Send: embedded slice failed (len=%u)",
+                          (unsigned)embedded_len);
+                    return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+                }
                 pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "Unconnected Send: unwrapping embedded CIP request (%u bytes)",
                       (unsigned)embedded_len);
                 return cip_dispatch_unconnected(a, embedded, sess, cfg);
             }
-            return handle_read(a, svc, svc_path, svc_payload, sess, cfg);
+            {
+                return handle_read(a, svc, svc_path, svc_payload, cfg, sess->max_cip_packet_size);
+            }
         }
 
-        case CIP_SRV_READ: return handle_read(a, svc, svc_path, svc_payload, sess, cfg);
+        case CIP_SRV_READ: {
+            return handle_read(a, svc, svc_path, svc_payload, cfg, sess->max_cip_packet_size);
+        }
 
         case CIP_SRV_WRITE:
         case CIP_SRV_WRITE_FRAG: return handle_write(a, svc, svc_path, svc_payload, cfg);
@@ -177,7 +189,7 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
 }
 
 
-extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess, plc_config_t *cfg) {
+extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess, plc_config_t *cfg, size_t max_resp) {
     uint8_t svc = 0;
     Bytes svc_path = {0};
     Bytes svc_payload = {0};
@@ -195,7 +207,7 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
         case CIP_SRV_MULTI: return handle_multi(a, svc, svc_payload, sess, cfg);
 
         case CIP_SRV_READ:
-        case CIP_SRV_READ_FRAG: return handle_read(a, svc, svc_path, svc_payload, sess, cfg);
+        case CIP_SRV_READ_FRAG: return handle_read(a, svc, svc_path, svc_payload, cfg, max_resp);
 
         case CIP_SRV_WRITE:
         case CIP_SRV_WRITE_FRAG: return handle_write(a, svc, svc_path, svc_payload, cfg);
@@ -218,7 +230,7 @@ static bool parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes 
 
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "parse_cip_request: starting, input.len=%zu", input.len);
 
-    Bytes rest = bytes_unpack_fmt(input, "<BB", svc, &path_len_words);
+    Bytes rest = bytes_unpack(input, BYTES_LE, svc, &path_len_words);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_cip_request: too short to read service and path length (len=%zu)",
               input.len);
@@ -262,7 +274,7 @@ static bool extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_pa
         return false;
     }
 
-    Bytes rest = bytes_unpack_fmt(at_offset, "<B", &path_len_words);
+    Bytes rest = bytes_unpack(at_offset, BYTES_LE, &path_len_words);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "extract_path: cannot read path_len_words at offset=%zu", *offset);
         return false;
@@ -281,8 +293,7 @@ static bool extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_pa
             pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "extract_path: no room for pad byte at offset=%zu", *offset);
             return false;
         }
-        uint8_t pad = 0;
-        after_pad = bytes_unpack_fmt(after_pad, "<B", &pad);
+        after_pad = bytes_unpack(after_pad, BYTES_LE, BYTES_SKIP(1));
         if(bytes_is_null(after_pad)) {
             pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "extract_path: cannot read pad byte at offset=%zu", *offset);
             return false;
@@ -323,7 +334,7 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "parse_tag_path: starting, path.len=%zu", tag_path.len);
 
     /* Symbolic segment: 0x91 <name_len> <name_bytes> [pad] */
-    Bytes rest = bytes_unpack_fmt(tag_path, "<BB", &seg_type, &name_len_u8);
+    Bytes rest = bytes_unpack(tag_path, BYTES_LE, &seg_type, &name_len_u8);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: too short to read segment type and name length");
         return false;
@@ -346,8 +357,7 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
 
     /* Align to 16-bit boundary: if name_len is odd, skip one pad byte. */
     if(name_len % 2 != 0) {
-        uint8_t pad = 0;
-        Bytes after_pad = bytes_unpack_fmt(rest, "<B", &pad);
+        Bytes after_pad = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1));
         if(bytes_is_null(after_pad)) {
             pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: no room for alignment pad byte");
             return false;
@@ -384,13 +394,13 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
             return false;
         }
 
-        Bytes after_type = bytes_unpack_fmt(rest, "<B", &idx_type);
+        Bytes after_type = bytes_unpack(rest, BYTES_LE, &idx_type);
         if(bytes_is_null(after_type)) { break; }
 
         switch(idx_type) {
             case 0x28: {
                 /* 8-bit index: type(1) val(1) */
-                Bytes after_val = bytes_unpack_fmt(after_type, "<B", &idx_val8);
+                Bytes after_val = bytes_unpack(after_type, BYTES_LE, &idx_val8);
                 if(bytes_is_null(after_val)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated 8-bit index segment");
                     return false;
@@ -402,13 +412,12 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
 
             case 0x29: {
                 /* 16-bit index: type(1) pad(1) val(2) */
-                uint8_t pad = 0;
-                Bytes after_pad = bytes_unpack_fmt(after_type, "<B", &pad);
+                Bytes after_pad = bytes_unpack(after_type, BYTES_LE, BYTES_SKIP(1));
                 if(bytes_is_null(after_pad)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated pad in 16-bit index segment");
                     return false;
                 }
-                Bytes after_val = bytes_unpack_fmt(after_pad, "<H", &idx_val16);
+                Bytes after_val = bytes_unpack(after_pad, BYTES_LE, &idx_val16);
                 if(bytes_is_null(after_val)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated 16-bit index value");
                     return false;
@@ -420,13 +429,12 @@ static bool parse_tag_path(Bytes tag_path, plc_config_t *cfg, tag_def_t **tag_ou
 
             case 0x2A: {
                 /* 32-bit index: type(1) pad(1) val(4) */
-                uint8_t pad = 0;
-                Bytes after_pad = bytes_unpack_fmt(after_type, "<B", &pad);
+                Bytes after_pad = bytes_unpack(after_type, BYTES_LE, BYTES_SKIP(1));
                 if(bytes_is_null(after_pad)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated pad in 32-bit index segment");
                     return false;
                 }
-                Bytes after_val = bytes_unpack_fmt(after_pad, "<I", &idx_val32);
+                Bytes after_val = bytes_unpack(after_pad, BYTES_LE, &idx_val32);
                 if(bytes_is_null(after_val)) {
                     pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "parse_tag_path: truncated 32-bit index value");
                     return false;
@@ -501,8 +509,8 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes, ui
  * With ext=false: 4 bytes.  With ext=true: 6 bytes (adds 2-byte extended status).
  */
 static Bytes cip_error(Arena *a, uint8_t svc, uint8_t err, bool ext, uint16_t ext_err) {
-    if(ext) { return bytes_pack_fmt(a, "<BBBBH", (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)1, ext_err); }
-    return bytes_pack_fmt(a, "<BBBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)0);
+    if(ext) { return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)1, ext_err); }
+    return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, err, (uint8_t)0);
 }
 
 
@@ -538,8 +546,8 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     }
 
     /* Parse fixed fields. */
-    Bytes rest = bytes_unpack_fmt(svc_payload, "<BBIIHHIBxxxI", &secs_per_tick, &timeout_ticks, &server_conn_id, &client_conn_id,
-                              &conn_serial, &orig_vendor_id, &orig_serial, &conn_timeout_mult, &c2s_rpi);
+    Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &secs_per_tick, &timeout_ticks, &server_conn_id, &client_conn_id,
+                              &conn_serial, &orig_vendor_id, &orig_serial, &conn_timeout_mult, BYTES_SKIP(3), &c2s_rpi);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Forward Open: fixed field unpack failed");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
@@ -548,11 +556,11 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     /* c2s_params and s2c_params differ in width: 2B for standard FO, 4B for extended. */
     if(svc == CIP_SRV_FORWARD_OPEN) {
         uint16_t p1 = 0, p2 = 0;
-        rest = bytes_unpack_fmt(rest, "<HIH", &p1, &s2c_rpi, &p2);
+        rest = bytes_unpack(rest, BYTES_LE, &p1, &s2c_rpi, &p2);
         c2s_params = p1;
         s2c_params = p2;
     } else {
-        rest = bytes_unpack_fmt(rest, "<III", &c2s_params, &s2c_rpi, &s2c_params);
+        rest = bytes_unpack(rest, BYTES_LE, &c2s_params, &s2c_rpi, &s2c_params);
     }
 
     if(bytes_is_null(rest)) {
@@ -560,7 +568,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
-    rest = bytes_unpack_fmt(rest, "<B", &transport_class);
+    rest = bytes_unpack(rest, BYTES_LE, &transport_class);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Forward Open: transport class unpack failed");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
@@ -606,6 +614,8 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     sess->client_to_server_max_packet = c2s_params & pkt_mask;
     sess->server_to_client_max_packet = s2c_params & pkt_mask;
 
+    eip_session_set_connected_sizes(sess, sess->server_to_client_max_packet);
+
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_INFO, "Forward Open success: server_conn_id=0x%08x seq=0x%04x", sess->server_connection_id,
           sess->server_connection_seq);
 
@@ -616,7 +626,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
      *   O→T API / c2s_rpi (4), T→O API / s2c_rpi (4)
      *   app reply size (1), reserved (1)
      */
-    return bytes_pack_fmt(a, "<BBBBIIHHIIIBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, sess->server_connection_id,
+    return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, sess->server_connection_id,
                       sess->client_connection_id, conn_serial, orig_vendor_id, orig_serial, c2s_rpi, s2c_rpi, (uint8_t)0,
                       (uint8_t)0);
 }
@@ -628,7 +638,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
  * Validates serial number, vendor ID, and serial number against session state,
  * verifies the connection path, clears session state, and returns the FC response.
  */
-static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess) {
+static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg) {
     uint8_t secs_per_tick = 0;
     uint8_t timeout_ticks = 0;
     uint16_t conn_serial = 0;
@@ -642,7 +652,7 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
         return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
-    Bytes rest = bytes_unpack_fmt(svc_payload, "<BBHHI", &secs_per_tick, &timeout_ticks, &conn_serial, &vendor_id, &client_serial);
+    Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &secs_per_tick, &timeout_ticks, &conn_serial, &vendor_id, &client_serial);
     if(bytes_is_null(rest)) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Forward Close: header unpack failed");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
@@ -669,8 +679,10 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
     sess->server_connection_seq = 0;
     sess->client_connection_seq = 0;
 
+    eip_session_set_unconnected_sizes(sess, cfg->server_to_client_max_packet);
+
     /* Build success response (14 bytes). */
-    return bytes_pack_fmt(a, "<BBBBHHIBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, conn_serial, vendor_id,
+    return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, conn_serial, vendor_id,
                       client_serial, (uint8_t)0, (uint8_t)0);
 }
 
@@ -681,7 +693,7 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
  * Payload: elem_count(2) [frag_offset(4)]
  * Response: service|0x80 reserved status ext_size type_code(2) data...
  */
-static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg) {
+static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload, plc_config_t *cfg, size_t max_resp) {
     tag_def_t *tag = NULL;
     uint32_t num_idx = 3;
     uint32_t indexes[3] = {0};
@@ -693,36 +705,42 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
     bool fragmented = false;
     int64_t t_start = 0;
 
-    if(!parse_tag_path(svc_path, cfg, &tag, &num_idx, indexes)) { return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0); }
+    if(!parse_tag_path(svc_path, cfg, &tag, &num_idx, indexes)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: failed to parse tag path");
+        return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
+    }
 
     t_start = util_time_us();
 
-    Bytes rest = bytes_unpack_fmt(svc_payload, "<H", &elem_count);
-    if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &elem_count);
+    if(bytes_is_null(rest)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: failed to unpack elem_count");
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
 
     if(svc == CIP_SRV_READ_FRAG) {
-        rest = bytes_unpack_fmt(rest, "<I", &frag_offset);
-        if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+        rest = bytes_unpack(rest, BYTES_LE, &frag_offset);
+        if(bytes_is_null(rest)) {
+            pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: failed to unpack frag_offset");
+            return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+        }
     }
 
     if(!calc_offsets(tag, num_idx, indexes, elem_count, &byte_start, &byte_end)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: calc_offsets failed for tag '%s' elem_count=%u", tag->name,
+              (unsigned)elem_count);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     byte_start += frag_offset;
-    if(byte_start > byte_end) { return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0); }
+    if(byte_start > byte_end) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: frag_offset 0x%08x pushes start past end", (unsigned)frag_offset);
+        return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
+    }
 
-    /*
-     * How much data fits in one response packet?
-     *
-     * Prefer the session-negotiated size (set by Forward Open).
-     * Fall back to the PLC-type config default (set at startup).
-     * The CIP response overhead is CIP_RESP_HDR_SIZE (4) + 2 bytes of type code.
-     */
-    size_t max_packet = (sess->server_to_client_max_packet > 0) ? (size_t)sess->server_to_client_max_packet :
-                                                                  (size_t)cfg->server_to_client_max_packet;
+    /* max_resp is the per-response budget set by the caller (session max or multi-sub cap). */
     size_t resp_overhead = CIP_RESP_HDR_SIZE + 2;
-    size_t max_data = (max_packet > resp_overhead) ? (max_packet - resp_overhead) : 0;
+    size_t max_data = (max_resp > resp_overhead) ? (max_resp - resp_overhead) : 0;
 
     /* Align max_data down to an element boundary to avoid splitting elements. */
     size_t elem_bytes = (tag->elem_size < 8) ? tag->elem_size : 8;
@@ -734,14 +752,22 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
     /* Align copy_len down to element boundary. */
     if(tag->elem_size > 0 && copy_len > 0) { copy_len = (copy_len / elem_bytes) * elem_bytes; }
 
-    if(copy_len == 0) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    /* No room for even one aligned element — signal partial data, no type included. */
+    if(copy_len == 0) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: no room for even one element (max_data=%zu elem_bytes=%zu)", max_data,
+              elem_bytes);
+        return cip_error(a, svc, CIP_ERR_FRAG, false, 0);
+    }
 
     fragmented = (byte_start + copy_len < byte_end);
 
     /* Build response: header(4) + type(2) + data. */
-    Bytes hdr = bytes_pack_fmt(a, "<BBBBh", (uint8_t)(svc | CIP_DONE), (uint8_t)0, (uint8_t)(fragmented ? CIP_ERR_FRAG : CIP_OK),
+    Bytes hdr = bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, (uint8_t)(fragmented ? CIP_ERR_FRAG : CIP_OK),
                            (uint8_t)0, (int16_t)tag->tag_type);
-    if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    if(bytes_is_null(hdr)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_read: arena alloc failed for response header");
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
 
     Bytes data = bytes_from_buf(tag->data + byte_start, copy_len);
     Bytes resp = bytes_concat(a, hdr, data);
@@ -776,12 +802,18 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     size_t byte_end = 0;
     int64_t t_start = 0;
 
-    if(!parse_tag_path(svc_path, cfg, &tag, &num_idx, indexes)) { return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0); }
+    if(!parse_tag_path(svc_path, cfg, &tag, &num_idx, indexes)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_write: failed to parse tag path");
+        return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
+    }
 
     t_start = util_time_us();
 
-    Bytes rest = bytes_unpack_fmt(svc_payload, "<HH", &req_type, &elem_count);
-    if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &req_type, &elem_count);
+    if(bytes_is_null(rest)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_write: failed to unpack type and elem_count");
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
 
     if(req_type != tag->tag_type) {
         pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "Write type mismatch: got 0x%04x expected 0x%04x", req_type, tag->tag_type);
@@ -789,11 +821,16 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     }
 
     if(svc == CIP_SRV_WRITE_FRAG) {
-        rest = bytes_unpack_fmt(rest, "<I", &frag_offset);
-        if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+        rest = bytes_unpack(rest, BYTES_LE, &frag_offset);
+        if(bytes_is_null(rest)) {
+            pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_write: failed to unpack frag_offset");
+            return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+        }
     }
 
     if(!calc_offsets(tag, num_idx, indexes, elem_count, &byte_start, &byte_end)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_write: calc_offsets failed for tag '%s' elem_count=%u", tag->name,
+              (unsigned)elem_count);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
@@ -816,7 +853,7 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
 
     pdlog(LOG_MODULE_CIP, LOG_LEVEL_DETAIL, "Write '%s': %zu bytes", tag->name, write_len);
 
-    return bytes_pack_fmt(a, "<BBBB", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+    return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
 }
 
 
@@ -832,60 +869,126 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
  */
 static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload, eip_session_t *sess, plc_config_t *cfg) {
     uint16_t svc_count = 0;
-    uint16_t req_offsets[MAX_SUB_REQUESTS];
 
-    Bytes payload_rest = bytes_unpack_fmt(svc_payload, "<H", &svc_count);
-    if(bytes_is_null(payload_rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    Bytes payload_rest = bytes_unpack(svc_payload, BYTES_LE, &svc_count);
+    if(bytes_is_null(payload_rest)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: failed to unpack service count");
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
 
-    if(svc_count == 0 || svc_count > MAX_SUB_REQUESTS) { return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0); }
+    if(svc_count == 0 || svc_count > MAX_SUB_REQUESTS) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: invalid service count %u (max %u)", (unsigned)svc_count,
+              (unsigned)MAX_SUB_REQUESTS);
+        return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
+    }
 
-    payload_rest = bytes_unpack_fmt(payload_rest, "<*H", (size_t)svc_count, req_offsets);
-    if(bytes_is_null(payload_rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    /* Allocate per-request arrays from the arena to avoid large stack frames. */
+    uint16_t *req_offsets = (uint16_t *)arena_alloc(a, (size_t)svc_count * sizeof(uint16_t));
+    if(!req_offsets) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: arena alloc failed for req_offsets (%u entries)",
+              (unsigned)svc_count);
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
+
+    payload_rest = bytes_unpack(payload_rest, BYTES_LE, BYTES_ARRAY(req_offsets, (size_t)svc_count));
+    if(bytes_is_null(payload_rest)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: failed to unpack %u request offsets", (unsigned)svc_count);
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
 
     /*
-     * Process each sub-request and accumulate responses.
-     * We build sub-responses into a Bytes array then concatenate at the end.
-     * Max reasonable sub-requests is 500 — use a fixed-size stack array.
+     * Budget allocation — all svc_count entries must appear in the response.
+     *
+     * Each entry costs at minimum 6 bytes: 2 (offset table entry) + 4 (min
+     * CIP response header, status 0x06 with no data).
+     *
+     * max_payload = max_packet - CIP_RESP_HDR_SIZE(4) - service_count_field(2)
+     *
+     * Greedy allocation per entry i (0-indexed, remaining_entries = N-i):
+     *
+     *   cap_i = max_payload - remaining_entries * 6
+     *
+     * After entry i uses r_i bytes of sub-response:
+     *   max_payload -= (2 + r_i)     [2 for offset entry, r_i for sub-response]
+     *
+     * This guarantees cap_i >= CIP_RESP_HDR_SIZE for all i as long as
+     * max_payload >= svc_count * 6 on entry.  First entries receive the bulk
+     * of the space; later entries fall back to a 4-byte 0x06 (partial data)
+     * response once the data budget is exhausted.
      */
-    Bytes sub_responses[MAX_SUB_REQUESTS];
-    size_t response_offsets[MAX_SUB_REQUESTS];
-    size_t running_offset = 0; /* offset from start of service_count word of response */
+    size_t max_packet = sess->max_cip_packet_size;
 
-    /* Running offset starts after service_count(2) + offsets array (2*count). */
-    running_offset = (size_t)2 + (size_t)svc_count * 2;
+    if(max_packet < CIP_RESP_HDR_SIZE + 2) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: max_packet=%zu too small for any response", max_packet);
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
+    size_t max_payload = max_packet - CIP_RESP_HDR_SIZE - 2;
+
+    if(max_payload < (size_t)svc_count * 6) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: max_payload=%zu too small for %u sub-responses (need %zu)",
+              max_payload, (unsigned)svc_count, (size_t)svc_count * 6);
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
+
+    Bytes *sub_responses = (Bytes *)arena_alloc(a, (size_t)svc_count * sizeof(Bytes));
+    uint16_t *response_offsets = (uint16_t *)arena_alloc(a, (size_t)svc_count * sizeof(uint16_t));
+    if(!sub_responses || !response_offsets) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: arena alloc failed for response arrays (%u entries)",
+              (unsigned)svc_count);
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
+
+    /* running_offset: from the service_count word, starts after the offset table. */
+    size_t running_offset = 2 + (size_t)svc_count * 2;
 
     for(uint16_t i = 0; i < svc_count; i++) {
         uint16_t req_off = req_offsets[i];
         uint16_t next_off = (i + 1 < svc_count) ? req_offsets[i + 1] : (uint16_t)svc_payload.len;
 
         if(req_off >= svc_payload.len || next_off > svc_payload.len || req_off >= next_off) {
+            pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: sub-request %u has invalid offsets [%u,%u) payload_len=%zu",
+                  (unsigned)i, (unsigned)req_off, (unsigned)next_off, svc_payload.len);
             return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
         }
 
+        size_t remaining_entries = (size_t)(svc_count - i);
+        size_t cap = max_payload - remaining_entries * 6;
+
         Bytes sub_req = bytes_slice(svc_payload, req_off, (size_t)(next_off - req_off));
-        Bytes sub_resp = cip_dispatch_connected(a, sub_req, sess, cfg);
-        if(bytes_is_null(sub_resp)) {
-            sub_resp = cip_error(a, (sub_req.len > 0 ? sub_req.data[0] : 0), CIP_ERR_INVALID_PARAM, false, 0);
+        Bytes sub_resp;
+        if(cap < CIP_RESP_HDR_SIZE) {
+            /* Budget exhausted — 0x06 response with no data. */
+            uint8_t sub_svc = (sub_req.len > 0) ? sub_req.data[0] : 0;
+            sub_resp = cip_error(a, sub_svc, CIP_ERR_FRAG, false, 0);
+        } else {
+            sub_resp = cip_dispatch_connected(a, sub_req, sess, cfg, cap);
+            if(bytes_is_null(sub_resp)) {
+                uint8_t sub_svc = (sub_req.len > 0) ? sub_req.data[0] : 0;
+                sub_resp = cip_error(a, sub_svc, CIP_ERR_FRAG, false, 0);
+            }
         }
 
-        response_offsets[i] = running_offset;
+        response_offsets[i] = (uint16_t)running_offset;
         sub_responses[i] = sub_resp;
         running_offset += sub_resp.len;
+        max_payload -= (2 + sub_resp.len);
     }
 
     /*
-     * Build the entire response in one allocation to avoid O(N²) arena usage.
+     * Build the entire response in one allocation.
      *
      * Layout: CIP hdr(4) | svc_count(2) | offset_table(2*N) | sub-responses
-     * running_offset already equals 2 + svc_count*2 + sum(sub_resp.len).
      */
     size_t resp_size = CIP_RESP_HDR_SIZE + running_offset;
     Bytes result = bytes_alloc(a, resp_size);
-    if(bytes_is_null(result)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    if(bytes_is_null(result)) {
+        pdlog(LOG_MODULE_CIP, LOG_LEVEL_WARN, "handle_multi: arena alloc failed for %zu-byte response", resp_size);
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
 
-    Bytes rest = bytes_pack_into_fmt(result, "<BBBBH", (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, svc_count);
+    Bytes rest = bytes_pack_into(result, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0, svc_count);
 
-    for(uint16_t i = 0; i < svc_count; i++) { rest = bytes_pack_into_fmt(rest, "<H", (uint16_t)response_offsets[i]); }
+    rest = bytes_pack_into(rest, BYTES_LE, BYTES_ARRAY(response_offsets, (size_t)svc_count));
 
     for(uint16_t i = 0; i < svc_count; i++) {
         if(sub_responses[i].len > 0) {

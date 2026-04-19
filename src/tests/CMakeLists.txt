@@ -9,6 +9,9 @@ endif()
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
 # Build test executables
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory("unit")
+endif()
 add_subdirectory("stress_api_lock")
 add_subdirectory("stress_rc_mem")
 add_subdirectory("stress_test")

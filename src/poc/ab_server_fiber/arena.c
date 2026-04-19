@@ -37,10 +37,20 @@
  * of calling exit().
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "arena.h"
+
+void arena_set_stats(Arena *a, ArenaStats *stats) {
+    if(!a) { return; }
+    a->stats = stats;
+    if(stats) {
+        memset(stats, 0, sizeof(*stats));
+        stats->use_min = SIZE_MAX;
+    }
+}
 
 
 util_err_t arena_init(Arena *out, size_t size) {
@@ -65,8 +75,13 @@ util_err_t arena_init(Arena *out, size_t size) {
 void *arena_alloc(Arena *a, size_t size) {
     if(!a || !a->buffer) { return NULL; }
 
-    if(a->length + size > a->capacity) { return NULL; }
+    /* Align the cursor to max_align_t (typically 8 or 16 bytes), matching malloc. */
+    size_t align = _Alignof(max_align_t);
+    size_t padding = (align - (a->length % align)) % align;
 
+    if(a->length + padding + size > a->capacity) { return NULL; }
+
+    a->length += padding;
     void *ptr = a->buffer + a->length;
     a->length += size;
 
@@ -77,7 +92,15 @@ void *arena_alloc(Arena *a, size_t size) {
 
 
 void arena_reset(Arena *a) {
-    if(a) { a->length = 0; }
+    if(!a) { return; }
+    if(a->stats && a->length > 0) {
+        ArenaStats *s = a->stats;
+        s->reset_count++;
+        if(a->length < s->use_min) { s->use_min = a->length; }
+        if(a->length > s->use_max) { s->use_max = a->length; }
+        s->use_total += a->length;
+    }
+    a->length = 0;
 }
 
 

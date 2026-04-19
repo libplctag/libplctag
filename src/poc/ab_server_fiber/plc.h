@@ -150,6 +150,12 @@ typedef struct {
     uint32_t client_to_server_max_packet;
     uint32_t server_to_client_max_packet;
 
+    /* Cached per-layer packet size limits (recalculated on ForwardOpen/ForwardClose). */
+    uint32_t raw_packet_size;       /* negotiated wire packet size */
+    size_t   max_eip_packet_size;   /* max EIP payload (raw minus EIP header) */
+    size_t   max_cpf_packet_size;   /* max CPF payload (EIP payload minus CPF framing) */
+    size_t   max_cip_packet_size;   /* max CIP response (CPF payload minus CPF item framing) */
+
     /* PCCC sequence ID echoed in every PCCC response. */
     uint16_t pccc_seq_id;
 

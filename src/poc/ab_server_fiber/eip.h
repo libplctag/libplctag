@@ -63,10 +63,21 @@
  * ============================================================================ */
 
 /*
- * Dispatch an EIP command and return the complete EIP response
- * (header + payload) allocated from arena a.
- * cmd and payload are decoded from the EIP header by the caller.
- * sess->sender_context must be set by the caller before this call.
+ * Parse the EIP header, dispatch the command, and return the complete EIP
+ * response (header + payload) allocated from arena a.
+ * hdr must be exactly EIP_HEADER_SIZE bytes; payload may be empty.
  * Returns {NULL, 0} on UnregisterSession or fatal error — caller should close.
  */
-extern Bytes eip_dispatch(Arena *a, uint16_t cmd, Bytes payload, eip_session_t *sess, plc_config_t *cfg);
+extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, plc_config_t *cfg);
+
+/*
+ * Recalculate and cache per-layer max packet sizes for an unconnected session.
+ * Call at session init and after ForwardClose.
+ */
+extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+
+/*
+ * Recalculate and cache per-layer max packet sizes for a connected session.
+ * Call after ForwardOpen sets server_to_client_max_packet.
+ */
+extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);

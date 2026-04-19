@@ -63,4 +63,4 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
  * Dispatch a CIP request arriving via a connected EIP send.
  * Handles: Multi-Service (0x0A), Read (0x4C/0x52), Write (0x4D/0x53).
  */
-extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess, plc_config_t *cfg);
+extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess, plc_config_t *cfg, size_t max_resp);
