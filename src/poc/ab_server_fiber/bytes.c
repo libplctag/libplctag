@@ -96,6 +96,8 @@ Bytes bytes_concat_impl(Arena *a, int count, ...) {
  * Struct pack / unpack helpers
  * ============================================================================ */
 
+#if 0
+
 /* Returns 1 for little-endian, -1 for big-endian, 0 for native. */
 static int get_byte_order(const char *fmt) {
     if(!fmt || !*fmt) { return 0; }
@@ -396,6 +398,8 @@ static void write_array_elem(void *ptr, size_t i, char c, uint64_t val) {
 }
 
 
+#endif /* helpers only needed by _fmt API */
+
 /* ============================================================================
  * Type-safe pack implementation
  * ============================================================================ */
@@ -430,6 +434,7 @@ Bytes bytes_pack_into_impl(Bytes buf, int endian, ...) {
 }
 
 
+#if 0
 /* ============================================================================
  * bytes_pack_fmt (old format-string API)
  * ============================================================================ */
@@ -823,6 +828,7 @@ Bytes bytes_unpack_fmt(Bytes data, const char *fmt, ...) {
 
     return bytes_slice(data, offset, data.len - offset);
 }
+#endif
 
 
 /* ============================================================================
@@ -870,6 +876,85 @@ Bytes bytes_unpack_impl(Bytes data, int endian, ...) {
 /* ============================================================================
  * write_typed_args — single-pass typed writer for bytes_pack_impl
  * ============================================================================ */
+
+static size_t pack_type_elem_size(BytesPackType t) {
+    switch(t) {
+        case BYTES_TYPE_U8:
+        case BYTES_TYPE_I8:  return 1;
+        case BYTES_TYPE_U16:
+        case BYTES_TYPE_I16: return 2;
+        case BYTES_TYPE_U32:
+        case BYTES_TYPE_I32:
+        case BYTES_TYPE_F32: return 4;
+        case BYTES_TYPE_U64:
+        case BYTES_TYPE_I64:
+        case BYTES_TYPE_F64: return 8;
+        default:             return 0;
+    }
+}
+
+/* Host-value → wire-byte-order helpers.  Use memcpy to transfer to/from buffers. */
+
+static inline uint16_t u16h_to_le(uint16_t v) {
+    uint16_t r; uint8_t *b = (uint8_t *)&r;
+    b[0]=(uint8_t)v; b[1]=(uint8_t)(v>>8);
+    return r;
+}
+static inline uint16_t u16h_to_be(uint16_t v) {
+    uint16_t r; uint8_t *b = (uint8_t *)&r;
+    b[0]=(uint8_t)(v>>8); b[1]=(uint8_t)v;
+    return r;
+}
+static inline uint32_t u32h_to_le(uint32_t v) {
+    uint32_t r; uint8_t *b = (uint8_t *)&r;
+    b[0]=(uint8_t)v; b[1]=(uint8_t)(v>>8); b[2]=(uint8_t)(v>>16); b[3]=(uint8_t)(v>>24);
+    return r;
+}
+static inline uint32_t u32h_to_be(uint32_t v) {
+    uint32_t r; uint8_t *b = (uint8_t *)&r;
+    b[0]=(uint8_t)(v>>24); b[1]=(uint8_t)(v>>16); b[2]=(uint8_t)(v>>8); b[3]=(uint8_t)v;
+    return r;
+}
+static inline uint64_t u64h_to_le(uint64_t v) {
+    uint64_t r; uint8_t *b = (uint8_t *)&r;
+    b[0]=(uint8_t)v;      b[1]=(uint8_t)(v>>8);  b[2]=(uint8_t)(v>>16); b[3]=(uint8_t)(v>>24);
+    b[4]=(uint8_t)(v>>32); b[5]=(uint8_t)(v>>40); b[6]=(uint8_t)(v>>48); b[7]=(uint8_t)(v>>56);
+    return r;
+}
+static inline uint64_t u64h_to_be(uint64_t v) {
+    uint64_t r; uint8_t *b = (uint8_t *)&r;
+    b[0]=(uint8_t)(v>>56); b[1]=(uint8_t)(v>>48); b[2]=(uint8_t)(v>>40); b[3]=(uint8_t)(v>>32);
+    b[4]=(uint8_t)(v>>24); b[5]=(uint8_t)(v>>16); b[6]=(uint8_t)(v>>8);  b[7]=(uint8_t)v;
+    return r;
+}
+
+static inline uint16_t u16le_to_host(uint16_t v) {
+    const uint8_t *b = (const uint8_t *)&v;
+    return (uint16_t)((uint16_t)b[0] | ((uint16_t)b[1]<<8));
+}
+static inline uint16_t u16be_to_host(uint16_t v) {
+    const uint8_t *b = (const uint8_t *)&v;
+    return (uint16_t)(((uint16_t)b[0]<<8) | (uint16_t)b[1]);
+}
+static inline uint32_t u32le_to_host(uint32_t v) {
+    const uint8_t *b = (const uint8_t *)&v;
+    return (uint32_t)b[0] | ((uint32_t)b[1]<<8) | ((uint32_t)b[2]<<16) | ((uint32_t)b[3]<<24);
+}
+static inline uint32_t u32be_to_host(uint32_t v) {
+    const uint8_t *b = (const uint8_t *)&v;
+    return ((uint32_t)b[0]<<24) | ((uint32_t)b[1]<<16) | ((uint32_t)b[2]<<8) | (uint32_t)b[3];
+}
+static inline uint64_t u64le_to_host(uint64_t v) {
+    const uint8_t *b = (const uint8_t *)&v;
+    return (uint64_t)b[0]       | ((uint64_t)b[1]<<8)  | ((uint64_t)b[2]<<16) | ((uint64_t)b[3]<<24)
+         | ((uint64_t)b[4]<<32) | ((uint64_t)b[5]<<40) | ((uint64_t)b[6]<<48) | ((uint64_t)b[7]<<56);
+}
+static inline uint64_t u64be_to_host(uint64_t v) {
+    const uint8_t *b = (const uint8_t *)&v;
+    return ((uint64_t)b[0]<<56) | ((uint64_t)b[1]<<48) | ((uint64_t)b[2]<<40) | ((uint64_t)b[3]<<32)
+         | ((uint64_t)b[4]<<24) | ((uint64_t)b[5]<<16) | ((uint64_t)b[6]<<8)  | (uint64_t)b[7];
+}
+
 
 static size_t write_typed_args(uint8_t *dst, size_t cap, int endian, va_list args) {
     size_t off = 0;
@@ -975,96 +1060,52 @@ static size_t write_typed_args(uint8_t *dst, size_t cap, int endian, va_list arg
                 }
                 break;
             }
+            case BYTES_TYPE_SKIP: {
+                BytesSkip *s = va_arg(args, BytesSkip *);
+                if(off + s->count > cap) { return SIZE_MAX; }
+                memset(dst + off, 0, s->count);
+                off += s->count;
+                break;
+            }
             case BYTES_TYPE_ARRAY: {
-                BytesArray ba = va_arg(args, BytesArray);
-                if(!ba.data || ba.count == 0) { break; }
-                for(size_t i = 0; i < ba.count; i++) {
-                    switch(ba.elem_type) {
+                BytesArray *ba = va_arg(args, BytesArray *);
+                if(!ba->data || ba->count == 0) { break; }
+                size_t esz = pack_type_elem_size(ba->elem_type);
+                if(esz == 0 || off + ba->count * esz > cap) { return SIZE_MAX; }
+                int le = (endian == (int)BYTES_LE);
+                for(size_t i = 0; i < ba->count; i++) {
+                    const uint8_t *elem = (const uint8_t *)ba->data + i * esz;
+                    switch(ba->elem_type) {
                         case BYTES_TYPE_U8:
-                        case BYTES_TYPE_I8: {
-                            if(off + 1 > cap) { return SIZE_MAX; }
-                            dst[off++] = ((uint8_t *)ba.data)[i];
+                        case BYTES_TYPE_I8:
+                            dst[off] = *elem;
                             break;
-                        }
                         case BYTES_TYPE_U16:
                         case BYTES_TYPE_I16: {
-                            if(off + 2 > cap) { return SIZE_MAX; }
-                            uint16_t v;
-                            memcpy(&v, (uint8_t *)ba.data + i * 2, 2);
-                            if(endian == (int)BYTES_LE) {
-                                dst[off]   = (uint8_t) v;
-                                dst[off+1] = (uint8_t)(v >> 8);
-                            } else {
-                                dst[off]   = (uint8_t)(v >> 8);
-                                dst[off+1] = (uint8_t) v;
-                            }
-                            off += 2;
+                            uint16_t t; memcpy(&t, elem, 2);
+                            uint16_t w = le ? u16h_to_le(t) : u16h_to_be(t);
+                            memcpy(dst + off, &w, 2);
                             break;
                         }
                         case BYTES_TYPE_U32:
-                        case BYTES_TYPE_I32: {
-                            if(off + 4 > cap) { return SIZE_MAX; }
-                            uint32_t v;
-                            memcpy(&v, (uint8_t *)ba.data + i * 4, 4);
-                            if(endian == (int)BYTES_LE) {
-                                dst[off]   = (uint8_t) v;
-                                dst[off+1] = (uint8_t)(v >>  8);
-                                dst[off+2] = (uint8_t)(v >> 16);
-                                dst[off+3] = (uint8_t)(v >> 24);
-                            } else {
-                                dst[off]   = (uint8_t)(v >> 24);
-                                dst[off+1] = (uint8_t)(v >> 16);
-                                dst[off+2] = (uint8_t)(v >>  8);
-                                dst[off+3] = (uint8_t) v;
-                            }
-                            off += 4;
+                        case BYTES_TYPE_I32:
+                        case BYTES_TYPE_F32: {
+                            uint32_t t; memcpy(&t, elem, 4);
+                            uint32_t w = le ? u32h_to_le(t) : u32h_to_be(t);
+                            memcpy(dst + off, &w, 4);
                             break;
                         }
                         case BYTES_TYPE_U64:
-                        case BYTES_TYPE_I64: {
-                            if(off + 8 > cap) { return SIZE_MAX; }
-                            uint64_t v;
-                            memcpy(&v, (uint8_t *)ba.data + i * 8, 8);
-                            if(endian == (int)BYTES_LE) {
-                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(v >> (j * 8)); }
-                            } else {
-                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(v >> ((7 - j) * 8)); }
-                            }
-                            off += 8;
-                            break;
-                        }
-                        case BYTES_TYPE_F32: {
-                            if(off + 4 > cap) { return SIZE_MAX; }
-                            uint32_t bits;
-                            memcpy(&bits, (uint8_t *)ba.data + i * 4, 4);
-                            if(endian == (int)BYTES_LE) {
-                                dst[off]   = (uint8_t) bits;
-                                dst[off+1] = (uint8_t)(bits >>  8);
-                                dst[off+2] = (uint8_t)(bits >> 16);
-                                dst[off+3] = (uint8_t)(bits >> 24);
-                            } else {
-                                dst[off]   = (uint8_t)(bits >> 24);
-                                dst[off+1] = (uint8_t)(bits >> 16);
-                                dst[off+2] = (uint8_t)(bits >>  8);
-                                dst[off+3] = (uint8_t) bits;
-                            }
-                            off += 4;
-                            break;
-                        }
+                        case BYTES_TYPE_I64:
                         case BYTES_TYPE_F64: {
-                            if(off + 8 > cap) { return SIZE_MAX; }
-                            uint64_t bits;
-                            memcpy(&bits, (uint8_t *)ba.data + i * 8, 8);
-                            if(endian == (int)BYTES_LE) {
-                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(bits >> (j * 8)); }
-                            } else {
-                                for(size_t j = 0; j < 8; j++) { dst[off + j] = (uint8_t)(bits >> ((7 - j) * 8)); }
-                            }
-                            off += 8;
+                            uint64_t t; memcpy(&t, elem, 8);
+                            uint64_t w = le ? u64h_to_le(t) : u64h_to_be(t);
+                            memcpy(dst + off, &w, 8);
                             break;
                         }
                         default: break;
                     }
+                    off += esz;
                 }
                 break;
             }
@@ -1187,73 +1228,52 @@ static size_t read_typed_args(const uint8_t *src, size_t len, int endian, va_lis
                 off += bp->len;
                 break;
             }
+            case BYTES_TYPE_SKIP: {
+                BytesSkip *s = (BytesSkip *)ptr;
+                if(off + s->count > len) { return SIZE_MAX; }
+                off += s->count;
+                break;
+            }
             case BYTES_TYPE_ARRAY: {
                 BytesArray *bap = (BytesArray *)ptr;
                 if(!bap->data || bap->count == 0) { break; }
+                size_t esz = pack_type_elem_size(bap->elem_type);
+                if(esz == 0 || off + bap->count * esz > len) { return SIZE_MAX; }
+                int le = (endian == (int)BYTES_LE);
                 for(size_t i = 0; i < bap->count; i++) {
+                    const uint8_t *src_elem = src + off;
+                    uint8_t *dst_elem = (uint8_t *)bap->data + i * esz;
                     switch(bap->elem_type) {
                         case BYTES_TYPE_U8:
-                        case BYTES_TYPE_I8: {
-                            if(off + 1 > len) { return SIZE_MAX; }
-                            ((uint8_t *)bap->data)[i] = src[off++];
+                        case BYTES_TYPE_I8:
+                            *dst_elem = *src_elem;
                             break;
-                        }
                         case BYTES_TYPE_U16:
                         case BYTES_TYPE_I16: {
-                            if(off + 2 > len) { return SIZE_MAX; }
-                            uint16_t v = (endian == (int)BYTES_LE)
-                                ? (uint16_t)((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
-                                : (uint16_t)(((uint16_t)src[off] << 8) | (uint16_t)src[off+1]);
-                            memcpy((uint8_t *)bap->data + i * 2, &v, 2);
-                            off += 2;
+                            uint16_t t; memcpy(&t, src_elem, 2);
+                            uint16_t h = le ? u16le_to_host(t) : u16be_to_host(t);
+                            memcpy(dst_elem, &h, 2);
                             break;
                         }
                         case BYTES_TYPE_U32:
-                        case BYTES_TYPE_I32: {
-                            if(off + 4 > len) { return SIZE_MAX; }
-                            uint32_t v = (endian == (int)BYTES_LE)
-                                ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
-                                : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
-                            memcpy((uint8_t *)bap->data + i * 4, &v, 4);
-                            off += 4;
+                        case BYTES_TYPE_I32:
+                        case BYTES_TYPE_F32: {
+                            uint32_t t; memcpy(&t, src_elem, 4);
+                            uint32_t h = le ? u32le_to_host(t) : u32be_to_host(t);
+                            memcpy(dst_elem, &h, 4);
                             break;
                         }
                         case BYTES_TYPE_U64:
-                        case BYTES_TYPE_I64: {
-                            if(off + 8 > len) { return SIZE_MAX; }
-                            uint64_t v = 0;
-                            if(endian == (int)BYTES_LE) {
-                                for(size_t j = 0; j < 8; j++) { v |= ((uint64_t)src[off + j] << (j * 8)); }
-                            } else {
-                                for(size_t j = 0; j < 8; j++) { v |= ((uint64_t)src[off + j] << ((7 - j) * 8)); }
-                            }
-                            memcpy((uint8_t *)bap->data + i * 8, &v, 8);
-                            off += 8;
-                            break;
-                        }
-                        case BYTES_TYPE_F32: {
-                            if(off + 4 > len) { return SIZE_MAX; }
-                            uint32_t bits = (endian == (int)BYTES_LE)
-                                ? ((uint32_t)src[off] | ((uint32_t)src[off+1] << 8) | ((uint32_t)src[off+2] << 16) | ((uint32_t)src[off+3] << 24))
-                                : (((uint32_t)src[off] << 24) | ((uint32_t)src[off+1] << 16) | ((uint32_t)src[off+2] << 8) | (uint32_t)src[off+3]);
-                            memcpy((uint8_t *)bap->data + i * 4, &bits, 4);
-                            off += 4;
-                            break;
-                        }
+                        case BYTES_TYPE_I64:
                         case BYTES_TYPE_F64: {
-                            if(off + 8 > len) { return SIZE_MAX; }
-                            uint64_t bits = 0;
-                            if(endian == (int)BYTES_LE) {
-                                for(size_t j = 0; j < 8; j++) { bits |= ((uint64_t)src[off + j] << (j * 8)); }
-                            } else {
-                                for(size_t j = 0; j < 8; j++) { bits |= ((uint64_t)src[off + j] << ((7 - j) * 8)); }
-                            }
-                            memcpy((uint8_t *)bap->data + i * 8, &bits, 8);
-                            off += 8;
+                            uint64_t t; memcpy(&t, src_elem, 8);
+                            uint64_t h = le ? u64le_to_host(t) : u64be_to_host(t);
+                            memcpy(dst_elem, &h, 8);
                             break;
                         }
                         default: break;
                     }
+                    off += esz;
                 }
                 break;
             }

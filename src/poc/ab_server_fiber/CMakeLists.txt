@@ -1,6 +1,6 @@
 message("Building ab_server_fiber POC (fiber_net + yafl stackful fibers).")
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

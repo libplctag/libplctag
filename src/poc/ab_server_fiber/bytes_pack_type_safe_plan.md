@@ -45,6 +45,7 @@ typedef enum {
     BYTES_TYPE_F64,         /* double  */
     BYTES_TYPE_BYTES,       /* Bytes struct — raw memcpy, no endian conversion */
     BYTES_TYPE_ARRAY,       /* BytesArray struct — per-element endian conversion */
+    BYTES_TYPE_SKIP,        /* BytesSkip* — zero/skip N bytes (pack: zero-fill; unpack: advance) */
 } BytesPackType;
 
 /*
@@ -56,6 +57,13 @@ typedef struct {
     size_t        count;
     BytesPackType elem_type;
 } BytesArray;
+
+/*
+ * Skip descriptor.  Always passed as a pointer (compound literal) so that
+ * the same BYTES_SKIP(n) macro works in both bytes_pack and bytes_unpack.
+ * Pack: writes n zero bytes.  Unpack: advances past n bytes.
+ */
+typedef struct { size_t count; } BytesSkip;
 ```
 
 ---
@@ -68,19 +76,20 @@ typedef struct {
  * Unrecognised types fall through to BYTES_TYPE_BYTES (raw copy).
  */
 #define BYTES_TYPE_OF(x) _Generic((x),   \
-    uint8_t:    BYTES_TYPE_U8,           \
-    uint16_t:   BYTES_TYPE_U16,          \
-    uint32_t:   BYTES_TYPE_U32,          \
-    uint64_t:   BYTES_TYPE_U64,          \
-    int8_t:     BYTES_TYPE_I8,           \
-    int16_t:    BYTES_TYPE_I16,          \
-    int32_t:    BYTES_TYPE_I32,          \
-    int64_t:    BYTES_TYPE_I64,          \
-    float:      BYTES_TYPE_F32,          \
-    double:     BYTES_TYPE_F64,          \
-    Bytes:      BYTES_TYPE_BYTES,        \
-    BytesArray: BYTES_TYPE_ARRAY,        \
-    default:    BYTES_TYPE_BYTES         \
+    uint8_t:     BYTES_TYPE_U8,          \
+    uint16_t:    BYTES_TYPE_U16,         \
+    uint32_t:    BYTES_TYPE_U32,         \
+    uint64_t:    BYTES_TYPE_U64,         \
+    int8_t:      BYTES_TYPE_I8,          \
+    int16_t:     BYTES_TYPE_I16,         \
+    int32_t:     BYTES_TYPE_I32,         \
+    int64_t:     BYTES_TYPE_I64,         \
+    float:       BYTES_TYPE_F32,         \
+    double:      BYTES_TYPE_F64,         \
+    Bytes:       BYTES_TYPE_BYTES,       \
+    BytesArray:  BYTES_TYPE_ARRAY,       \
+    BytesSkip*:  BYTES_TYPE_SKIP,        \
+    default:     BYTES_TYPE_BYTES        \
 )
 
 /* Expand one user argument to a (type-tag, value) pair. */
@@ -99,6 +108,16 @@ typedef struct {
         .count     = (count_), \
         .elem_type = BYTES_TYPE_OF(*(ptr_)) \
     })
+
+/*
+ * Zero-fill (pack) or skip (unpack) n bytes inline.
+ * Yields a BytesSkip* (pointer to compound literal); lifetime spans the call.
+ * Works identically in bytes_pack and bytes_unpack.
+ *
+ * Example: bytes_pack(a, BYTES_LE, (uint8_t)cmd, BYTES_SKIP(2), (uint16_t)len)
+ *          bytes_unpack(data, BYTES_LE, &cmd, BYTES_SKIP(2), &len)
+ */
+#define BYTES_SKIP(n_)  (&(BytesSkip){(n_)})
 ```
 
 The `_Generic` dispatch is **compile-time only** — the selected branch is the only branch that survives to the binary (the others are discarded by the compiler). Zero runtime overhead for type dispatch.
@@ -268,6 +287,13 @@ static size_t write_typed_args(uint8_t *dst, size_t cap, int endian, va_list arg
                 }
                 break;
             }
+            case BYTES_TYPE_SKIP: {
+                BytesSkip *s = va_arg(args, BytesSkip *);
+                if(off + s->count > cap) { return SIZE_MAX; }
+                memset(dst + off, 0, s->count);
+                off += s->count;
+                break;
+            }
             case BYTES_TYPE_ARRAY: {
                 BytesArray ba = va_arg(args, BytesArray);
                 if(!ba.data || ba.count == 0) { break; }
@@ -433,6 +459,7 @@ Return semantics match the existing `bytes_pack_into`: the **remaining** slice i
     double*:     BYTES_TYPE_F64,                  \
     Bytes*:      BYTES_TYPE_BYTES,                \
     BytesArray*: BYTES_TYPE_ARRAY,                \
+    BytesSkip*:  BYTES_TYPE_SKIP,                 \
     default:     BYTES_TYPE_BYTES                 \
 )
 
@@ -592,6 +619,12 @@ static size_t read_typed_args(const uint8_t *src, size_t len, int endian, va_lis
                 if(off + bp->len > len) { return SIZE_MAX; }
                 bp->data = (uint8_t *)src + off;  /* zero-copy slice */
                 off += bp->len;
+                break;
+            }
+            case BYTES_TYPE_SKIP: {
+                BytesSkip *s = (BytesSkip *)ptr;
+                if(off + s->count > len) { return SIZE_MAX; }
+                off += s->count;
                 break;
             }
             case BYTES_TYPE_ARRAY: {

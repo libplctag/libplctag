@@ -129,6 +129,7 @@ typedef enum {
     BYTES_TYPE_F64,       /* double */
     BYTES_TYPE_BYTES,     /* Bytes struct — raw memcpy, no endian conversion */
     BYTES_TYPE_ARRAY,     /* BytesArray struct — per-element endian conversion */
+    BYTES_TYPE_SKIP,      /* BytesSkip* — zero-fill (pack) or advance (unpack) N bytes */
 } BytesPackType;
 
 /*
@@ -142,27 +143,45 @@ typedef struct {
 } BytesArray;
 
 /*
+ * Skip descriptor for BYTES_TYPE_SKIP.  Always passed as BytesSkip* so that
+ * BYTES_SKIP(n) works identically in bytes_pack and bytes_unpack.
+ * Pack: writes n zero bytes.  Unpack: advances past n bytes.
+ */
+typedef struct { size_t count; } BytesSkip;
+
+/*
  * Resolve a C expression to its BytesPackType tag at compile time.
  * Unrecognised types fall through to BYTES_TYPE_BYTES (raw copy).
  */
 #define BYTES_TYPE_OF(x) _Generic((x),    \
-    uint8_t:    BYTES_TYPE_U8,            \
-    uint16_t:   BYTES_TYPE_U16,           \
-    uint32_t:   BYTES_TYPE_U32,           \
-    uint64_t:   BYTES_TYPE_U64,           \
-    int8_t:     BYTES_TYPE_I8,            \
-    int16_t:    BYTES_TYPE_I16,           \
-    int32_t:    BYTES_TYPE_I32,           \
-    int64_t:    BYTES_TYPE_I64,           \
-    float:      BYTES_TYPE_F32,           \
-    double:     BYTES_TYPE_F64,           \
-    Bytes:      BYTES_TYPE_BYTES,         \
-    BytesArray: BYTES_TYPE_ARRAY,         \
-    default:    BYTES_TYPE_BYTES          \
+    uint8_t:     BYTES_TYPE_U8,           \
+    uint16_t:    BYTES_TYPE_U16,          \
+    uint32_t:    BYTES_TYPE_U32,          \
+    uint64_t:    BYTES_TYPE_U64,          \
+    int8_t:      BYTES_TYPE_I8,           \
+    int16_t:     BYTES_TYPE_I16,          \
+    int32_t:     BYTES_TYPE_I32,          \
+    int64_t:     BYTES_TYPE_I64,          \
+    float:       BYTES_TYPE_F32,          \
+    double:      BYTES_TYPE_F64,          \
+    Bytes:       BYTES_TYPE_BYTES,        \
+    BytesArray*: BYTES_TYPE_ARRAY,        \
+    BytesSkip*:  BYTES_TYPE_SKIP,         \
+    default:     BYTES_TYPE_BYTES         \
 )
 
 /* Expand one user argument to a (type-tag, value) pair. */
 #define BYTES_WRAP(x)  (int)BYTES_TYPE_OF(x), (x)
+
+/*
+ * Zero-fill (pack) or skip (unpack) n bytes inline.
+ * Yields a BytesSkip* (pointer to a compound literal); lifetime spans the call.
+ * Works identically in bytes_pack and bytes_unpack.
+ *
+ * Example: bytes_pack(a, BYTES_LE, (uint8_t)cmd, BYTES_SKIP(2), (uint16_t)len)
+ *          bytes_unpack(data, BYTES_LE, &cmd, BYTES_SKIP(2), &len)
+ */
+#define BYTES_SKIP(n_)  (&(BytesSkip){(n_)})
 
 /*
  * Wrap any typed array pointer + element count into a BytesArray.
@@ -170,7 +189,7 @@ typedef struct {
  * Endian conversion is applied per-element in write_typed_args.
  */
 #define BYTES_ARRAY(ptr_, count_) \
-    ((BytesArray){ \
+    (&(BytesArray){ \
         .data      = (void *)(ptr_), \
         .count     = (count_), \
         .elem_type = BYTES_TYPE_OF(*(ptr_)) \
@@ -259,6 +278,7 @@ extern Bytes bytes_pack_into_impl(Bytes buf, int endian, ...);
  *        zero bytes with no array pointer argument.
  * ============================================================================ */
 
+#if 0
 /* Pack values into an arena-allocated Bytes.  Returns {NULL,0} on OOM. */
 extern Bytes bytes_pack_fmt(Arena *a, const char *fmt, ...);
 
@@ -267,6 +287,7 @@ extern Bytes bytes_pack_fmt(Arena *a, const char *fmt, ...);
  * Returns the remaining (unfilled) slice, or {NULL,0} if buf is too small.
  */
 extern Bytes bytes_pack_into_fmt(Bytes buf, const char *fmt, ...);
+#endif
 
 /* ============================================================================
  * Type-safe unpack (C11 _Generic dispatch)
@@ -297,6 +318,7 @@ extern Bytes bytes_pack_into_fmt(Bytes buf, const char *fmt, ...);
     double*:     BYTES_TYPE_F64,                  \
     Bytes*:      BYTES_TYPE_BYTES,                \
     BytesArray*: BYTES_TYPE_ARRAY,                \
+    BytesSkip*:  BYTES_TYPE_SKIP,                 \
     default:     BYTES_TYPE_BYTES                 \
 )
 
@@ -349,7 +371,9 @@ extern Bytes bytes_unpack_impl(Bytes data, int endian, ...);
     bytes_unpack_impl((data_), (int)(endian_), BYTES_FOREACH_OUT(__VA_ARGS__), (int)BYTES_TYPE_END)
 
 /* Format-string variant (old API). */
+#if 0
 extern Bytes bytes_unpack_fmt(Bytes data, const char *fmt, ...);
+#endif
 
 /* ============================================================================
  * Slicing (no allocation)

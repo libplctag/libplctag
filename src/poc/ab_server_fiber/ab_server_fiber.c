@@ -96,6 +96,7 @@ typedef struct {
     int64_t clients_connected;
     int64_t clients_disconnected;
     int64_t total_requests;
+    ArenaStats arena;
 } server_stats_t;
 
 typedef struct {
@@ -431,8 +432,10 @@ static void *client_fiber(void *arg) {
         free(ctx);
         return NULL;
     }
+    arena_set_stats(&arena, &ctx->server->stats.arena);
 
     sess.reject_fo_count = cfg->reject_fo_count;
+    eip_session_set_unconnected_sizes(&sess, cfg->server_to_client_max_packet);
 
     ctx->server->stats.clients_connected++;
     pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_DETAIL, "Client fiber started");
@@ -455,19 +458,26 @@ static void *client_fiber(void *arg) {
             break;
         }
 
-        /* ---- Phase 2: Decode full EIP header ---- */
-        uint16_t cmd = 0;
+        /* ---- Phase 2: Extract payload length from EIP header ---- */
         uint16_t payload_len = 0;
-        uint32_t eip_session_val = 0;
-        uint32_t eip_status_val = 0;
-        uint32_t eip_options_val = 0;
-        Bytes hdr_rest = bytes_unpack_fmt(hdr_buf, "<HHIIQI",
-                                      &cmd, &payload_len,
-                                      &eip_session_val, &eip_status_val,
-                                      &sess.sender_context, &eip_options_val);
-        (void)eip_session_val; (void)eip_status_val; (void)eip_options_val;
-        if(bytes_is_null(hdr_rest)) {
-            pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_WARN, "Failed to decode EIP header");
+        if(bytes_is_null(bytes_unpack(hdr_buf, BYTES_LE, BYTES_SKIP(2), &payload_len))) {
+            pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_WARN, "Failed to read EIP payload length");
+            break;
+        }
+
+        /* Protocol-level size guard: reject payloads that exceed the negotiated maximum.
+         * This is the primary check — eip_dispatch repeats it on the parsed header. */
+        if(sess.max_eip_packet_size > 0 && (size_t)payload_len > sess.max_eip_packet_size) {
+            pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_WARN,
+                  "EIP payload_len=%u exceeds negotiated max %zu — closing connection",
+                  (unsigned)payload_len, sess.max_eip_packet_size);
+            break;
+        }
+
+        /* Arena-level fallback: reject payload sizes that exceed remaining arena space. */
+        if((size_t)payload_len > arena_remaining(&arena)) {
+            pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_WARN,
+                  "EIP payload_len=%u exceeds remaining arena space — closing connection", (unsigned)payload_len);
             break;
         }
 
@@ -489,10 +499,10 @@ static void *client_fiber(void *arg) {
             }
         }
 
-        pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_DETAIL, "EIP cmd=0x%04x payload=%u bytes", (unsigned)cmd, (unsigned)payload_len);
+        pdlog(LOG_MODULE_AB_CLIENT, LOG_LEVEL_DETAIL, "EIP request received, payload=%u bytes", (unsigned)payload_len);
 
         /* ---- Phase 4: Dispatch ---- */
-        Bytes response = eip_dispatch(&arena, cmd, payload_buf, &sess, cfg);
+        Bytes response = eip_dispatch(&arena, hdr_buf, payload_buf, &sess, cfg);
 
         /* ---- Phase 5: Optional artificial delay ---- */
         if(cfg->response_delay_ms > 0) { fiber_net_sleep_ms(net, (uint32_t)cfg->response_delay_ms); }
@@ -544,6 +554,19 @@ static void print_statistics(server_ctx_t *server) {
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║ Clients connected:    %" PRId64 "\n", (long long)stats->clients_connected);
     fprintf(stderr, "║ Clients disconnected: %" PRId64 "\n", (long long)stats->clients_disconnected);
+
+    /* ----- Arena statistics ----- */
+    if(stats->arena.reset_count > 0) {
+        double avg_bytes = (double)stats->arena.use_total / (double)stats->arena.reset_count;
+        fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+        fprintf(stderr, "║              ARENA USAGE PER REQUEST                             ║\n");
+        fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+        fprintf(stderr, "║  Requests measured: %7zu\n", stats->arena.reset_count);
+        fprintf(stderr, "║  Avg usage:         %7.0f bytes\n", avg_bytes);
+        fprintf(stderr, "║  Min usage:         %7zu bytes\n", stats->arena.use_min);
+        fprintf(stderr, "║  Max usage:         %7zu bytes\n", stats->arena.use_max);
+        fprintf(stderr, "║  Arena capacity:    %7u bytes\n", CLIENT_ARENA_SIZE);
+    }
 
     /* ----- Per-tag statistics ----- */
     if(server->cfg && server->cfg->tags) {
@@ -820,7 +843,10 @@ static bool parse_pccc_tag(const char *tag_str, plc_config_t *cfg) {
     }
 
     tag_def_t *tag = (tag_def_t *)calloc(1, sizeof(tag_def_t));
-    if(!tag) { return false; }
+    if(!tag) {
+        pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_WARN, "parse_pccc_tag: out of memory allocating tag_def_t");
+        return false;
+    }
 
     tag->tag_type = tag_type;
     tag->elem_size = elem_size;
@@ -832,12 +858,14 @@ static bool parse_pccc_tag(const char *tag_str, plc_config_t *cfg) {
     tag->dimensions[2] = 1;
     tag->name = strdup(file_name);
     if(!tag->name) {
+        pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_WARN, "parse_pccc_tag: out of memory duplicating tag name");
         free(tag);
         return false;
     }
 
     tag->data = (uint8_t *)calloc(count, elem_size);
     if(!tag->data) {
+        pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_WARN, "parse_pccc_tag: out of memory allocating %zu bytes of tag data", count * elem_size);
         free(tag->name);
         free(tag);
         return false;
@@ -953,7 +981,10 @@ static bool parse_cip_tag(const char *tag_str, plc_config_t *cfg) {
     }
 
     tag_def_t *tag = (tag_def_t *)calloc(1, sizeof(tag_def_t));
-    if(!tag) { return false; }
+    if(!tag) {
+        pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_WARN, "parse_cip_tag: out of memory allocating tag_def_t");
+        return false;
+    }
 
     tag->tag_type = tag_type;
     tag->elem_size = elem_size;
@@ -966,12 +997,14 @@ static bool parse_cip_tag(const char *tag_str, plc_config_t *cfg) {
 
     tag->name = strdup(tag_name);
     if(!tag->name) {
+        pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_WARN, "parse_cip_tag: out of memory duplicating tag name");
         free(tag);
         return false;
     }
 
     tag->data = (uint8_t *)calloc(tag->elem_count, elem_size);
     if(!tag->data) {
+        pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_WARN, "parse_cip_tag: out of memory allocating %zu bytes of tag data", tag->elem_count * elem_size);
         free(tag->name);
         free(tag);
         return false;

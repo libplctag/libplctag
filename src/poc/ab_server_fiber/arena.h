@@ -52,15 +52,32 @@ extern "C" {
 
 #include "err.h"
 
+/*
+ * Per-reset-cycle usage statistics.  Attach to an arena with arena_set_stats();
+ * pass NULL to disable collection entirely.  arena_reset() samples arena.length
+ * just before clearing the cursor, so each sample equals the peak usage for
+ * that request cycle (bump allocators never free, so length == peak).
+ */
+typedef struct {
+    size_t reset_count;    /* number of non-empty reset cycles measured */
+    size_t use_min;        /* minimum usage at reset time (bytes) */
+    size_t use_max;        /* maximum usage at reset time (bytes) */
+    size_t use_total;      /* sum of all samples (for average) */
+} ArenaStats;
+
 typedef struct {
     uint8_t *buffer;
     size_t length;
     size_t capacity;
-    size_t high_water; /* peak usage across all resets */
+    size_t high_water;   /* peak usage across all resets */
+    ArenaStats *stats;   /* optional; NULL disables stats gathering */
 } Arena;
 
 /* Initialize arena with a fixed size.  Returns UTIL_ERESOURCE on malloc failure. */
 extern util_err_t arena_init(Arena *out, size_t size);
+
+/* Attach (or detach with NULL) a stats collector.  Clears the stats struct on attach. */
+extern void arena_set_stats(Arena *a, ArenaStats *stats);
 
 /* Allocate size bytes from arena.  Returns NULL if out of space; caller must check. */
 extern void *arena_alloc(Arena *a, size_t size);
@@ -74,7 +91,8 @@ extern size_t arena_remaining(Arena *a);
 /* Advance arena cursor by n bytes.  Caller must ensure n <= arena_remaining(). */
 extern void arena_commit(Arena *a, size_t n);
 
-/* Reset arena cursor to zero without freeing the backing buffer. */
+/* Reset arena cursor to zero without freeing the backing buffer.
+ * If stats are attached, samples arena.length before clearing. */
 extern void arena_reset(Arena *a);
 
 /* Save current cursor position. */
