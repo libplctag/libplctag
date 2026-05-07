@@ -87,6 +87,7 @@ extern plc_tag_p ab_device_tag_create(attr attribs,
 
     /* set the vtable to the device tag vtable. */
     tag->vtable = &device_tag_vtable;
+    tag->protocol_type = TAG_PROTOCOL_AB_DEVICE;
 
     /* set up the generic parts. */
     int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
@@ -158,12 +159,48 @@ static int device_tag_tickler(plc_tag_p raw_tag) {
     /* drain all unread ring buffer entries; write_idx points to the last written slot */
     while(read_idx != write_idx) {
         read_idx = (read_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
+        int32_t event_type = device_tag->session->conn_status_ring[read_idx].event_type;
         int32_t status = device_tag->session->conn_status_ring[read_idx].status;
         int32_t reason = device_tag->session->conn_status_ring[read_idx].reason;
-        device_tag->last_conn_state = status;
+
         /* api_mutex is already held by the generic tickler so dispatch each entry directly */
         if(device_tag->callback) {
-            device_tag->callback(device_tag->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, (int)reason, device_tag->userdata);
+            switch(event_type) {
+                case SESSION_EVENT_CONNECTION_CHANGED_STATE:
+                    device_tag->last_conn_state = status;
+                    device_tag->callback(device_tag->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, (int)reason,
+                                         device_tag->userdata);
+                    break;
+
+                case SESSION_EVENT_SEND_REQUEST_STARTED:
+                    if(device_tag->io_events) {
+                        device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, (int)status, device_tag->userdata);
+                    }
+                    break;
+
+                case SESSION_EVENT_SEND_REQUEST_COMPLETED:
+                    if(device_tag->io_events) {
+                        device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, (int)status, device_tag->userdata);
+                    }
+                    break;
+
+                case SESSION_EVENT_RECEIVE_RESPONSE_STARTED:
+                    if(device_tag->io_events) {
+                        device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_READ_STARTED, (int)status, device_tag->userdata);
+                    }
+                    break;
+
+                case SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED:
+                    if(device_tag->io_events) {
+                        device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, (int)status, device_tag->userdata);
+                    }
+                    break;
+
+                default:
+                    pdebug(DEBUG_MODULE_AB_DEVICE, DEBUG_WARN, device_tag->tag_id, "Unsupported ring event type %d.",
+                           (int)event_type);
+                    break;
+            }
         }
     }
 
