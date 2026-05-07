@@ -77,6 +77,10 @@ static const char *tag_path = NULL;
 static volatile bool running = true;
 static volatile int next_expected_idx = 0;
 static volatile bool test_failed = false;
+static volatile int read_started_count = 0;
+static volatile int read_completed_count = 0;
+static volatile int write_started_count = 0;
+static volatile int write_completed_count = 0;
 
 
 static void interrupt_handler(void) { running = false; }
@@ -110,18 +114,34 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
 
         case PLCTAG_EVENT_ABORTED: fprintf(stderr, "EVENT ABORTED: status=%s.\n", plc_tag_decode_error(status)); break;
 
-        case PLCTAG_EVENT_READ_STARTED: fprintf(stderr, "EVENT READ_STARTED: status=%s.\n", plc_tag_decode_error(status)); break;
-
         case PLCTAG_EVENT_READ_COMPLETED:
             fprintf(stderr, "EVENT READ_COMPLETED: status=%s.\n", plc_tag_decode_error(status));
+            read_completed_count++;
+            if(read_completed_count > read_started_count) {
+                fprintf(stderr, "ERROR: READ_COMPLETED observed before matching READ_STARTED.\n");
+                test_failed = true;
+                running = false;
+            }
+            break;
+
+        case PLCTAG_EVENT_READ_STARTED:
+            fprintf(stderr, "EVENT READ_STARTED: status=%s.\n", plc_tag_decode_error(status));
+            read_started_count++;
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
             fprintf(stderr, "EVENT WRITE_STARTED: status=%s.\n", plc_tag_decode_error(status));
+            write_started_count++;
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
             fprintf(stderr, "EVENT WRITE_COMPLETED: status=%s.\n", plc_tag_decode_error(status));
+            write_completed_count++;
+            if(write_completed_count > write_started_count) {
+                fprintf(stderr, "ERROR: WRITE_COMPLETED observed before matching WRITE_STARTED.\n");
+                test_failed = true;
+                running = false;
+            }
             break;
 
         case PLCTAG_EVENT_CONN_STATUS_UP:
@@ -291,6 +311,21 @@ int main(int argc, char **argv) {
     if(next_expected_idx < NUM_EXPECTED_STATES) {
         fprintf(stderr, "RESULT: FAIL - only %d of %d expected state transitions received (last expected: %s).\n",
                 next_expected_idx, NUM_EXPECTED_STATES, conn_status_name(expected_states[next_expected_idx]));
+        return 1;
+    }
+
+    if(read_started_count < 1 || read_completed_count < 1 || write_started_count < 1 || write_completed_count < 1) {
+        fprintf(stderr,
+                "RESULT: FAIL - missing IO events. read_started=%d read_completed=%d write_started=%d write_completed=%d.\n",
+                read_started_count, read_completed_count, write_started_count, write_completed_count);
+        return 1;
+    }
+
+    if(read_started_count < read_completed_count || write_started_count < write_completed_count) {
+        fprintf(
+            stderr,
+            "RESULT: FAIL - IO event ordering invalid. read_started=%d read_completed=%d write_started=%d write_completed=%d.\n",
+            read_started_count, read_completed_count, write_started_count, write_completed_count);
         return 1;
     }
 

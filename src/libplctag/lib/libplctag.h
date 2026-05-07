@@ -310,6 +310,11 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
                                      void *userdata, int timeout);
 
 
+LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
+                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                           void *userdata, int timeout);
+
+
 /**
  * @brief Shut down the library and release all resources.
  *
