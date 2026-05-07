@@ -165,7 +165,7 @@ void ab_teardown(void) {
 
 
 plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                        void *userdata) {
+                        void *userdata, plc_tag_p src_tag) {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
@@ -173,7 +173,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Starting.");
 
     /* short circuit for split Omron*/
-    if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata); }
+    if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata, src_tag); }
 
     /* short circuit for device tag */
     plc_type_t plc_type = get_plc_type(attribs);
@@ -200,6 +200,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     tag->vtable = &default_vtable;
+    tag->protocol_type = TAG_PROTOCOL_AB;
 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
@@ -217,12 +218,17 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      *
      */
 
-    if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
-        /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return (plc_tag_p)NULL;
+    if(src_tag) {
+        ab_tag_p src = (ab_tag_p)src_tag;
+        tag->plc_type = src->plc_type;
+    } else {
+        if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
+            /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+            rc_dec(tag);
+            return (plc_tag_p)NULL;
+        }
     }
 
     /* set up any required settings based on the cpu type. */
@@ -289,10 +295,20 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      *
      * All tags need sessions.  They are the TCP connection to the gateway PLC.
      */
-    if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
-        tag->status = PLCTAG_ERR_BAD_GATEWAY;
-        return (plc_tag_p)tag;
+    if(src_tag) {
+        ab_tag_p src = (ab_tag_p)src_tag;
+        tag->session = rc_inc(src->session);
+        if(!tag->session) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
+            tag->status = PLCTAG_ERR_NOT_FOUND;
+            return (plc_tag_p)tag;
+        }
+    } else {
+        if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
+            tag->status = PLCTAG_ERR_BAD_GATEWAY;
+            return (plc_tag_p)tag;
+        }
     }
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);

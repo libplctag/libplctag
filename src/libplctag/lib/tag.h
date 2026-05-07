@@ -73,6 +73,15 @@ struct tag_vtable_t {
 
 typedef struct tag_vtable_t *tag_vtable_p;
 
+typedef enum {
+    TAG_PROTOCOL_UNKNOWN = 0,
+    TAG_PROTOCOL_SYSTEM = 1,
+    TAG_PROTOCOL_AB = 2,
+    TAG_PROTOCOL_AB_DEVICE = 3,
+    TAG_PROTOCOL_MODBUS = 4,
+    TAG_PROTOCOL_OMRON = 5
+} tag_protocol_t;
+
 
 /* byte ordering */
 
@@ -136,6 +145,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t tag_id;                               \
     int connection_group_id;                      \
     int bit;                                      \
+    int protocol_type;                            \
     atomic_bool abort_requested;                  \
     int8_t event_creation_complete_status;        \
     int8_t event_deletion_started_status;         \

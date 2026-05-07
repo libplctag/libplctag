@@ -352,7 +352,7 @@ struct tag_vtable_t modbus_vtable = {
 /****** main entry point *******/
 
 plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                        void *userdata) {
+                        void *userdata, plc_tag_p src_tag) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
 
@@ -373,8 +373,16 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         return (plc_tag_p)NULL;
     }
 
+    tag->protocol_type = TAG_PROTOCOL_MODBUS;
+
     /* find the PLC object. */
-    rc = find_or_create_plc(attribs, &(tag->plc));
+    if(src_tag) {
+        modbus_tag_p src = (modbus_tag_p)src_tag;
+        tag->plc = rc_inc(src->plc);
+        rc = tag->plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_FOUND;
+    } else {
+        rc = find_or_create_plc(attribs, &(tag->plc));
+    }
     if(rc == PLCTAG_STATUS_OK) {
         /* put the tag on the PLC's list. */
         add_tag(tag->plc, tag);
