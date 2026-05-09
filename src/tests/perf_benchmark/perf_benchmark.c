@@ -40,7 +40,11 @@
  *
  * Usage:
  *   perf_benchmark --mode=sync|async --groups=N --threads=M --tags=T
- *                  [--duration=S] [--gateway=IP] [--port=PORT]
+ *                  --tag=BASE_TAG_PATH [--duration=S]
+ *
+ * BASE_TAG_PATH is the full tag attribute string without connection_group_id,
+ * which the benchmark appends automatically per tag.  Example:
+ *   protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray[0]
  *
  * Tags is the primary axis.  Threads and groups must be <= tags (groups
  * also capped at 100).  Each thread owns an exclusive slice of the tags
@@ -80,17 +84,12 @@
 #define TAG_CREATE_TIMEOUT_MS (10000)
 #define TAG_READ_TIMEOUT_MS (5000)
 #define DEFAULT_DURATION_S (10)
-#define DEFAULT_GATEWAY "127.0.0.1"
-#define DEFAULT_PORT (44818)
-#define TAG_NAME "TestBigArray"
 
 #define MAX_TAGS (1100)
 #define MAX_THREADS (1100)
 
-/* Tag path template.  connection_group_id is filled per tag. */
-#define TAG_PATH_FMT                                          \
-    "protocol=ab-eip&gateway=%s:%d&path=1,0&plc=ControlLogix" \
-    "&elem_count=1&name=%s[0]&connection_group_id=%d"
+/* Tag path template.  connection_group_id is appended to the caller-supplied base path. */
+#define TAG_PATH_FMT "%s&connection_group_id=%d"
 
 
 /*--- CPU time helper (cross-platform) ---*/
@@ -230,16 +229,19 @@ static void usage(const char *prog) {
     fprintf(stderr,
             "Usage:\n"
             "  %s --mode=sync|async --groups=N --threads=M --tags=T\n"
-            "     [--duration=S] [--gateway=IP] [--port=PORT]\n"
+            "     --tag=BASE_TAG_PATH [--duration=S]\n"
             "\n"
             "  --mode        sync or async\n"
             "  --groups      number of connection groups (1-100)\n"
             "  --threads     number of reader threads (1-1000)\n"
             "  --tags        number of tags to create (1-1000)\n"
+            "  --tag         base tag attribute string (connection_group_id is appended)\n"
             "  --duration    test duration in seconds (default: %d)\n"
-            "  --gateway     PLC/simulator IP (default: %s)\n"
-            "  --port        PLC/simulator port (default: %d)\n",
-            prog, DEFAULT_DURATION_S, DEFAULT_GATEWAY, DEFAULT_PORT);
+            "\n"
+            "Example:\n"
+            "  %s --mode=sync --groups=1 --threads=1 --tags=10 --duration=10\n"
+            "     --tag=\"protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray[0]\"\n",
+            prog, DEFAULT_DURATION_S, prog);
     exit(1);
 }
 
@@ -252,8 +254,7 @@ int main(int argc, char **argv) {
     int num_threads = -1;
     int num_tags = -1;
     int duration_s = DEFAULT_DURATION_S;
-    const char *gateway = DEFAULT_GATEWAY;
-    int port = DEFAULT_PORT;
+    const char *base_tag_path = NULL;
 
     int32_t tag_handles[MAX_TAGS];
     compat_thread_t threads[MAX_THREADS];
@@ -279,18 +280,16 @@ int main(int argc, char **argv) {
             num_tags = atoi(argv[i] + 7);
         } else if(strncmp(argv[i], "--duration=", 11) == 0) {
             duration_s = atoi(argv[i] + 11);
-        } else if(strncmp(argv[i], "--gateway=", 10) == 0) {
-            gateway = argv[i] + 10;
-        } else if(strncmp(argv[i], "--port=", 7) == 0) {
-            port = atoi(argv[i] + 7);
+        } else if(strncmp(argv[i], "--tag=", 6) == 0) {
+            base_tag_path = argv[i] + 6;
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             usage(argv[0]);
         }
     }
 
-    if(is_async < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0) {
-        fprintf(stderr, "Error: --mode, --groups, --threads, and --tags are required and must be positive.\n");
+    if(is_async < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || base_tag_path == NULL || base_tag_path[0] == '\0') {
+        fprintf(stderr, "Error: --mode, --groups, --threads, --tags, and --tag are required and must be valid.\n");
         usage(argv[0]);
     }
 
@@ -309,8 +308,8 @@ int main(int argc, char **argv) {
     compat_set_interrupt_handler(handle_interrupt);
 
     const char *mode_str = is_async ? "async" : "sync";
-    fprintf(stderr, "perf_benchmark: mode=%s groups=%d threads=%d tags=%d duration=%ds gateway=%s:%d\n", mode_str, num_groups,
-            num_threads, num_tags, duration_s, gateway, port);
+    fprintf(stderr, "perf_benchmark: mode=%s groups=%d threads=%d tags=%d duration=%ds tag=%s\n", mode_str, num_groups,
+            num_threads, num_tags, duration_s, base_tag_path);
 
     /*--- Create tags ---*/
     fprintf(stderr, "Creating %d tags...\n", num_tags);
@@ -318,7 +317,7 @@ int main(int argc, char **argv) {
         char path[512];
         int group_id = (i % num_groups) + 1;
 
-        snprintf(path, sizeof(path), TAG_PATH_FMT, gateway, port, TAG_NAME, group_id);
+        snprintf(path, sizeof(path), TAG_PATH_FMT, base_tag_path, group_id);
 
         tag_handles[i] = plc_tag_create(path, TAG_CREATE_TIMEOUT_MS);
         if(tag_handles[i] < 0) {

@@ -72,6 +72,7 @@ set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
 set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 set(MAX_DEBUG_LEVEL 4 CACHE STRING "Maximum debug level to include in the build (0-5)")
+set(LIBPLCTAG_ENABLE_COVERAGE 0 CACHE BOOL "Enable code coverage measurement")
 
 # message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 
@@ -214,6 +215,35 @@ set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS "libplctag (= ${CPACK_PACKAGE_VERSION})")
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "libplctag")
 set(CPACK_RPM_DEVEL_PACKAGE_NAME "libplctag-devel")
 set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "libplctag = ${CPACK_PACKAGE_VERSION}")
+
+# Code Coverage Target
+if(LIBPLCTAG_ENABLE_COVERAGE AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang"))
+    find_program(LCOV_PATH lcov)
+    find_program(GENHTML_PATH genhtml)
+    if(LCOV_PATH AND GENHTML_PATH)
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            # If using clang, we might need llvm-cov. Try to find it.
+            find_program(LLVM_COV_PATH llvm-cov)
+            if(LLVM_COV_PATH)
+                set(GCOV_TOOL "--gcov-tool=${CMAKE_CURRENT_SOURCE_DIR}/cmake/llvm-gcov.sh")
+                # Create a simple wrapper for llvm-cov gcov since lcov needs an executable
+                file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/llvm-gcov.sh "#!/bin/bash\nexec ${LLVM_COV_PATH} gcov \"$@\"")
+                execute_process(COMMAND chmod +x ${CMAKE_CURRENT_SOURCE_DIR}/cmake/llvm-gcov.sh)
+            endif()
+        endif()
+        
+        add_custom_target(coverage
+            COMMAND ${LCOV_PATH} --capture --directory . --output-file coverage.info ${GCOV_TOOL} --ignore-errors gcov,unsupported
+            COMMAND ${LCOV_PATH} --remove coverage.info "*/usr/*" "*/tests/*" "*/examples/*" "*/poc/*" "*/tools/*" --output-file coverage_filtered.info --ignore-errors unused
+            COMMAND ${GENHTML_PATH} coverage_filtered.info --output-directory coverage_report --ignore-errors unsupported
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Generating code coverage report in ${CMAKE_BINARY_DIR}/coverage_report/"
+            VERBATIM
+        )
+    else()
+        message(WARNING "lcov and/or genhtml not found. Coverage target not created.")
+    endif()
+endif()
 
 # include the functions for CPack (after all CPACK_* variables are set)
 include(CPack)

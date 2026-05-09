@@ -1,0 +1,290 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>LCOV - yafl Code Coverage - tests/test_yafl_guard.c</title>
+  <link rel="stylesheet" type="text/css" href="../gcov.css">
+</head>
+
+<body>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="title">LCOV - code coverage report</td></tr>
+            <tr><td class="ruler"><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+
+            <tr>
+              <td width="100%">
+                <table cellpadding=1 border=0 width="100%">
+          <tr>
+            <td width="10%" class="headerItem">Current view:</td>
+            <td width="10%" class="headerValue"><a href="../index.html" title="Click to go to top-level">top level</a> - <a href="index.html" title="Click to go to directory tests">tests</a> - test_yafl_guard.c<span style="font-size: 80%;"> (source / <a href="test_yafl_guard.c.func-c.html" title="Click to go to function table">functions</a>)</span></td>
+            <td width="5%"></td>
+            <td width="5%"></td>
+            <td width="5%" class="headerCovTableHead">Coverage</td>
+            <td width="5%" class="headerCovTableHead" title="Covered + Uncovered code">Total</td>
+            <td width="5%" class="headerCovTableHead" title="Exercised code only">Hit</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test:</td>
+            <td class="headerValue">yafl Code Coverage</td>
+            <td></td>
+            <td class="headerItem">Lines:</td>
+            <td class="headerCovTableEntryLo">34.1&nbsp;%</td>
+            <td class="headerCovTableEntry">82</td>
+            <td class="headerCovTableEntry">28</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test Date:</td>
+            <td class="headerValue">2026-04-28 13:50:18</td>
+            <td></td>
+            <td class="headerItem">Functions:</td>
+            <td class="headerCovTableEntryLo">25.0&nbsp;%</td>
+            <td class="headerCovTableEntry">4</td>
+            <td class="headerCovTableEntry">1</td>
+          </tr>
+                  <tr><td><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr><td class="ruler"><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+          </table>
+
+          <table cellpadding=0 cellspacing=0 border=0>
+            <tr>
+              <td><br></td>
+            </tr>
+            <tr>
+              <td>
+<pre class="sourceHeading">            Line data    Source code</pre>
+<pre class="source">
+<span id="L1"><span class="lineNum">       1</span>              : /*</span>
+<span id="L2"><span class="lineNum">       2</span>              :  * test_yafl_guard.c - Guard page overflow detection test</span>
+<span id="L3"><span class="lineNum">       3</span>              :  *</span>
+<span id="L4"><span class="lineNum">       4</span>              :  * Verifies that guard pages detect stack overflow.</span>
+<span id="L5"><span class="lineNum">       5</span>              :  * Uses child process (fork on POSIX, CreateProcess on Windows) to detect crash.</span>
+<span id="L6"><span class="lineNum">       6</span>              :  *</span>
+<span id="L7"><span class="lineNum">       7</span>              :  * Copyright Kyle Hayes (2026)</span>
+<span id="L8"><span class="lineNum">       8</span>              :  * Distributed under the Boost Software License, Version 1.0.</span>
+<span id="L9"><span class="lineNum">       9</span>              :  */</span>
+<span id="L10"><span class="lineNum">      10</span>              : </span>
+<span id="L11"><span class="lineNum">      11</span>              : #include &lt;assert.h&gt;</span>
+<span id="L12"><span class="lineNum">      12</span>              : #include &lt;stdbool.h&gt;</span>
+<span id="L13"><span class="lineNum">      13</span>              : #include &lt;stdio.h&gt;</span>
+<span id="L14"><span class="lineNum">      14</span>              : #include &lt;stdlib.h&gt;</span>
+<span id="L15"><span class="lineNum">      15</span>              : #include &lt;string.h&gt;</span>
+<span id="L16"><span class="lineNum">      16</span>              : </span>
+<span id="L17"><span class="lineNum">      17</span>              : #include &quot;../include/yafl.h&quot;</span>
+<span id="L18"><span class="lineNum">      18</span>              : </span>
+<span id="L19"><span class="lineNum">      19</span>              : #ifdef _WIN32</span>
+<span id="L20"><span class="lineNum">      20</span>              :     #include &lt;windows.h&gt;</span>
+<span id="L21"><span class="lineNum">      21</span>              : #else</span>
+<span id="L22"><span class="lineNum">      22</span>              :     #include &lt;sys/wait.h&gt;</span>
+<span id="L23"><span class="lineNum">      23</span>              :     #include &lt;unistd.h&gt;</span>
+<span id="L24"><span class="lineNum">      24</span>              : #endif</span>
+<span id="L25"><span class="lineNum">      25</span>              : </span>
+<span id="L26"><span class="lineNum">      26</span>              : /* Recursive function to overflow the stack */</span>
+<span id="L27"><span class="lineNum">      27</span> <span class="tlaUNC">           0 : static void overflow_stack(int depth) {</span></span>
+<span id="L28"><span class="lineNum">      28</span> <span class="tlaUNC">           0 :     volatile char buffer[128];</span></span>
+<span id="L29"><span class="lineNum">      29</span>              : </span>
+<span id="L30"><span class="lineNum">      30</span>              :     /* Touch the buffer to prevent optimization */</span>
+<span id="L31"><span class="lineNum">      31</span> <span class="tlaUNC">           0 :     memset((void *)buffer, 0xAA, sizeof(buffer));</span></span>
+<span id="L32"><span class="lineNum">      32</span>              : </span>
+<span id="L33"><span class="lineNum">      33</span> <span class="tlaUNC">           0 :     fprintf(stderr, &quot;[overflow] depth=%d, buffer=%p\n&quot;, depth, (void *)buffer);</span></span>
+<span id="L34"><span class="lineNum">      34</span> <span class="tlaUNC">           0 :     fflush(stderr);</span></span>
+<span id="L35"><span class="lineNum">      35</span>              : </span>
+<span id="L36"><span class="lineNum">      36</span>              :     /* Recurse to build up stack usage to trigger guard page */</span>
+<span id="L37"><span class="lineNum">      37</span> <span class="tlaUNC">           0 :     if (depth &lt; 250) {</span></span>
+<span id="L38"><span class="lineNum">      38</span> <span class="tlaUNC">           0 :         overflow_stack(depth + 1);</span></span>
+<span id="L39"><span class="lineNum">      39</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L40"><span class="lineNum">      40</span> <span class="tlaUNC">           0 : }</span></span>
+<span id="L41"><span class="lineNum">      41</span>              : </span>
+<span id="L42"><span class="lineNum">      42</span> <span class="tlaUNC">           0 : static void *guard_test_fiber(void *data) {</span></span>
+<span id="L43"><span class="lineNum">      43</span> <span class="tlaUNC">           0 :     (void)data;</span></span>
+<span id="L44"><span class="lineNum">      44</span>              : </span>
+<span id="L45"><span class="lineNum">      45</span> <span class="tlaUNC">           0 :     fprintf(stderr, &quot;[fiber] starting guard page test\n&quot;);</span></span>
+<span id="L46"><span class="lineNum">      46</span> <span class="tlaUNC">           0 :     fflush(stderr);</span></span>
+<span id="L47"><span class="lineNum">      47</span>              : </span>
+<span id="L48"><span class="lineNum">      48</span>              :     /* This will hit the guard page and cause the process to crash */</span>
+<span id="L49"><span class="lineNum">      49</span> <span class="tlaUNC">           0 :     overflow_stack(0);</span></span>
+<span id="L50"><span class="lineNum">      50</span>              : </span>
+<span id="L51"><span class="lineNum">      51</span> <span class="tlaUNC">           0 :     fprintf(stderr, &quot;[fiber] ERROR: should not reach here\n&quot;);</span></span>
+<span id="L52"><span class="lineNum">      52</span> <span class="tlaUNC">           0 :     fflush(stderr);</span></span>
+<span id="L53"><span class="lineNum">      53</span> <span class="tlaUNC">           0 :     return (void *)0x0;</span></span>
+<span id="L54"><span class="lineNum">      54</span>              : }</span>
+<span id="L55"><span class="lineNum">      55</span>              : </span>
+<span id="L56"><span class="lineNum">      56</span>              : /* Child process test - will crash when guard page is hit */</span>
+<span id="L57"><span class="lineNum">      57</span> <span class="tlaUNC">           0 : static int run_child_test(void) {</span></span>
+<span id="L58"><span class="lineNum">      58</span> <span class="tlaUNC">           0 :     fprintf(stderr, &quot;[child] creating fiber with guard pages\n&quot;);</span></span>
+<span id="L59"><span class="lineNum">      59</span> <span class="tlaUNC">           0 :     fflush(stderr);</span></span>
+<span id="L60"><span class="lineNum">      60</span>              : </span>
+<span id="L61"><span class="lineNum">      61</span> <span class="tlaUNC">           0 :     yafl_fiber_t *fiber = yafl_fiber_create(guard_test_fiber, 24 * 1024,</span></span>
+<span id="L62"><span class="lineNum">      62</span>              :                                             YAFL_STACK_FLAGS_VMEM);</span>
+<span id="L63"><span class="lineNum">      63</span> <span class="tlaUNC">           0 :     if (fiber == NULL) {</span></span>
+<span id="L64"><span class="lineNum">      64</span> <span class="tlaUNC">           0 :         fprintf(stderr, &quot;[child] ERROR: fiber creation failed\n&quot;);</span></span>
+<span id="L65"><span class="lineNum">      65</span> <span class="tlaUNC">           0 :         fflush(stderr);</span></span>
+<span id="L66"><span class="lineNum">      66</span> <span class="tlaUNC">           0 :         return 1;</span></span>
+<span id="L67"><span class="lineNum">      67</span>              :     }</span>
+<span id="L68"><span class="lineNum">      68</span>              : </span>
+<span id="L69"><span class="lineNum">      69</span> <span class="tlaUNC">           0 :     fprintf(stderr, &quot;[child] resuming fiber\n&quot;);</span></span>
+<span id="L70"><span class="lineNum">      70</span> <span class="tlaUNC">           0 :     fflush(stderr);</span></span>
+<span id="L71"><span class="lineNum">      71</span>              : </span>
+<span id="L72"><span class="lineNum">      72</span>              :     /* This will cause guard page fault and crash the process */</span>
+<span id="L73"><span class="lineNum">      73</span> <span class="tlaUNC">           0 :     void *result = yafl_fiber_resume(fiber, NULL);</span></span>
+<span id="L74"><span class="lineNum">      74</span>              : </span>
+<span id="L75"><span class="lineNum">      75</span>              :     /* Should never reach here if guard page is working */</span>
+<span id="L76"><span class="lineNum">      76</span> <span class="tlaUNC">           0 :     fprintf(stderr, &quot;[child] ERROR: fiber returned: %p (should have crashed)\n&quot;, result);</span></span>
+<span id="L77"><span class="lineNum">      77</span> <span class="tlaUNC">           0 :     fflush(stderr);</span></span>
+<span id="L78"><span class="lineNum">      78</span> <span class="tlaUNC">           0 :     yafl_fiber_destroy(fiber);</span></span>
+<span id="L79"><span class="lineNum">      79</span> <span class="tlaUNC">           0 :     return 1;</span></span>
+<span id="L80"><span class="lineNum">      80</span> <span class="tlaUNC">           0 : }</span></span>
+<span id="L81"><span class="lineNum">      81</span>              : </span>
+<span id="L82"><span class="lineNum">      82</span> <span class="tlaGNC">           4 : int main(int argc, char *argv[]) {</span></span>
+<span id="L83"><span class="lineNum">      83</span> <span class="tlaGNC">           4 :     fprintf(stderr, &quot;=== yafl Guard Page Test ===\n&quot;);</span></span>
+<span id="L84"><span class="lineNum">      84</span> <span class="tlaGNC">           4 :     fflush(stderr);</span></span>
+<span id="L85"><span class="lineNum">      85</span>              : </span>
+<span id="L86"><span class="lineNum">      86</span>              :     /* argc and argv only used on Windows */</span>
+<span id="L87"><span class="lineNum">      87</span>              : #ifndef _WIN32</span>
+<span id="L88"><span class="lineNum">      88</span> <span class="tlaGNC">           4 :     (void)argc;</span></span>
+<span id="L89"><span class="lineNum">      89</span> <span class="tlaGNC">           4 :     (void)argv;</span></span>
+<span id="L90"><span class="lineNum">      90</span>              : #endif</span>
+<span id="L91"><span class="lineNum">      91</span>              : </span>
+<span id="L92"><span class="lineNum">      92</span>              : #ifdef _WIN32</span>
+<span id="L93"><span class="lineNum">      93</span>              :     /* Check if we're the child process */</span>
+<span id="L94"><span class="lineNum">      94</span>              :     if (argc &gt; 1 &amp;&amp; strcmp(argv[1], &quot;__child__&quot;) == 0) {</span>
+<span id="L95"><span class="lineNum">      95</span>              :         return run_child_test();</span>
+<span id="L96"><span class="lineNum">      96</span>              :     }</span>
+<span id="L97"><span class="lineNum">      97</span>              : </span>
+<span id="L98"><span class="lineNum">      98</span>              :     /* Parent: spawn child process */</span>
+<span id="L99"><span class="lineNum">      99</span>              :     fprintf(stderr, &quot;[main] spawning child process\n&quot;);</span>
+<span id="L100"><span class="lineNum">     100</span>              :     fflush(stderr);</span>
+<span id="L101"><span class="lineNum">     101</span>              : </span>
+<span id="L102"><span class="lineNum">     102</span>              :     STARTUPINFO si;</span>
+<span id="L103"><span class="lineNum">     103</span>              :     PROCESS_INFORMATION pi;</span>
+<span id="L104"><span class="lineNum">     104</span>              :     memset(&amp;si, 0, sizeof(si));</span>
+<span id="L105"><span class="lineNum">     105</span>              :     si.cb = sizeof(si);</span>
+<span id="L106"><span class="lineNum">     106</span>              : </span>
+<span id="L107"><span class="lineNum">     107</span>              :     /* Build command line to run ourselves as child */</span>
+<span id="L108"><span class="lineNum">     108</span>              :     char cmd_line[512];</span>
+<span id="L109"><span class="lineNum">     109</span>              :     snprintf(cmd_line, sizeof(cmd_line), &quot;%s __child__&quot;, argv[0]);</span>
+<span id="L110"><span class="lineNum">     110</span>              : </span>
+<span id="L111"><span class="lineNum">     111</span>              :     if (!CreateProcessA(NULL, cmd_line, NULL, NULL, FALSE, 0, NULL, NULL, &amp;si, &amp;pi)) {</span>
+<span id="L112"><span class="lineNum">     112</span>              :         fprintf(stderr, &quot;[main] ERROR: CreateProcess failed (error: %lu)\n&quot;, GetLastError());</span>
+<span id="L113"><span class="lineNum">     113</span>              :         fflush(stderr);</span>
+<span id="L114"><span class="lineNum">     114</span>              :         return 1;</span>
+<span id="L115"><span class="lineNum">     115</span>              :     }</span>
+<span id="L116"><span class="lineNum">     116</span>              : </span>
+<span id="L117"><span class="lineNum">     117</span>              :     fprintf(stderr, &quot;[main] waiting for child process (PID: %lu)\n&quot;, pi.dwProcessId);</span>
+<span id="L118"><span class="lineNum">     118</span>              :     fflush(stderr);</span>
+<span id="L119"><span class="lineNum">     119</span>              : </span>
+<span id="L120"><span class="lineNum">     120</span>              :     /* Wait for child to complete */</span>
+<span id="L121"><span class="lineNum">     121</span>              :     WaitForSingleObject(pi.hProcess, INFINITE);</span>
+<span id="L122"><span class="lineNum">     122</span>              : </span>
+<span id="L123"><span class="lineNum">     123</span>              :     DWORD exit_code;</span>
+<span id="L124"><span class="lineNum">     124</span>              :     if (!GetExitCodeProcess(pi.hProcess, &amp;exit_code)) {</span>
+<span id="L125"><span class="lineNum">     125</span>              :         fprintf(stderr, &quot;[main] ERROR: GetExitCodeProcess failed\n&quot;);</span>
+<span id="L126"><span class="lineNum">     126</span>              :         fflush(stderr);</span>
+<span id="L127"><span class="lineNum">     127</span>              :         CloseHandle(pi.hProcess);</span>
+<span id="L128"><span class="lineNum">     128</span>              :         CloseHandle(pi.hThread);</span>
+<span id="L129"><span class="lineNum">     129</span>              :         return 1;</span>
+<span id="L130"><span class="lineNum">     130</span>              :     }</span>
+<span id="L131"><span class="lineNum">     131</span>              : </span>
+<span id="L132"><span class="lineNum">     132</span>              :     CloseHandle(pi.hProcess);</span>
+<span id="L133"><span class="lineNum">     133</span>              :     CloseHandle(pi.hThread);</span>
+<span id="L134"><span class="lineNum">     134</span>              : </span>
+<span id="L135"><span class="lineNum">     135</span>              :     fprintf(stderr, &quot;[main] child exited with code: 0x%lx\n&quot;, exit_code);</span>
+<span id="L136"><span class="lineNum">     136</span>              :     fflush(stderr);</span>
+<span id="L137"><span class="lineNum">     137</span>              : </span>
+<span id="L138"><span class="lineNum">     138</span>              :     /* On Windows, if guard page is working, child will crash with non-zero exit code</span>
+<span id="L139"><span class="lineNum">     139</span>              :      * If child exited cleanly with code 0, it means the guard page didn't trigger */</span>
+<span id="L140"><span class="lineNum">     140</span>              :     if (exit_code == 0) {</span>
+<span id="L141"><span class="lineNum">     141</span>              :         fprintf(stderr, &quot;[main] FAIL: child exited cleanly (guard page not triggered)\n&quot;);</span>
+<span id="L142"><span class="lineNum">     142</span>              :         fflush(stderr);</span>
+<span id="L143"><span class="lineNum">     143</span>              :         return 1;</span>
+<span id="L144"><span class="lineNum">     144</span>              :     }</span>
+<span id="L145"><span class="lineNum">     145</span>              : </span>
+<span id="L146"><span class="lineNum">     146</span>              :     fprintf(stderr, &quot;[main] guard page successfully detected stack overflow\n&quot;);</span>
+<span id="L147"><span class="lineNum">     147</span>              :     fflush(stderr);</span>
+<span id="L148"><span class="lineNum">     148</span>              : </span>
+<span id="L149"><span class="lineNum">     149</span>              : #else</span>
+<span id="L150"><span class="lineNum">     150</span>              :     /* POSIX: use fork */</span>
+<span id="L151"><span class="lineNum">     151</span> <span class="tlaGNC">           4 :     fprintf(stderr, &quot;[main] spawning child process\n&quot;);</span></span>
+<span id="L152"><span class="lineNum">     152</span> <span class="tlaGNC">           4 :     fflush(stderr);</span></span>
+<span id="L153"><span class="lineNum">     153</span>              : </span>
+<span id="L154"><span class="lineNum">     154</span> <span class="tlaGNC">           4 :     pid_t pid = fork();</span></span>
+<span id="L155"><span class="lineNum">     155</span> <span class="tlaGNC">           4 :     if (pid == -1) {</span></span>
+<span id="L156"><span class="lineNum">     156</span> <span class="tlaUNC">           0 :         fprintf(stderr, &quot;[main] ERROR: fork failed\n&quot;);</span></span>
+<span id="L157"><span class="lineNum">     157</span> <span class="tlaUNC">           0 :         fflush(stderr);</span></span>
+<span id="L158"><span class="lineNum">     158</span> <span class="tlaUNC">           0 :         return 1;</span></span>
+<span id="L159"><span class="lineNum">     159</span>              :     }</span>
+<span id="L160"><span class="lineNum">     160</span>              : </span>
+<span id="L161"><span class="lineNum">     161</span> <span class="tlaGNC">           4 :     if (pid == 0) {</span></span>
+<span id="L162"><span class="lineNum">     162</span>              :         /* Child process - run test and exit */</span>
+<span id="L163"><span class="lineNum">     163</span> <span class="tlaUNC">           0 :         exit(run_child_test());</span></span>
+<span id="L164"><span class="lineNum">     164</span>              :     }</span>
+<span id="L165"><span class="lineNum">     165</span>              : </span>
+<span id="L166"><span class="lineNum">     166</span>              :     /* Parent process - wait for child */</span>
+<span id="L167"><span class="lineNum">     167</span> <span class="tlaGNC">           4 :     fprintf(stderr, &quot;[main] waiting for child process (PID: %d)\n&quot;, (int)pid);</span></span>
+<span id="L168"><span class="lineNum">     168</span> <span class="tlaGNC">           4 :     fflush(stderr);</span></span>
+<span id="L169"><span class="lineNum">     169</span>              : </span>
+<span id="L170"><span class="lineNum">     170</span> <span class="tlaGNC">           4 :     int status;</span></span>
+<span id="L171"><span class="lineNum">     171</span> <span class="tlaGNC">           4 :     pid_t result = waitpid(pid, &amp;status, 0);</span></span>
+<span id="L172"><span class="lineNum">     172</span> <span class="tlaGNC">           4 :     if (result == -1) {</span></span>
+<span id="L173"><span class="lineNum">     173</span> <span class="tlaUNC">           0 :         fprintf(stderr, &quot;[main] ERROR: waitpid failed\n&quot;);</span></span>
+<span id="L174"><span class="lineNum">     174</span> <span class="tlaUNC">           0 :         fflush(stderr);</span></span>
+<span id="L175"><span class="lineNum">     175</span> <span class="tlaUNC">           0 :         return 1;</span></span>
+<span id="L176"><span class="lineNum">     176</span>              :     }</span>
+<span id="L177"><span class="lineNum">     177</span>              : </span>
+<span id="L178"><span class="lineNum">     178</span>              :     /* Check how the child terminated */</span>
+<span id="L179"><span class="lineNum">     179</span> <span class="tlaGNC">           4 :     if (WIFSIGNALED(status)) {</span></span>
+<span id="L180"><span class="lineNum">     180</span> <span class="tlaGNC">           4 :         int sig = WTERMSIG(status);</span></span>
+<span id="L181"><span class="lineNum">     181</span> <span class="tlaGNC">           4 :         fprintf(stderr, &quot;[main] child killed by signal %d\n&quot;, sig);</span></span>
+<span id="L182"><span class="lineNum">     182</span> <span class="tlaGNC">           4 :         fflush(stderr);</span></span>
+<span id="L183"><span class="lineNum">     183</span>              : </span>
+<span id="L184"><span class="lineNum">     184</span>              :         /* Expect SIGSEGV (11) or SIGBUS (7) SIGILL (4) for guard page fault */</span>
+<span id="L185"><span class="lineNum">     185</span> <span class="tlaGNC">           4 :         if (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL) {</span></span>
+<span id="L186"><span class="lineNum">     186</span> <span class="tlaGNC">           4 :             fprintf(stderr, &quot;[main] guard page successfully detected stack overflow\n&quot;);</span></span>
+<span id="L187"><span class="lineNum">     187</span> <span class="tlaGNC">           4 :             fflush(stderr);</span></span>
+<span id="L188"><span class="lineNum">     188</span> <span class="tlaGNC">           4 :         } else {</span></span>
+<span id="L189"><span class="lineNum">     189</span> <span class="tlaUNC">           0 :             fprintf(stderr, &quot;[main] FAIL: child killed by unexpected signal %d\n&quot;, sig);</span></span>
+<span id="L190"><span class="lineNum">     190</span> <span class="tlaUNC">           0 :             fflush(stderr);</span></span>
+<span id="L191"><span class="lineNum">     191</span> <span class="tlaUNC">           0 :             return 1;</span></span>
+<span id="L192"><span class="lineNum">     192</span>              :         }</span>
+<span id="L193"><span class="lineNum">     193</span> <span class="tlaGNC">           4 :     } else if (WIFEXITED(status)) {</span></span>
+<span id="L194"><span class="lineNum">     194</span> <span class="tlaUNC">           0 :         int exit_code = WEXITSTATUS(status);</span></span>
+<span id="L195"><span class="lineNum">     195</span> <span class="tlaUNC">           0 :         fprintf(stderr, &quot;[main] child exited with code %d\n&quot;, exit_code);</span></span>
+<span id="L196"><span class="lineNum">     196</span> <span class="tlaUNC">           0 :         fflush(stderr);</span></span>
+<span id="L197"><span class="lineNum">     197</span>              : </span>
+<span id="L198"><span class="lineNum">     198</span> <span class="tlaUNC">           0 :         if (exit_code == 0) {</span></span>
+<span id="L199"><span class="lineNum">     199</span> <span class="tlaUNC">           0 :             fprintf(stderr, &quot;[main] FAIL: child exited cleanly (guard page not triggered)\n&quot;);</span></span>
+<span id="L200"><span class="lineNum">     200</span> <span class="tlaUNC">           0 :             fflush(stderr);</span></span>
+<span id="L201"><span class="lineNum">     201</span> <span class="tlaUNC">           0 :             return 1;</span></span>
+<span id="L202"><span class="lineNum">     202</span>              :         }</span>
+<span id="L203"><span class="lineNum">     203</span> <span class="tlaUNC">           0 :     } else {</span></span>
+<span id="L204"><span class="lineNum">     204</span> <span class="tlaUNC">           0 :         fprintf(stderr, &quot;[main] FAIL: unexpected child termination\n&quot;);</span></span>
+<span id="L205"><span class="lineNum">     205</span> <span class="tlaUNC">           0 :         fflush(stderr);</span></span>
+<span id="L206"><span class="lineNum">     206</span> <span class="tlaUNC">           0 :         return 1;</span></span>
+<span id="L207"><span class="lineNum">     207</span>              :     }</span>
+<span id="L208"><span class="lineNum">     208</span>              : </span>
+<span id="L209"><span class="lineNum">     209</span>              : #endif</span>
+<span id="L210"><span class="lineNum">     210</span>              : </span>
+<span id="L211"><span class="lineNum">     211</span> <span class="tlaGNC">           4 :     fprintf(stderr, &quot;\nPASS: Guard page detected stack overflow\n&quot;);</span></span>
+<span id="L212"><span class="lineNum">     212</span> <span class="tlaGNC">           4 :     fflush(stderr);</span></span>
+<span id="L213"><span class="lineNum">     213</span> <span class="tlaGNC">           4 :     return 0;</span></span>
+<span id="L214"><span class="lineNum">     214</span> <span class="tlaGNC">           4 : }</span></span>
+        </pre>
+              </td>
+            </tr>
+          </table>
+          <br>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="ruler"><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+            <tr><td class="versionInfo">Generated by: <a href="https://github.com//linux-test-project/lcov" target="_parent">LCOV version 2.4-0</a></td></tr>
+          </table>
+          <br>
+
+</body>
+</html>

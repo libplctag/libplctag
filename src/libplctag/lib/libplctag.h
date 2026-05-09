@@ -347,15 +347,24 @@ LIB_EXPORT void plc_tag_shutdown(void);
  */
 
 typedef enum {
-    PLCTAG_EVENT_READ_STARTED = 1,             /*!< Read operation started */
-    PLCTAG_EVENT_READ_COMPLETED = 2,           /*!< Read operation completed */
-    PLCTAG_EVENT_WRITE_STARTED = 3,            /*!< Write operation started */
-    PLCTAG_EVENT_WRITE_COMPLETED = 4,          /*!< Write operation completed */
-    PLCTAG_EVENT_ABORTED = 5,                  /*!< Operation aborted */
-    PLCTAG_EVENT_DESTROYED = 6,                /*!< Tag destroyed */
-    PLCTAG_EVENT_CREATED = 7,                  /*!< Tag created */
-    PLCTAG_EVENT_CONNECTION_CHANGED_STATE = 8, /*!< Connection state changed */
-    PLCTAG_EVENT_MAX = 9                       /*!< Maximum event type value */
+    PLCTAG_EVENT_READ_STARTED = 1,    /* Read operation started */
+    PLCTAG_EVENT_READ_COMPLETED = 2,  /* Read operation completed */
+    PLCTAG_EVENT_WRITE_STARTED = 3,   /* Write operation started */
+    PLCTAG_EVENT_WRITE_COMPLETED = 4, /* Write operation completed */
+    PLCTAG_EVENT_ABORTED = 5,         /* Operation aborted */
+    PLCTAG_EVENT_DESTROYED = 6,       /* Tag destroyed */
+    PLCTAG_EVENT_CREATED = 7,         /* Tag created */
+
+    /* Connection status events */
+    PLCTAG_EVENT_CONN_STATUS_OFFSET = 100,        /* Base offset for connection status change events */
+    PLCTAG_EVENT_CONN_STATUS_UP = 100,            /* Connected and ready for operations */
+    PLCTAG_EVENT_CONN_STATUS_DOWN = 101,          /* Not connected */
+    PLCTAG_EVENT_CONN_STATUS_DISCONNECTING = 102, /* In process of disconnecting */
+    PLCTAG_EVENT_CONN_STATUS_CONNECTING = 103,    /* In process of connecting */
+    PLCTAG_EVENT_CONN_STATUS_IDLE_WAIT = 104,     /* Waiting to reconnect after idle disconnect */
+    PLCTAG_EVENT_CONN_STATUS_ERR_WAIT = 105,      /* Waiting to reconnect after error */
+
+    PLCTAG_EVENT_MAX = 105 /* Maximum event type value */
 } plctag_event_t;
 
 /**

@@ -17,11 +17,13 @@ parse_libplctag_header(
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
     set(EXTRA_LINK_FLAGS "${EXTRA_LINK_FLAGS} ${EXTRA_LINK_FLAGS_DEBUG}")
-    set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} ${EXTRA_LINK_FLAGS_DEBUG}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${EXTRA_LINK_FLAGS_DEBUG}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${EXTRA_LINK_FLAGS_DEBUG}")
 else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
     set(EXTRA_LINK_FLAGS "${EXTRA_LINK_FLAGS} ${EXTRA_LINK_FLAGS_MINSIZEREL}")
-    set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} ${EXTRA_LINK_FLAGS_MINSIZEREL}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${EXTRA_LINK_FLAGS_MINSIZEREL}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${EXTRA_LINK_FLAGS_MINSIZEREL}")
 endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
@@ -127,6 +129,13 @@ if(PLATFORM_WINDOWS)
     target_compile_definitions(plctag_dyn PUBLIC -D_CRT_SECURE_NO_WARNINGS)
 endif(PLATFORM_WINDOWS)
 
+if(LIBPLCTAG_ENABLE_COVERAGE)
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
+        target_compile_options(plctag_dyn PRIVATE --coverage)
+        target_link_options(plctag_dyn PUBLIC --coverage)
+    endif()
+endif()
+
 install(TARGETS plctag_dyn
     LIBRARY DESTINATION lib${LIB_SUFFIX}
     COMPONENT runtime)
@@ -154,6 +163,13 @@ target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)
 if(PLATFORM_WINDOWS)
     target_compile_definitions(plctag_static PUBLIC -D_CRT_SECURE_NO_WARNINGS)
 endif(PLATFORM_WINDOWS)
+
+if(LIBPLCTAG_ENABLE_COVERAGE)
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
+        target_compile_options(plctag_static PRIVATE --coverage)
+        target_link_options(plctag_static PUBLIC --coverage)
+    endif()
+endif()
 
 # make sure the .h file is in the output directory
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)

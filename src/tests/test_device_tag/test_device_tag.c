@@ -87,6 +87,8 @@ static void interrupt_handler(void) { running = false; }
 
 
 static const char *conn_status_name(int32_t conn_status) {
+    if(conn_status >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { conn_status -= PLCTAG_EVENT_CONN_STATUS_OFFSET; }
+
     switch(conn_status) {
         case PLCTAG_CONN_STATUS_UP: return "UP";
         case PLCTAG_CONN_STATUS_DOWN: return "DOWN";
@@ -98,10 +100,9 @@ static const char *conn_status_name(int32_t conn_status) {
     }
 }
 
-
 static void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
-    int32_t conn = 0;
-    int32_t reason = 0;
+    (void)tag_id;
+
     int idx = 0;
 
     (void)userdata;
@@ -143,23 +144,86 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             }
             break;
 
-        case PLCTAG_EVENT_CONNECTION_CHANGED_STATE:
-            conn = plc_tag_get_int_attribute(tag_id, "connection_status", -1);
-            reason = (int32_t)status;
-            fprintf(stderr, "EVENT CONNECTION_CHANGED_STATE: state=%s (%d), reason=%s.\n", conn_status_name(conn), (int)conn,
-                    plc_tag_decode_error((int)reason));
-
+        case PLCTAG_EVENT_CONN_STATUS_UP:
+            fprintf(stderr, "EVENT CONN_STATUS_UP: status=%s.\n", plc_tag_decode_error(status));
             idx = next_expected_idx;
             if(idx < NUM_EXPECTED_STATES) {
-                if(conn == expected_states[idx]) {
+                if(expected_states[idx] == PLCTAG_CONN_STATUS_UP) {
                     next_expected_idx = idx + 1;
-                    if(next_expected_idx == NUM_EXPECTED_STATES) {
-                        fprintf(stderr, "All %d expected state transitions received.\n", NUM_EXPECTED_STATES);
-                        running = false;
-                    }
                 } else {
-                    fprintf(stderr, "ERROR: expected state %s but got %s.\n", conn_status_name(expected_states[idx]),
-                            conn_status_name(conn));
+                    fprintf(stderr, "ERROR: expected state %s but got UP.\n", conn_status_name(expected_states[idx]));
+                    test_failed = true;
+                    running = false;
+                }
+            }
+            break;
+
+        case PLCTAG_EVENT_CONN_STATUS_DOWN:
+            fprintf(stderr, "EVENT CONN_STATUS_DOWN: status=%s.\n", plc_tag_decode_error(status));
+            idx = next_expected_idx;
+            if(idx < NUM_EXPECTED_STATES) {
+                if(expected_states[idx] == PLCTAG_CONN_STATUS_DOWN) {
+                    next_expected_idx = idx + 1;
+                } else {
+                    fprintf(stderr, "ERROR: expected state %s but got DOWN.\n", conn_status_name(expected_states[idx]));
+                    test_failed = true;
+                    running = false;
+                }
+            }
+            break;
+
+        case PLCTAG_EVENT_CONN_STATUS_DISCONNECTING:
+            fprintf(stderr, "EVENT CONN_STATUS_DISCONNECTING: status=%s.\n", plc_tag_decode_error(status));
+            idx = next_expected_idx;
+            if(idx < NUM_EXPECTED_STATES) {
+                if(expected_states[idx] == PLCTAG_CONN_STATUS_DISCONNECTING) {
+                    next_expected_idx = idx + 1;
+                } else {
+                    fprintf(stderr, "ERROR: expected state %s but got DISCONNECTING.\n", conn_status_name(expected_states[idx]));
+                    test_failed = true;
+                    running = false;
+                }
+            }
+            break;
+        case PLCTAG_EVENT_CONN_STATUS_CONNECTING:
+            fprintf(stderr, "EVENT CONN_STATUS_CONNECTING: status=%s.\n", plc_tag_decode_error(status));
+            idx = next_expected_idx;
+            if(idx < NUM_EXPECTED_STATES) {
+                if(expected_states[idx] == PLCTAG_CONN_STATUS_CONNECTING) {
+                    next_expected_idx = idx + 1;
+                } else {
+                    fprintf(stderr, "ERROR: expected state %s but got CONNECTING.\n", conn_status_name(expected_states[idx]));
+                    test_failed = true;
+                    running = false;
+                }
+            }
+            break;
+
+        case PLCTAG_EVENT_CONN_STATUS_IDLE_WAIT:
+            fprintf(stderr, "EVENT CONN_STATUS_IDLE_WAIT: status=%s.\n", plc_tag_decode_error(status));
+            idx = next_expected_idx;
+            if(idx < NUM_EXPECTED_STATES) {
+                if(expected_states[idx] == PLCTAG_CONN_STATUS_IDLE_WAIT) {
+                    next_expected_idx = idx + 1;
+                } else {
+                    fprintf(stderr, "ERROR: expected state %s but got IDLE_WAIT.\n", conn_status_name(expected_states[idx]));
+                    test_failed = true;
+                    running = false;
+                }
+            }
+
+            running = false; /* test is done after idle wait starts */
+
+            break;
+
+        case PLCTAG_EVENT_CONN_STATUS_ERR_WAIT:
+            fprintf(stderr, "EVENT CONN_STATUS_ERR_WAIT: status=%s.\n", plc_tag_decode_error(status));
+            idx = next_expected_idx;
+            if(idx < NUM_EXPECTED_STATES) {
+                if(expected_states[idx] == PLCTAG_CONN_STATUS_ERR_WAIT) {
+                    next_expected_idx = idx + 1;
+                } else {
+                    fprintf(stderr, "ERROR: expected state %s but got ERR_WAIT.\n", conn_status_name(expected_states[idx]));
                     test_failed = true;
                     running = false;
                 }

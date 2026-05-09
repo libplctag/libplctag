@@ -1,0 +1,32 @@
+FROM debian:bullseye-slim
+
+# Configure apt with retry logic for transient network failures
+RUN echo 'APT::Acquire::Retries "3";' > /etc/apt/apt.conf.d/99-retries && \
+    echo 'Acquire::http::ConnectionAttemptDelayMsec "1000";' >> /etc/apt/apt.conf.d/99-retries && \
+    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/99-retries
+
+# Install packages with retry loop to handle transient network issues
+RUN for attempt in 1 2 3; do \
+    echo "Attempt $attempt/3: Updating package list..." && \
+    apt-get update && \
+    apt-get install -y \
+      cmake \
+      build-essential \
+      qemu-user \
+      qemu-user-static \
+      gcc-mips64el-linux-gnuabi64 \
+      wget \
+      xz-utils && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "Installation successful" && \
+    exit 0 || \
+    (if [ $attempt -lt 3 ]; then \
+      echo "Attempt $attempt failed, waiting 15 seconds before retry..."; \
+      sleep 15; \
+    else \
+      echo "All 3 attempts failed"; \
+      exit 1; \
+    fi); \
+    done
+
+WORKDIR /src
