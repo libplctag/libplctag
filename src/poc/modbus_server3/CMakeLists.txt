@@ -6,21 +6,16 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # ---- yafl stackful fiber library ----
-set(YAFL_DIR "${CMAKE_CURRENT_LIST_DIR}/../../vendor/libyafl")
-if(NOT EXISTS "${YAFL_DIR}/CMakeLists.txt")
-    set(YAFL_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../vendor/libyafl")
+if(NOT TARGET yafl)
+    set(YAFL_DIR "${CMAKE_CURRENT_LIST_DIR}/../../vendor/libyafl")
+    if(NOT EXISTS "${YAFL_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR "libyafl not found; expected vendored copy at src/vendor/libyafl")
+    endif()
+    add_subdirectory("${YAFL_DIR}" "${CMAKE_BINARY_DIR}/vendor/libyafl")
 endif()
-if(NOT EXISTS "${YAFL_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR "libyafl not found; expected vendored copy in src/vendor/libyafl")
-endif()
-add_subdirectory(${YAFL_DIR} ${CMAKE_CURRENT_BINARY_DIR}/yafl)
-# Suppress sign-conversion warnings that the parent project's -Werror would
-# otherwise turn into build errors inside yafl's own source.
-if(TARGET yafl)
-    target_compile_options(yafl PRIVATE
-        -Wno-error=sign-conversion
-        -Wno-error=conversion
-    )
+if(NOT TARGET yafl)
+    message(FATAL_ERROR "yafl target not found; expected to be defined by the libyafl CMakeLists.txt")
+    return()
 endif()
 
 # ---- Shared source files from the original modbus_server POC ----
