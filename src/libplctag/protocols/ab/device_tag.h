@@ -33,13 +33,10 @@
 
 #pragma once
 
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
+#include <stdint.h>
 #include <utils/attr.h>
+#include <libplctag/lib/tag.h>
 
-/* these are definitions used outside of the Modbus module. */
-
-extern void mb_teardown(void);
-extern int mb_init(void);
-extern plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                               void *userdata, plc_tag_p src_tag);
+extern plc_tag_p ab_device_tag_create(attr attribs,
+                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                      void *userdata);

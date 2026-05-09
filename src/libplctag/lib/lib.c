@@ -92,6 +92,9 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 static int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int new_split_index);
 static int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size);
 static int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val);
+static int32_t plc_tag_create_impl(const char *attrib_str,
+                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata, int timeout, plc_tag_p src_tag);
 
 
 #ifdef LIPLCTAGDLL_EXPORTS
@@ -456,6 +459,16 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
             tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
             tag->event_write_complete = 0;
             tag->event_write_complete_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a connection state change? */
+        if(tag->event_connection_state_changed) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag connection state changed with status %s.",
+                   plc_tag_decode_error(tag->event_connection_state_changed_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_CONNECTION_CHANGED_STATE, tag->event_connection_state_changed_status,
+                          tag->userdata);
+            tag->event_connection_state_changed = 0;
+            tag->event_connection_state_changed_status = PLCTAG_STATUS_OK;
         }
 
         /* do this last so that we raise all other events first. we only start deletion events. */
@@ -911,13 +924,54 @@ LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_p
  */
 
 LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout) {
-    return plc_tag_create_ex(attrib_str, NULL, NULL, timeout);
+    return plc_tag_create_impl(attrib_str, NULL, NULL, timeout, NULL);
 }
 
 
 LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                      void *userdata, int timeout) {
+    return plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, NULL);
+}
+
+
+LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
+                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                           void *userdata, int timeout) {
+    plc_tag_p src_tag = NULL;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, src_tag_id, "Starting create-from-tag.");
+
+    if(src_tag_id <= 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag ID is invalid.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    src_tag = lookup_tag(src_tag_id);
+    if(!src_tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if(src_tag->protocol_type == TAG_PROTOCOL_AB_DEVICE || src_tag->protocol_type == TAG_PROTOCOL_SYSTEM
+       || src_tag->protocol_type == TAG_PROTOCOL_UNKNOWN) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
+               src_tag->protocol_type);
+        rc_dec(src_tag);
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    rc = plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, src_tag);
+    rc_dec(src_tag);
+
+    return rc;
+}
+
+
+static int32_t plc_tag_create_impl(const char *attrib_str,
+                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata, int timeout, plc_tag_p src_tag) {
     plc_tag_p tag = PLC_TAG_P_NULL;
     int id = PLCTAG_ERR_OUT_OF_BOUNDS;
     attr attribs = NULL;
@@ -969,15 +1023,26 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
      */
-    tag_constructor = find_tag_create_func(attribs);
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: tag_constructor = ab_tag_create; break;
+
+            case TAG_PROTOCOL_MODBUS: tag_constructor = mb_tag_create; break;
+
+            default: tag_constructor = NULL; break;
+        }
+    } else {
+        tag_constructor = find_tag_create_func(attribs);
+    }
 
     if(!tag_constructor) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, no tag constructor found for tag type!");
         attr_destroy(attribs);
-        return PLCTAG_ERR_BAD_PARAM;
+        return src_tag ? PLCTAG_ERR_NOT_ALLOWED : PLCTAG_ERR_BAD_PARAM;
     }
 
-    tag = tag_constructor(attribs, tag_callback_func, userdata);
+    tag = tag_constructor(attribs, tag_callback_func, userdata, src_tag);
 
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, skipping mutex creation and other generic setup.");

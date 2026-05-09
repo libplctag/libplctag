@@ -145,6 +145,7 @@ static int send_extended_forward_open_request(ab_session_p session);
 static int receive_forward_open_response(ab_session_p session);
 static void request_destroy(void *req_arg);
 static int session_request_increase_buffer(ab_request_p request, int new_capacity);
+static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason);
 
 
 static volatile mutex_p session_mutex = NULL;
@@ -881,6 +882,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     session->is_dhp = is_dhp;
     session->dhp_dest = dhp_dest;
     atomic_init_int32(&session->connection_status, PLCTAG_CONN_STATUS_DOWN);
+    atomic_init_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
+    atomic_init_int32(&session->conn_status_ring_write_idx, 0);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
     session->connection_group_id = connection_group_id;
@@ -1296,6 +1299,35 @@ typedef enum {
 } session_state_t;
 
 
+static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason) {
+    int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
+    write_idx = (write_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
+
+    /* write data to the slot before publishing the new index */
+    session->conn_status_ring[write_idx].event_type = event_type;
+    session->conn_status_ring[write_idx].status = status;
+    session->conn_status_ring[write_idx].reason = reason;
+
+    /* atomic store acts as the release point; readers will not see this slot until after this */
+    atomic_set_int32(&session->conn_status_ring_write_idx, write_idx);
+    plc_tag_tickler_wake();
+}
+
+
+/* Set connection status and reason atomics, and push a ring buffer entry if the status changed.
+ * Must only be called from the session handler thread (single writer). */
+static inline void session_set_connection_status(ab_session_p session, int32_t new_status, int32_t new_reason) {
+    int32_t old_status = atomic_get_int32(&session->connection_status);
+
+    atomic_set_int32(&session->connection_status_reason, new_reason);
+    atomic_set_int32(&session->connection_status, new_status);
+
+    if(old_status != new_status) {
+        session_publish_event(session, SESSION_EVENT_CONNECTION_CHANGED_STATE, new_status, new_reason);
+    }
+}
+
+
 THREAD_FUNC(session_handler) {
     ab_session_p session = arg;
     int rc = PLCTAG_STATUS_OK;
@@ -1334,12 +1366,13 @@ THREAD_FUNC(session_handler) {
         switch(state) {
             case SESSION_OPEN_SOCKET_START:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
                 /* we must connect to the gateway*/
                 rc = session_open_socket(session);
                 if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session connect failed %s!", plc_tag_decode_error(rc));
+                    atomic_set_int32(&session->connection_status_reason, rc);
                     state = SESSION_CLOSE_SOCKET;
                 } else {
                     if(rc == PLCTAG_STATUS_OK) {
@@ -1368,7 +1401,7 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_OPEN_SOCKET_WAIT:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_WAIT state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
                 /* we must connect to the gateway */
                 rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
@@ -1387,6 +1420,7 @@ THREAD_FUNC(session_handler) {
                     /* don't wait more.  The TCP connect check will wait in select(). */
                 } else {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
+                    atomic_set_int32(&session->connection_status_reason, rc);
 
                     state = SESSION_CLOSE_SOCKET;
                 }
@@ -1398,10 +1432,11 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_REGISTER:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
                 if((rc = session_register(session)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "session registration failed %s!", plc_tag_decode_error(rc));
+                    atomic_set_int32(&session->connection_status_reason, rc);
                     state = SESSION_CLOSE_SOCKET;
                 } else {
                     retry_wait_ms = RETRY_WAIT_INITIAL_MS;
@@ -1417,9 +1452,10 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_SEND_FORWARD_OPEN:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_SEND_FORWARD_OPEN state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
                 if((rc = send_forward_open_request(session)) != PLCTAG_STATUS_OK) {
+                    atomic_set_int32(&session->connection_status_reason, rc);
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_UNREGISTER;
                 } else {
@@ -1434,7 +1470,7 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_RECEIVE_FORWARD_OPEN:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_RECEIVE_FORWARD_OPEN state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
                 if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
                     if(rc == PLCTAG_ERR_DUPLICATE) {
@@ -1458,6 +1494,7 @@ THREAD_FUNC(session_handler) {
                     }
                 } else {
                     retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+                    atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                     state = SESSION_IDLE;
                 }
@@ -1466,7 +1503,7 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_IDLE:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_UP);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
 
                 /* make sure that our timeout period has not changed */
                 if(inactivity_timeout_ms != atomic_get_int32(&session->connection_inactivity_timeout_ms)) {
@@ -1489,6 +1526,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
+                    atomic_set_int32(&session->connection_status_reason, rc);
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error while processing requests %s!",
                            plc_tag_decode_error(rc));
                     if(session->use_connected_msg) {
@@ -1502,6 +1540,7 @@ THREAD_FUNC(session_handler) {
 
                 /* check if we should disconnect */
                 if(auto_disconnect_time < now) {
+                    atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
 
                     auto_disconnect = 1;
@@ -1528,7 +1567,8 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_DISCONNECT:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_DISCONNECT state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_DISCONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
+                                              atomic_get_int32(&session->connection_status_reason));
 
                 if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward close failed %s!", plc_tag_decode_error(rc));
@@ -1540,7 +1580,8 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_UNREGISTER:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_UNREGISTER state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_DISCONNECTING);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_DISCONNECTING,
+                                              atomic_get_int32(&session->connection_status_reason));
 
                 if((rc = session_unregister(session)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
@@ -1552,7 +1593,8 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_CLOSE_SOCKET:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_CLOSE_SOCKET state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_DOWN);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_DOWN,
+                                              atomic_get_int32(&session->connection_status_reason));
 
                 if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Closing session socket failed %s!", plc_tag_decode_error(rc));
@@ -1584,7 +1626,8 @@ THREAD_FUNC(session_handler) {
 
             case SESSION_WAIT_ERR_RETRY:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_ERR_RETRY state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_ERR_WAIT);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_ERR_WAIT,
+                                              atomic_get_int32(&session->connection_status_reason));
 
                 if(timeout_time < now) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
@@ -1600,7 +1643,8 @@ THREAD_FUNC(session_handler) {
             case SESSION_WAIT_IDLE_RECONNECT:
                 /* wait for at least one request to queue before reconnecting. */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_WAIT_IDLE_RECONNECT state.");
-                atomic_set_int32(&session->connection_status, PLCTAG_CONN_STATUS_IDLE_WAIT);
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_IDLE_WAIT,
+                                              atomic_get_int32(&session->connection_status_reason));
 
                 auto_disconnect = 0;
 
@@ -1624,6 +1668,8 @@ THREAD_FUNC(session_handler) {
 
                 /* FIXME - this logic is not complete.  We might be here without
                  * a connected session or a registered session. */
+
+                atomic_set_int32(&session->connection_status_reason, PLCTAG_ERR_UNSUPPORTED);
                 if(session->use_connected_msg) {
                     state = SESSION_DISCONNECT;
                 } else {
@@ -1730,10 +1776,6 @@ int process_requests(ab_session_p session) {
 
     /* grab a request off the front of the list. */
     critical_block(session->session_mutex) {
-        int available_payload = session_get_available_cip_payload_space(session);
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Available payload space is %d bytes.", available_payload);
-
         // FIXME - no logging in a mutex!
         // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
@@ -1750,7 +1792,9 @@ int process_requests(ab_session_p session) {
              * the EIP encapsulation header and the CPF header and the CPF address item,
              * which are already accounted for in the buffer structure.
              */
-            remaining_space = available_payload;
+            remaining_space = session_get_available_cip_payload_space(session);
+
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Available payload space is %d bytes.", remaining_space);
 
             /*
              * The logic below is a bit convoluted.
@@ -2400,6 +2444,7 @@ int prepare_request(ab_session_p session) {
 
 int send_eip_request(ab_session_p session, int timeout) {
     int rc = PLCTAG_STATUS_OK;
+    int32_t final_rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
@@ -2408,6 +2453,8 @@ int send_eip_request(ab_session_p session, int timeout) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session pointer is null.");
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    session_publish_event(session, SESSION_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
     if(timeout > 0) {
         timeout_time = time_ms() + timeout;
@@ -2443,18 +2490,26 @@ int send_eip_request(ab_session_p session, int timeout) {
 
     if(session->terminating) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session is terminating.");
-        return PLCTAG_ERR_ABORT;
+        final_rc = PLCTAG_ERR_ABORT;
+        session_publish_event(session, SESSION_EVENT_WRITE_COMPLETED, final_rc, final_rc);
+        return final_rc;
     }
 
     if(rc < 0) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error, %d, writing socket!", rc);
-        return rc;
+        final_rc = rc;
+        session_publish_event(session, SESSION_EVENT_WRITE_COMPLETED, final_rc, final_rc);
+        return final_rc;
     }
 
     if(timeout_time <= time_ms()) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting to send data!");
-        return PLCTAG_ERR_TIMEOUT;
+        final_rc = PLCTAG_ERR_TIMEOUT;
+        session_publish_event(session, SESSION_EVENT_WRITE_COMPLETED, final_rc, final_rc);
+        return final_rc;
     }
+
+    session_publish_event(session, SESSION_EVENT_WRITE_COMPLETED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
@@ -2472,6 +2527,7 @@ int send_eip_request(ab_session_p session, int timeout) {
 int recv_eip_response(ab_session_p session, int timeout) {
     uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
+    int32_t final_rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
@@ -2480,6 +2536,8 @@ int recv_eip_response(ab_session_p session, int timeout) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Called with null session!");
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    session_publish_event(session, SESSION_EVENT_READ_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
 
     if(timeout > 0) {
@@ -2508,7 +2566,9 @@ int recv_eip_response(ab_session_p session, int timeout) {
                 if(data_needed > session->data_capacity) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                            "Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
-                    return PLCTAG_ERR_TOO_LARGE;
+                    final_rc = PLCTAG_ERR_TOO_LARGE;
+                    session_publish_event(session, SESSION_EVENT_READ_COMPLETED, final_rc, final_rc);
+                    return final_rc;
                 }
             }
         } else {
@@ -2517,19 +2577,25 @@ int recv_eip_response(ab_session_p session, int timeout) {
             } else {
                 /* error! */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
-                return rc;
+                final_rc = rc;
+                session_publish_event(session, SESSION_EVENT_READ_COMPLETED, final_rc, final_rc);
+                return final_rc;
             }
         }
     } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
 
     if(session->terminating) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session is terminating, returning...");
-        return PLCTAG_ERR_ABORT;
+        final_rc = PLCTAG_ERR_ABORT;
+        session_publish_event(session, SESSION_EVENT_READ_COMPLETED, final_rc, final_rc);
+        return final_rc;
     }
 
     if(timeout_time <= time_ms()) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting for data to read!");
-        return PLCTAG_ERR_TIMEOUT;
+        final_rc = PLCTAG_ERR_TIMEOUT;
+        session_publish_event(session, SESSION_EVENT_READ_COMPLETED, final_rc, final_rc);
+        return final_rc;
     }
 
     session->resp_seq_id = le2h64(((eip_encap *)(session->data))->encap_sender_context);
@@ -2544,6 +2610,8 @@ int recv_eip_response(ab_session_p session, int timeout) {
 
     /* check status. */
     if(le2h32(((eip_encap *)(session->data))->encap_status) != AB_EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
+
+    session_publish_event(session, SESSION_EVENT_READ_COMPLETED, rc, rc);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 

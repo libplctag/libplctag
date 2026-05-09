@@ -26,6 +26,8 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
+message("Adding AB protocol sources to build.")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab")
 
 # set up the library sources
 set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
@@ -35,33 +37,6 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/ab.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/ab_common.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/ab_common.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/cip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/defs.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_cip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_cip_special.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_cip_special.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_lgx_pccc.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_lgx_pccc.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_plc5_dhp.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_plc5_dhp.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_plc5_pccc.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_plc5_pccc.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_slc_dhp.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_slc_dhp.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_slc_pccc.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/eip_slc_pccc.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/error_codes.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/error_codes.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/pccc.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/pccc.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/session.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/session.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.h"
@@ -101,6 +76,8 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h"
                      "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
+
+list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")
 
 
 macro(print_all_ar_link_variables)

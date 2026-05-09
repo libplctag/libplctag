@@ -73,6 +73,15 @@ struct tag_vtable_t {
 
 typedef struct tag_vtable_t *tag_vtable_p;
 
+typedef enum {
+    TAG_PROTOCOL_UNKNOWN = 0,
+    TAG_PROTOCOL_SYSTEM = 1,
+    TAG_PROTOCOL_AB = 2,
+    TAG_PROTOCOL_AB_DEVICE = 3,
+    TAG_PROTOCOL_MODBUS = 4,
+    TAG_PROTOCOL_OMRON = 5
+} tag_protocol_t;
+
 
 /* byte ordering */
 
@@ -117,51 +126,54 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
 
 /* NB: sorted by decreasing size and then alphabetically */
 
-#define TAG_BASE_STRUCT                      \
-    int64_t auto_sync_next_read;             \
-    int64_t auto_sync_next_write;            \
-    int64_t read_cache_expire;               \
-    int64_t read_cache_ms;                   \
-    uint8_t *data;                           \
-    tag_byte_order_t *byte_order;            \
-    cond_p tag_cond_wait;                    \
-    mutex_p api_mutex;                       \
-    mutex_p ext_mutex;                       \
-    tag_extended_callback_func callback;     \
-    tag_vtable_p vtable;                     \
-    void *userdata;                          \
-    int32_t auto_sync_read_ms;               \
-    int32_t auto_sync_write_ms;              \
-    int32_t size;                            \
-    int32_t tag_id;                          \
-    int connection_group_id;                 \
-    int bit;                                 \
-    atomic_bool abort_requested;             \
-    int8_t event_creation_complete_status;   \
-    int8_t event_deletion_started_status;    \
-    int8_t event_operation_aborted_status;   \
-    int8_t event_read_complete_status;       \
-    int8_t event_read_started_status;        \
-    int8_t event_write_complete_status;      \
-    int8_t event_write_started_status;       \
-    int8_t status;                           \
-    uint8_t allow_field_resize : 1;          \
-    uint8_t event_creation_complete : 1;     \
-    uint8_t event_deletion_started : 1;      \
-    uint8_t event_operation_aborted : 1;     \
-    uint8_t event_read_complete : 1;         \
-    uint8_t event_read_complete_enable : 1;  \
-    uint8_t event_read_started : 1;          \
-    uint8_t event_write_complete : 1;        \
-    uint8_t event_write_complete_enable : 1; \
-    uint8_t event_write_started : 1;         \
-    uint8_t had_created_event : 1;           \
-    uint8_t is_bit : 1;                      \
-    uint8_t read_complete : 1;               \
-    uint8_t read_in_flight : 1;              \
-    uint8_t skip_tickler : 1;                \
-    uint8_t tag_is_dirty : 1;                \
-    uint8_t write_complete : 1;              \
+#define TAG_BASE_STRUCT                           \
+    int64_t auto_sync_next_read;                  \
+    int64_t auto_sync_next_write;                 \
+    int64_t read_cache_expire;                    \
+    int64_t read_cache_ms;                        \
+    uint8_t *data;                                \
+    tag_byte_order_t *byte_order;                 \
+    cond_p tag_cond_wait;                         \
+    mutex_p api_mutex;                            \
+    mutex_p ext_mutex;                            \
+    tag_extended_callback_func callback;          \
+    tag_vtable_p vtable;                          \
+    void *userdata;                               \
+    int32_t auto_sync_read_ms;                    \
+    int32_t auto_sync_write_ms;                   \
+    int32_t size;                                 \
+    int32_t tag_id;                               \
+    int connection_group_id;                      \
+    int bit;                                      \
+    int protocol_type;                            \
+    atomic_bool abort_requested;                  \
+    int8_t event_creation_complete_status;        \
+    int8_t event_deletion_started_status;         \
+    int8_t event_operation_aborted_status;        \
+    int8_t event_read_complete_status;            \
+    int8_t event_read_started_status;             \
+    int8_t event_write_complete_status;           \
+    int8_t event_write_started_status;            \
+    int8_t event_connection_state_changed_status; \
+    int8_t status;                                \
+    uint8_t allow_field_resize : 1;               \
+    uint8_t event_creation_complete : 1;          \
+    uint8_t event_deletion_started : 1;           \
+    uint8_t event_operation_aborted : 1;          \
+    uint8_t event_read_complete : 1;              \
+    uint8_t event_read_complete_enable : 1;       \
+    uint8_t event_read_started : 1;               \
+    uint8_t event_write_complete : 1;             \
+    uint8_t event_write_complete_enable : 1;      \
+    uint8_t event_write_started : 1;              \
+    uint8_t event_connection_state_changed : 1;   \
+    uint8_t had_created_event : 1;                \
+    uint8_t is_bit : 1;                           \
+    uint8_t read_complete : 1;                    \
+    uint8_t read_in_flight : 1;                   \
+    uint8_t skip_tickler : 1;                     \
+    uint8_t tag_is_dirty : 1;                     \
+    uint8_t write_complete : 1;                   \
     uint8_t write_in_flight : 1
 
 
@@ -278,6 +290,13 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
             tag->event_write_started_status = status;
             tag->event_write_complete_enable = 1;
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_WRITE_COMPLETE.");
+            break;
+
+        case PLCTAG_EVENT_CONNECTION_CHANGED_STATE:
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CONNECTION_CHANGED_STATE raised with status %s.",
+                   plc_tag_decode_error(status));
+            tag->event_connection_state_changed = 1;
+            tag->event_connection_state_changed_status = status;
             break;
 
         default: pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported event %d!", status); break;

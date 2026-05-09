@@ -203,7 +203,8 @@ typedef enum {
     PLCTAG_MODULE_OMRON_RAW_TAG = 20,
     PLCTAG_MODULE_MODBUS = 21,
     PLCTAG_MODULE_SYSTEM = 22,
-    PLCTAG_MODULE_PLATFORM = 23
+    PLCTAG_MODULE_PLATFORM = 23,
+    PLCTAG_MODULE_AB_DEVICE = 24
 } plctag_debug_module_t;
 
 
@@ -238,7 +239,6 @@ LIB_EXPORT int plc_tag_get_debug_module_level(plctag_debug_module_t module);
  */
 LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_get_debug_level(void);
-
 
 
 /**
@@ -310,6 +310,11 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
                                      void *userdata, int timeout);
 
 
+LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
+                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                           void *userdata, int timeout);
+
+
 /**
  * @brief Shut down the library and release all resources.
  *
@@ -342,14 +347,15 @@ LIB_EXPORT void plc_tag_shutdown(void);
  */
 
 typedef enum {
-    PLCTAG_EVENT_READ_STARTED = 1,    /*!< Read operation started */
-    PLCTAG_EVENT_READ_COMPLETED = 2,  /*!< Read operation completed */
-    PLCTAG_EVENT_WRITE_STARTED = 3,   /*!< Write operation started */
-    PLCTAG_EVENT_WRITE_COMPLETED = 4, /*!< Write operation completed */
-    PLCTAG_EVENT_ABORTED = 5,         /*!< Operation aborted */
-    PLCTAG_EVENT_DESTROYED = 6,       /*!< Tag destroyed */
-    PLCTAG_EVENT_CREATED = 7,         /*!< Tag created */
-    PLCTAG_EVENT_MAX = 8              /*!< Maximum event type value */
+    PLCTAG_EVENT_READ_STARTED = 1,             /*!< Read operation started */
+    PLCTAG_EVENT_READ_COMPLETED = 2,           /*!< Read operation completed */
+    PLCTAG_EVENT_WRITE_STARTED = 3,            /*!< Write operation started */
+    PLCTAG_EVENT_WRITE_COMPLETED = 4,          /*!< Write operation completed */
+    PLCTAG_EVENT_ABORTED = 5,                  /*!< Operation aborted */
+    PLCTAG_EVENT_DESTROYED = 6,                /*!< Tag destroyed */
+    PLCTAG_EVENT_CREATED = 7,                  /*!< Tag created */
+    PLCTAG_EVENT_CONNECTION_CHANGED_STATE = 8, /*!< Connection state changed */
+    PLCTAG_EVENT_MAX = 9                       /*!< Maximum event type value */
 } plctag_event_t;
 
 /**
