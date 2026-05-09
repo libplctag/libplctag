@@ -6,7 +6,13 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # ---- yafl stackful fiber library ----
-set(YAFL_DIR "$ENV{HOME}/Projects/yafl")
+set(YAFL_DIR "${CMAKE_CURRENT_LIST_DIR}/../../vendor/libyafl")
+if(NOT EXISTS "${YAFL_DIR}/CMakeLists.txt")
+    set(YAFL_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../vendor/libyafl")
+endif()
+if(NOT EXISTS "${YAFL_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "libyafl not found; expected vendored copy in src/vendor/libyafl")
+endif()
 add_subdirectory(${YAFL_DIR} ${CMAKE_CURRENT_BINARY_DIR}/yafl)
 # Suppress sign-conversion warnings that the parent project's -Werror would
 # otherwise turn into build errors inside yafl's own source.
