@@ -236,7 +236,7 @@ fi
 
 
 let TEST++
-echo -n "  Test $TEST: create-from-tag API (invalid source, @device rejection, AB clone success)... "
+echo -n "  Test $TEST: create-from-tag API (12 comprehensive permutation tests with AB/EIP)... "
 $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
     "--clone-attrib=name=TestBigArray[1]&elem_count=1" \
@@ -575,6 +575,17 @@ else
 fi
 
 let TEST++
+echo -n "  Test $TEST: device tag connection state transitions (Modbus)... "
+$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" > "$LOG_DIR/${TEST}_device_tag_modbus_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
 echo -n "  Test $TEST: test idle disconnect with Modbus... "
 $VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" > "$LOG_DIR/${TEST}_modbus_idle_disconnect_test.log" 2>&1
 if [ $? != 0 ]; then
@@ -618,6 +629,22 @@ fi
 let TEST++
 echo -n "  Test $TEST: callback events Modbus... "
 $VALGRIND$TEST_DIR/test_callback_ex_modbus > "$LOG_DIR/${TEST}_test_callback_ex_modbus.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "  Test $TEST: create-from-tag API (12 comprehensive permutation tests with Modbus)... "
+$VALGRIND$TEST_DIR/test_create_from_tag \
+    "--src-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
+    "--clone-attrib=name=hr20&elem_count=2" \
+    "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" \
+    --timeout=5000 > "$LOG_DIR/${TEST}_create_from_tag_modbus_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
