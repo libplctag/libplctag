@@ -12,6 +12,12 @@ FetchContent_Declare(
 # Suppress CMocka's own tests and examples from polluting our build
 set(UNIT_TESTING OFF CACHE BOOL "Disable CMocka tests" FORCE)
 set(WITH_EXAMPLES OFF CACHE BOOL "Disable CMocka examples" FORCE)
+# Build static cmocka: the project uses -fvisibility=hidden which hides cmocka's
+# internal symbols (_will_return etc.) in the shared library, breaking linking on
+# Linux. Setting BUILD_SHARED_LIBS=OFF makes cmocka's add_library() produce a
+# static archive where all symbols are accessible to the linker regardless of
+# visibility attributes.
+set(BUILD_SHARED_LIBS OFF)
 FetchContent_MakeAvailable(cmocka)
 
 # We want to mock out initialize_modules dependencies using GNU linker wraps
@@ -42,7 +48,7 @@ target_include_directories(test_init PRIVATE
     ${PLATFORM_SHIM_PATH}
 )
 
-# Link CMocka, some internal plctag objects if needed, and apply our wraps
+# Link against cmocka (static archive when BUILD_SHARED_LIBS=OFF)
 target_link_libraries(test_init PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")

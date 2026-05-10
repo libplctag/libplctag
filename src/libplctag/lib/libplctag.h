@@ -171,14 +171,13 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
  * Each module represents a different subsystem within libplctag and can have its
  * own independent debug level setting.
  *
- * This is the canonical list of module IDs used throughout the library. From this
- * list the module name strings used in the debug functions are derived.
+ * This is the canonical list of module IDs used throughout the library.
  *
  * @note Do not rely on these values remaining constant between library versions
  *       as they will likely be added to in future releases.
  */
 
-/** Debug module IDs - sequential integer values, used as array indices */
+/* Debug module IDs - sequential integer values, used as array indices */
 typedef enum {
     PLCTAG_MODULE_LIB = 0,
     PLCTAG_MODULE_INIT = 1,
@@ -310,6 +309,16 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
                                      void *userdata, int timeout);
 
 
+/**
+ * @brief Create a new tag based on an existing tag.
+ *
+ * @param src_tag_id Source tag ID to copy attributes from.
+ * @param attrib_str additional attributes for a tag based on the protocol and device of the source tag.
+ * @param tag_callback_func Callback function for tag events.
+ * @param userdata User-supplied data pointer passed to callback.
+ * @param timeout Milliseconds to wait for creation (0 = return immediately).
+ * @return Opaque tag handle (>0 on success, <0 on error with PLCTAG_ERR_xyz code).
+ */
 LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
                                            void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                            void *userdata, int timeout);

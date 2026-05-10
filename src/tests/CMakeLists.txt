@@ -8,8 +8,9 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
-# Build test executables
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# Build cmocka unit tests only in Debug builds (they require FetchContent and
+# are not part of the release artifact set)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_subdirectory("unit")
 endif()
 add_subdirectory("stress_api_lock")
