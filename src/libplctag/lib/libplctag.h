@@ -217,7 +217,6 @@ typedef enum {
  * @param debug_level Debug level value (same as plc_tag_set_debug_level()).
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_BAD_PARAM if arguments are out of range.
  */
-LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_set_debug_module_level(plctag_debug_module_t module, int debug_level);
 
 
@@ -227,7 +226,6 @@ LIB_EXPORT int plc_tag_set_debug_module_level(plctag_debug_module_t module, int 
  * @param module Module ID from the plctag_debug_module_t enum.
  * @return Current debug level for the specified module.
  */
-LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_get_debug_module_level(plctag_debug_module_t module);
 
 
@@ -236,7 +234,6 @@ LIB_EXPORT int plc_tag_get_debug_module_level(plctag_debug_module_t module);
  *
  * @return Current global debug level set by plc_tag_set_debug_level().
  */
-LIBPLCTAG_EXPERIMENTAL
 LIB_EXPORT int plc_tag_get_debug_level(void);
 
 
