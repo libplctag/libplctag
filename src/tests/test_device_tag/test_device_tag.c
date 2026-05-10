@@ -61,7 +61,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define REQUIRED_VERSION 2, 6, 16
+#define REQUIRED_VERSION 2, 7, 0
 #define RUN_DURATION_MS ((int64_t)40000)
 #define POLL_INTERVAL_MS ((uint32_t)500)
 

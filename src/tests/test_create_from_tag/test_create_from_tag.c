@@ -76,7 +76,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define REQUIRED_VERSION 2, 6, 16
+#define REQUIRED_VERSION 2, 7, 0
 #define DEFAULT_TIMEOUT_MS 5000
 #define POLL_SLEEP_MS 10
 
