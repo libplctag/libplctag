@@ -130,6 +130,10 @@ else()
         set(HOST_ARCH "x86_64")
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64|AARCH64")
         set(HOST_ARCH "aarch64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm|^ARM")
+        set(HOST_ARCH "arm")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^x86$|^i386$|^i686$|^Win32$")
+        set(HOST_ARCH "i386")
     else()
         message(FATAL_ERROR "Could not auto-detect architecture. Please specify -DTARGET=<triple>")
     endif()
@@ -205,8 +209,21 @@ else()
 endif()
 
 # ============================================================================
-# Test Executables
+# Library
 # ============================================================================
+
+# Create static library
+add_library(yafl STATIC src/yafl.c ${ASM_FILES})
+target_include_directories(yafl PUBLIC include)
+set_target_properties(yafl PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+
+# ============================================================================
+# Test Executables (Debug builds only)
+# ============================================================================
+
+# Gate tests to Debug builds: assert()-heavy test code produces -Wunused-variable
+# errors under -Werror in optimized builds where NDEBUG is defined.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 set(TESTS
     test_yafl_basic
@@ -215,11 +232,6 @@ set(TESTS
     test_yafl_many
     test_yafl_watermark
 )
-
-# Create static library
-add_library(yafl STATIC src/yafl.c ${ASM_FILES})
-target_include_directories(yafl PUBLIC include)
-set_target_properties(yafl PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
 foreach(test ${TESTS})
     add_executable(${test} tests/${test}.c)
@@ -246,6 +258,8 @@ endforeach()
 
 # test_yafl_guard is expected to crash (segfault) due to stack overflow
 # set_tests_properties(test_yafl_guard PROPERTIES WILL_FAIL TRUE)
+
+endif() # CMAKE_BUILD_TYPE STREQUAL "Debug"
 
 # ============================================================================
 # Summary
