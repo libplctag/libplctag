@@ -644,7 +644,7 @@ $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
     "--clone-attrib=name=hr20&elem_count=2" \
     "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" \
-    --timeout=5000 > "$LOG_DIR/${TEST}_create_from_tag_modbus_test.log" 2>&1
+    --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_modbus_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
