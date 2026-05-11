@@ -944,12 +944,17 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    if(src_tag->protocol_type == TAG_PROTOCOL_AB_DEVICE || src_tag->protocol_type == TAG_PROTOCOL_SYSTEM
-       || src_tag->protocol_type == TAG_PROTOCOL_UNKNOWN) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
-               src_tag->protocol_type);
-        rc_dec(src_tag);
-        return PLCTAG_ERR_NOT_ALLOWED;
+    switch(src_tag->protocol_type) {
+        case TAG_PROTOCOL_AB_DEVICE:
+        case TAG_PROTOCOL_MB_DEVICE:
+        case TAG_PROTOCOL_SYSTEM:
+        case TAG_PROTOCOL_UNKNOWN:
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
+                   src_tag->protocol_type);
+            rc_dec(src_tag);
+            return PLCTAG_ERR_NOT_ALLOWED;
+        default:
+            break;
     }
 
     rc = plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, src_tag);
@@ -992,8 +997,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(!attrib_str || str_length(attrib_str) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag attribute string is null or zero length!");
+    if(!attrib_str) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag attribute string is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(str_length(attrib_str) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag attribute string is zero length!");
         return PLCTAG_ERR_TOO_SMALL;
     }
 

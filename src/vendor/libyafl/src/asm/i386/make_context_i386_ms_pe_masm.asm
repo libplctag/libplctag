@@ -81,12 +81,12 @@ yafl_make_context PROC
 
     ; store address of trampoline as EIP
     ; will be entered after calling yafl_switch() first time
-    mov  ecx, trampoline
+    mov  ecx, offset trampoline
     mov  [eax+02ch], ecx
 
     ; store address of finish as EBP
     ; will be entered after context-function returns
-    mov  ecx, finish
+    mov  ecx, offset finish
     mov  [eax+028h], ecx
 
     ; traverse current SEH chain to get the last exception handler installed by Windows

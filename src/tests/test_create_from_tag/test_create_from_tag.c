@@ -253,6 +253,10 @@ static int test_empty_attrib_str(void) {
 
 /* Test 7: @device tag as source, data clone attribs -> ERR_NOT_ALLOWED. */
 static int test_device_src_data_dst(void) {
+    if(device_tag_attribs == NULL) {
+        fprintf(stderr, "  SKIP: no --device-tag provided, skipping @device source test.\n");
+        return PLCTAG_STATUS_OK;
+    }
     int32_t device_tag = create_ready_device_tag();
     if(device_tag < 0) { return (int)device_tag; }
 
@@ -278,6 +282,10 @@ static int test_device_src_data_dst(void) {
 
 /* Test 8: @device tag as source, @device clone attribs -> ERR_NOT_ALLOWED. */
 static int test_device_src_device_dst(void) {
+    if(device_tag_attribs == NULL) {
+        fprintf(stderr, "  SKIP: no --device-tag provided, skipping @device source test.\n");
+        return PLCTAG_STATUS_OK;
+    }
     int32_t device_tag = create_ready_device_tag();
     if(device_tag < 0) { return (int)device_tag; }
 
@@ -535,7 +543,7 @@ int main(int argc, char **argv) {
 
     parse_args(argc, argv);
 
-    have_plc_args = (src_tag_attribs != NULL) && (clone_tag_attribs != NULL) && (device_tag_attribs != NULL);
+    have_plc_args = (src_tag_attribs != NULL) && (clone_tag_attribs != NULL);
 
     /* --- No-PLC tests (always run) --- */
     fprintf(stderr, "\n-- No-PLC tests (invalid source IDs) --\n");

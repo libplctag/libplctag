@@ -79,8 +79,25 @@ typedef enum {
     TAG_PROTOCOL_AB = 2,
     TAG_PROTOCOL_AB_DEVICE = 3,
     TAG_PROTOCOL_MODBUS = 4,
-    TAG_PROTOCOL_OMRON = 5
+    TAG_PROTOCOL_OMRON = 5,
+    TAG_PROTOCOL_MB_DEVICE = 6
 } tag_protocol_t;
+
+
+/* Shared connection event types — used by both AB and Modbus device tags */
+
+typedef enum {
+    TAG_CONN_EVENT_CONNECTION_CHANGED_STATE    = 1,
+    TAG_CONN_EVENT_SEND_REQUEST_STARTED        = 2,
+    TAG_CONN_EVENT_SEND_REQUEST_COMPLETED      = 3,
+    TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED    = 4,
+    TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED  = 5,
+} tag_conn_event_type_t;
+
+typedef struct {
+    int32_t event_type; /* tag_conn_event_type_t */
+    int32_t status;
+} tag_conn_event_t;
 
 
 /* byte ordering */

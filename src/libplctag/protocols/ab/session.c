@@ -1323,7 +1323,7 @@ static inline void session_set_connection_status(ab_session_p session, int32_t n
     atomic_set_int32(&session->connection_status, new_status);
 
     if(old_status != new_status) {
-        session_publish_event(session, SESSION_EVENT_CONNECTION_CHANGED_STATE, new_status, new_reason);
+        session_publish_event(session, TAG_CONN_EVENT_CONNECTION_CHANGED_STATE, new_status, new_reason);
     }
 }
 
@@ -2454,7 +2454,7 @@ int send_eip_request(ab_session_p session, int timeout) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    session_publish_event(session, SESSION_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
+    session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
     if(timeout > 0) {
         timeout_time = time_ms() + timeout;
@@ -2491,25 +2491,25 @@ int send_eip_request(ab_session_p session, int timeout) {
     if(session->terminating) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session is terminating.");
         final_rc = PLCTAG_ERR_ABORT;
-        session_publish_event(session, SESSION_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
+        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
         return final_rc;
     }
 
     if(rc < 0) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error, %d, writing socket!", rc);
         final_rc = rc;
-        session_publish_event(session, SESSION_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
+        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
         return final_rc;
     }
 
     if(timeout_time <= time_ms()) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting to send data!");
         final_rc = PLCTAG_ERR_TIMEOUT;
-        session_publish_event(session, SESSION_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
+        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
         return final_rc;
     }
 
-    session_publish_event(session, SESSION_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
+    session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
@@ -2537,7 +2537,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    session_publish_event(session, SESSION_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
+    session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
 
 
     if(timeout > 0) {
@@ -2567,7 +2567,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                            "Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
                     final_rc = PLCTAG_ERR_TOO_LARGE;
-                    session_publish_event(session, SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+                    session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
                     return final_rc;
                 }
             }
@@ -2578,7 +2578,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                 /* error! */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
                 final_rc = rc;
-                session_publish_event(session, SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+                session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
                 return final_rc;
             }
         }
@@ -2587,14 +2587,14 @@ int recv_eip_response(ab_session_p session, int timeout) {
     if(session->terminating) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session is terminating, returning...");
         final_rc = PLCTAG_ERR_ABORT;
-        session_publish_event(session, SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+        session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
         return final_rc;
     }
 
     if(timeout_time <= time_ms()) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting for data to read!");
         final_rc = PLCTAG_ERR_TIMEOUT;
-        session_publish_event(session, SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+        session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
         return final_rc;
     }
 
@@ -2611,7 +2611,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
     /* check status. */
     if(le2h32(((eip_encap *)(session->data))->encap_status) != AB_EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
 
-    session_publish_event(session, SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED, rc, rc);
+    session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc, rc);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 

@@ -90,6 +90,9 @@ static inline int64_t time_us(void) {
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
 
+#define MB_CONN_EVENT_RING_SIZE  8
+#define MB_CONN_EVENT_RING_MASK  (MB_CONN_EVENT_RING_SIZE - 1)
+
 struct modbus_plc_t {
     struct modbus_plc_t *next;
 
@@ -102,6 +105,11 @@ struct modbus_plc_t {
 
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
+
+    /* event ring for device tags (single writer: PLC handler thread) */
+    tag_conn_event_t conn_event_ring[MB_CONN_EVENT_RING_SIZE];
+    atomic_int32_t   conn_event_ring_write_idx;
+    int32_t          last_published_conn_status;
 
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
@@ -249,6 +257,16 @@ struct modbus_tag_t {
 };
 
 
+/* Device tag (@device) — monitors Modbus TCP connection state */
+typedef struct modbus_device_tag_s {
+    TAG_BASE_STRUCT;
+    modbus_plc_p plc;
+    int32_t      last_conn_state;
+    int32_t      event_ring_read_idx;
+} modbus_device_tag_t;
+typedef modbus_device_tag_t *modbus_device_tag_p;
+
+
 /* default string types used for Modbus PLCs. */
 tag_byte_order_t modbus_tag_byte_order = {.is_allocated = 0,
 
@@ -282,6 +300,18 @@ static cond_p plc_cleanup_cond = NULL;
 /* Track active handler threads for proper shutdown synchronization */
 static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 
+
+/* device tag functions */
+static plc_tag_p mb_device_tag_create(attr attribs,
+                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                      void *userdata);
+static int mb_device_tag_abort(plc_tag_p tag);
+static int mb_device_tag_status(plc_tag_p tag);
+static int mb_device_tag_tickler(plc_tag_p tag);
+static int mb_device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static void mb_device_tag_destructor(void *ptr);
+static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
+static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
 
 /* helper functions */
 static int create_tag_object(attr attribs, modbus_tag_p *tag);
@@ -357,6 +387,10 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     modbus_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
+
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
+        return mb_device_tag_create(attribs, tag_callback_func, userdata);
+    }
 
     /* create the tag object. */
     rc = create_tag_object(attribs, &tag);
@@ -680,6 +714,8 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                     (*plc)->state = PLC_CONNECT_START;
                     atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT);
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
+                    atomic_init_int32(&(*plc)->conn_event_ring_write_idx, 0);
+                    (*plc)->last_published_conn_status = PLCTAG_CONN_STATUS_DOWN;
 
                     /* Calculate initial disconnect deadline */
                     (*plc)->cached_inactivity_timeout_ms = atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
@@ -997,7 +1033,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Resetting disconnect deadline to %" PRId64 " (timeout=%dms)",
                        plc->disconnect_at_time_ms, timeout_ms);
 
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_CONNECTING);
 
                 /* reset the PLC to initial state, including closing the socket */
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Calling reset_plc() from PLC_CONNECT_START state.");
@@ -1043,7 +1079,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_CONNECT_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "in PLC_CONNECT_WAIT state.");
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_CONNECTING);
+                mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_CONNECTING);
                 rc = socket_connect_tcp_check(plc->sock, SOCKET_CONNECT_TIMEOUT);
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Socket connected, going to state PLC_READY.");
@@ -1083,7 +1119,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_READY:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_READY state.");
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_UP);
+                mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_UP);
 
                 /* make sure that our timeout period has not changed */
                 if(plc->cached_inactivity_timeout_ms != atomic_get_int32(&plc->connection_inactivity_timeout_ms)) {
@@ -1124,7 +1160,9 @@ THREAD_FUNC(modbus_plc_handler) {
                                idle_time, inactivity_timeout_ms, current_time, plc->last_packet_time_ms);
 
                         /* reset the PLC state */
+                        mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DISCONNECTING);
                         reset_plc(plc);
+                        mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
 
                         /* go to the state where we wait for something to happen. */
                         plc->state = PLC_IDLE_WAIT;
@@ -1187,12 +1225,14 @@ THREAD_FUNC(modbus_plc_handler) {
             case PLC_SEND_REQUEST:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_SEND_REQUEST state.");
 
+                mb_plc_publish_event(plc, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK);
                 {
                     int64_t send_start_us = time_us();
                     rc = send_request(plc);
                     plc->cycle_send_time_sum_us += (time_us() - send_start_us);
                 }
                 if(rc == PLCTAG_STATUS_OK) {
+                    mb_plc_publish_event(plc, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Request sent, going to back to state PLC_READY.");
                     plc->cycle_count++;
 
@@ -1220,9 +1260,11 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_RECEIVE_RESPONSE state.");
 
                 /* get a packet */
+                mb_plc_publish_event(plc, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK);
                 rc = receive_response(plc);
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Response ready, going back to PLC_READY state.");
+                    mb_plc_publish_event(plc, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, PLCTAG_STATUS_OK);
                     plc->flags.response_ready = 1;
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_STATUS_PENDING) {
@@ -1241,7 +1283,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_IDLE_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_IDLE_WAIT state.");
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_IDLE_WAIT);
+                mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_IDLE_WAIT);
 
                 /* Check if any tags need connection (active_tags is non-empty) */
                 if(vector_length(plc->active_tags) > 0) {
@@ -1260,7 +1302,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
             case PLC_ERR_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_ERR_WAIT state.");
-                atomic_set_int32(&plc->connection_status, PLCTAG_CONN_STATUS_ERR_WAIT);
+                mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_ERR_WAIT);
 
                 /* wait until done. */
                 if(err_delay_until > time_ms()) {
@@ -3484,6 +3526,155 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
     }
 
     return rc;
+}
+
+
+/****** Modbus device tag (@device) implementation *******/
+
+static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status) {
+    int32_t idx = (atomic_get_int32(&plc->conn_event_ring_write_idx) + 1) & MB_CONN_EVENT_RING_MASK;
+    plc->conn_event_ring[idx].event_type = event_type;
+    plc->conn_event_ring[idx].status = status;
+    atomic_set_int32(&plc->conn_event_ring_write_idx, idx);
+    plc_tag_tickler_wake();
+}
+
+static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
+    atomic_set_int32(&plc->connection_status, new_status);
+    if(plc->last_published_conn_status != new_status) {
+        plc->last_published_conn_status = new_status;
+        mb_plc_publish_event(plc, TAG_CONN_EVENT_CONNECTION_CHANGED_STATE, new_status);
+    }
+}
+
+static struct tag_vtable_t mb_device_tag_vtable = {
+    .abort         = mb_device_tag_abort,
+    .read          = NULL,
+    .status        = mb_device_tag_status,
+    .tickler       = mb_device_tag_tickler,
+    .write         = NULL,
+    .wake_plc      = NULL,
+    .tag_data_written = NULL,
+    .get_int_attrib = mb_device_get_int_attrib,
+    .set_int_attrib = NULL,
+};
+
+static int mb_device_tag_abort(plc_tag_p tag) {
+    (void)tag;
+    return PLCTAG_STATUS_OK;
+}
+
+static int mb_device_tag_status(plc_tag_p tag) {
+    modbus_device_tag_p dt = (modbus_device_tag_p)tag;
+    if(dt->vtable->tickler) { dt->vtable->tickler(tag); }
+    return dt->status;
+}
+
+static int mb_device_tag_tickler(plc_tag_p raw_tag) {
+    modbus_device_tag_p dt = (modbus_device_tag_p)raw_tag;
+
+    if(!dt->plc) { return PLCTAG_STATUS_OK; }
+
+    /* Skip the single tickler cycle where CREATED is queued to prevent
+     * connection events firing before the CREATED callback. */
+    if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
+
+    int32_t write_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
+    int32_t read_idx  = dt->event_ring_read_idx;
+
+    while(read_idx != write_idx) {
+        read_idx = (read_idx + 1) & MB_CONN_EVENT_RING_MASK;
+        int32_t event_type = dt->plc->conn_event_ring[read_idx].event_type;
+        int32_t status     = dt->plc->conn_event_ring[read_idx].status;
+
+        if(dt->callback) {
+            switch(event_type) {
+                case TAG_CONN_EVENT_CONNECTION_CHANGED_STATE:
+                    dt->last_conn_state = status;
+                    dt->callback(dt->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, dt->userdata);
+                    break;
+                case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
+                    dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_STARTED, status, dt->userdata);
+                    break;
+                case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
+                    dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, status, dt->userdata);
+                    break;
+                case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
+                    dt->callback(dt->tag_id, PLCTAG_EVENT_READ_STARTED, status, dt->userdata);
+                    break;
+                case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
+                    dt->callback(dt->tag_id, PLCTAG_EVENT_READ_COMPLETED, status, dt->userdata);
+                    break;
+                default:
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, dt->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    break;
+            }
+        }
+    }
+
+    dt->event_ring_read_idx = write_idx;
+    return PLCTAG_STATUS_OK;
+}
+
+static int mb_device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
+    modbus_device_tag_p dt = (modbus_device_tag_p)tag;
+    if(str_cmp_i(attrib_name, "connection_status") == 0) { return dt->last_conn_state; }
+    return default_value;
+}
+
+static void mb_device_tag_destructor(void *ptr) {
+    modbus_device_tag_p dt = (modbus_device_tag_p)ptr;
+
+    if(dt->plc) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, dt->tag_id, "Releasing PLC reference.");
+        rc_dec(dt->plc);
+        dt->plc = NULL;
+    }
+
+    if(dt->ext_mutex) { mutex_destroy(&dt->ext_mutex); dt->ext_mutex = NULL; }
+    if(dt->api_mutex) { mutex_destroy(&dt->api_mutex); dt->api_mutex = NULL; }
+    if(dt->tag_cond_wait) { cond_destroy(&dt->tag_cond_wait); dt->tag_cond_wait = NULL; }
+    if(dt->byte_order && dt->byte_order->is_allocated) { mem_free(dt->byte_order); dt->byte_order = NULL; }
+    if(dt->data) { mem_free(dt->data); dt->data = NULL; }
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, dt->tag_id, "Done.");
+}
+
+static plc_tag_p mb_device_tag_create(attr attribs,
+                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                      void *userdata) {
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
+
+    modbus_device_tag_p dt = (modbus_device_tag_p)rc_alloc(sizeof(modbus_device_tag_t), mb_device_tag_destructor);
+    if(!dt) { return NULL; }
+
+    dt->vtable = &mb_device_tag_vtable;
+    dt->protocol_type = TAG_PROTOCOL_MB_DEVICE;
+    dt->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
+
+    int32_t rc = plc_tag_generic_init_tag((plc_tag_p)dt, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(dt);
+        return NULL;
+    }
+
+    rc = find_or_create_plc(attribs, &dt->plc);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
+        dt->status = (int8_t)rc;
+        tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, (int8_t)rc);
+        return (plc_tag_p)dt;
+    }
+
+    /* Start at the current ring write index so we only see future events. */
+    dt->event_ring_read_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
+    dt->last_conn_state     = atomic_get_int32(&dt->plc->connection_status);
+
+    tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Done. Initial connection status: %d.", dt->last_conn_state);
+    return (plc_tag_p)dt;
 }
 
 

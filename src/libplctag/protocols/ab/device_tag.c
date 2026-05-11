@@ -166,31 +166,31 @@ static int device_tag_tickler(plc_tag_p raw_tag) {
         /* api_mutex is already held by the generic tickler so dispatch each entry directly */
         if(device_tag->callback) {
             switch(event_type) {
-                case SESSION_EVENT_CONNECTION_CHANGED_STATE:
+                case TAG_CONN_EVENT_CONNECTION_CHANGED_STATE:
                     device_tag->last_conn_state = status;
                     device_tag->callback(device_tag->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, (int)reason,
                                          device_tag->userdata);
                     break;
 
-                case SESSION_EVENT_SEND_REQUEST_STARTED:
+                case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
                     if(device_tag->io_events) {
                         device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, (int)status, device_tag->userdata);
                     }
                     break;
 
-                case SESSION_EVENT_SEND_REQUEST_COMPLETED:
+                case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
                     if(device_tag->io_events) {
                         device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, (int)status, device_tag->userdata);
                     }
                     break;
 
-                case SESSION_EVENT_RECEIVE_RESPONSE_STARTED:
+                case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
                     if(device_tag->io_events) {
                         device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_READ_STARTED, (int)status, device_tag->userdata);
                     }
                     break;
 
-                case SESSION_EVENT_RECEIVE_RESPONSE_COMPLETED:
+                case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
                     if(device_tag->io_events) {
                         device_tag->callback(device_tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, (int)status, device_tag->userdata);
                     }
