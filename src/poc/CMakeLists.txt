@@ -6,11 +6,14 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
 endif()
 
-# When building 32-bit on Linux, libyafl's project() resets CMAKE_SYSTEM_PROCESSOR
-# to the host value (x86_64). Override the triple so libyafl picks the right
-# toolchain and assembly files.
+# When building for x86, libyafl's project() resets CMAKE_SYSTEM_PROCESSOR to the
+# host value. Override the triple so libyafl picks the right toolchain and assembly.
 if(BUILD_32_BIT AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(TRIPLE "i386-pc-linux-gnu")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "Win32")
+    set(TRIPLE "i386-pc-windows-msvc")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^x86$|^i386$|^i686$")
+    set(TRIPLE "i386-pc-windows-gnu")
 endif()
 
 # Build POC programs

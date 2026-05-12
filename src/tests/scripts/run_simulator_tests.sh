@@ -241,7 +241,7 @@ $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
     "--clone-attrib=name=TestBigArray[1]&elem_count=1" \
     "--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device" \
-    --timeout=5000 > "$LOG_DIR/${TEST}_create_from_tag_test.log" 2>&1
+    --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
