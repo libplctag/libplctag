@@ -253,7 +253,7 @@ extern yafl_fiber_t *yafl_fiber_create(yafl_fiber_fn fiber_fn, size_t stack_size
         void *stack_region_end = (char *)stack_base + aligned_stack_size;
         void *stack_top = (char *)stack_region_end - 256;
         stack_top = align_stack_pointer(stack_top);
-        size_t actual_stack_size = (uintptr_t)(intptr_t)((char *)stack_top - (char *)stack_base);
+        size_t actual_stack_size = (uintptr_t)(char *)stack_top - (uintptr_t)(char *)stack_base;
 
         fiber->stack_top = stack_top;
         fiber->stack_size = actual_stack_size;
