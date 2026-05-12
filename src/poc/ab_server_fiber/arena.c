@@ -37,12 +37,19 @@
  * of calling exit().
  */
 
-#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "arena.h"
+
+/* Portable substitute for max_align_t: a union of all fundamental types whose
+ * alignment must be respected.  max_align_t from <stddef.h> is C11 but older
+ * MSVC toolchains may not provide it even with /std:c11. */
+typedef union {
+    char c; short s; int i; long l; long long ll;
+    float f; double d; long double ld; void *p;
+} arena_max_align_t;
 
 void arena_set_stats(Arena *a, ArenaStats *stats) {
     if(!a) { return; }
@@ -76,8 +83,8 @@ util_err_t arena_init(Arena *out, size_t size) {
 void *arena_alloc(Arena *a, size_t size) {
     if(!a || !a->buffer) { return NULL; }
 
-    /* Align the cursor to max_align_t (typically 8 or 16 bytes), matching malloc. */
-    size_t align = _Alignof(max_align_t);
+    /* Align the cursor to the strictest fundamental alignment, matching malloc. */
+    size_t align = _Alignof(arena_max_align_t);
     size_t padding = (align - (a->length % align)) % align;
 
     if(a->length + padding + size > a->capacity) { return NULL; }
