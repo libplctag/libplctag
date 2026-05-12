@@ -3102,12 +3102,6 @@ static int remove_tag(modbus_plc_p plc, modbus_tag_p tag) {
         atomic_add_int32(&plc->tag_count, -1);
         remaining = atomic_get_int32(&plc->tag_count);
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Tag removed, count now %" PRId32 ".", remaining);
-
-        /* If no more tags, signal handler thread to terminate. */
-        if(remaining == 0) {
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, tag->tag_id, "Last tag removed from PLC, signaling handler thread to exit.");
-            plc->flags.terminate = 1;
-        }
     }
 
     if(get_debug_level() >= DEBUG_SPEW) {
