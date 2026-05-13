@@ -318,7 +318,7 @@ jobs:
             toolchain: mingw
             runner: windows-2022
             cmake_processor: x86
-            cmake_extra_flags: "-DCMAKE_TOOLCHAIN_FILE=cmake_toolchains/mingw_i686_windows.cmake"
+            cmake_toolchain_file: cmake_toolchains/mingw_i686_windows.cmake
             artifact_suffix: "windows_x86_MinGW"
 
     env:
@@ -366,9 +366,21 @@ jobs:
         if: matrix.toolchain == 'msvc'
         run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} -DCMAKE_VERBOSE_MAKEFILE=On
 
-      - name: Configure CMake (MinGW)
-        if: matrix.toolchain == 'mingw'
-        run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} ${{ matrix.cmake_extra_flags || '' }} -DCMAKE_VERBOSE_MAKEFILE=On
+      - name: Configure CMake (MinGW x64)
+        if: matrix.toolchain == 'mingw' && !matrix.cmake_toolchain_file
+        run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} -DCMAKE_VERBOSE_MAKEFILE=On
+
+      - name: Configure CMake (MinGW x86 with toolchain file)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: bash
+        run: |
+          cd "${{ env.BUILD }}"
+          cmake .. -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+            "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/${{ matrix.cmake_toolchain_file }}" \
+            -DCMAKE_VERBOSE_MAKEFILE=On
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
