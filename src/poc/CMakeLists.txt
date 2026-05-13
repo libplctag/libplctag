@@ -12,7 +12,7 @@ if(BUILD_32_BIT AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(TRIPLE "i386-pc-linux-gnu")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "Win32")
     set(TRIPLE "i386-pc-windows-msvc")
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^x86$|^i386$|^i686$")
+elseif(BUILD_32_BIT AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(TRIPLE "i386-pc-windows-gnu")
 endif()
 

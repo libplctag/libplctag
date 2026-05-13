@@ -318,6 +318,7 @@ jobs:
             toolchain: mingw
             runner: windows-2022
             cmake_processor: x86
+            cmake_extra_flags: "-DBUILD_32_BIT=1"
             artifact_suffix: "windows_x86_MinGW"
 
     env:
@@ -362,7 +363,7 @@ jobs:
 
       - name: Configure CMake (MinGW)
         if: matrix.toolchain == 'mingw'
-        run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} -DCMAKE_VERBOSE_MAKEFILE=On
+        run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} ${{ matrix.cmake_extra_flags || '' }} -DCMAKE_VERBOSE_MAKEFILE=On
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
