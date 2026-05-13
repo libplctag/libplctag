@@ -357,10 +357,13 @@ jobs:
         with:
           arch: ${{ matrix.msvc_arch }}
 
-      - name: Install 32-bit MinGW toolchain (x86_MinGW only)
-        if: matrix.toolchain == 'mingw' && matrix.cmake_processor == 'x86'
-        shell: cmd
-        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-i686-gcc
+      - name: Set up MSYS2 i686 MinGW toolchain (x86_MinGW only)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: false
+          install: mingw-w64-i686-toolchain
 
       - name: Configure CMake (MSVC)
         if: matrix.toolchain == 'msvc'
