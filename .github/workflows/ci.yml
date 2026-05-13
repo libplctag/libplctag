@@ -318,7 +318,7 @@ jobs:
             toolchain: mingw
             runner: windows-2022
             cmake_processor: x86
-            cmake_extra_flags: "-DBUILD_32_BIT=1"
+            cmake_extra_flags: "-DCMAKE_TOOLCHAIN_FILE=cmake_toolchains/mingw_i686_windows.cmake"
             artifact_suffix: "windows_x86_MinGW"
 
     env:
@@ -356,6 +356,11 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.msvc_arch }}
+
+      - name: Install 32-bit MinGW toolchain (x86_MinGW only)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_processor == 'x86'
+        shell: cmd
+        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-i686-gcc
 
       - name: Configure CMake (MSVC)
         if: matrix.toolchain == 'msvc'
