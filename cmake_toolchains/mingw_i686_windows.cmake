@@ -12,7 +12,8 @@
 set(CMAKE_SYSTEM_NAME    Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86)
 
-set(CMAKE_C_COMPILER   C:/msys64/mingw32/bin/gcc.exe)
+# Do not hardcode CMAKE_C_COMPILER — msys2/setup-msys2 prepends
+# C:/msys64/mingw32/bin to PATH, so cmake finds i686 gcc automatically.
 
 # Tell CMake where to find 32-bit headers and libraries.
 set(CMAKE_FIND_ROOT_PATH C:/msys64/mingw32)
