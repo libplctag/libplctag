@@ -363,6 +363,7 @@ jobs:
         run: |
           C:\msys64\usr\bin\pacman.exe -Sy --noconfirm
           C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-i686-gcc mingw-w64-i686-make
+          echo C:\msys64\mingw32\bin >> %GITHUB_PATH%
 
       - name: Debug - show MSYS2 mingw32 tree (x86_MinGW only)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
