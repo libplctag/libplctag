@@ -359,11 +359,15 @@ jobs:
 
       - name: Set up MSYS2 i686 MinGW toolchain (x86_MinGW only)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW32
-          update: false
-          install: mingw-w64-i686-toolchain
+        shell: cmd
+        run: |
+          C:\msys64\usr\bin\pacman.exe -Sy --noconfirm
+          C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-i686-gcc mingw-w64-i686-make
+
+      - name: Debug - show MSYS2 mingw32 tree (x86_MinGW only)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: cmd
+        run: tree /F C:\msys64\mingw32
 
       - name: Configure CMake (MSVC)
         if: matrix.toolchain == 'msvc'
