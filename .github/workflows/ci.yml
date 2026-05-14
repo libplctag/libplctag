@@ -357,13 +357,20 @@ jobs:
         with:
           arch: ${{ matrix.msvc_arch }}
 
-      - name: Set up MSYS2 i686 MinGW toolchain (x86_MinGW only)
+      - name: Sync MSYS2 package database (x86_MinGW only)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
         shell: cmd
-        run: |
-          C:\msys64\usr\bin\pacman.exe -Sy --noconfirm
-          C:\msys64\usr\bin\pacman.exe -S --noconfirm --overwrite * mingw-w64-i686-gcc mingw-w64-i686-make
-          echo C:\msys64\mingw32\bin >> %GITHUB_PATH%
+        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -Sy --noconfirm"
+
+      - name: Install i686 MinGW toolchain (x86_MinGW only)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: cmd
+        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -S --noconfirm --overwrite='*' mingw-w64-i686-gcc mingw-w64-i686-make"
+
+      - name: Add MinGW32 bin to PATH (x86_MinGW only)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: cmd
+        run: echo C:\msys64\mingw32\bin >> %GITHUB_PATH%
 
       - name: Debug - show MSYS2 mingw32 tree (x86_MinGW only)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
