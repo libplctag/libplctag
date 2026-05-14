@@ -390,10 +390,15 @@ jobs:
         shell: bash
         run: |
           cd "${{ env.BUILD }}"
-          cmake .. -G "Ninja" \
+          # Avoid relying on cmd->bash PATH translation on Windows runners.
+          export PATH="/c/msys64/mingw32/bin:$PATH"
+          which gcc
+          which mingw32-make
+          cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DCMAKE_SYSTEM_NAME=Windows \
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+            -DCMAKE_MAKE_PROGRAM=C:/msys64/mingw32/bin/mingw32-make.exe \
             "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/${{ matrix.cmake_toolchain_file }}" \
             -DCMAKE_VERBOSE_MAKEFILE=On
 
