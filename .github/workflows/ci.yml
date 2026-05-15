@@ -357,25 +357,13 @@ jobs:
         with:
           arch: ${{ matrix.msvc_arch }}
 
-      - name: Sync MSYS2 package database (x86_MinGW only)
+      - name: Setup MSYS2 MINGW32 environment (x86_MinGW only)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: cmd
-        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -Sy --noconfirm"
-
-      - name: Install i686 MinGW toolchain (x86_MinGW only)
-        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: cmd
-        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -S --noconfirm --overwrite='*' mingw-w64-i686-gcc mingw-w64-i686-make"
-
-      - name: Add MinGW32 bin to PATH (x86_MinGW only)
-        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: cmd
-        run: echo C:\msys64\mingw32\bin >> %GITHUB_PATH%
-
-      - name: Debug - show MSYS2 mingw32 tree (x86_MinGW only)
-        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: cmd
-        run: tree /F C:\msys64\mingw32
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: false
+          install: mingw-w64-i686-gcc mingw-w64-i686-make
 
       - name: Configure CMake (MSVC)
         if: matrix.toolchain == 'msvc'
@@ -387,17 +375,16 @@ jobs:
 
       - name: Configure CMake (MinGW x86 with toolchain file)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: cmd
+        shell: msys2 {0}
         run: |
-          cd /D ${{ env.BUILD }}
-          where gcc
-          where mingw32-make
-          cmake .. -G "MinGW Makefiles" ^
-            -DCMAKE_BUILD_TYPE=MinSizeRel ^
-            -DCMAKE_SYSTEM_NAME=Windows ^
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} ^
-            -DCMAKE_MAKE_PROGRAM=C:/msys64/mingw32/bin/mingw32-make.exe ^
-            "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/${{ matrix.cmake_toolchain_file }}" ^
+          cd "$(cygpath -u '${{ env.BUILD }}')"
+          gcc --version
+          which mingw32-make
+          cmake .. -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+            "-DCMAKE_TOOLCHAIN_FILE=$(cygpath -m '${{ github.workspace }}/${{ matrix.cmake_toolchain_file }}')" \
             -DCMAKE_VERBOSE_MAKEFILE=On
 
       - name: Build
