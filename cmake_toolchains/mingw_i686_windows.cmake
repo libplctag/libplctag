@@ -6,16 +6,21 @@
 #            -DCMAKE_TOOLCHAIN_FILE=cmake_toolchains/mingw_i686_windows.cmake \
 #            -DCMAKE_BUILD_TYPE=MinSizeRel
 #
-# Prerequisites: install the MSYS2 i686 toolchain before configuring:
-#   C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-i686-gcc
+# Prerequisites: install the MSYS2 i686 toolchain before configuring.
+# When run under an MSYS2 MINGW32 shell, gcc/g++ and mingw32-make are on PATH.
 
 set(CMAKE_SYSTEM_NAME    Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86)
 
-set(CMAKE_C_COMPILER C:/msys64/mingw32/bin/gcc.exe)
+set(CMAKE_C_COMPILER gcc)
+set(CMAKE_CXX_COMPILER g++)
 
 # Tell CMake where to find 32-bit headers and libraries.
-set(CMAKE_FIND_ROOT_PATH C:/msys64/mingw32)
+if(DEFINED ENV{MINGW_PREFIX})
+	set(CMAKE_FIND_ROOT_PATH $ENV{MINGW_PREFIX})
+else()
+	set(CMAKE_FIND_ROOT_PATH /mingw32)
+endif()
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
