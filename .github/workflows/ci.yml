@@ -363,7 +363,8 @@ jobs:
         with:
           msystem: MINGW32
           update: false
-          install: mingw-w64-i686-gcc mingw-w64-i686-make
+          install: mingw-w64-i686-gcc mingw-w64-i686-binutils mingw-w64-i686-make
+          path-type: inherit
 
       - name: Configure CMake (MSVC)
         if: matrix.toolchain == 'msvc'
