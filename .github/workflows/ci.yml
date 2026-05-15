@@ -363,12 +363,12 @@ jobs:
         with:
           msystem: MINGW32
           update: false
-          install: mingw-w64-i686-gcc mingw-w64-i686-binutils mingw-w64-i686-make
+          install: mingw-w64-i686-gcc mingw-w64-i686-binutils mingw-w64-i686-make mingw-w64-i686-cmake
           path-type: inherit
 
       - name: Debug MinGW x86 environment (pre-configure)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: bash
+        shell: msys2 {0}
         run: |
           echo "=== Matrix / job settings ==="
           echo "matrix.name=${{ matrix.name }}"
@@ -415,41 +415,26 @@ jobs:
 
       - name: Configure CMake (MinGW x86 with toolchain file)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: bash
+        shell: msys2 {0}
         run: |
-          echo "=== Configure diagnostics (before selection) ==="
+          echo "=== Configure diagnostics ==="
           echo "PWD=$(pwd)"
           echo "PATH=${PATH}"
-          where.exe i686-w64-mingw32-gcc || true
-          where.exe gcc || true
-
-          MINGW_GCC=$(where.exe i686-w64-mingw32-gcc 2> NUL | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]i686-w64-mingw32-gcc\.exe$' | head -n1)
-          if [ -z "$MINGW_GCC" ]; then
-            MINGW_GCC=$(where.exe gcc | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]gcc\.exe$' | head -n1)
-          fi
-          if [ -z "$MINGW_GCC" ]; then
-            echo "Could not find MSYS2 mingw32 i686-w64-mingw32-gcc.exe or gcc.exe on PATH"
-            where.exe i686-w64-mingw32-gcc
-            where.exe gcc
-            exit 1
-          fi
-          MINGW_BIN=$(dirname "$MINGW_GCC")
-          export PATH="$MINGW_BIN:$PATH"
-          export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
-
-          echo "=== Configure diagnostics (after selection) ==="
-          echo "MINGW_GCC=${MINGW_GCC}"
-          echo "MINGW_BIN=${MINGW_BIN}"
+          echo "MSYSTEM=${MSYSTEM}"
           echo "MINGW_PREFIX=${MINGW_PREFIX}"
-          echo "PATH=${PATH}"
-          ls -la "${MINGW_BIN}" | sed -n '1,80p'
-          command -v gcc
-          command -v i686-w64-mingw32-gcc || true
-          command -v mingw32-make
+          echo "MINGW_PACKAGE_PREFIX=${MINGW_PACKAGE_PREFIX}"
+          which cmake
+          which i686-w64-mingw32-gcc || true
+          which gcc
+          which i686-w64-mingw32-g++ || true
+          which g++
+          which mingw32-make
+          ls -la "${MINGW_PREFIX}/bin" | sed -n '1,80p'
 
           cd build
           gcc --version
           i686-w64-mingw32-gcc --version || true
+          cmake --version
           which mingw32-make
           cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
@@ -460,25 +445,12 @@ jobs:
 
       - name: Debug MinGW x86 build environment (post-configure)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: bash
+        shell: msys2 {0}
         run: |
-          MINGW_GCC=$(where.exe i686-w64-mingw32-gcc 2> NUL | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]i686-w64-mingw32-gcc\.exe$' | head -n1)
-          if [ -z "$MINGW_GCC" ]; then
-            MINGW_GCC=$(where.exe gcc | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]gcc\.exe$' | head -n1)
-          fi
-          if [ -z "$MINGW_GCC" ]; then
-            echo "Could not find MSYS2 mingw32 i686-w64-mingw32-gcc.exe or gcc.exe on PATH"
-            where.exe i686-w64-mingw32-gcc
-            where.exe gcc
-            exit 1
-          fi
-          MINGW_BIN=$(dirname "$MINGW_GCC")
-          export PATH="$MINGW_BIN:$PATH"
-          export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
-
           echo "=== Build diagnostics ==="
           echo "PWD=$(pwd)"
           echo "PATH=${PATH}"
+          echo "MSYSTEM=${MSYSTEM}"
           echo "MINGW_PREFIX=${MINGW_PREFIX}"
           cd build
           ls -la
@@ -487,22 +459,8 @@ jobs:
 
       - name: Build (MinGW x86 with toolchain file)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: bash
+        shell: msys2 {0}
         run: |
-          MINGW_GCC=$(where.exe i686-w64-mingw32-gcc 2> NUL | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]i686-w64-mingw32-gcc\.exe$' | head -n1)
-          if [ -z "$MINGW_GCC" ]; then
-            MINGW_GCC=$(where.exe gcc | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]gcc\.exe$' | head -n1)
-          fi
-          if [ -z "$MINGW_GCC" ]; then
-            echo "Could not find MSYS2 mingw32 i686-w64-mingw32-gcc.exe or gcc.exe on PATH"
-            where.exe i686-w64-mingw32-gcc
-            where.exe gcc
-            exit 1
-          fi
-          MINGW_BIN=$(dirname "$MINGW_GCC")
-          export PATH="$MINGW_BIN:$PATH"
-          export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
-
           cd build
           cmake --build . --verbose --config MinSizeRel
 
