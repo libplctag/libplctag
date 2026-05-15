@@ -376,19 +376,55 @@ jobs:
 
       - name: Configure CMake (MinGW x86 with toolchain file)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
-        shell: msys2 {0}
+        shell: bash
         run: |
-          cd "$(cygpath -u '${{ env.BUILD }}')"
+          MINGW_GCC=$(where.exe i686-w64-mingw32-gcc 2> NUL | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]i686-w64-mingw32-gcc\.exe$' | head -n1)
+          if [ -z "$MINGW_GCC" ]; then
+            MINGW_GCC=$(where.exe gcc | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]gcc\.exe$' | head -n1)
+          fi
+          if [ -z "$MINGW_GCC" ]; then
+            echo "Could not find MSYS2 mingw32 i686-w64-mingw32-gcc.exe or gcc.exe on PATH"
+            where.exe i686-w64-mingw32-gcc
+            where.exe gcc
+            exit 1
+          fi
+          MINGW_BIN=$(dirname "$MINGW_GCC")
+          export PATH="$MINGW_BIN:$PATH"
+          export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
+
+          cd build
           gcc --version
           which mingw32-make
           cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DCMAKE_SYSTEM_NAME=Windows \
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
-            "-DCMAKE_TOOLCHAIN_FILE=$(cygpath -m '${{ github.workspace }}/${{ matrix.cmake_toolchain_file }}')" \
+            "-DCMAKE_TOOLCHAIN_FILE=../${{ matrix.cmake_toolchain_file }}" \
             -DCMAKE_VERBOSE_MAKEFILE=On
 
-      - name: Build
+      - name: Build (MinGW x86 with toolchain file)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: bash
+        run: |
+          MINGW_GCC=$(where.exe i686-w64-mingw32-gcc 2> NUL | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]i686-w64-mingw32-gcc\.exe$' | head -n1)
+          if [ -z "$MINGW_GCC" ]; then
+            MINGW_GCC=$(where.exe gcc | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]gcc\.exe$' | head -n1)
+          fi
+          if [ -z "$MINGW_GCC" ]; then
+            echo "Could not find MSYS2 mingw32 i686-w64-mingw32-gcc.exe or gcc.exe on PATH"
+            where.exe i686-w64-mingw32-gcc
+            where.exe gcc
+            exit 1
+          fi
+          MINGW_BIN=$(dirname "$MINGW_GCC")
+          export PATH="$MINGW_BIN:$PATH"
+          export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
+
+          cd build
+          cmake --build . --verbose --config MinSizeRel
+
+      - name: Build (all other Windows variants)
+        if: matrix.toolchain != 'mingw' || !matrix.cmake_toolchain_file
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
       - name: Run Simulator Tests
