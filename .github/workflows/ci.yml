@@ -366,6 +366,45 @@ jobs:
           install: mingw-w64-i686-gcc mingw-w64-i686-binutils mingw-w64-i686-make
           path-type: inherit
 
+      - name: Debug MinGW x86 environment (pre-configure)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: bash
+        run: |
+          echo "=== Matrix / job settings ==="
+          echo "matrix.name=${{ matrix.name }}"
+          echo "matrix.toolchain=${{ matrix.toolchain }}"
+          echo "matrix.cmake_processor=${{ matrix.cmake_processor }}"
+          echo "matrix.cmake_toolchain_file=${{ matrix.cmake_toolchain_file }}"
+          echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
+          echo "BUILD=${BUILD}"
+          echo "MSYSTEM=${MSYSTEM}"
+
+          echo "=== Shell / path basics ==="
+          uname -a || true
+          echo "SHELL=${SHELL}"
+          echo "PWD=$(pwd)"
+          echo "PATH=${PATH}"
+
+          echo "=== Tool discovery (Windows view) ==="
+          where.exe cmake || true
+          where.exe i686-w64-mingw32-gcc || true
+          where.exe gcc || true
+          where.exe i686-w64-mingw32-g++ || true
+          where.exe g++ || true
+          where.exe mingw32-make || true
+
+          echo "=== Tool discovery (POSIX view) ==="
+          which cmake || true
+          which i686-w64-mingw32-gcc || true
+          which gcc || true
+          which i686-w64-mingw32-g++ || true
+          which g++ || true
+          which mingw32-make || true
+
+          echo "=== Toolchain file check ==="
+          ls -la "${GITHUB_WORKSPACE}/${{ matrix.cmake_toolchain_file }}"
+          sed -n '1,120p' "${GITHUB_WORKSPACE}/${{ matrix.cmake_toolchain_file }}"
+
       - name: Configure CMake (MSVC)
         if: matrix.toolchain == 'msvc'
         run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} -DCMAKE_VERBOSE_MAKEFILE=On
@@ -375,6 +414,51 @@ jobs:
         run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} -DCMAKE_VERBOSE_MAKEFILE=On
 
       - name: Configure CMake (MinGW x86 with toolchain file)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: bash
+        run: |
+          echo "=== Configure diagnostics (before selection) ==="
+          echo "PWD=$(pwd)"
+          echo "PATH=${PATH}"
+          where.exe i686-w64-mingw32-gcc || true
+          where.exe gcc || true
+
+          MINGW_GCC=$(where.exe i686-w64-mingw32-gcc 2> NUL | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]i686-w64-mingw32-gcc\.exe$' | head -n1)
+          if [ -z "$MINGW_GCC" ]; then
+            MINGW_GCC=$(where.exe gcc | tr -d '\r' | grep -iE 'msys64[\\/]mingw32[\\/]bin[\\/]gcc\.exe$' | head -n1)
+          fi
+          if [ -z "$MINGW_GCC" ]; then
+            echo "Could not find MSYS2 mingw32 i686-w64-mingw32-gcc.exe or gcc.exe on PATH"
+            where.exe i686-w64-mingw32-gcc
+            where.exe gcc
+            exit 1
+          fi
+          MINGW_BIN=$(dirname "$MINGW_GCC")
+          export PATH="$MINGW_BIN:$PATH"
+          export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
+
+          echo "=== Configure diagnostics (after selection) ==="
+          echo "MINGW_GCC=${MINGW_GCC}"
+          echo "MINGW_BIN=${MINGW_BIN}"
+          echo "MINGW_PREFIX=${MINGW_PREFIX}"
+          echo "PATH=${PATH}"
+          ls -la "${MINGW_BIN}" | sed -n '1,80p'
+          command -v gcc
+          command -v i686-w64-mingw32-gcc || true
+          command -v mingw32-make
+
+          cd build
+          gcc --version
+          i686-w64-mingw32-gcc --version || true
+          which mingw32-make
+          cmake .. -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
+            "-DCMAKE_TOOLCHAIN_FILE=../${{ matrix.cmake_toolchain_file }}" \
+            -DCMAKE_VERBOSE_MAKEFILE=On
+
+      - name: Debug MinGW x86 build environment (post-configure)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
         shell: bash
         run: |
@@ -392,15 +476,14 @@ jobs:
           export PATH="$MINGW_BIN:$PATH"
           export MINGW_PREFIX="$(cd "$MINGW_BIN/.." && pwd)"
 
+          echo "=== Build diagnostics ==="
+          echo "PWD=$(pwd)"
+          echo "PATH=${PATH}"
+          echo "MINGW_PREFIX=${MINGW_PREFIX}"
           cd build
-          gcc --version
-          which mingw32-make
-          cmake .. -G "MinGW Makefiles" \
-            -DCMAKE_BUILD_TYPE=MinSizeRel \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.cmake_processor }} \
-            "-DCMAKE_TOOLCHAIN_FILE=../${{ matrix.cmake_toolchain_file }}" \
-            -DCMAKE_VERBOSE_MAKEFILE=On
+          ls -la
+          ls -la CMakeCache.txt || true
+          grep -E '^CMAKE_(C|CXX)_COMPILER:|^CMAKE_MAKE_PROGRAM:|^CMAKE_FIND_ROOT_PATH:' CMakeCache.txt || true
 
       - name: Build (MinGW x86 with toolchain file)
         if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
