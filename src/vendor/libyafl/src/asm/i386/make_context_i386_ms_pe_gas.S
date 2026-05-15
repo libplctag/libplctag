@@ -137,4 +137,4 @@ finish:
 .def	__exit;	.scl	2;	.type	32;	.endef
 
 .section .drectve
-.ascii " -export:\"_yafl_make_context\""
+.ascii " -export:\"yafl_make_context\""

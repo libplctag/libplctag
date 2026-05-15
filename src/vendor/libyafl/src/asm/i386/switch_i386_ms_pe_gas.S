@@ -134,4 +134,4 @@ _yafl_switch:
     jmp  *%ecx
 
 .section .drectve
-.ascii " -export:\"_yafl_switch\""
+.ascii " -export:\"yafl_switch\""
