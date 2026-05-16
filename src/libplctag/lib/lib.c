@@ -952,8 +952,7 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
                    src_tag->protocol_type);
             rc_dec(src_tag);
             return PLCTAG_ERR_NOT_ALLOWED;
-        default:
-            break;
+        default: break;
     }
 
     rc = plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, src_tag);
@@ -1025,13 +1024,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_AB_DEVICE:
-                tag_constructor = ab_tag_create;
-                break;
+            case TAG_PROTOCOL_AB_DEVICE: tag_constructor = ab_tag_create; break;
 
-            case TAG_PROTOCOL_OMRON:
-                tag_constructor = omron_tag_create;
-                break;
+            case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
 
             case TAG_PROTOCOL_MODBUS:
             case TAG_PROTOCOL_MB_DEVICE: tag_constructor = mb_tag_create; break;
