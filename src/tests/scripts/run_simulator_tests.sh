@@ -46,6 +46,9 @@ kill_process() {
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
         # Windows (Git Bash)
         taskkill //F //IM "${process_name}.exe" > /dev/null 2>&1
+        # Windows releases TCP sockets asynchronously after process exit;
+        # wait for the port to become available before the caller starts the next server.
+        sleep 2
     else
         # Linux/macOS/Alpine - pkill has consistent syntax across platforms
         pkill -TERM "$process_name" > /dev/null 2>&1
