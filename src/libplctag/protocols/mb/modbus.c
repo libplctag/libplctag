@@ -3540,7 +3540,15 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 /****** Modbus device tag (@device) implementation *******/
 
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status) {
-    int32_t idx = (atomic_get_int32(&plc->conn_event_ring_write_idx) + 1) & MB_CONN_EVENT_RING_MASK;
+    int32_t cur_idx = atomic_get_int32(&plc->conn_event_ring_write_idx);
+
+    if(event_type == TAG_CONN_EVENT_CONNECTION_CHANGED_STATE) {
+        tag_conn_event_t *last_entry = &plc->conn_event_ring[cur_idx];
+
+        if(last_entry->event_type == event_type && last_entry->status == status) { return; }
+    }
+
+    int32_t idx = (cur_idx + 1) & MB_CONN_EVENT_RING_MASK;
     plc->conn_event_ring[idx].event_type = event_type;
     plc->conn_event_ring[idx].status = status;
     atomic_set_int32(&plc->conn_event_ring_write_idx, idx);

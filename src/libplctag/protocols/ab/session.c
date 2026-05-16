@@ -1301,6 +1301,13 @@ typedef enum {
 
 static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason) {
     int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
+
+    if(event_type == TAG_CONN_EVENT_CONNECTION_CHANGED_STATE) {
+        session_conn_status_entry_t *last_entry = &session->conn_status_ring[write_idx];
+
+        if(last_entry->event_type == event_type && last_entry->status == status) { return; }
+    }
+
     write_idx = (write_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
 
     /* write data to the slot before publishing the new index */
