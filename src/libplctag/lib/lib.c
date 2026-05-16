@@ -1020,6 +1020,10 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      *
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
+     *
+     * FIXME - there has to be a better way to do this.  We now have repetitive code
+     * that looks up the tag constructor based on the protocol type.  Is this the sort
+     * of thing that we should be doing with a registry or a vtable entry?
      */
     if(src_tag) {
         switch(src_tag->protocol_type) {
@@ -1027,6 +1031,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             case TAG_PROTOCOL_AB_DEVICE: tag_constructor = ab_tag_create; break;
 
             case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
+            case TAG_PROTOCOL_OMRON_DEVICE: tag_constructor = omron_tag_create; break;
 
             case TAG_PROTOCOL_MODBUS:
             case TAG_PROTOCOL_MB_DEVICE: tag_constructor = mb_tag_create; break;

@@ -39,6 +39,7 @@
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/defs.h>
+#include <libplctag/protocols/omron/omron_device_tag.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/omron/omron_common.h>
 #include <libplctag/protocols/omron/omron_raw_tag.h>
@@ -92,6 +93,11 @@ static int default_read(plc_tag_p tag);
 static int default_status(plc_tag_p tag);
 static int default_tickler(plc_tag_p tag);
 static int default_write(plc_tag_p tag);
+
+typedef struct omron_device_tag_view_s {
+    TAG_BASE_STRUCT;
+    omron_conn_p conn;
+} omron_device_tag_view_t;
 
 
 /* vtables for different kinds of tags */
@@ -169,6 +175,10 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Starting.");
 
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
+        return omron_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    }
+
     /*
      * allocate memory for the new tag.  Do this first so that
      * we have a vehicle for returning status.
@@ -207,7 +217,17 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
      */
 
     if(src_tag) {
-        tag->plc_type = ((omron_tag_p)src_tag)->plc_type;
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_OMRON: tag->plc_type = ((omron_tag_p)src_tag)->plc_type; break;
+
+            case TAG_PROTOCOL_OMRON_DEVICE: {
+                omron_device_tag_view_t *src_device = (omron_device_tag_view_t *)src_tag;
+                tag->plc_type = src_device->conn ? src_device->conn->plc_type : OMRON_PLC_NONE;
+                break;
+            }
+
+            default: tag->plc_type = OMRON_PLC_NONE; break;
+        }
     } else {
         if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "CPU type not valid or missing.");
@@ -233,7 +253,18 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
      * All tags need conns.  They are the TCP connection to the gateway PLC.
      */
     if(src_tag) {
-        tag->conn = rc_inc(((omron_tag_p)src_tag)->conn);
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_OMRON: tag->conn = rc_inc(((omron_tag_p)src_tag)->conn); break;
+
+            case TAG_PROTOCOL_OMRON_DEVICE: {
+                omron_device_tag_view_t *src_device = (omron_device_tag_view_t *)src_tag;
+                tag->conn = rc_inc(src_device->conn);
+                break;
+            }
+
+            default: tag->conn = NULL; break;
+        }
+
         if(!tag->conn) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Unable to reuse source conn!");
             tag->status = PLCTAG_ERR_NOT_FOUND;
