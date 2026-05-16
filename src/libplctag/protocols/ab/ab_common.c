@@ -58,6 +58,12 @@
 #include <utils/debug.h>
 #include <utils/vector.h>
 
+/* Minimal view of AB device-tag layout needed for source-session sharing. */
+typedef struct ab_device_tag_view_s {
+    TAG_BASE_STRUCT;
+    ab_session_p session;
+} ab_device_tag_view_t;
+
 /*
  * Externally visible global variables
  */
@@ -177,7 +183,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     /* short circuit for device tag */
     if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
-        return (plc_tag_p)ab_device_tag_create(attribs, tag_callback_func, userdata);
+        return (plc_tag_p)ab_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
     /*
@@ -218,8 +224,22 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     if(src_tag) {
-        ab_tag_p src = (ab_tag_p)src_tag;
-        tag->plc_type = src->plc_type;
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: {
+                ab_tag_p src = (ab_tag_p)src_tag;
+                tag->plc_type = src->plc_type;
+                break;
+            }
+
+            case TAG_PROTOCOL_AB_DEVICE: {
+                ab_device_tag_view_t *src_device = (ab_device_tag_view_t *)src_tag;
+                tag->plc_type = src_device->session ? src_device->session->plc_type : AB_PLC_NONE;
+                break;
+            }
+
+            default: tag->plc_type = AB_PLC_NONE; break;
+        }
     } else {
         if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
@@ -295,8 +315,23 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      * All tags need sessions.  They are the TCP connection to the gateway PLC.
      */
     if(src_tag) {
-        ab_tag_p src = (ab_tag_p)src_tag;
-        tag->session = rc_inc(src->session);
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: {
+                ab_tag_p src = (ab_tag_p)src_tag;
+                tag->session = rc_inc(src->session);
+                break;
+            }
+
+            case TAG_PROTOCOL_AB_DEVICE: {
+                ab_device_tag_view_t *src_device = (ab_device_tag_view_t *)src_tag;
+                tag->session = rc_inc(src_device->session);
+                break;
+            }
+
+            default: tag->session = NULL; break;
+        }
+
         if(!tag->session) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
             tag->status = PLCTAG_ERR_NOT_FOUND;

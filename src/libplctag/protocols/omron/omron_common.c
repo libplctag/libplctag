@@ -167,8 +167,6 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
     const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
 
-    (void)src_tag;
-
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Starting.");
 
     /*
@@ -208,12 +206,16 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
      * This determines the protocol type.
      */
 
-    if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "CPU type not valid or missing.");
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".",
-               tag->tag_id);
-        rc_dec(tag);
-        return (plc_tag_p)NULL;
+    if(src_tag) {
+        tag->plc_type = ((omron_tag_p)src_tag)->plc_type;
+    } else {
+        if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "CPU type not valid or missing.");
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".",
+                   tag->tag_id);
+            rc_dec(tag);
+            return (plc_tag_p)NULL;
+        }
     }
 
     /* set up any required settings based on the PLC type. */
@@ -230,10 +232,19 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
      *
      * All tags need conns.  They are the TCP connection to the gateway PLC.
      */
-    if(conn_find_or_create(&tag->conn, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Unable to create conn!");
-        tag->status = PLCTAG_ERR_BAD_GATEWAY;
-        return (plc_tag_p)tag;
+    if(src_tag) {
+        tag->conn = rc_inc(((omron_tag_p)src_tag)->conn);
+        if(!tag->conn) {
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Unable to reuse source conn!");
+            tag->status = PLCTAG_ERR_NOT_FOUND;
+            return (plc_tag_p)tag;
+        }
+    } else {
+        if(conn_find_or_create(&tag->conn, attribs) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Unable to create conn!");
+            tag->status = PLCTAG_ERR_BAD_GATEWAY;
+            return (plc_tag_p)tag;
+        }
     }
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "using conn=%p", tag->conn);
@@ -249,7 +260,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up OMRON NJ/NX Series tag.");
 
-    if(str_length(path) == 0) {
+    if(!src_tag && str_length(path) == 0) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "A path is required for this PLC type.");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;

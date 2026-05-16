@@ -304,7 +304,7 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 /* device tag functions */
 static plc_tag_p mb_device_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata);
+                                      void *userdata, plc_tag_p src_tag);
 static int mb_device_tag_abort(plc_tag_p tag);
 static int mb_device_tag_status(plc_tag_p tag);
 static int mb_device_tag_tickler(plc_tag_p tag);
@@ -389,7 +389,7 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
-        return mb_device_tag_create(attribs, tag_callback_func, userdata);
+        return mb_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
     /* create the tag object. */
@@ -411,8 +411,22 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     /* find the PLC object. */
     if(src_tag) {
-        modbus_tag_p src = (modbus_tag_p)src_tag;
-        tag->plc = rc_inc(src->plc);
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_MODBUS: {
+                modbus_tag_p src = (modbus_tag_p)src_tag;
+                tag->plc = rc_inc(src->plc);
+                break;
+            }
+
+            case TAG_PROTOCOL_MB_DEVICE: {
+                modbus_device_tag_p src_device = (modbus_device_tag_p)src_tag;
+                tag->plc = rc_inc(src_device->plc);
+                break;
+            }
+
+            default: tag->plc = NULL; break;
+        }
+
         rc = tag->plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_FOUND;
     } else {
         rc = find_or_create_plc(attribs, &(tag->plc));
@@ -3636,7 +3650,7 @@ static void mb_device_tag_destructor(void *ptr) {
 
 static plc_tag_p mb_device_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata) {
+                                      void *userdata, plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     modbus_device_tag_p dt = (modbus_device_tag_p)rc_alloc(sizeof(modbus_device_tag_t), mb_device_tag_destructor);
@@ -3653,7 +3667,20 @@ static plc_tag_p mb_device_tag_create(attr attribs,
         return NULL;
     }
 
-    rc = find_or_create_plc(attribs, &dt->plc);
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_MODBUS: dt->plc = rc_inc(((modbus_tag_p)src_tag)->plc); break;
+
+            case TAG_PROTOCOL_MB_DEVICE: dt->plc = rc_inc(((modbus_device_tag_p)src_tag)->plc); break;
+
+            default: dt->plc = NULL; break;
+        }
+
+        rc = dt->plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
+    } else {
+        rc = find_or_create_plc(attribs, &dt->plc);
+    }
+
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
         dt->status = (int8_t)rc;

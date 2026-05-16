@@ -43,6 +43,7 @@
 #include <libplctag/lib/version.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/mb/modbus.h>
+#include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -935,7 +936,7 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
 
     if(src_tag_id <= 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag ID is invalid.");
-        return PLCTAG_ERR_NOT_FOUND;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     src_tag = lookup_tag(src_tag_id);
@@ -945,8 +946,6 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
     }
 
     switch(src_tag->protocol_type) {
-        case TAG_PROTOCOL_AB_DEVICE:
-        case TAG_PROTOCOL_MB_DEVICE:
         case TAG_PROTOCOL_SYSTEM:
         case TAG_PROTOCOL_UNKNOWN:
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
@@ -1026,9 +1025,16 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: tag_constructor = ab_tag_create; break;
+            case TAG_PROTOCOL_AB_DEVICE:
+                tag_constructor = ab_tag_create;
+                break;
 
-            case TAG_PROTOCOL_MODBUS: tag_constructor = mb_tag_create; break;
+            case TAG_PROTOCOL_OMRON:
+                tag_constructor = omron_tag_create;
+                break;
+
+            case TAG_PROTOCOL_MODBUS:
+            case TAG_PROTOCOL_MB_DEVICE: tag_constructor = mb_tag_create; break;
 
             default: tag_constructor = NULL; break;
         }
