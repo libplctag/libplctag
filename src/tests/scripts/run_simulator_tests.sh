@@ -3,13 +3,24 @@
 TEST_DIR=$1
 LOG_DIR=${2:-.}  # Default to current directory if not specified
 
+is_windows_shell() {
+    case "$OSTYPE" in
+        msys*|cygwin*|win32*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # Debug: show what we received
 echo "Received TEST_DIR: $TEST_DIR"
 echo "Received LOG_DIR: $LOG_DIR"
 echo "OSTYPE: $OSTYPE"
 
-# Convert Windows paths to Unix paths if running on Windows (Git Bash)
-if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+# Convert Windows paths to Unix paths if running on Windows (Git Bash/Cygwin)
+if is_windows_shell; then
     # Convert D:\path\to\dir to /d/path/to/dir (lowercase drive letter)
     # First replace backslashes with forward slashes using tr
     TEST_DIR=$(echo "$TEST_DIR" | tr '\\' '/')
@@ -43,8 +54,8 @@ VALGRIND=""
 # Cross-platform process killing function
 kill_process() {
     local process_name=$1
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-        # Windows (Git Bash)
+    if is_windows_shell; then
+        # Windows (Git Bash/Cygwin)
         taskkill //F //IM "${process_name}.exe" > /dev/null 2>&1
         # Windows releases TCP sockets asynchronously after process exit;
         # wait for the port to become available before the caller starts the next server.
