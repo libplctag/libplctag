@@ -74,7 +74,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_device_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_device_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -585,6 +585,15 @@ if [ $MODBUS_PID -le 0 ]; then
 else
     # sleep to let the server start up all the way
     sleep 3
+    if ! kill -0 "$MODBUS_PID" > /dev/null 2>&1; then
+        echo "Modbus server process exited during startup!"
+        if [[ -f "$LOG_DIR/modbus_server.log" ]]; then
+            echo "--- modbus_server.log (tail) ---"
+            tail -n 200 "$LOG_DIR/modbus_server.log"
+            echo "--- end modbus_server.log ---"
+        fi
+        exit 1
+    fi
     # echo "Modbus server started"
 fi
 
