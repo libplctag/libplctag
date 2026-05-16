@@ -26,11 +26,13 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # Create executable
 add_executable(modbus_server ${SOURCES})
+target_link_libraries(modbus_server PRIVATE ${EXTRA_LINKER_LIBS})
+target_link_options(modbus_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 
 # Platform-specific settings
 if(WIN32)
     # Windows requires Winsock2
-    target_link_libraries(modbus_server ws2_32)
+    target_link_libraries(modbus_server PRIVATE ws2_32)
 
     # Suppress Windows-specific warnings
     target_compile_definitions(modbus_server PRIVATE
@@ -43,13 +45,13 @@ elseif(UNIX)
         # Linux may need -lrt for some older systems
         find_library(RT_LIBRARY rt)
         if(RT_LIBRARY)
-            target_link_libraries(modbus_server ${RT_LIBRARY})
+            target_link_libraries(modbus_server PRIVATE ${RT_LIBRARY})
         endif()
     endif()
 
     # Link math library (logging and protocol may use math functions)
     # Math functions are in libm on Unix but in the C runtime on Windows
-    target_link_libraries(modbus_server m)
+    target_link_libraries(modbus_server PRIVATE m)
 endif()
 
 # Compiler-specific warnings
