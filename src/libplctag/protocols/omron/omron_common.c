@@ -516,6 +516,7 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
 
     if(tag) {
         omron_request_p req = NULL;
+        bool release_tag_ref = false;
 
         critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
 
@@ -528,9 +529,20 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
                 if(tag->req != req) {
                     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Request got changed out from underneath us!");
                 }
-                if(tag->req == req) { tag->req = rc_dec(tag->req); }
+                if(tag->req == req) {
+                    /* Clear the tag-owned pointer first, then release that ownership separately. */
+                    tag->req = NULL;
+                    release_tag_ref = true;
+                }
             }
 
+            if(release_tag_ref) {
+                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id,
+                       "rc_dec: Releasing tag-owned reference to request of tag %" PRId32 ".", tag->tag_id);
+                rc_dec(req);
+            }
+
+            /* Release this function's local borrowed reference. */
             req = rc_dec(req);
         } else {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Called without a request in flight.");

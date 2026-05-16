@@ -802,14 +802,16 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id,
-                   "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
             critical_block(tag->api_mutex) {
-                if(req != tag->req) {
+                if(tag->req == req) {
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id,
+                           "rc_dec: Releasing tag-owned reference to request of tag %" PRId32 ".", tag->tag_id);
+                    tag->req = NULL;
+                    rc_dec(req);
+                } else {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
                            "Request changed out from underneath us during abort process!");
                 }
-                tag->req = rc_dec(tag->req);
             }
 
             req = rc_dec(req);
