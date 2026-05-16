@@ -66,6 +66,23 @@ kill_process() {
     fi
 }
 
+dump_binary_diagnostics() {
+    local binary_path=$1
+
+    if [[ -e "$binary_path" ]]; then
+        echo "Binary details for $binary_path:"
+        ls -l "$binary_path" || true
+    else
+        echo "Binary not found: $binary_path"
+        return
+    fi
+
+    if command -v objdump > /dev/null 2>&1; then
+        echo "Dynamic dependencies (objdump):"
+        objdump -p "$binary_path" 2>/dev/null | grep "DLL Name" || true
+    fi
+}
+
 if [[ ! -d $TEST_DIR ]]; then
     # echo "Using $TEST_DIR for test executables."
 # else
@@ -587,6 +604,9 @@ else
     sleep 3
     if ! kill -0 "$MODBUS_PID" > /dev/null 2>&1; then
         echo "Modbus server process exited during startup!"
+        wait "$MODBUS_PID" 2>/dev/null
+        echo "Modbus server exit code: $?"
+        dump_binary_diagnostics "$TEST_DIR/modbus_server"
         if [[ -f "$LOG_DIR/modbus_server.log" ]]; then
             echo "--- modbus_server.log (tail) ---"
             tail -n 200 "$LOG_DIR/modbus_server.log"
