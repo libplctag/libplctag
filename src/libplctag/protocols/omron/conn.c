@@ -59,7 +59,8 @@
  * Number of milliseconds to wait to try to set up the conn again
  * after a failure.
  */
-#define RETRY_WAIT_MS (5000)
+#define RETRY_WAIT_INITIAL_MS (100)
+#define RETRY_WAIT_MAX_MS (10000)
 
 /* Idle time to wait before disconnecting.  Set it to one second less than we negotiate with the PLC. */
 #define CONN_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
@@ -93,6 +94,7 @@ static int conn_close_socket(omron_conn_p conn);
 static int conn_unregister(omron_conn_p conn);
 static THREAD_FUNC(conn_handler);
 static int purge_aborted_requests_unsafe(omron_conn_p conn);
+static int64_t calc_retry_time(unsigned int retry_count);
 static int process_requests(omron_conn_p conn);
 // static int check_packing(omron_conn_p conn, omron_request_p request);
 static int get_payload_size(omron_request_p request);
@@ -1110,6 +1112,14 @@ static inline void conn_publish_event(omron_conn_p conn, int32_t event_type, int
 }
 
 
+int64_t calc_retry_time(unsigned int retry_count) {
+    int64_t result = RETRY_WAIT_INITIAL_MS * (int64_t)(1 << retry_count);
+    if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
+    result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
+    return result;
+}
+
+
 THREAD_FUNC(conn_handler) {
     omron_conn_p conn = arg;
     int rc = PLCTAG_STATUS_OK;
@@ -1118,6 +1128,7 @@ THREAD_FUNC(conn_handler) {
     int64_t wait_until_time = 0;
     int32_t inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
     int64_t auto_disconnect_time = time_ms() + inactivity_timeout_ms;
+    unsigned int retry_count = 0;
     int auto_disconnect = 0;
 
 
@@ -1160,6 +1171,8 @@ THREAD_FUNC(conn_handler) {
                                "Connect complete immediately, going to state CONN_REGISTER.");
 
                         state = CONN_REGISTER;
+
+                        retry_count = 0;
                     } else {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
                                "Connect started, going to state CONN_OPEN_SOCKET_WAIT.");
@@ -1370,7 +1383,8 @@ THREAD_FUNC(conn_handler) {
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "in CONN_START_RETRY state.");
 
                 /* FIXME - make this a tag attribute. */
-                timeout_time = time_ms() + RETRY_WAIT_MS;
+                timeout_time = time_ms() + calc_retry_time(retry_count);
+                retry_count++;
 
                 /* start waiting. */
                 state = CONN_WAIT_ERR_RETRY;
