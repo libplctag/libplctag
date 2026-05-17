@@ -602,11 +602,15 @@ int omron_tag_abort(omron_tag_p tag) {
 
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
-            req = rc_dec(req);
-        }
 
-        /* do a real abort */
-        omron_tag_abort_request(tag);
+            /* do a real abort */
+            omron_tag_abort_request(tag);
+
+            req = rc_dec(req);
+        } else {
+            /* do a real abort even if there's no current request */
+            omron_tag_abort_request(tag);
+        }
 
         tag->status = PLCTAG_ERR_ABORT;
         return tag->status;
