@@ -34,6 +34,7 @@
 #include "device_tag.h"
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/ab/tag.h>
 #include "session.h"
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
@@ -75,7 +76,7 @@ static struct tag_vtable_t device_tag_vtable = {
 
 extern plc_tag_p ab_device_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata) {
+                                      void *userdata, plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_AB_DEVICE, DEBUG_DETAIL, 0, "Starting.");
 
     ab_device_tag_p tag = (ab_device_tag_p)rc_alloc(sizeof(ab_device_tag_t), ab_device_tag_destructor);
@@ -99,7 +100,22 @@ extern plc_tag_p ab_device_tag_create(attr attribs,
     }
 
     /* get a session */
-    if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: tag->session = rc_inc(((ab_tag_p)src_tag)->session); break;
+
+            case TAG_PROTOCOL_AB_DEVICE: tag->session = rc_inc(((ab_device_tag_p)src_tag)->session); break;
+
+            default: tag->session = NULL; break;
+        }
+
+        if(!tag->session) {
+            pdebug(DEBUG_MODULE_AB_DEVICE, DEBUG_WARN, 0, "Unable to reuse source session.");
+            tag->status = PLCTAG_ERR_NOT_ALLOWED;
+            return (plc_tag_p)tag;
+        }
+    } else if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_DEVICE, DEBUG_INFO, 0, "Unable to create session!");
         tag->status = PLCTAG_ERR_BAD_GATEWAY;
         return (plc_tag_p)tag;

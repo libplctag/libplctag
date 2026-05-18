@@ -54,6 +54,8 @@
 
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
+#    define OMRON_CONN_EVENT_RING_SIZE (8)
+#    define OMRON_CONN_EVENT_RING_MASK (OMRON_CONN_EVENT_RING_SIZE - 1)
 
 
 struct omron_conn_t {
@@ -121,6 +123,10 @@ struct omron_conn_t {
 
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
+
+    /* event ring for device tags (single writer: connection handler thread) */
+    tag_conn_event_t conn_event_ring[OMRON_CONN_EVENT_RING_SIZE];
+    atomic_int32_t conn_event_ring_write_idx;
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */

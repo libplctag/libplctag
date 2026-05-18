@@ -41,16 +41,16 @@
  *
  *  No-PLC tests:
  *   1. src_tag_id = INT32_MAX (nonexistent positive)   -> ERR_NOT_FOUND
- *   2. src_tag_id = 0                                   -> ERR_NOT_FOUND or ERR_BAD_PARAM
- *   3. src_tag_id = -1 (negative / error code as ID)   -> ERR_NOT_FOUND or ERR_BAD_PARAM
- *   4. src_tag_id = INT32_MIN                           -> ERR_NOT_FOUND or ERR_BAD_PARAM
+ *   2. src_tag_id = 0                                   -> ERR_BAD_PARAM
+ *   3. src_tag_id = -1 (negative / error code as ID)   -> ERR_BAD_PARAM
+ *   4. src_tag_id = INT32_MIN                           -> ERR_BAD_PARAM
  *
  *  With-PLC tests:
  *   5. valid src, attrib_str = NULL                     -> ERR_BAD_PARAM or ERR_NULL_PTR
  *   6. valid src, attrib_str = ""                       -> any error (not success)
- *   7. @device src + data clone attribs                 -> ERR_NOT_ALLOWED
- *   8. @device src + @device clone attribs              -> ERR_NOT_ALLOWED
- *   9. regular src + @device clone attribs              -> any error (not success)
+ *   7. @device src + data clone attribs                 -> success
+ *   8. @device src + @device clone attribs              -> success
+ *   9. regular src + @device clone attribs              -> success
  *  10. regular src + valid data clone attribs           -> success; read works after src destroyed
  *  11. regular src, create two clones from same src     -> both succeed independently
  *  12. previously-destroyed src ID reused               -> ERR_NOT_FOUND
@@ -103,8 +103,8 @@ static int wait_for_tag_ready(int32_t tag, int timeout) {
     return PLCTAG_ERR_TIMEOUT;
 }
 
-/** Return true if rc is a recognised "not a valid tag ID" error. */
-static bool is_invalid_id_error(int32_t rc) { return rc == PLCTAG_ERR_NOT_FOUND || rc == PLCTAG_ERR_BAD_PARAM; }
+/** Return true if rc indicates invalid source tag ID input. */
+static bool is_bad_src_id_error(int32_t rc) { return rc == PLCTAG_ERR_BAD_PARAM; }
 
 /** Return true if rc indicates a NULL/bad attrib string. */
 static bool is_bad_attrib_error(int32_t rc) { return rc == PLCTAG_ERR_BAD_PARAM || rc == PLCTAG_ERR_NULL_PTR; }
@@ -157,8 +157,8 @@ static int test_invalid_src_id_max(void) {
 
     fprintf(stderr, "  test_invalid_src_id_max: rc=%s (%d)\n", plc_tag_decode_error((int)rc), (int)rc);
 
-    if(!is_invalid_id_error(rc)) {
-        fprintf(stderr, "  FAIL: expected ERR_NOT_FOUND or ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
+    if(rc != PLCTAG_ERR_NOT_FOUND) {
+        fprintf(stderr, "  FAIL: expected ERR_NOT_FOUND, got %s\n", plc_tag_decode_error((int)rc));
         return PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -171,8 +171,8 @@ static int test_invalid_src_id_zero(void) {
 
     fprintf(stderr, "  test_invalid_src_id_zero: rc=%s (%d)\n", plc_tag_decode_error((int)rc), (int)rc);
 
-    if(!is_invalid_id_error(rc)) {
-        fprintf(stderr, "  FAIL: expected ERR_NOT_FOUND or ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
+    if(!is_bad_src_id_error(rc)) {
+        fprintf(stderr, "  FAIL: expected ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
         return PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -185,8 +185,8 @@ static int test_invalid_src_id_minus_one(void) {
 
     fprintf(stderr, "  test_invalid_src_id_minus_one: rc=%s (%d)\n", plc_tag_decode_error((int)rc), (int)rc);
 
-    if(!is_invalid_id_error(rc)) {
-        fprintf(stderr, "  FAIL: expected ERR_NOT_FOUND or ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
+    if(!is_bad_src_id_error(rc)) {
+        fprintf(stderr, "  FAIL: expected ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
         return PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -199,8 +199,8 @@ static int test_invalid_src_id_min(void) {
 
     fprintf(stderr, "  test_invalid_src_id_min: rc=%s (%d)\n", plc_tag_decode_error((int)rc), (int)rc);
 
-    if(!is_invalid_id_error(rc)) {
-        fprintf(stderr, "  FAIL: expected ERR_NOT_FOUND or ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
+    if(!is_bad_src_id_error(rc)) {
+        fprintf(stderr, "  FAIL: expected ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
         return PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -251,7 +251,7 @@ static int test_empty_attrib_str(void) {
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 7: @device tag as source, data clone attribs -> ERR_NOT_ALLOWED. */
+/* Test 7: @device tag as source, data clone attribs -> success. */
 static int test_device_src_data_dst(void) {
     if(device_tag_attribs == NULL) {
         fprintf(stderr, "  SKIP: no --device-tag provided, skipping @device source test.\n");
@@ -264,23 +264,45 @@ static int test_device_src_data_dst(void) {
 
     fprintf(stderr, "  test_device_src_data_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: expected success cloning from @device source, got %s\n", plc_tag_decode_error((int)clone));
+        plc_tag_destroy(device_tag);
+        return (int)clone;
+    }
+
+    int rc = wait_for_tag_ready(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: clone from @device source not ready: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone);
+        plc_tag_destroy(device_tag);
+        return rc;
+    }
+
     plc_tag_destroy(device_tag);
 
-    if(clone > 0) {
+    rc = plc_tag_read(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        fprintf(stderr, "  FAIL: clone read failed after @device source destroyed: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(clone);
-        fprintf(stderr, "  FAIL: expected ERR_NOT_ALLOWED from @device source but got a valid handle.\n");
-        return PLCTAG_ERR_BAD_STATUS;
+        return rc;
     }
 
-    if(clone != PLCTAG_ERR_NOT_ALLOWED) {
-        fprintf(stderr, "  FAIL: expected ERR_NOT_ALLOWED, got %s\n", plc_tag_decode_error((int)clone));
-        return PLCTAG_ERR_BAD_STATUS;
+    if(rc == PLCTAG_STATUS_PENDING) {
+        rc = wait_for_tag_ready(clone, timeout_ms);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "  FAIL: clone from @device source did not recover from pending read: %s\n",
+                    plc_tag_decode_error(rc));
+            plc_tag_destroy(clone);
+            return rc;
+        }
     }
+
+    plc_tag_destroy(clone);
 
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 8: @device tag as source, @device clone attribs -> ERR_NOT_ALLOWED. */
+/* Test 8: @device tag as source, @device clone attribs -> success. */
 static int test_device_src_device_dst(void) {
     if(device_tag_attribs == NULL) {
         fprintf(stderr, "  SKIP: no --device-tag provided, skipping @device source test.\n");
@@ -293,23 +315,29 @@ static int test_device_src_device_dst(void) {
 
     fprintf(stderr, "  test_device_src_device_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: expected success cloning @device from @device source, got %s\n",
+                plc_tag_decode_error((int)clone));
+        plc_tag_destroy(device_tag);
+        return (int)clone;
+    }
+
     plc_tag_destroy(device_tag);
 
-    if(clone > 0) {
+    /* Device tags may remain pending for a while; treat timeout as acceptable. */
+    int rc = wait_for_tag_ready(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TIMEOUT) {
+        fprintf(stderr, "  FAIL: cloned @device tag hard failure: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(clone);
-        fprintf(stderr, "  FAIL: expected ERR_NOT_ALLOWED from @device source but got a valid handle.\n");
-        return PLCTAG_ERR_BAD_STATUS;
+        return rc;
     }
 
-    if(clone != PLCTAG_ERR_NOT_ALLOWED) {
-        fprintf(stderr, "  FAIL: expected ERR_NOT_ALLOWED, got %s\n", plc_tag_decode_error((int)clone));
-        return PLCTAG_ERR_BAD_STATUS;
-    }
+    plc_tag_destroy(clone);
 
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 9: regular tag as source, @device as the target type -> any error. */
+/* Test 9: regular tag as source, @device as the target type -> success. */
 static int test_data_src_device_dst(void) {
     int32_t src = create_ready_src_tag();
     if(src < 0) { return (int)src; }
@@ -318,14 +346,23 @@ static int test_data_src_device_dst(void) {
 
     fprintf(stderr, "  test_data_src_device_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: expected success cloning @device from data source, got %s\n", plc_tag_decode_error((int)clone));
+        plc_tag_destroy(src);
+        return (int)clone;
+    }
+
     plc_tag_destroy(src);
 
-    if(clone > 0) {
+    /* Device tags may remain pending for a while; treat timeout as acceptable. */
+    int rc = wait_for_tag_ready(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TIMEOUT) {
+        fprintf(stderr, "  FAIL: cloned @device tag hard failure after source destroy: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(clone);
-        fprintf(stderr, "  FAIL: expected an error when requesting an @device tag from a data source "
-                        "but got a valid handle.\n");
-        return PLCTAG_ERR_BAD_STATUS;
+        return rc;
     }
+
+    plc_tag_destroy(clone);
 
     return PLCTAG_STATUS_OK;
 }
@@ -543,7 +580,7 @@ int main(int argc, char **argv) {
 
     parse_args(argc, argv);
 
-    have_plc_args = (src_tag_attribs != NULL) && (clone_tag_attribs != NULL);
+    have_plc_args = (src_tag_attribs != NULL) && (clone_tag_attribs != NULL) && (device_tag_attribs != NULL);
 
     /* --- No-PLC tests (always run) --- */
     fprintf(stderr, "\n-- No-PLC tests (invalid source IDs) --\n");

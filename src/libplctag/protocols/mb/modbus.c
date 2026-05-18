@@ -90,8 +90,8 @@ static inline int64_t time_us(void) {
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
 
-#define MB_CONN_EVENT_RING_SIZE  8
-#define MB_CONN_EVENT_RING_MASK  (MB_CONN_EVENT_RING_SIZE - 1)
+#define MB_CONN_EVENT_RING_SIZE 8
+#define MB_CONN_EVENT_RING_MASK (MB_CONN_EVENT_RING_SIZE - 1)
 
 struct modbus_plc_t {
     struct modbus_plc_t *next;
@@ -108,8 +108,8 @@ struct modbus_plc_t {
 
     /* event ring for device tags (single writer: PLC handler thread) */
     tag_conn_event_t conn_event_ring[MB_CONN_EVENT_RING_SIZE];
-    atomic_int32_t   conn_event_ring_write_idx;
-    int32_t          last_published_conn_status;
+    atomic_int32_t conn_event_ring_write_idx;
+    int32_t last_published_conn_status;
 
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
@@ -261,8 +261,8 @@ struct modbus_tag_t {
 typedef struct modbus_device_tag_s {
     TAG_BASE_STRUCT;
     modbus_plc_p plc;
-    int32_t      last_conn_state;
-    int32_t      event_ring_read_idx;
+    int32_t last_conn_state;
+    int32_t event_ring_read_idx;
 } modbus_device_tag_t;
 typedef modbus_device_tag_t *modbus_device_tag_p;
 
@@ -304,7 +304,7 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 /* device tag functions */
 static plc_tag_p mb_device_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata);
+                                      void *userdata, plc_tag_p src_tag);
 static int mb_device_tag_abort(plc_tag_p tag);
 static int mb_device_tag_status(plc_tag_p tag);
 static int mb_device_tag_tickler(plc_tag_p tag);
@@ -389,7 +389,7 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
-        return mb_device_tag_create(attribs, tag_callback_func, userdata);
+        return mb_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
     /* create the tag object. */
@@ -411,8 +411,22 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     /* find the PLC object. */
     if(src_tag) {
-        modbus_tag_p src = (modbus_tag_p)src_tag;
-        tag->plc = rc_inc(src->plc);
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_MODBUS: {
+                modbus_tag_p src = (modbus_tag_p)src_tag;
+                tag->plc = rc_inc(src->plc);
+                break;
+            }
+
+            case TAG_PROTOCOL_MB_DEVICE: {
+                modbus_device_tag_p src_device = (modbus_device_tag_p)src_tag;
+                tag->plc = rc_inc(src_device->plc);
+                break;
+            }
+
+            default: tag->plc = NULL; break;
+        }
+
         rc = tag->plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_FOUND;
     } else {
         rc = find_or_create_plc(attribs, &(tag->plc));
@@ -3526,7 +3540,15 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 /****** Modbus device tag (@device) implementation *******/
 
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status) {
-    int32_t idx = (atomic_get_int32(&plc->conn_event_ring_write_idx) + 1) & MB_CONN_EVENT_RING_MASK;
+    int32_t cur_idx = atomic_get_int32(&plc->conn_event_ring_write_idx);
+
+    if(event_type == TAG_CONN_EVENT_CONNECTION_CHANGED_STATE) {
+        tag_conn_event_t *last_entry = &plc->conn_event_ring[cur_idx];
+
+        if(last_entry->event_type == event_type && last_entry->status == status) { return; }
+    }
+
+    int32_t idx = (cur_idx + 1) & MB_CONN_EVENT_RING_MASK;
     plc->conn_event_ring[idx].event_type = event_type;
     plc->conn_event_ring[idx].status = status;
     atomic_set_int32(&plc->conn_event_ring_write_idx, idx);
@@ -3542,12 +3564,12 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
 }
 
 static struct tag_vtable_t mb_device_tag_vtable = {
-    .abort         = mb_device_tag_abort,
-    .read          = NULL,
-    .status        = mb_device_tag_status,
-    .tickler       = mb_device_tag_tickler,
-    .write         = NULL,
-    .wake_plc      = NULL,
+    .abort = mb_device_tag_abort,
+    .read = NULL,
+    .status = mb_device_tag_status,
+    .tickler = mb_device_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
     .tag_data_written = NULL,
     .get_int_attrib = mb_device_get_int_attrib,
     .set_int_attrib = NULL,
@@ -3574,12 +3596,12 @@ static int mb_device_tag_tickler(plc_tag_p raw_tag) {
     if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
 
     int32_t write_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
-    int32_t read_idx  = dt->event_ring_read_idx;
+    int32_t read_idx = dt->event_ring_read_idx;
 
     while(read_idx != write_idx) {
         read_idx = (read_idx + 1) & MB_CONN_EVENT_RING_MASK;
         int32_t event_type = dt->plc->conn_event_ring[read_idx].event_type;
-        int32_t status     = dt->plc->conn_event_ring[read_idx].status;
+        int32_t status = dt->plc->conn_event_ring[read_idx].status;
 
         if(dt->callback) {
             switch(event_type) {
@@ -3625,18 +3647,33 @@ static void mb_device_tag_destructor(void *ptr) {
         dt->plc = NULL;
     }
 
-    if(dt->ext_mutex) { mutex_destroy(&dt->ext_mutex); dt->ext_mutex = NULL; }
-    if(dt->api_mutex) { mutex_destroy(&dt->api_mutex); dt->api_mutex = NULL; }
-    if(dt->tag_cond_wait) { cond_destroy(&dt->tag_cond_wait); dt->tag_cond_wait = NULL; }
-    if(dt->byte_order && dt->byte_order->is_allocated) { mem_free(dt->byte_order); dt->byte_order = NULL; }
-    if(dt->data) { mem_free(dt->data); dt->data = NULL; }
+    if(dt->ext_mutex) {
+        mutex_destroy(&dt->ext_mutex);
+        dt->ext_mutex = NULL;
+    }
+    if(dt->api_mutex) {
+        mutex_destroy(&dt->api_mutex);
+        dt->api_mutex = NULL;
+    }
+    if(dt->tag_cond_wait) {
+        cond_destroy(&dt->tag_cond_wait);
+        dt->tag_cond_wait = NULL;
+    }
+    if(dt->byte_order && dt->byte_order->is_allocated) {
+        mem_free(dt->byte_order);
+        dt->byte_order = NULL;
+    }
+    if(dt->data) {
+        mem_free(dt->data);
+        dt->data = NULL;
+    }
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, dt->tag_id, "Done.");
 }
 
 static plc_tag_p mb_device_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata) {
+                                      void *userdata, plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     modbus_device_tag_p dt = (modbus_device_tag_p)rc_alloc(sizeof(modbus_device_tag_t), mb_device_tag_destructor);
@@ -3653,7 +3690,20 @@ static plc_tag_p mb_device_tag_create(attr attribs,
         return NULL;
     }
 
-    rc = find_or_create_plc(attribs, &dt->plc);
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_MODBUS: dt->plc = rc_inc(((modbus_tag_p)src_tag)->plc); break;
+
+            case TAG_PROTOCOL_MB_DEVICE: dt->plc = rc_inc(((modbus_device_tag_p)src_tag)->plc); break;
+
+            default: dt->plc = NULL; break;
+        }
+
+        rc = dt->plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
+    } else {
+        rc = find_or_create_plc(attribs, &dt->plc);
+    }
+
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
         dt->status = (int8_t)rc;
@@ -3663,7 +3713,7 @@ static plc_tag_p mb_device_tag_create(attr attribs,
 
     /* Start at the current ring write index so we only see future events. */
     dt->event_ring_read_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
-    dt->last_conn_state     = atomic_get_int32(&dt->plc->connection_status);
+    dt->last_conn_state = atomic_get_int32(&dt->plc->connection_status);
 
     tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 

@@ -43,6 +43,7 @@
 #include <libplctag/lib/version.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/mb/modbus.h>
+#include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -935,7 +936,7 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
 
     if(src_tag_id <= 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag ID is invalid.");
-        return PLCTAG_ERR_NOT_FOUND;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     src_tag = lookup_tag(src_tag_id);
@@ -945,16 +946,13 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
     }
 
     switch(src_tag->protocol_type) {
-        case TAG_PROTOCOL_AB_DEVICE:
-        case TAG_PROTOCOL_MB_DEVICE:
         case TAG_PROTOCOL_SYSTEM:
         case TAG_PROTOCOL_UNKNOWN:
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
                    src_tag->protocol_type);
             rc_dec(src_tag);
             return PLCTAG_ERR_NOT_ALLOWED;
-        default:
-            break;
+        default: break;
     }
 
     rc = plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, src_tag);
@@ -1022,13 +1020,21 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      *
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
+     *
+     * FIXME - there has to be a better way to do this.  We now have repetitive code
+     * that looks up the tag constructor based on the protocol type.  Is this the sort
+     * of thing that we should be doing with a registry or a vtable entry?
      */
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: tag_constructor = ab_tag_create; break;
+            case TAG_PROTOCOL_AB_DEVICE: tag_constructor = ab_tag_create; break;
 
-            case TAG_PROTOCOL_MODBUS: tag_constructor = mb_tag_create; break;
+            case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
+            case TAG_PROTOCOL_OMRON_DEVICE: tag_constructor = omron_tag_create; break;
+
+            case TAG_PROTOCOL_MODBUS:
+            case TAG_PROTOCOL_MB_DEVICE: tag_constructor = mb_tag_create; break;
 
             default: tag_constructor = NULL; break;
         }
