@@ -936,6 +936,7 @@ int omron_check_request_status(omron_tag_p tag) {
         }
 
         /* request can be used by more than one thread at once. */
+        /* FIXME - this should be replaced with atomics. */
         spin_block(&req->lock) {
             if(!req->resp_received) {
                 rc = PLCTAG_STATUS_PENDING;
@@ -948,6 +949,9 @@ int omron_check_request_status(omron_tag_p tag) {
                 break;
             }
         }
+
+        /* check the status from the spin-block, exit if needed. */
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /* check the length */
         if((req->request_size < 0) || (size_t)req->request_size < sizeof(*eip_header)) {
