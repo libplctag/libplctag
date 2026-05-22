@@ -189,7 +189,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     /* was the numeric segment valid? */
-    if(val < 0 || val > 0x0F) {
+    if(val < 0 || val > 0x11) {
         pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, 0, "Numeric segment in path at position %d is out of bounds!",
                (int)(ssize_t)(*path_index));
         return PLCTAG_ERR_OUT_OF_BOUNDS;
