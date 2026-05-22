@@ -42,55 +42,55 @@
 #include <utils/debug.h>
 #include <utils/rc.h>
 
-#include "omron_device_tag.h"
+#include "omron_connection_tag.h"
 
-typedef struct omron_device_tag_s {
+typedef struct omron_connection_tag_s {
     TAG_BASE_STRUCT;
     omron_conn_p conn;
     int32_t last_conn_state;
     int32_t io_events;
     int32_t event_ring_read_idx;
-} omron_device_tag_t;
+} omron_connection_tag_t;
 
-typedef omron_device_tag_t *omron_device_tag_p;
+typedef omron_connection_tag_t *omron_connection_tag_p;
 
-static int omron_device_tag_abort(plc_tag_p tag);
-static int omron_device_tag_status(plc_tag_p tag);
-static int omron_device_tag_tickler(plc_tag_p tag);
-static int omron_device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
-static void omron_device_tag_destructor(void *ptr);
+static int omron_connection_tag_abort(plc_tag_p tag);
+static int omron_connection_tag_status(plc_tag_p tag);
+static int omron_connection_tag_tickler(plc_tag_p tag);
+static int omron_connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static void omron_connection_tag_destructor(void *ptr);
 
-static struct tag_vtable_t omron_device_tag_vtable = {
-    .abort = omron_device_tag_abort,
+static struct tag_vtable_t omron_connection_tag_vtable = {
+    .abort = omron_connection_tag_abort,
     .read = NULL,
-    .status = omron_device_tag_status,
-    .tickler = omron_device_tag_tickler,
+    .status = omron_connection_tag_status,
+    .tickler = omron_connection_tag_tickler,
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
-    .get_int_attrib = omron_device_get_int_attrib,
+    .get_int_attrib = omron_connection_get_int_attrib,
     .set_int_attrib = NULL,
     .get_byte_array_attrib = NULL,
 };
 
 
-extern plc_tag_p omron_device_tag_create(attr attribs,
+extern plc_tag_p omron_connection_tag_create(attr attribs,
                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                          void *userdata, plc_tag_p src_tag) {
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Starting.");
+    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_INFO, 0, "Starting.");
 
-    omron_device_tag_p tag = (omron_device_tag_p)rc_alloc(sizeof(omron_device_tag_t), omron_device_tag_destructor);
+    omron_connection_tag_p tag = (omron_connection_tag_p)rc_alloc(sizeof(omron_connection_tag_t), omron_connection_tag_destructor);
     if(!tag) { return NULL; }
 
     tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
     tag->io_events = attr_get_int(attribs, "io_events", 1);
 
-    tag->vtable = &omron_device_tag_vtable;
-    tag->protocol_type = TAG_PROTOCOL_OMRON_DEVICE;
+    tag->vtable = &omron_connection_tag_vtable;
+    tag->protocol_type = TAG_PROTOCOL_OMRON_CONNECTION;
 
     int rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
         rc_dec(tag);
         return NULL;
     }
@@ -99,7 +99,7 @@ extern plc_tag_p omron_device_tag_create(attr attribs,
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_OMRON: tag->conn = rc_inc(((omron_tag_p)src_tag)->conn); break;
 
-            case TAG_PROTOCOL_OMRON_DEVICE: tag->conn = rc_inc(((omron_device_tag_p)src_tag)->conn); break;
+            case TAG_PROTOCOL_OMRON_CONNECTION: tag->conn = rc_inc(((omron_connection_tag_p)src_tag)->conn); break;
 
             default: tag->conn = NULL; break;
         }
@@ -110,7 +110,7 @@ extern plc_tag_p omron_device_tag_create(attr attribs,
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, 0, "Unable to find or create conn, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, 0, "Unable to find or create conn, error %s!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
         return (plc_tag_p)tag;
@@ -121,26 +121,26 @@ extern plc_tag_p omron_device_tag_create(attr attribs,
 
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Done. Initial connection status: %d.", tag->last_conn_state);
+    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_INFO, 0, "Done. Initial connection status: %d.", tag->last_conn_state);
     return (plc_tag_p)tag;
 }
 
 
-static int omron_device_tag_abort(plc_tag_p tag) {
+static int omron_connection_tag_abort(plc_tag_p tag) {
     (void)tag;
     return PLCTAG_STATUS_OK;
 }
 
-static int omron_device_tag_status(plc_tag_p raw_tag) {
-    omron_device_tag_p tag = (omron_device_tag_p)raw_tag;
+static int omron_connection_tag_status(plc_tag_p raw_tag) {
+    omron_connection_tag_p tag = (omron_connection_tag_p)raw_tag;
 
     if(tag->vtable->tickler) { tag->vtable->tickler(raw_tag); }
 
     return tag->status;
 }
 
-static int omron_device_tag_tickler(plc_tag_p raw_tag) {
-    omron_device_tag_p tag = (omron_device_tag_p)raw_tag;
+static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
+    omron_connection_tag_p tag = (omron_connection_tag_p)raw_tag;
 
     if(!tag->conn) { return PLCTAG_STATUS_OK; }
 
@@ -178,7 +178,7 @@ static int omron_device_tag_tickler(plc_tag_p raw_tag) {
                     break;
 
                 default:
-                    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.", (int)event_type);
                     break;
             }
         }
@@ -188,16 +188,16 @@ static int omron_device_tag_tickler(plc_tag_p raw_tag) {
     return PLCTAG_STATUS_OK;
 }
 
-static int omron_device_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
-    omron_device_tag_p tag = (omron_device_tag_p)raw_tag;
+static int omron_connection_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
+    omron_connection_tag_p tag = (omron_connection_tag_p)raw_tag;
 
     if(str_cmp_i(attrib_name, "connection_status") == 0) { return tag->last_conn_state; }
 
     return default_value;
 }
 
-static void omron_device_tag_destructor(void *ptr) {
-    omron_device_tag_p tag = (omron_device_tag_p)ptr;
+static void omron_connection_tag_destructor(void *ptr) {
+    omron_connection_tag_p tag = (omron_connection_tag_p)ptr;
 
     if(tag->conn) {
         rc_dec(tag->conn);
@@ -229,5 +229,5 @@ static void omron_device_tag_destructor(void *ptr) {
         tag->data = NULL;
     }
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_INFO, tag->tag_id, "Done.");
 }

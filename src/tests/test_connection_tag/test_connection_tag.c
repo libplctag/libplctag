@@ -32,9 +32,9 @@
  ***************************************************************************/
 
 /*
- * Test program for the @device tag type.
+ * Test program for the @connection tag type.
  *
- * Creates a device tag using a user-supplied attribute string, registers a
+ * Creates a connection tag using a user-supplied attribute string, registers a
  * callback that checks connection state transitions in order, and runs until
  * all expected transitions are seen or the timeout expires.
  *
@@ -46,11 +46,11 @@
  * expires before all transitions are seen.
  *
  * Usage:
- *   test_device_tag --tag=<attribute-string> [--debug=N]
+ *   test_connection_tag --tag=<attribute-string> [--debug=N]
  *
  * Example:
- *   test_device_tag \
- *     "--tag=protocol=ab-eip&gateway=10.0.0.1&path=1,0&plc=ControlLogix&name=@device"
+ *   test_connection_tag \
+ *     "--tag=protocol=ab-eip&gateway=10.0.0.1&path=1,0&plc=ControlLogix&name=@connection"
  */
 
 #include "compat_utils.h"
@@ -239,9 +239,9 @@ static void parse_args(int argc, char **argv) {
     int i = 0;
 
     if(argc < 2) {
-        fprintf(stderr, "Usage: test_device_tag --tag=TAG_ATTRIBUTE_STRING [--debug=N]\n");
-        fprintf(stderr, "  --tag=TAG_ATTRIBUTE_STRING  device tag attribute string, e.g.\n");
-        fprintf(stderr, "    \"protocol=ab-eip&gateway=10.0.0.1&path=1,0&plc=ControlLogix&name=@device\"\n");
+        fprintf(stderr, "Usage: test_connection_tag --tag=TAG_ATTRIBUTE_STRING [--debug=N]\n");
+        fprintf(stderr, "  --tag=TAG_ATTRIBUTE_STRING  connection tag attribute string, e.g.\n");
+        fprintf(stderr, "    \"protocol=ab-eip&gateway=10.0.0.1&path=1,0&plc=ControlLogix&name=@connection\"\n");
         fprintf(stderr, "  --debug=N                   debug level (0=none, 4=detail)\n");
         exit(1);
     }
@@ -280,11 +280,11 @@ int main(int argc, char **argv) {
 
     compat_set_interrupt_handler(interrupt_handler);
 
-    fprintf(stderr, "Creating device tag: %s\n", tag_path);
+    fprintf(stderr, "Creating connection tag: %s\n", tag_path);
 
     tag = plc_tag_create_ex(tag_path, tag_callback, NULL, 0);
     if(tag < 0) {
-        fprintf(stderr, "ERROR: could not create device tag: %s\n", plc_tag_decode_error((int)tag));
+        fprintf(stderr, "ERROR: could not create connection tag: %s\n", plc_tag_decode_error((int)tag));
         return 1;
     }
 

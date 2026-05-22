@@ -39,7 +39,7 @@
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/defs.h>
-#include <libplctag/protocols/omron/omron_device_tag.h>
+#include <libplctag/protocols/omron/omron_connection_tag.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/omron/omron_common.h>
 #include <libplctag/protocols/omron/omron_raw_tag.h>
@@ -94,10 +94,10 @@ static int default_status(plc_tag_p tag);
 static int default_tickler(plc_tag_p tag);
 static int default_write(plc_tag_p tag);
 
-typedef struct omron_device_tag_view_s {
+typedef struct omron_connection_tag_view_s {
     TAG_BASE_STRUCT;
     omron_conn_p conn;
-} omron_device_tag_view_t;
+} omron_connection_tag_view_t;
 
 
 /* vtables for different kinds of tags */
@@ -175,8 +175,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Starting.");
 
-    if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
-        return omron_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        return omron_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
     /*
@@ -220,8 +220,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_OMRON: tag->plc_type = ((omron_tag_p)src_tag)->plc_type; break;
 
-            case TAG_PROTOCOL_OMRON_DEVICE: {
-                omron_device_tag_view_t *src_device = (omron_device_tag_view_t *)src_tag;
+            case TAG_PROTOCOL_OMRON_CONNECTION: {
+                omron_connection_tag_view_t *src_device = (omron_connection_tag_view_t *)src_tag;
                 tag->plc_type = src_device->conn ? src_device->conn->plc_type : OMRON_PLC_NONE;
                 break;
             }
@@ -256,8 +256,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_OMRON: tag->conn = rc_inc(((omron_tag_p)src_tag)->conn); break;
 
-            case TAG_PROTOCOL_OMRON_DEVICE: {
-                omron_device_tag_view_t *src_device = (omron_device_tag_view_t *)src_tag;
+            case TAG_PROTOCOL_OMRON_CONNECTION: {
+                omron_connection_tag_view_t *src_device = (omron_connection_tag_view_t *)src_tag;
                 tag->conn = rc_inc(src_device->conn);
                 break;
             }

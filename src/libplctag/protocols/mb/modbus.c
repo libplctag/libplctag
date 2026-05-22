@@ -257,14 +257,14 @@ struct modbus_tag_t {
 };
 
 
-/* Device tag (@device) — monitors Modbus TCP connection state */
-typedef struct modbus_device_tag_s {
+/* Connection tag (@connection) — monitors Modbus TCP connection state */
+typedef struct modbus_connection_tag_s {
     TAG_BASE_STRUCT;
     modbus_plc_p plc;
     int32_t last_conn_state;
     int32_t event_ring_read_idx;
-} modbus_device_tag_t;
-typedef modbus_device_tag_t *modbus_device_tag_p;
+} modbus_connection_tag_t;
+typedef modbus_connection_tag_t *modbus_connection_tag_p;
 
 
 /* default string types used for Modbus PLCs. */
@@ -302,14 +302,14 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 
 
 /* device tag functions */
-static plc_tag_p mb_device_tag_create(attr attribs,
+static plc_tag_p mb_connection_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                       void *userdata, plc_tag_p src_tag);
-static int mb_device_tag_abort(plc_tag_p tag);
-static int mb_device_tag_status(plc_tag_p tag);
-static int mb_device_tag_tickler(plc_tag_p tag);
-static int mb_device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
-static void mb_device_tag_destructor(void *ptr);
+static int mb_connection_tag_abort(plc_tag_p tag);
+static int mb_connection_tag_status(plc_tag_p tag);
+static int mb_connection_tag_tickler(plc_tag_p tag);
+static int mb_connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static void mb_connection_tag_destructor(void *ptr);
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
 
@@ -388,8 +388,8 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
-    if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
-        return mb_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        return mb_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
     /* create the tag object. */
@@ -418,8 +418,8 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
                 break;
             }
 
-            case TAG_PROTOCOL_MB_DEVICE: {
-                modbus_device_tag_p src_device = (modbus_device_tag_p)src_tag;
+            case TAG_PROTOCOL_MB_CONNECTION: {
+                modbus_connection_tag_p src_device = (modbus_connection_tag_p)src_tag;
                 tag->plc = rc_inc(src_device->plc);
                 break;
             }
@@ -3537,7 +3537,7 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 }
 
 
-/****** Modbus device tag (@device) implementation *******/
+/****** Modbus connection tag (@connection) implementation *******/
 
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status) {
     int32_t cur_idx = atomic_get_int32(&plc->conn_event_ring_write_idx);
@@ -3563,31 +3563,31 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     }
 }
 
-static struct tag_vtable_t mb_device_tag_vtable = {
-    .abort = mb_device_tag_abort,
+static struct tag_vtable_t mb_connection_tag_vtable = {
+    .abort = mb_connection_tag_abort,
     .read = NULL,
-    .status = mb_device_tag_status,
-    .tickler = mb_device_tag_tickler,
+    .status = mb_connection_tag_status,
+    .tickler = mb_connection_tag_tickler,
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
-    .get_int_attrib = mb_device_get_int_attrib,
+    .get_int_attrib = mb_connection_get_int_attrib,
     .set_int_attrib = NULL,
 };
 
-static int mb_device_tag_abort(plc_tag_p tag) {
+static int mb_connection_tag_abort(plc_tag_p tag) {
     (void)tag;
     return PLCTAG_STATUS_OK;
 }
 
-static int mb_device_tag_status(plc_tag_p tag) {
-    modbus_device_tag_p dt = (modbus_device_tag_p)tag;
+static int mb_connection_tag_status(plc_tag_p tag) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
     if(dt->vtable->tickler) { dt->vtable->tickler(tag); }
     return dt->status;
 }
 
-static int mb_device_tag_tickler(plc_tag_p raw_tag) {
-    modbus_device_tag_p dt = (modbus_device_tag_p)raw_tag;
+static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)raw_tag;
 
     if(!dt->plc) { return PLCTAG_STATUS_OK; }
 
@@ -3622,7 +3622,7 @@ static int mb_device_tag_tickler(plc_tag_p raw_tag) {
                     dt->callback(dt->tag_id, PLCTAG_EVENT_READ_COMPLETED, status, dt->userdata);
                     break;
                 default:
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, dt->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, dt->tag_id, "Unknown ring event type %d.", (int)event_type);
                     break;
             }
         }
@@ -3632,17 +3632,17 @@ static int mb_device_tag_tickler(plc_tag_p raw_tag) {
     return PLCTAG_STATUS_OK;
 }
 
-static int mb_device_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
-    modbus_device_tag_p dt = (modbus_device_tag_p)tag;
+static int mb_connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
     if(str_cmp_i(attrib_name, "connection_status") == 0) { return dt->last_conn_state; }
     return default_value;
 }
 
-static void mb_device_tag_destructor(void *ptr) {
-    modbus_device_tag_p dt = (modbus_device_tag_p)ptr;
+static void mb_connection_tag_destructor(void *ptr) {
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)ptr;
 
     if(dt->plc) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, dt->tag_id, "Releasing PLC reference.");
+        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_DETAIL, dt->tag_id, "Releasing PLC reference.");
         rc_dec(dt->plc);
         dt->plc = NULL;
     }
@@ -3668,24 +3668,24 @@ static void mb_device_tag_destructor(void *ptr) {
         dt->data = NULL;
     }
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, dt->tag_id, "Done.");
+    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, dt->tag_id, "Done.");
 }
 
-static plc_tag_p mb_device_tag_create(attr attribs,
+static plc_tag_p mb_connection_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                       void *userdata, plc_tag_p src_tag) {
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
+    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, 0, "Starting.");
 
-    modbus_device_tag_p dt = (modbus_device_tag_p)rc_alloc(sizeof(modbus_device_tag_t), mb_device_tag_destructor);
+    modbus_connection_tag_p dt = (modbus_connection_tag_p)rc_alloc(sizeof(modbus_connection_tag_t), mb_connection_tag_destructor);
     if(!dt) { return NULL; }
 
-    dt->vtable = &mb_device_tag_vtable;
-    dt->protocol_type = TAG_PROTOCOL_MB_DEVICE;
+    dt->vtable = &mb_connection_tag_vtable;
+    dt->protocol_type = TAG_PROTOCOL_MB_CONNECTION;
     dt->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
 
     int32_t rc = plc_tag_generic_init_tag((plc_tag_p)dt, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
         rc_dec(dt);
         return NULL;
     }
@@ -3694,7 +3694,7 @@ static plc_tag_p mb_device_tag_create(attr attribs,
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_MODBUS: dt->plc = rc_inc(((modbus_tag_p)src_tag)->plc); break;
 
-            case TAG_PROTOCOL_MB_DEVICE: dt->plc = rc_inc(((modbus_device_tag_p)src_tag)->plc); break;
+            case TAG_PROTOCOL_MB_CONNECTION: dt->plc = rc_inc(((modbus_connection_tag_p)src_tag)->plc); break;
 
             default: dt->plc = NULL; break;
         }
@@ -3705,7 +3705,7 @@ static plc_tag_p mb_device_tag_create(attr attribs,
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
         dt->status = (int8_t)rc;
         tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, (int8_t)rc);
         return (plc_tag_p)dt;
@@ -3717,7 +3717,7 @@ static plc_tag_p mb_device_tag_create(attr attribs,
 
     tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Done. Initial connection status: %d.", dt->last_conn_state);
+    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, 0, "Done. Initial connection status: %d.", dt->last_conn_state);
     return (plc_tag_p)dt;
 }
 

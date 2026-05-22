@@ -40,7 +40,7 @@
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
-#include <libplctag/protocols/ab/device_tag.h>
+#include <libplctag/protocols/ab/connection_tag.h>
 #include <libplctag/protocols/ab/eip_cip.h>
 #include <libplctag/protocols/ab/eip_cip_special.h>
 #include <libplctag/protocols/ab/eip_lgx_pccc.h>
@@ -59,10 +59,10 @@
 #include <utils/vector.h>
 
 /* Minimal view of AB device-tag layout needed for source-session sharing. */
-typedef struct ab_device_tag_view_s {
+typedef struct ab_connection_tag_view_s {
     TAG_BASE_STRUCT;
     ab_session_p session;
-} ab_device_tag_view_t;
+} ab_connection_tag_view_t;
 
 /*
  * Externally visible global variables
@@ -182,8 +182,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata, src_tag); }
 
     /* short circuit for device tag */
-    if(str_cmp(attr_get_str(attribs, "name", ""), "@device") == 0) {
-        return (plc_tag_p)ab_device_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        return (plc_tag_p)ab_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
     /*
@@ -232,8 +232,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
                 break;
             }
 
-            case TAG_PROTOCOL_AB_DEVICE: {
-                ab_device_tag_view_t *src_device = (ab_device_tag_view_t *)src_tag;
+            case TAG_PROTOCOL_AB_CONNECTION: {
+                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
                 tag->plc_type = src_device->session ? src_device->session->plc_type : AB_PLC_NONE;
                 break;
             }
@@ -323,8 +323,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
                 break;
             }
 
-            case TAG_PROTOCOL_AB_DEVICE: {
-                ab_device_tag_view_t *src_device = (ab_device_tag_view_t *)src_tag;
+            case TAG_PROTOCOL_AB_CONNECTION: {
+                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
                 tag->session = rc_inc(src_device->session);
                 break;
             }
@@ -471,7 +471,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         case AB_PLC_GENERIC:
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up generic CIP device tag.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up generic CIP connection tag.");
 
             /* Generic type supports optional path for reaching modules in chassis */
             if(path && str_length(path)) {

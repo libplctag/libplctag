@@ -91,7 +91,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_device_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_connection_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -255,8 +255,8 @@ fi
 
 
 let TEST++
-echo -n "  Test $TEST: device tag connection state transitions (ControlLogix)... "
-$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device" > "$LOG_DIR/${TEST}_device_tag_test.log" 2>&1
+echo -n "  Test $TEST: connection tag connection state transitions (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" > "$LOG_DIR/${TEST}_connection_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -271,7 +271,7 @@ echo -n "  Test $TEST: create-from-tag API (12 comprehensive permutation tests w
 $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
     "--clone-attrib=name=TestBigArray[1]&elem_count=1" \
-    "--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device" \
+    "--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
     --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -618,8 +618,8 @@ else
 fi
 
 let TEST++
-echo -n "  Test $TEST: device tag connection state transitions (Modbus)... "
-$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" > "$LOG_DIR/${TEST}_device_tag_modbus_test.log" 2>&1
+echo -n "  Test $TEST: connection tag connection state transitions (Modbus)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" > "$LOG_DIR/${TEST}_connection_tag_modbus_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -686,7 +686,7 @@ echo -n "  Test $TEST: create-from-tag API (12 comprehensive permutation tests w
 $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
     "--clone-attrib=name=hr20&elem_count=2" \
-    "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" \
+    "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" \
     --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_modbus_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
