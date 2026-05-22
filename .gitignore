@@ -63,3 +63,9 @@ src/tests/log.txt
 .vscode
 external_docs/
 build_perf/*
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
