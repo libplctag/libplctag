@@ -50,6 +50,7 @@ typedef struct ab_connection_tag_s {
     int32_t last_conn_state;      /* previous value; used to detect changes */
     int32_t io_events;            /* 1 = fire READ/WRITE events for session IO, 0 = suppress */
     int32_t status_ring_read_idx; /* index of the last ring buffer entry this tag has processed */
+    bool first_tickler_run;       /* true until the first post-CREATED tickler; fires late-join synthetic event */
 } ab_connection_tag_t;
 
 typedef ab_connection_tag_t *ab_connection_tag_p;
@@ -123,9 +124,9 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
 
     pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "using session=%p", tag->session);
 
-    /* start at the current write index so we only see future state changes */
     tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
     tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
+    tag->first_tickler_run = true;
 
     /*
      * Queue the CREATED event. plc_tag_create_ex() will dispatch it via
@@ -171,6 +172,16 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
 
     int32_t write_idx = atomic_get_int32(&conn_tag->session->conn_status_ring_write_idx);
     int32_t read_idx = conn_tag->status_ring_read_idx;
+
+    /* First tickler after CREATED: if the session was already active at creation (late join),
+     * synthesise the creation-time state so the tag is not silently stuck. */
+    if(conn_tag->first_tickler_run) {
+        conn_tag->first_tickler_run = false;
+        if(conn_tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && conn_tag->callback) {
+            conn_tag->callback(conn_tag->tag_id, conn_tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET,
+                               PLCTAG_STATUS_OK, conn_tag->userdata);
+        }
+    }
 
     /* drain all unread ring buffer entries; write_idx points to the last written slot */
     while(read_idx != write_idx) {

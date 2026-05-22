@@ -263,6 +263,7 @@ typedef struct modbus_connection_tag_s {
     modbus_plc_p plc;
     int32_t last_conn_state;
     int32_t event_ring_read_idx;
+    bool first_tickler_run;
 } modbus_connection_tag_t;
 typedef modbus_connection_tag_t *modbus_connection_tag_p;
 
@@ -3598,6 +3599,16 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
     int32_t write_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
     int32_t read_idx = dt->event_ring_read_idx;
 
+    /* First tickler after CREATED: if the session was already active at creation (late join),
+     * synthesise the creation-time state so the tag is not silently stuck. */
+    if(dt->first_tickler_run) {
+        dt->first_tickler_run = false;
+        if(dt->last_conn_state != PLCTAG_CONN_STATUS_DOWN && dt->callback) {
+            dt->callback(dt->tag_id, dt->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
+                         dt->userdata);
+        }
+    }
+
     while(read_idx != write_idx) {
         read_idx = (read_idx + 1) & MB_CONN_EVENT_RING_MASK;
         int32_t event_type = dt->plc->conn_event_ring[read_idx].event_type;
@@ -3711,9 +3722,9 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
         return (plc_tag_p)dt;
     }
 
-    /* Start at the current ring write index so we only see future events. */
     dt->event_ring_read_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
     dt->last_conn_state = atomic_get_int32(&dt->plc->connection_status);
+    dt->first_tickler_run = true;
 
     tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 

@@ -50,6 +50,7 @@ typedef struct omron_connection_tag_s {
     int32_t last_conn_state;
     int32_t io_events;
     int32_t event_ring_read_idx;
+    bool first_tickler_run;
 } omron_connection_tag_t;
 
 typedef omron_connection_tag_t *omron_connection_tag_p;
@@ -118,6 +119,7 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
 
     tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
     tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
+    tag->first_tickler_run = true;
 
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 
@@ -148,6 +150,16 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
 
     int32_t write_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
     int32_t read_idx = tag->event_ring_read_idx;
+
+    /* First tickler after CREATED: if the session was already active at creation (late join),
+     * synthesise the creation-time state so the tag is not silently stuck. */
+    if(tag->first_tickler_run) {
+        tag->first_tickler_run = false;
+        if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && tag->callback) {
+            tag->callback(tag->tag_id, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
+                          tag->userdata);
+        }
+    }
 
     while(read_idx != write_idx) {
         read_idx = (read_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
