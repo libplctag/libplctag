@@ -109,8 +109,6 @@ struct modbus_plc_t {
     /* event ring for device tags (single writer: PLC handler thread) */
     tag_conn_event_t conn_event_ring[MB_CONN_EVENT_RING_SIZE];
     atomic_int32_t conn_event_ring_write_idx;
-    int32_t last_published_conn_status;
-
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
     int64_t disconnect_at_time_ms; /* Calculated deadline for disconnection based on inactivity timeout */
@@ -263,6 +261,7 @@ typedef struct modbus_connection_tag_s {
     modbus_plc_p plc;
     int32_t last_conn_state;
     int32_t event_ring_read_idx;
+    int32_t io_events;
     bool first_tickler_run;
 } modbus_connection_tag_t;
 typedef modbus_connection_tag_t *modbus_connection_tag_p;
@@ -730,7 +729,6 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                     atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT);
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
                     atomic_init_int32(&(*plc)->conn_event_ring_write_idx, 0);
-                    (*plc)->last_published_conn_status = PLCTAG_CONN_STATUS_DOWN;
 
                     /* Calculate initial disconnect deadline */
                     (*plc)->cached_inactivity_timeout_ms = atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
@@ -3543,11 +3541,8 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status) {
     int32_t cur_idx = atomic_get_int32(&plc->conn_event_ring_write_idx);
 
-    if(event_type == TAG_CONN_EVENT_CONNECTION_CHANGED_STATE) {
-        tag_conn_event_t *last_entry = &plc->conn_event_ring[cur_idx];
-
-        if(last_entry->event_type == event_type && last_entry->status == status) { return; }
-    }
+    if(plc->conn_event_ring[cur_idx].event_type == event_type &&
+       plc->conn_event_ring[cur_idx].status == status) { return; }
 
     int32_t idx = (cur_idx + 1) & MB_CONN_EVENT_RING_MASK;
     plc->conn_event_ring[idx].event_type = event_type;
@@ -3557,10 +3552,10 @@ static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t s
 }
 
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
+    int32_t old_status = atomic_get_int32(&plc->connection_status);
     atomic_set_int32(&plc->connection_status, new_status);
-    if(plc->last_published_conn_status != new_status) {
-        plc->last_published_conn_status = new_status;
-        mb_plc_publish_event(plc, TAG_CONN_EVENT_CONNECTION_CHANGED_STATE, new_status);
+    if(old_status != new_status) {
+        mb_plc_publish_event(plc, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
     }
 }
 
@@ -3616,24 +3611,25 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
 
         if(dt->callback) {
             switch(event_type) {
-                case TAG_CONN_EVENT_CONNECTION_CHANGED_STATE:
-                    dt->last_conn_state = status;
-                    dt->callback(dt->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, dt->userdata);
-                    break;
                 case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
-                    dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_STARTED, status, dt->userdata);
+                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_STARTED, status, dt->userdata); }
                     break;
                 case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
-                    dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, status, dt->userdata);
+                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, status, dt->userdata); }
                     break;
                 case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
-                    dt->callback(dt->tag_id, PLCTAG_EVENT_READ_STARTED, status, dt->userdata);
+                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_READ_STARTED, status, dt->userdata); }
                     break;
                 case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
-                    dt->callback(dt->tag_id, PLCTAG_EVENT_READ_COMPLETED, status, dt->userdata);
+                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_READ_COMPLETED, status, dt->userdata); }
                     break;
                 default:
-                    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, dt->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
+                        dt->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
+                        dt->callback(dt->tag_id, event_type, PLCTAG_STATUS_OK, dt->userdata);
+                    } else {
+                        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, dt->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    }
                     break;
             }
         }
@@ -3693,6 +3689,7 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
     dt->vtable = &mb_connection_tag_vtable;
     dt->protocol_type = TAG_PROTOCOL_MB_CONNECTION;
     dt->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
+    dt->io_events = attr_get_int(attribs, "io_events", 1);
 
     int32_t rc = plc_tag_generic_init_tag((plc_tag_p)dt, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {

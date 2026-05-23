@@ -168,11 +168,6 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
 
         if(tag->callback) {
             switch(event_type) {
-                case TAG_CONN_EVENT_CONNECTION_CHANGED_STATE:
-                    tag->last_conn_state = status;
-                    tag->callback(tag->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, tag->userdata);
-                    break;
-
                 case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
                     if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, status, tag->userdata); }
                     break;
@@ -190,7 +185,12 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
                     break;
 
                 default:
-                    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
+                        tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
+                        tag->callback(tag->tag_id, event_type, PLCTAG_STATUS_OK, tag->userdata);
+                    } else {
+                        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.", (int)event_type);
+                    }
                     break;
             }
         }

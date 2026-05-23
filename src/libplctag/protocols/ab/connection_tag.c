@@ -64,20 +64,20 @@ static const char *conn_status_name(int32_t conn_status);
 
 static struct tag_vtable_t connection_tag_vtable = {
     .abort = connection_tag_abort,               /* Not used */
-    .read = NULL,                            /* Not used */
+    .read = NULL,                                /* Not used */
     .status = connection_tag_status,             /* returns last connection status value */
     .tickler = connection_tag_tickler,           /* polls connection_status, raises events */
-    .write = NULL,                           /* Not used */
-    .wake_plc = NULL,                        /* Not used */
-    .tag_data_written = NULL,                /* Not used */
+    .write = NULL,                               /* Not used */
+    .wake_plc = NULL,                            /* Not used */
+    .tag_data_written = NULL,                    /* Not used */
     .get_int_attrib = connection_get_int_attrib, /* get connection status attribute */
-    .set_int_attrib = NULL,                  /* Not used */
+    .set_int_attrib = NULL,                      /* Not used */
 };
 
 
 extern plc_tag_p ab_connection_tag_create(attr attribs,
-                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata, plc_tag_p src_tag) {
+                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                          void *userdata, plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
 
     ab_connection_tag_p tag = (ab_connection_tag_p)rc_alloc(sizeof(ab_connection_tag_t), ab_connection_tag_destructor);
@@ -178,8 +178,8 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
     if(conn_tag->first_tickler_run) {
         conn_tag->first_tickler_run = false;
         if(conn_tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && conn_tag->callback) {
-            conn_tag->callback(conn_tag->tag_id, conn_tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET,
-                               PLCTAG_STATUS_OK, conn_tag->userdata);
+            conn_tag->callback(conn_tag->tag_id, conn_tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
+                               conn_tag->userdata);
         }
     }
 
@@ -188,17 +188,11 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
         read_idx = (read_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
         int32_t event_type = conn_tag->session->conn_status_ring[read_idx].event_type;
         int32_t status = conn_tag->session->conn_status_ring[read_idx].status;
-        int32_t reason = conn_tag->session->conn_status_ring[read_idx].reason;
+        // int32_t reason = conn_tag->session->conn_status_ring[read_idx].reason;
 
         /* api_mutex is already held by the generic tickler so dispatch each entry directly */
         if(conn_tag->callback) {
             switch(event_type) {
-                case TAG_CONN_EVENT_CONNECTION_CHANGED_STATE:
-                    conn_tag->last_conn_state = status;
-                    conn_tag->callback(conn_tag->tag_id, status + PLCTAG_EVENT_CONN_STATUS_OFFSET, (int)reason,
-                                         conn_tag->userdata);
-                    break;
-
                 case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
                     if(conn_tag->io_events) {
                         conn_tag->callback(conn_tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, (int)status, conn_tag->userdata);
@@ -224,8 +218,13 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
                     break;
 
                 default:
-                    pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_WARN, conn_tag->tag_id, "Unsupported ring event type %d.",
-                           (int)event_type);
+                    if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
+                        conn_tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
+                        conn_tag->callback(conn_tag->tag_id, event_type, PLCTAG_STATUS_OK, conn_tag->userdata);
+                    } else {
+                        pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_WARN, conn_tag->tag_id, "Unsupported ring event type %d.",
+                               (int)event_type);
+                    }
                     break;
             }
         }
