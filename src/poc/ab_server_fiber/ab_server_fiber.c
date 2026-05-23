@@ -549,11 +549,11 @@ static void print_statistics(server_ctx_t *server) {
     fprintf(stderr, "║          AB SERVER (FIBER) PERFORMANCE STATISTICS                ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║ Runtime: %.2f seconds\n", runtime_sec);
-    fprintf(stderr, "║ Total EIP requests: %" PRId64 "\n", (long long)stats->total_requests);
+    fprintf(stderr, "║ Total EIP requests: %" PRId64 "\n", (int64_t)stats->total_requests);
     if(runtime_sec > 0.0) { fprintf(stderr, "║ Throughput: %.2f requests/sec\n", (double)stats->total_requests / runtime_sec); }
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
-    fprintf(stderr, "║ Clients connected:    %" PRId64 "\n", (long long)stats->clients_connected);
-    fprintf(stderr, "║ Clients disconnected: %" PRId64 "\n", (long long)stats->clients_disconnected);
+    fprintf(stderr, "║ Clients connected:    %" PRId64 "\n", (int64_t)stats->clients_connected);
+    fprintf(stderr, "║ Clients disconnected: %" PRId64 "\n", (int64_t)stats->clients_disconnected);
 
     /* ----- Arena statistics ----- */
     if(stats->arena.reset_count > 0) {
@@ -578,8 +578,8 @@ static void print_statistics(server_ctx_t *server) {
             if(tag->request_count > 0) {
                 double avg_us = (double)tag->total_latency_us / (double)tag->request_count;
                 fprintf(stderr, "║  %-20s  requests: %8" PRId64 "  avg: %8.2f us  min: %8" PRId64 " us  max: %8" PRId64 " us\n",
-                        tag->name ? tag->name : "(pccc)", (long long)tag->request_count, avg_us, (long long)tag->min_latency_us,
-                        (long long)tag->max_latency_us);
+                        tag->name ? tag->name : "(pccc)", (int64_t)tag->request_count, avg_us, (int64_t)tag->min_latency_us,
+                        (int64_t)tag->max_latency_us);
             }
             tag = tag->next_tag;
         }
@@ -598,11 +598,11 @@ static void print_statistics(server_ctx_t *server) {
         fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
         fprintf(stderr, "║              FIBER_NET EVENT LOOP INSTRUMENTATION                ║\n");
         fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
-        fprintf(stderr, "║ Loop iterations:   %10" PRId64 "\n", (long long)ls.loop_iterations);
-        fprintf(stderr, "║ Poll timeouts:     %10" PRId64 "  (%5.1f%% of iters)\n", (long long)ls.poll_timeout_iters,
+        fprintf(stderr, "║ Loop iterations:   %10" PRId64 "\n", (int64_t)ls.loop_iterations);
+        fprintf(stderr, "║ Poll timeouts:     %10" PRId64 "  (%5.1f%% of iters)\n", (int64_t)ls.poll_timeout_iters,
                 timeout_pct);
-        fprintf(stderr, "║ Poll wakeups:      %10" PRId64 "  (%5.1f%% of iters)\n", (long long)ls.poll_wakeup_iters, wakeup_pct);
-        fprintf(stderr, "║ Total resumes:     %10" PRId64 "\n", (long long)ls.total_resumes);
+        fprintf(stderr, "║ Poll wakeups:      %10" PRId64 "  (%5.1f%% of iters)\n", (int64_t)ls.poll_wakeup_iters, wakeup_pct);
+        fprintf(stderr, "║ Total resumes:     %10" PRId64 "\n", (int64_t)ls.total_resumes);
         fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
         fprintf(stderr, "║              LOOP PHASE BREAKDOWN (avg µs / iteration)           ║\n");
         fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
@@ -622,7 +622,7 @@ static void print_statistics(server_ctx_t *server) {
             fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
             fprintf(stderr, "║  Stack size (configured): %7zu bytes (%zu KB)\n", ls.stack_size_bytes,
                     ls.stack_size_bytes / 1024u);
-            fprintf(stderr, "║  Fibers measured:         %7" PRId64 "\n", (long long)ls.watermark_count);
+            fprintf(stderr, "║  Fibers measured:         %7" PRId64 "\n", (int64_t)ls.watermark_count);
             fprintf(stderr, "║  Avg stack used:          %7.0f bytes (%4.1f%%)\n", ls.avg_stack_used_bytes,
                     ls.avg_stack_used_bytes / sz * 100.0);
             fprintf(stderr, "║  Min stack used:          %7zu bytes (%4.1f%%)\n", ls.min_stack_used_bytes,
