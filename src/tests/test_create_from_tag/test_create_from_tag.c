@@ -269,20 +269,6 @@ static int test_device_src_data_dst(void) {
     fprintf(stderr, "  test_device_src_data_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
     if(clone < 0) {
-        fprintf(stderr, "  FAIL: expected success cloning from @device source, got %s\n", plc_tag_decode_error((int)clone));
-        plc_tag_destroy(device_tag);
-        return (int)clone;
-    }
-
-    int rc = wait_for_tag_ready(clone, timeout_ms);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "  FAIL: clone from @device source not ready: %s\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(clone);
-        plc_tag_destroy(device_tag);
-        return rc;
-    }
-
-    if(clone < 0) {
         fprintf(stderr, "  FAIL: expected success cloning from @connection source, got %s\n", plc_tag_decode_error((int)clone));
         plc_tag_destroy(connection_tag);
         return (int)clone;
@@ -332,13 +318,6 @@ static int test_device_src_device_dst(void) {
     int32_t clone = plc_tag_create_from_tag(connection_tag, "name=@connection", NULL, NULL, timeout_ms);
 
     fprintf(stderr, "  test_device_src_device_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
-
-    if(clone < 0) {
-        fprintf(stderr, "  FAIL: expected success cloning @device from @device source, got %s\n",
-                plc_tag_decode_error((int)clone));
-        plc_tag_destroy(device_tag);
-        return (int)clone;
-    }
 
     if(clone < 0) {
         fprintf(stderr, "  FAIL: expected success cloning @connection from @connection source, got %s\n",
