@@ -34,6 +34,7 @@
 #include "plc.h"
 #include "compat.h"
 #include "fairness.h"
+#include <inttypes.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -93,8 +94,8 @@ void dump_fairness_stats(plc_s *plc) {
         int64_t max_latency = atomic_load_int64(&tag->max_latency_us);
         int64_t avg_latency = (requests > 0) ? (total_latency / requests) : 0;
 
-        fprintf(stderr, "%-30s %8d %10lld %10lld %10lld\n", tag->name, requests, (long long)avg_latency, (long long)min_latency,
-                (long long)max_latency);
+        fprintf(stderr, "%-30s %8d %10" PRId64 " %10" PRId64 " %10" PRId64 "\n", tag->name, requests, (int64_t)avg_latency,
+                (int64_t)min_latency, (int64_t)max_latency);
 
         total_requests += requests;
         if(requests < min_requests) { min_requests = requests; }
@@ -167,8 +168,8 @@ void dump_fairness_stats(plc_s *plc) {
     fprintf(stderr, "\nLatency Fairness:\n");
     fprintf(stderr, "-----------------\n");
     fprintf(stderr, "  Mean avg latency per tag:    %.2f us\n", latency_mean);
-    fprintf(stderr, "  Global min latency:          %lld us\n", (long long)global_min_latency);
-    fprintf(stderr, "  Global max latency:          %lld us\n", (long long)global_max_latency);
+    fprintf(stderr, "  Global min latency:          %" PRId64 " us\n", (int64_t)global_min_latency);
+    fprintf(stderr, "  Global max latency:          %" PRId64 " us\n", (int64_t)global_max_latency);
     fprintf(stderr, "  Latency std deviation:       %.2f us\n", latency_std_dev);
     fprintf(stderr, "  Latency CV:                  %.2f%%\n", latency_cv);
     if(global_max_latency > 0 && global_min_latency < INT64_MAX) {

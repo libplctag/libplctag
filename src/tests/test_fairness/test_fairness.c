@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
     /* stop debug output so that the statistics etc. are the last thing in the log. */
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
-    fprintf(stderr, "Test complete. Actual duration: %lld ms\n\n", (long long)actual_duration);
+    fprintf(stderr, "Test complete. Actual duration: %" PRId64 "ms\n\n", (int64_t)actual_duration);
 
     /* make sure we flush the output*/
     fflush(stderr);
