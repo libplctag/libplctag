@@ -12,7 +12,7 @@ else()
     # Don't set static linker options if sanitizers are enabled in Debug mode
     if(NOT (USE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug"))
         set(STATIC_C_LINKER_OPTIONS "-static")
-        set(STATIC_CXX_LINKER_OPTIONS "-static-libgcc -static-libstdc++")
+        set(STATIC_CXX_LINKER_OPTIONS "-static-libgcc;-static-libstdc++")
     endif()
 endif()
 
