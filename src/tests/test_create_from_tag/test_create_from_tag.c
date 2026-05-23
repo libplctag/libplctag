@@ -48,9 +48,9 @@
  *  With-PLC tests:
  *   5. valid src, attrib_str = NULL                     -> ERR_BAD_PARAM or ERR_NULL_PTR
  *   6. valid src, attrib_str = ""                       -> any error (not success)
- *   7. @device src + data clone attribs                 -> success
- *   8. @device src + @device clone attribs              -> success
- *   9. regular src + @device clone attribs              -> success
+ *   7. @connection src + data clone attribs                 -> success
+ *   8. @connection src + @connection clone attribs              -> success
+ *   9. regular src + @connection clone attribs              -> success
  *  10. regular src + valid data clone attribs           -> success; read works after src destroyed
  *  11. regular src, create two clones from same src     -> both succeed independently
  *  12. previously-destroyed src ID reused               -> ERR_NOT_FOUND
@@ -63,7 +63,7 @@
  *   test_create_from_tag \
  *     "--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
  *     "--clone-attrib=name=TestBigArray[1]&elem_count=1" \
- *     "--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device" \
+ *     "--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
  *     --timeout=5000
  */
 
@@ -82,8 +82,12 @@
 
 static const char *src_tag_attribs = NULL;
 static const char *clone_tag_attribs = NULL;
-static const char *device_tag_attribs = NULL;
+static const char *connection_tag_attribs = NULL;
 static int timeout_ms = DEFAULT_TIMEOUT_MS;
+
+/* Shared flags for test 16 (callback fires on clone). */
+static compat_atomic_int32_t clone_created_cb_fired = {0};
+static compat_atomic_int32_t clone_read_completed_cb_fired = {0};
 
 /* -------------------------------------------------------------------------
  * Helpers
@@ -127,11 +131,11 @@ static int32_t create_ready_src_tag(void) {
     return tag;
 }
 
-/** Create an @device tag and wait for it to be connected. Returns tag id or negative error. */
-static int32_t create_ready_device_tag(void) {
-    int32_t tag = plc_tag_create(device_tag_attribs, timeout_ms);
+/** Create an @connection tag and wait for it to be connected. Returns tag id or negative error. */
+static int32_t create_ready_connection_tag(void) {
+    int32_t tag = plc_tag_create(connection_tag_attribs, timeout_ms);
     if(tag < 0) {
-        fprintf(stderr, "  ERROR: could not create @device tag: %s\n", plc_tag_decode_error((int)tag));
+        fprintf(stderr, "  ERROR: could not create @connection tag: %s\n", plc_tag_decode_error((int)tag));
         return tag;
     }
 
@@ -139,7 +143,7 @@ static int32_t create_ready_device_tag(void) {
     /* ERR_TIMEOUT just means the UP event did not fire within the window —
      * the tag was still created. Any other error is a hard failure. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TIMEOUT) {
-        fprintf(stderr, "  ERROR: @device tag hard failure: %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "  ERROR: @connection tag hard failure: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return (int32_t)rc;
     }
@@ -251,16 +255,16 @@ static int test_empty_attrib_str(void) {
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 7: @device tag as source, data clone attribs -> success. */
+/* Test 7: @connection tag as source, data clone attribs -> success. */
 static int test_device_src_data_dst(void) {
-    if(device_tag_attribs == NULL) {
-        fprintf(stderr, "  SKIP: no --device-tag provided, skipping @device source test.\n");
+    if(connection_tag_attribs == NULL) {
+        fprintf(stderr, "  SKIP: no --device-tag provided, skipping @connection source test.\n");
         return PLCTAG_STATUS_OK;
     }
-    int32_t device_tag = create_ready_device_tag();
-    if(device_tag < 0) { return (int)device_tag; }
+    int32_t connection_tag = create_ready_connection_tag();
+    if(connection_tag < 0) { return (int)connection_tag; }
 
-    int32_t clone = plc_tag_create_from_tag(device_tag, clone_tag_attribs, NULL, NULL, timeout_ms);
+    int32_t clone = plc_tag_create_from_tag(connection_tag, clone_tag_attribs, NULL, NULL, timeout_ms);
 
     fprintf(stderr, "  test_device_src_data_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
@@ -278,11 +282,25 @@ static int test_device_src_data_dst(void) {
         return rc;
     }
 
-    plc_tag_destroy(device_tag);
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: expected success cloning from @connection source, got %s\n", plc_tag_decode_error((int)clone));
+        plc_tag_destroy(connection_tag);
+        return (int)clone;
+    }
+
+    int rc = wait_for_tag_ready(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: clone from @connection source not ready: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone);
+        plc_tag_destroy(connection_tag);
+        return rc;
+    }
+
+    plc_tag_destroy(connection_tag);
 
     rc = plc_tag_read(clone, timeout_ms);
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr, "  FAIL: clone read failed after @device source destroyed: %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "  FAIL: clone read failed after @connection source destroyed: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(clone);
         return rc;
     }
@@ -290,7 +308,7 @@ static int test_device_src_data_dst(void) {
     if(rc == PLCTAG_STATUS_PENDING) {
         rc = wait_for_tag_ready(clone, timeout_ms);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "  FAIL: clone from @device source did not recover from pending read: %s\n",
+            fprintf(stderr, "  FAIL: clone from @connection source did not recover from pending read: %s\n",
                     plc_tag_decode_error(rc));
             plc_tag_destroy(clone);
             return rc;
@@ -302,16 +320,16 @@ static int test_device_src_data_dst(void) {
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 8: @device tag as source, @device clone attribs -> success. */
+/* Test 8: @connection tag as source, @connection clone attribs -> success. */
 static int test_device_src_device_dst(void) {
-    if(device_tag_attribs == NULL) {
-        fprintf(stderr, "  SKIP: no --device-tag provided, skipping @device source test.\n");
+    if(connection_tag_attribs == NULL) {
+        fprintf(stderr, "  SKIP: no --device-tag provided, skipping @connection source test.\n");
         return PLCTAG_STATUS_OK;
     }
-    int32_t device_tag = create_ready_device_tag();
-    if(device_tag < 0) { return (int)device_tag; }
+    int32_t connection_tag = create_ready_connection_tag();
+    if(connection_tag < 0) { return (int)connection_tag; }
 
-    int32_t clone = plc_tag_create_from_tag(device_tag, "name=@device", NULL, NULL, timeout_ms);
+    int32_t clone = plc_tag_create_from_tag(connection_tag, "name=@connection", NULL, NULL, timeout_ms);
 
     fprintf(stderr, "  test_device_src_device_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
@@ -322,12 +340,19 @@ static int test_device_src_device_dst(void) {
         return (int)clone;
     }
 
-    plc_tag_destroy(device_tag);
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: expected success cloning @connection from @connection source, got %s\n",
+                plc_tag_decode_error((int)clone));
+        plc_tag_destroy(connection_tag);
+        return (int)clone;
+    }
+
+    plc_tag_destroy(connection_tag);
 
     /* Device tags may remain pending for a while; treat timeout as acceptable. */
     int rc = wait_for_tag_ready(clone, timeout_ms);
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TIMEOUT) {
-        fprintf(stderr, "  FAIL: cloned @device tag hard failure: %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "  FAIL: cloned @connection tag hard failure: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(clone);
         return rc;
     }
@@ -337,17 +362,18 @@ static int test_device_src_device_dst(void) {
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 9: regular tag as source, @device as the target type -> success. */
+/* Test 9: regular tag as source, @connection as the target type -> success. */
 static int test_data_src_device_dst(void) {
     int32_t src = create_ready_src_tag();
     if(src < 0) { return (int)src; }
 
-    int32_t clone = plc_tag_create_from_tag(src, "name=@device", NULL, NULL, timeout_ms);
+    int32_t clone = plc_tag_create_from_tag(src, "name=@connection", NULL, NULL, timeout_ms);
 
     fprintf(stderr, "  test_data_src_device_dst: rc=%s (%d)\n", plc_tag_decode_error((int)clone), (int)clone);
 
     if(clone < 0) {
-        fprintf(stderr, "  FAIL: expected success cloning @device from data source, got %s\n", plc_tag_decode_error((int)clone));
+        fprintf(stderr, "  FAIL: expected success cloning @connection from data source, got %s\n",
+                plc_tag_decode_error((int)clone));
         plc_tag_destroy(src);
         return (int)clone;
     }
@@ -357,7 +383,7 @@ static int test_data_src_device_dst(void) {
     /* Device tags may remain pending for a while; treat timeout as acceptable. */
     int rc = wait_for_tag_ready(clone, timeout_ms);
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TIMEOUT) {
-        fprintf(stderr, "  FAIL: cloned @device tag hard failure after source destroy: %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "  FAIL: cloned @connection tag hard failure after source destroy: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(clone);
         return rc;
     }
@@ -474,6 +500,38 @@ static int test_two_clones_from_same_src(void) {
     return PLCTAG_STATUS_OK;
 }
 
+/* Test 13: system tag (TAG_PROTOCOL_SYSTEM) as source -> ERR_NOT_ALLOWED.
+ * Does not require a PLC — system tags work without a network connection. */
+static int test_system_tag_source(void) {
+    int32_t system_tag = plc_tag_create("make=system&family=library&name=version", 0);
+
+    fprintf(stderr, "  test_system_tag_source: system_tag=%d\n", (int)system_tag);
+
+    if(system_tag < 0) {
+        fprintf(stderr, "  FAIL: could not create system tag: %s\n", plc_tag_decode_error((int)system_tag));
+        return (int)system_tag;
+    }
+
+    int32_t rc = plc_tag_create_from_tag(system_tag, "name=whatever", NULL, NULL, 0);
+
+    fprintf(stderr, "  test_system_tag_source: rc=%s (%d)\n", plc_tag_decode_error((int)rc), (int)rc);
+
+    plc_tag_destroy(system_tag);
+
+    if(rc >= 0) {
+        plc_tag_destroy(rc);
+        fprintf(stderr, "  FAIL: expected ERR_NOT_ALLOWED for system tag source\n");
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(rc != PLCTAG_ERR_NOT_ALLOWED) {
+        fprintf(stderr, "  FAIL: expected ERR_NOT_ALLOWED, got %s\n", plc_tag_decode_error((int)rc));
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
 /* Test 12: reuse the handle of a tag that was already destroyed -> ERR_NOT_FOUND. */
 static int test_destroyed_src_id_reused(void) {
     int32_t src = create_ready_src_tag();
@@ -501,6 +559,182 @@ static int test_destroyed_src_id_reused(void) {
     return PLCTAG_STATUS_OK;
 }
 
+/* Test 14: negative timeout -> ERR_BAD_PARAM. */
+static int test_negative_timeout(void) {
+    int32_t src = create_ready_src_tag();
+    if(src < 0) { return (int)src; }
+
+    int32_t rc = plc_tag_create_from_tag(src, clone_tag_attribs, NULL, NULL, -1);
+
+    fprintf(stderr, "  test_negative_timeout: rc=%s (%d)\n", plc_tag_decode_error((int)rc), (int)rc);
+
+    plc_tag_destroy(src);
+
+    if(rc >= 0) {
+        plc_tag_destroy(rc);
+        fprintf(stderr, "  FAIL: expected ERR_BAD_PARAM for negative timeout\n");
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(rc != PLCTAG_ERR_BAD_PARAM) {
+        fprintf(stderr, "  FAIL: expected ERR_BAD_PARAM, got %s\n", plc_tag_decode_error((int)rc));
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Test 15: clone of a clone shares the same underlying session. */
+static int test_clone_of_clone(void) {
+    int32_t src = create_ready_src_tag();
+    if(src < 0) { return (int)src; }
+
+    int32_t clone1 = plc_tag_create_from_tag(src, clone_tag_attribs, NULL, NULL, timeout_ms);
+    if(clone1 < 0) {
+        fprintf(stderr, "  FAIL: could not create first clone: %s\n", plc_tag_decode_error((int)clone1));
+        plc_tag_destroy(src);
+        return (int)clone1;
+    }
+
+    int rc = wait_for_tag_ready(clone1, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: first clone not ready: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone1);
+        plc_tag_destroy(src);
+        return rc;
+    }
+
+    /* Create a clone of the clone. */
+    int32_t clone2 = plc_tag_create_from_tag(clone1, clone_tag_attribs, NULL, NULL, timeout_ms);
+    plc_tag_destroy(src);
+
+    if(clone2 < 0) {
+        fprintf(stderr, "  FAIL: could not create clone of clone: %s\n", plc_tag_decode_error((int)clone2));
+        plc_tag_destroy(clone1);
+        return (int)clone2;
+    }
+
+    rc = wait_for_tag_ready(clone2, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: clone of clone not ready: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone1);
+        plc_tag_destroy(clone2);
+        return rc;
+    }
+
+    rc = plc_tag_read(clone1, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: read on clone1 failed: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone1);
+        plc_tag_destroy(clone2);
+        return rc;
+    }
+
+    rc = plc_tag_read(clone2, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: read on clone2 (clone of clone) failed: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone1);
+        plc_tag_destroy(clone2);
+        return rc;
+    }
+
+    fprintf(stderr, "  test_clone_of_clone: clone1=%d clone2=%d, both reads OK.\n", (int)clone1, (int)clone2);
+
+    plc_tag_destroy(clone1);
+    plc_tag_destroy(clone2);
+    return PLCTAG_STATUS_OK;
+}
+
+/* Callback used by test 16. */
+static void clone_event_callback(int32_t tag_id, int event, int status, void *userdata) {
+    (void)tag_id;
+    (void)status;
+    (void)userdata;
+
+    if(event == PLCTAG_EVENT_CREATED) { compat_atomic_store_int32(&clone_created_cb_fired, 1); }
+    if(event == PLCTAG_EVENT_READ_COMPLETED) { compat_atomic_store_int32(&clone_read_completed_cb_fired, 1); }
+}
+
+/* Test 16: callback registered on clone receives CREATED and READ_COMPLETED. */
+static int test_callback_fires_on_clone(void) {
+    compat_atomic_store_int32(&clone_created_cb_fired, 0);
+    compat_atomic_store_int32(&clone_read_completed_cb_fired, 0);
+
+    int32_t src = create_ready_src_tag();
+    if(src < 0) { return (int)src; }
+
+    int32_t clone = plc_tag_create_from_tag(src, clone_tag_attribs, clone_event_callback, NULL, timeout_ms);
+    plc_tag_destroy(src);
+
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: could not create clone with callback: %s\n", plc_tag_decode_error((int)clone));
+        return (int)clone;
+    }
+
+    int rc = wait_for_tag_ready(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: clone not ready: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone);
+        return rc;
+    }
+
+    if(!compat_atomic_load_int32(&clone_created_cb_fired)) {
+        fprintf(stderr, "  FAIL: PLCTAG_EVENT_CREATED did not fire on clone.\n");
+        plc_tag_destroy(clone);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    rc = plc_tag_read(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: read on clone failed: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone);
+        return rc;
+    }
+
+    if(!compat_atomic_load_int32(&clone_read_completed_cb_fired)) {
+        fprintf(stderr, "  FAIL: PLCTAG_EVENT_READ_COMPLETED did not fire on clone.\n");
+        plc_tag_destroy(clone);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    plc_tag_destroy(clone);
+    return PLCTAG_STATUS_OK;
+}
+
+/* Test 17: async creation (timeout=0) followed by polling to PLCTAG_STATUS_OK. */
+static int test_async_create_and_poll(void) {
+    int32_t src = create_ready_src_tag();
+    if(src < 0) { return (int)src; }
+
+    int32_t clone = plc_tag_create_from_tag(src, clone_tag_attribs, NULL, NULL, 0);
+    plc_tag_destroy(src);
+
+    if(clone < 0) {
+        fprintf(stderr, "  FAIL: create_from_tag with timeout=0 returned error: %s\n", plc_tag_decode_error((int)clone));
+        return (int)clone;
+    }
+
+    /* Poll until ready or timeout. */
+    int rc = wait_for_tag_ready(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: clone not ready after polling %d ms: %s\n", timeout_ms, plc_tag_decode_error(rc));
+        plc_tag_destroy(clone);
+        return rc;
+    }
+
+    rc = plc_tag_read(clone, timeout_ms);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "  FAIL: read on async-created clone failed: %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(clone);
+        return rc;
+    }
+
+    fprintf(stderr, "  test_async_create_and_poll: clone=%d, read OK after async creation.\n", (int)clone);
+
+    plc_tag_destroy(clone);
+    return PLCTAG_STATUS_OK;
+}
+
 /* -------------------------------------------------------------------------
  * Argument parsing
  * ---------------------------------------------------------------------- */
@@ -508,16 +742,17 @@ static int test_destroyed_src_id_reused(void) {
 static void usage(const char *prog) {
     fprintf(stderr,
             "Usage: %s [--src-tag=ATTRIBS] [--clone-attrib=ATTRIBS]\n"
-            "          [--device-tag=ATTRIBS] [--timeout=ms] [--debug=N]\n"
+            "          [--connection-tag=ATTRIBS] [--timeout=ms] [--debug=N]\n"
             "\n"
-            "Tests 1-4 (invalid source IDs) always run without a PLC.\n"
-            "Tests 5-12 run only when --src-tag, --clone-attrib, and --device-tag are provided.\n"
+            "Tests 1-4 and 13 (invalid/system source IDs) always run without a PLC.\n"
+            "Tests 5-12 and 14-17 run only when --src-tag, --clone-attrib, and\n"
+            "--connection-tag are all provided.\n"
             "\n"
             "Example (AB/EIP with simulator):\n"
             "  %s \\\n"
             "    \"--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]\"\\\n"
             "    \"--clone-attrib=name=TestBigArray[1]&elem_count=1\" \\\n"
-            "    \"--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device\" \\\n"
+            "    \"--connection-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection\" \\\n"
             "    --timeout=5000\n",
             prog, prog);
 }
@@ -530,8 +765,8 @@ static void parse_args(int argc, char **argv) {
             src_tag_attribs = &argv[i][10];
         } else if(strncmp(argv[i], "--clone-attrib=", 15) == 0) {
             clone_tag_attribs = &argv[i][15];
-        } else if(strncmp(argv[i], "--device-tag=", 13) == 0) {
-            device_tag_attribs = &argv[i][13];
+        } else if(strncmp(argv[i], "--connection-tag=", 17) == 0) {
+            connection_tag_attribs = &argv[i][17];
         } else if(strncmp(argv[i], "--timeout=", 10) == 0) {
             timeout_ms = atoi(&argv[i][10]);
             if(timeout_ms <= 0) { timeout_ms = DEFAULT_TIMEOUT_MS; }
@@ -580,29 +815,35 @@ int main(int argc, char **argv) {
 
     parse_args(argc, argv);
 
-    have_plc_args = (src_tag_attribs != NULL) && (clone_tag_attribs != NULL) && (device_tag_attribs != NULL);
+    have_plc_args = (src_tag_attribs != NULL) && (clone_tag_attribs != NULL) && (connection_tag_attribs != NULL);
 
     /* --- No-PLC tests (always run) --- */
-    fprintf(stderr, "\n-- No-PLC tests (invalid source IDs) --\n");
-    RUN_TEST("1. src_tag_id = INT32_MAX", test_invalid_src_id_max());
-    RUN_TEST("2. src_tag_id = 0", test_invalid_src_id_zero());
-    RUN_TEST("3. src_tag_id = -1", test_invalid_src_id_minus_one());
-    RUN_TEST("4. src_tag_id = INT32_MIN", test_invalid_src_id_min());
+    fprintf(stderr, "\n-- No-PLC tests (invalid/system source IDs) --\n");
+    RUN_TEST("1.  src_tag_id = INT32_MAX", test_invalid_src_id_max());
+    RUN_TEST("2.  src_tag_id = 0", test_invalid_src_id_zero());
+    RUN_TEST("3.  src_tag_id = -1", test_invalid_src_id_minus_one());
+    RUN_TEST("4.  src_tag_id = INT32_MIN", test_invalid_src_id_min());
+    RUN_TEST("13. system tag source -> ERR_NOT_ALLOWED", test_system_tag_source());
 
     /* --- With-PLC tests --- */
     if(!have_plc_args) {
-        fprintf(stderr, "\nSkipping tests 5-12: --src-tag, --clone-attrib, and --device-tag required.\n"
+        fprintf(stderr, "\nSkipping tests 5-12 and 14-17: --src-tag, --clone-attrib, and\n"
+                        "--connection-tag are all required.\n"
                         "Re-run with PLC arguments to execute the full test suite.\n");
     } else {
         fprintf(stderr, "\n-- With-PLC tests --\n");
         RUN_TEST("5.  valid src, attrib_str = NULL", test_null_attrib_str());
         RUN_TEST("6.  valid src, attrib_str = \"\"", test_empty_attrib_str());
-        RUN_TEST("7.  @device src + data clone attribs", test_device_src_data_dst());
-        RUN_TEST("8.  @device src + @device clone attribs", test_device_src_device_dst());
-        RUN_TEST("9.  regular src + @device clone attribs", test_data_src_device_dst());
+        RUN_TEST("7.  @connection src + data clone attribs", test_device_src_data_dst());
+        RUN_TEST("8.  @connection src + @connection clone attribs", test_device_src_device_dst());
+        RUN_TEST("9.  regular src + @connection clone attribs", test_data_src_device_dst());
         RUN_TEST("10. regular src + data clone, src destroyed", test_data_src_data_dst_success());
         RUN_TEST("11. two clones from same src", test_two_clones_from_same_src());
         RUN_TEST("12. destroyed src ID reused", test_destroyed_src_id_reused());
+        RUN_TEST("14. negative timeout -> ERR_BAD_PARAM", test_negative_timeout());
+        RUN_TEST("15. clone of clone -> success", test_clone_of_clone());
+        RUN_TEST("16. callback fires on clone (CREATED + READ_COMPLETED)", test_callback_fires_on_clone());
+        RUN_TEST("17. async create (timeout=0) + poll -> success", test_async_create_and_poll());
     }
 
     fprintf(stderr, "\nRESULT: %d/%d passed", passed, total);

@@ -1302,10 +1302,8 @@ typedef enum {
 static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason) {
     int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
 
-    if(event_type == TAG_CONN_EVENT_CONNECTION_CHANGED_STATE) {
-        session_conn_status_entry_t *last_entry = &session->conn_status_ring[write_idx];
-
-        if(last_entry->event_type == event_type && last_entry->status == status) { return; }
+    if(session->conn_status_ring[write_idx].event_type == event_type && session->conn_status_ring[write_idx].status == status) {
+        return;
     }
 
     write_idx = (write_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
@@ -1325,12 +1323,10 @@ static inline void session_publish_event(ab_session_p session, int32_t event_typ
  * Must only be called from the session handler thread (single writer). */
 static inline void session_set_connection_status(ab_session_p session, int32_t new_status, int32_t new_reason) {
     int32_t old_status = atomic_get_int32(&session->connection_status);
-
     atomic_set_int32(&session->connection_status_reason, new_reason);
     atomic_set_int32(&session->connection_status, new_status);
-
     if(old_status != new_status) {
-        session_publish_event(session, TAG_CONN_EVENT_CONNECTION_CHANGED_STATE, new_status, new_reason);
+        session_publish_event(session, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, new_reason);
     }
 }
 

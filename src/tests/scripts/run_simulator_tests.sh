@@ -91,7 +91,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_device_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_connection_stress test_create_from_tag test_connection_tag test_connection_tag_late_join test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_omron_destroy test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -103,6 +103,11 @@ do
     fi
 done
 # echo "...Done."
+
+
+# echo "  Killing any older AB emulator process."
+kill_process ab_server
+
 
 
 echo "Starting AB emulator for fast ControlLogix tests."
@@ -255,8 +260,8 @@ fi
 
 
 let TEST++
-echo -n "  Test $TEST: device tag connection state transitions (ControlLogix)... "
-$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device" > "$LOG_DIR/${TEST}_device_tag_test.log" 2>&1
+echo -n "  Test $TEST: connection tag connection state transitions (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" > "$LOG_DIR/${TEST}_connection_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -265,13 +270,55 @@ else
     let SUCCESSES++
 fi
 
+let TEST++
+echo -n "  Test $TEST: multiple simultaneous @connection tags on same session (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
+    --num-tags=3 \
+    "--data-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" > "$LOG_DIR/${TEST}_connection_tag_multi_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
-echo -n "  Test $TEST: create-from-tag API (12 comprehensive permutation tests with AB/EIP)... "
+echo -n "  Test $TEST: @connection tag late join — session already UP before tag created (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_connection_tag_late_join \
+    "--data-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
+    --timeout=5000 > "$LOG_DIR/${TEST}_connection_tag_late_join_logix_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: @connection tag 2-cycle reconnect (5 s idle timeout, ControlLogix)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
+    --cycles=2 \
+    "--data-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
+    --idle-timeout-ms=5000 > "$LOG_DIR/${TEST}_connection_tag_cycle_logix_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: create-from-tag API (17 permutation tests with AB/EIP)... "
 $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
     "--clone-attrib=name=TestBigArray[1]&elem_count=1" \
-    "--device-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@device" \
+    "--connection-tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
     --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -285,7 +332,59 @@ fi
 # echo "  Killing AB emulator."
 kill_process ab_server
 
+
+echo "Starting AB emulator for slot-16 path encoding test."
+{ $TEST_DIR/ab_server --debug --plc=ControlLogix --path=1,16 "--tag=TestBigArray:DINT[2000]" > "$LOG_DIR/logix_slot16_emulator.log" 2>&1 & } 2>/dev/null
+EMULATOR_PID=$!
+if [ $EMULATOR_PID -le 0 ]; then
+    echo "Unable to start AB/ControlLogix emulator (slot 16)!"
+    exit 1
+fi
+
+sleep 1
+
+let TEST++
+echo -n "  Test $TEST: unconnected tag read/write through chassis slot 16 (path=1,16)... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,16&plc=ControlLogix&elem_count=10&name=TestBigArray&use_connected_msg=0' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "$LOG_DIR/${TEST}_slot16_unconnected_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: connected tag read/write through chassis slot 16 (path=1,16)... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,16&plc=ControlLogix&elem_count=10&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "$LOG_DIR/${TEST}_slot16_connected_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+kill_process ab_server
+
+
 echo "Starting stand-alone tests."
+
+# ERR_WAIT test: no AB server is running at this point in the script, so the
+# connection attempt to 127.0.0.1:44818 fails immediately (ECONNREFUSED),
+# which is exactly the condition needed to trigger the ERR_WAIT state.
+let TEST++
+echo -n "  Test $TEST: @connection tag ERR_WAIT on unreachable host (no server running)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=@connection" \
+    --expect-err > "$LOG_DIR/${TEST}_connection_tag_err_wait_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "  Test $TEST: Test async reconnect after PLC outage... "
@@ -417,8 +516,132 @@ else
 fi
 
 let TEST++
+echo -n "  Test $TEST: Omron thread stress... "
+$VALGRIND$TEST_DIR/thread_stress 10 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' > "$LOG_DIR/${TEST}_omron_thread_stress_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
 echo -n "  Test $TEST: idle disconnect and reconnect with runtime timeout change (Omron)... "
 $VALGRIND$TEST_DIR/test_idle_disconnect "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" > "$LOG_DIR/${TEST}_idle_disconnect_omron_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: @connection tag connection state transitions (Omron)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=@connection" > "$LOG_DIR/${TEST}_connection_tag_omron_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: multiple simultaneous @connection tags on same session (Omron)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=@connection" \
+    --num-tags=3 \
+    "--data-tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]" > "$LOG_DIR/${TEST}_connection_tag_omron_multi_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: @connection tag 2-cycle reconnect (5 s idle timeout, Omron)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=@connection" \
+    --cycles=2 \
+    "--data-tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]" \
+    --idle-timeout-ms=5000 > "$LOG_DIR/${TEST}_connection_tag_omron_cycle_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: @connection tag late join (Omron)... "
+$VALGRIND$TEST_DIR/test_connection_tag_late_join \
+    "--data-tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]" \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=@connection" \
+    --timeout=5000 > "$LOG_DIR/${TEST}_connection_tag_late_join_omron_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: connection stress (multiple connections) Omron... "
+$VALGRIND$TEST_DIR/test_connection_stress --num-threads=200 --tag='protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' > "$LOG_DIR/${TEST}_omron_connection_stress_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: Omron tag scheduling fairness... "
+$VALGRIND$TEST_DIR/test_fairness "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray[0]&auto_sync_read_ms=200" --num-tags=200 --test-duration-secs=10 > "$LOG_DIR/${TEST}_omron_fairness_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: emulator test extended callbacks async (Omron)... "
+$VALGRIND$TEST_DIR/test_callback_ex_logix "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray" > "$LOG_DIR/${TEST}_omron_callback_ex_logix_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: create-from-tag API (17 permutation tests with Omron)... "
+$VALGRIND$TEST_DIR/test_create_from_tag \
+    "--src-tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]" \
+    "--clone-attrib=name=TestDINTArray[1]&elem_count=1" \
+    "--connection-tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=@connection" \
+    --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_omron_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: plc_tag_destroy does not hang after Omron connection loss (issue #625)... "
+$VALGRIND$TEST_DIR/test_omron_destroy "${TEST_DIR}/ab_server" > "$LOG_DIR/${TEST}_omron_destroy_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -618,8 +841,37 @@ else
 fi
 
 let TEST++
-echo -n "  Test $TEST: device tag connection state transitions (Modbus)... "
-$VALGRIND$TEST_DIR/test_device_tag "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" > "$LOG_DIR/${TEST}_device_tag_modbus_test.log" 2>&1
+echo -n "  Test $TEST: connection tag connection state transitions (Modbus)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" > "$LOG_DIR/${TEST}_connection_tag_modbus_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: multiple simultaneous @connection tags on same session (Modbus)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" \
+    --num-tags=3 \
+    "--data-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" > "$LOG_DIR/${TEST}_connection_tag_modbus_multi_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: @connection tag 2-cycle reconnect (5 s idle timeout, Modbus)... "
+$VALGRIND$TEST_DIR/test_connection_tag \
+    "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" \
+    --cycles=2 \
+    "--data-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
+    --idle-timeout-ms=5000 > "$LOG_DIR/${TEST}_connection_tag_modbus_cycle_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -682,11 +934,25 @@ fi
 
 
 let TEST++
-echo -n "  Test $TEST: create-from-tag API (12 comprehensive permutation tests with Modbus)... "
+echo -n "  Test $TEST: @connection tag late join (Modbus)... "
+$VALGRIND$TEST_DIR/test_connection_tag_late_join \
+    "--data-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
+    "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" \
+    --timeout=5000 > "$LOG_DIR/${TEST}_connection_tag_late_join_modbus_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: create-from-tag API (17 permutation tests with Modbus)... "
 $VALGRIND$TEST_DIR/test_create_from_tag \
     "--src-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
     "--clone-attrib=name=hr20&elem_count=2" \
-    "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" \
+    "--connection-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" \
     --timeout=10000 > "$LOG_DIR/${TEST}_create_from_tag_modbus_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"

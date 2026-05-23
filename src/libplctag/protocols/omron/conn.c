@@ -1086,16 +1086,15 @@ static inline void conn_set_connection_status(omron_conn_p conn, int32_t new_sta
     if(old_status != new_status) {
         atomic_set_int32(&conn->connection_status, new_status);
         int32_t cur_idx = atomic_get_int32(&conn->conn_event_ring_write_idx);
+        int32_t event_type = new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET;
 
-        /* Avoid duplicate consecutive connection state events. */
-        if(conn->conn_event_ring[cur_idx].event_type == TAG_CONN_EVENT_CONNECTION_CHANGED_STATE
-           && conn->conn_event_ring[cur_idx].status == new_status) {
+        if(conn->conn_event_ring[cur_idx].event_type == event_type && conn->conn_event_ring[cur_idx].status == PLCTAG_STATUS_OK) {
             return;
         }
 
         cur_idx = (cur_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-        conn->conn_event_ring[cur_idx].event_type = TAG_CONN_EVENT_CONNECTION_CHANGED_STATE;
-        conn->conn_event_ring[cur_idx].status = new_status;
+        conn->conn_event_ring[cur_idx].event_type = event_type;
+        conn->conn_event_ring[cur_idx].status = PLCTAG_STATUS_OK;
         atomic_set_int32(&conn->conn_event_ring_write_idx, cur_idx);
         plc_tag_tickler_wake();
     }

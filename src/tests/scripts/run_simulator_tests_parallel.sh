@@ -101,7 +101,7 @@ PORT_PLC5=44823
 # Executable preflight check
 # ──────────────────────────────────────────────────────────────────────────────
 
-EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_device_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server modbus_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_create_from_tag test_connection_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 
 for EXECUTABLE in $EXECUTABLES; do
     if [[ ! -e "$EXECUTABLE_DIR/$EXECUTABLE" ]]; then
@@ -365,15 +365,15 @@ group_logix_fast() {
         $VALGRIND$EXECUTABLE_DIR/test_shutdown_restart \
         "--tag=protocol=ab-eip&gateway=$gw&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"
 
-    run_test "$out" "$res" 13 "device tag connection state transitions (ControlLogix)" \
-        $VALGRIND$EXECUTABLE_DIR/test_device_tag \
-        "--tag=protocol=ab-eip&gateway=$gw&path=1,0&plc=ControlLogix&name=@device"
+    run_test "$out" "$res" 13 "connection tag connection state transitions (ControlLogix)" \
+        $VALGRIND$EXECUTABLE_DIR/test_connection_tag \
+        "--tag=protocol=ab-eip&gateway=$gw&path=1,0&plc=ControlLogix&name=@connection"
 
     run_test "$out" "$res" 14 "create-from-tag API (12 comprehensive permutation tests with AB/EIP)" \
         $VALGRIND$EXECUTABLE_DIR/test_create_from_tag \
         "--src-tag=protocol=ab-eip&gateway=$gw&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]" \
         "--clone-attrib=name=TestBigArray[1]&elem_count=1" \
-        "--device-tag=protocol=ab-eip&gateway=$gw&path=1,0&plc=ControlLogix&name=@device" \
+        "--device-tag=protocol=ab-eip&gateway=$gw&path=1,0&plc=ControlLogix&name=@connection" \
         --timeout=10000
 
     echo "Killing fast ControlLogix emulator." >> "$out"
@@ -571,9 +571,9 @@ group_modbus() {
         return 1
     fi
 
-    run_test "$out" "$res" 34 "device tag connection state transitions (Modbus)" \
-        $VALGRIND$EXECUTABLE_DIR/test_device_tag \
-        "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device"
+    run_test "$out" "$res" 34 "connection tag connection state transitions (Modbus)" \
+        $VALGRIND$EXECUTABLE_DIR/test_connection_tag \
+        "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection"
 
     run_test "$out" "$res" 35 "test idle disconnect with Modbus" \
         $VALGRIND$EXECUTABLE_DIR/test_idle_disconnect \
@@ -594,7 +594,7 @@ group_modbus() {
         $VALGRIND$EXECUTABLE_DIR/test_create_from_tag \
         "--src-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10" \
         "--clone-attrib=name=hr20&elem_count=2" \
-        "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@device" \
+        "--device-tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&name=@connection" \
         --timeout=10000
 
     run_test "$out" "$res" 40 "hard library shutdown (Modbus)" \
