@@ -522,7 +522,8 @@ static util_err_t parse_eip_list_identity_response(const buf_t *recv_buf, const 
     }
 
     /* Extract sender IP from socket address */
-    uint32_t sender_ip = ntohl(*(uint32_t *)&((struct sockaddr_in *)&src_addr->addr)->sin_addr);
+    const struct sockaddr_in *sender_sockaddr = (const struct sockaddr_in *)&src_addr->addr;
+    uint32_t sender_ip = ntohl(sender_sockaddr->sin_addr.s_addr);
 
     /* Process each CPF item */
     for(uint16_t i = 0; i < item_count; i++) {

@@ -4432,7 +4432,7 @@ int check_byte_order_str(const char *byte_order, int length, int32_t tag_id) {
     for(int i = 0; i < byte_order_len; i++) {
         int val = 0;
 
-        if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
+        if(!isdigit((unsigned char)byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Byte order string, \"%s\", must be only characters from '0' to '7'!",
                    byte_order);
             return PLCTAG_ERR_BAD_DATA;

@@ -75,8 +75,9 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
  * Number of milliseconds to wait to try to set up the session again
  * after a failure.
  */
-#define RETRY_WAIT_INITIAL_MS (100)
-#define RETRY_WAIT_MAX_MS (10000)
+#define RETRY_WAIT_INITIAL_MS (INT64_C(100))
+#define RETRY_WAIT_MAX_MS (INT64_C(10000))
+#define MAX_RETRY_COUNT ((unsigned int)16U) /* cap to prevent overflow */
 
 /* Idle timeout.  One second less than that negotiated with the PLC. */
 #define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
@@ -119,7 +120,7 @@ static void session_destroy(void *session);
 static int session_register(ab_session_p session);
 static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
-static int64_t calc_retry_time(unsigned int retry_count);
+static int64_t calc_retry_time(int64_t now, unsigned int *retry_count);
 static THREAD_FUNC(session_handler);
 static int purge_aborted_requests_unsafe(ab_session_p session);
 static int process_requests(ab_session_p session);
@@ -1265,18 +1266,29 @@ int session_add_request(ab_session_p session, ab_request_p req) {
 }
 
 
-int64_t calc_retry_time(unsigned int retry_count) {
-    int64_t result = 0;
-    result = RETRY_WAIT_INITIAL_MS * (1 << retry_count);
+int64_t calc_retry_time(int64_t now, unsigned int *retry_count) {
+    int64_t retry_wait = 0;
+    int64_t jitter_base = 0;
+    int64_t jitter = 0;
 
-    if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
+    /* clamp retry count to prevent overflow/UB */
+    if((++*retry_count) > MAX_RETRY_COUNT) { *retry_count = MAX_RETRY_COUNT; }
 
-    result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
+    retry_wait = RETRY_WAIT_INITIAL_MS * (int64_t)(1ULL << (uint64_t)(*retry_count));
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Retry count %u for retry time delay of %" PRId64 "ms.", retry_count,
-           result);
+    if(retry_wait > RETRY_WAIT_MAX_MS) { retry_wait = RETRY_WAIT_MAX_MS; }
 
-    return result;
+    jitter_base = retry_wait / 2;
+    if(jitter_base > 0) { jitter = (int64_t)random_u64((uint64_t)jitter_base) - (jitter_base / 2); }
+
+    retry_wait = now + retry_wait + jitter;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Retry count %u for retry time delay of %" PRId64 "ms.", *retry_count,
+           retry_wait - now);
+
+    if(retry_wait < 0) { retry_wait = 0; }
+
+    return retry_wait;
 }
 
 
@@ -1343,7 +1355,6 @@ THREAD_FUNC(session_handler) {
     int32_t inactivity_timeout_ms = atomic_get_int32(&session->connection_inactivity_timeout_ms);
     int64_t auto_disconnect_time = time_ms() + inactivity_timeout_ms;
     unsigned int retry_count = 0;
-    int64_t retry_wait_ms = 0;
     int auto_disconnect = 0;
 
 
@@ -1444,7 +1455,7 @@ THREAD_FUNC(session_handler) {
                     atomic_set_int32(&session->connection_status_reason, rc);
                     state = SESSION_CLOSE_SOCKET;
                 } else {
-                    retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+                    retry_count = 0;
 
                     if(session->use_connected_msg) {
                         state = SESSION_SEND_FORWARD_OPEN;
@@ -1464,7 +1475,7 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_UNREGISTER;
                 } else {
-                    retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+                    retry_count = 0;
 
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
                            "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
@@ -1498,7 +1509,7 @@ THREAD_FUNC(session_handler) {
                         state = SESSION_UNREGISTER;
                     }
                 } else {
-                    retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+                    retry_count = 0;
                     atomic_set_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                     state = SESSION_IDLE;
@@ -1509,6 +1520,9 @@ THREAD_FUNC(session_handler) {
             case SESSION_IDLE:
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
                 session_set_connection_status(session, PLCTAG_CONN_STATUS_UP, PLCTAG_STATUS_OK);
+
+                /* successful connected/registered state: restart retry backoff sequence */
+                retry_count = 0;
 
                 /* make sure that our timeout period has not changed */
                 if(inactivity_timeout_ms != atomic_get_int32(&session->connection_inactivity_timeout_ms)) {
@@ -1617,11 +1631,10 @@ THREAD_FUNC(session_handler) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
 
                 /* FIXME - make this a tag attribute. */
-                timeout_time = now + calc_retry_time(retry_count);
-                retry_count++;
+                timeout_time = calc_retry_time(now, &retry_count);
 
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting %dms before trying to reconnect.",
-                       (int)(retry_wait_ms));
+                       (int)(timeout_time - now));
 
                 /* start waiting. */
                 state = SESSION_WAIT_ERR_RETRY;

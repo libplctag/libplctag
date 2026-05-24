@@ -94,7 +94,7 @@ static int conn_close_socket(omron_conn_p conn);
 static int conn_unregister(omron_conn_p conn);
 static THREAD_FUNC(conn_handler);
 static int purge_aborted_requests_unsafe(omron_conn_p conn);
-static int64_t calc_retry_time(unsigned int retry_count);
+static int64_t calc_retry_time(int64_t now, unsigned int *retry_count);
 static int process_requests(omron_conn_p conn);
 // static int check_packing(omron_conn_p conn, omron_request_p request);
 static int get_payload_size(omron_request_p request);
@@ -1126,11 +1126,29 @@ static inline void conn_publish_event(omron_conn_p conn, int32_t event_type, int
 }
 
 
-int64_t calc_retry_time(unsigned int retry_count) {
-    int64_t result = RETRY_WAIT_INITIAL_MS * (int64_t)(1 << retry_count);
-    if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
-    result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
-    return result;
+int64_t calc_retry_time(int64_t now, unsigned int *retry_count) {
+    int64_t retry_wait = 0;
+    int64_t jitter_base = 0;
+    int64_t jitter = 0;
+
+    /* clamp retry count to prevent overflow/UB */
+    if((++*retry_count) > 16) { *retry_count = 16; }
+
+    retry_wait = (int64_t)RETRY_WAIT_INITIAL_MS * (int64_t)(1ULL << (uint64_t)(*retry_count));
+
+    if(retry_wait > RETRY_WAIT_MAX_MS) { retry_wait = RETRY_WAIT_MAX_MS; }
+
+    jitter_base = retry_wait / 2;
+    if(jitter_base > 0) { jitter = (int64_t)random_u64((uint64_t)jitter_base) - (jitter_base / 2); }
+
+    retry_wait = now + retry_wait + jitter;
+
+    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Retry count %u for retry time delay of %" PRId64 "ms.", *retry_count,
+           retry_wait - now);
+
+    if(retry_wait < 0) { retry_wait = 0; }
+
+    return retry_wait;
 }
 
 
@@ -1397,8 +1415,11 @@ THREAD_FUNC(conn_handler) {
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "in CONN_START_RETRY state.");
 
                 /* FIXME - make this a tag attribute. */
-                timeout_time = time_ms() + calc_retry_time(retry_count);
-                retry_count++;
+                int64_t now = time_ms();
+                timeout_time = calc_retry_time(now, &retry_count);
+
+                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Waiting %dms before trying to reconnect.",
+                       (int)(timeout_time - now));
 
                 /* start waiting. */
                 state = CONN_WAIT_ERR_RETRY;

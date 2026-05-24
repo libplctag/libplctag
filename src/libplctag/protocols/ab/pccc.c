@@ -762,7 +762,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address) {
 
         case 'B':
         case 'b': /* Bit or block transfer */
-            if(isdigit((*str)[1])) {
+            if(isdigit((unsigned char)(*str)[1])) {
                 /* Bit */
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Found Bit file.");
                 address->file_type = PCCC_FILE_BIT;
@@ -883,7 +883,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address) {
 
         case 'S':
         case 's': /* Status, SFC or String */
-            if(isdigit((*str)[1])) {
+            if(isdigit((unsigned char)(*str)[1])) {
                 /* Status */
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Found Status file.");
                 address->file_type = PCCC_FILE_STATUS;
@@ -945,14 +945,14 @@ int parse_pccc_file_num(const char **str, pccc_addr_t *address) {
     }
 
     /* if this is I or O, then we can skip the data file number. */
-    if((address->file_type == PCCC_FILE_INPUT || address->file_type == PCCC_FILE_OUTPUT) && !isdigit(**str)) {
+    if((address->file_type == PCCC_FILE_INPUT || address->file_type == PCCC_FILE_OUTPUT) && !isdigit((unsigned char)**str)) {
         /* skip the data file number */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Data file number omitted for I or O data file.");
         return PLCTAG_STATUS_OK;
     }
 
     /* FIXME - why are we not using strtol here? We should also support octal. */
-    while(**str && isdigit(**str) && tmp < 65535) {
+    while(**str && isdigit((unsigned char)**str) && tmp < 65535) {
         tmp *= 10;
         tmp += (int)((**str) - '0');
         (*str)++;
@@ -980,7 +980,7 @@ int parse_pccc_elem_num(const char **str, pccc_addr_t *address) {
     /* step past the : character */
     (*str)++;
 
-    while(**str && isdigit(**str) && tmp < 65535) {
+    while(**str && isdigit((unsigned char)**str) && tmp < 65535) {
         tmp *= 10;
         tmp += (int)((**str) - '0');
         (*str)++;
@@ -1065,13 +1065,13 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Starting.");
 
     /* is it a numeric sub-element? */
-    if(!isdigit(**str)) {
+    if(!isdigit((unsigned char)**str)) {
         /* nope, it is not. */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Not a numeric sub-element.");
         return PLCTAG_ERR_NO_MATCH;
     }
 
-    while(**str && isdigit(**str) && tmp < 65535) {
+    while(**str && isdigit((unsigned char)**str) && tmp < 65535) {
         tmp *= 10;
         tmp += (int)((**str) - '0');
         (*str)++;
@@ -1326,7 +1326,7 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
     (*str)++;
 
     /* FIXME - we do this a lot, should be a small routine. */
-    while(**str && isdigit(**str) && tmp < 65535) {
+    while(**str && isdigit((unsigned char)**str) && tmp < 65535) {
         tmp *= 10;
         tmp += (int)((**str) - '0');
         (*str)++;

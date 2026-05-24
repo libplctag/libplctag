@@ -307,7 +307,7 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
             /* yes, there is, delay a bit. */
             compat_sleep_ms(10, NULL);
         }
-    } while(tags_pending > 0 && end_timeout > compat_time_ms() && !done);
+    } while(tags_pending > 0 && end_timeout > compat_time_ms() && !compat_atomic_load_int32(&done));
 
     rc = PLCTAG_STATUS_OK;
 
