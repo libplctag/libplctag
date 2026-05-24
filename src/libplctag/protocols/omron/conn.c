@@ -287,7 +287,7 @@ int conn_get_available_cip_payload_space(omron_conn_p conn) {
 }
 
 
-int conn_find_or_create(omron_conn_p *tag_conn, attr attribs) {
+int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *conn_gw = attr_get_str(attribs, "gateway", "");
     const char *conn_path = attr_get_str(attribs, "path", "");
@@ -393,6 +393,8 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs) {
 
     /* store it into the tag */
     *tag_conn = conn;
+
+    if(is_new_conn) { *is_new_conn = new_conn; }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Done");
 

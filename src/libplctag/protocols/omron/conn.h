@@ -170,7 +170,7 @@ uint64_t conn_get_new_seq_id(omron_conn_p sess);
 extern int conn_startup(void);
 extern void conn_teardown(void);
 
-extern int conn_find_or_create(omron_conn_p *conn, attr attribs);
+extern int conn_find_or_create(omron_conn_p *conn, attr attribs, int *is_new_conn);
 extern int conn_get_max_payload(omron_conn_p conn);
 extern int conn_get_available_cip_payload_space(omron_conn_p conn);
 extern int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *request);

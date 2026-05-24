@@ -116,16 +116,31 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
             tag->status = PLCTAG_ERR_NOT_ALLOWED;
             return (plc_tag_p)tag;
         }
-    } else if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, 0, "Unable to create session!");
-        tag->status = PLCTAG_ERR_BAD_GATEWAY;
-        return (plc_tag_p)tag;
+        /* Cloned from an existing tag: start with current connection state. */
+        tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
+        tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
+    } else {
+        int new_session = 0;
+        if(session_find_or_create(&tag->session, attribs, &new_session) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, 0, "Unable to create session!");
+            tag->status = PLCTAG_ERR_BAD_GATEWAY;
+            return (plc_tag_p)tag;
+        }
+        if(new_session) {
+            /* Fresh session: start at ring index 0 so all events arrive via the ring
+             * in order (CONNECTING → UP).  This avoids a race where the session
+             * thread connects before we read connection_status here. */
+            tag->status_ring_read_idx = 0;
+            tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
+        } else {
+            /* Late join: session already exists and may already be UP. */
+            tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
+            tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
+        }
     }
 
     pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "using session=%p", tag->session);
 
-    tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
-    tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
     tag->first_tickler_run = true;
 
     /*

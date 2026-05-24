@@ -338,7 +338,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             return (plc_tag_p)tag;
         }
     } else {
-        if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
+        if(session_find_or_create(&tag->session, attribs, NULL) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
             tag->status = PLCTAG_ERR_BAD_GATEWAY;
             return (plc_tag_p)tag;

@@ -271,7 +271,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
             return (plc_tag_p)tag;
         }
     } else {
-        if(conn_find_or_create(&tag->conn, attribs) != PLCTAG_STATUS_OK) {
+        if(conn_find_or_create(&tag->conn, attribs, NULL) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Unable to create conn!");
             tag->status = PLCTAG_ERR_BAD_GATEWAY;
             return (plc_tag_p)tag;

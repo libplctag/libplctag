@@ -338,7 +338,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
     return result;
 }
 
-int session_find_or_create(ab_session_p *tag_session, attr attribs) {
+int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_session) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
@@ -484,6 +484,8 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs) {
 
     /* store it into the tag */
     *tag_session = session;
+
+    if(is_new_session) { *is_new_session = new_session; }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done");
 

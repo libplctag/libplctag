@@ -177,7 +177,7 @@ uint64_t session_get_new_seq_id(ab_session_p sess);
 extern int session_startup(void);
 extern void session_teardown(void);
 
-extern int session_find_or_create(ab_session_p *session, attr attribs);
+extern int session_find_or_create(ab_session_p *session, attr attribs, int *is_new_session);
 extern int session_get_max_payload(ab_session_p session);
 extern int session_get_available_cip_payload_space(ab_session_p session);
 extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);

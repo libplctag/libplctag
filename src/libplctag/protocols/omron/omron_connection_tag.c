@@ -106,8 +106,24 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
         }
 
         rc = tag->conn ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
+        if(rc == PLCTAG_STATUS_OK) {
+            /* Cloned from an existing tag: start with current connection state. */
+            tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
+            tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
+        }
     } else {
-        rc = conn_find_or_create(&tag->conn, attribs);
+        int new_conn = 0;
+        rc = conn_find_or_create(&tag->conn, attribs, &new_conn);
+        if(rc == PLCTAG_STATUS_OK) {
+            if(new_conn) {
+                tag->event_ring_read_idx = 0;
+                tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
+            } else {
+                /* Late join: conn already exists and may already be UP. */
+                tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
+                tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
+            }
+        }
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -117,8 +133,6 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
         return (plc_tag_p)tag;
     }
 
-    tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
-    tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
     tag->first_tickler_run = true;
 
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
