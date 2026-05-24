@@ -192,28 +192,30 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons((uint16_t)atoi(listening_port));
 
-    log_info("socket_open() setting up server socket. Binding to address 0.0.0.0.");
-
-    rc = bind(sock, (struct sockaddr *)&address, (socklen_t)sizeof(address));
-    if(rc < 0) {
-        perror("Error from bind(): ");
-        printf("ERROR: Unable to bind() socket: %d\n", rc);
-        return (SOCKET)ERR_SOCKET_BIND;
-    }
-
-    rc = listen(sock, LISTEN_QUEUE);
-    if(rc < 0) {
-        log_info("ERROR: Unable to call listen() on socket: %d\n", rc);
-        return (SOCKET)ERR_SOCKET_LISTEN;
-    }
-
-    /* set up our socket to allow reuse if we crash suddenly. */
+    /* set up our socket to allow reuse if we crash suddenly — must be before bind(). */
     sock_opt = 1;
     rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt));
     if(rc) {
         socket_close(sock);
         log_info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
         return (SOCKET)ERR_SOCKET_SETOPT;
+    }
+
+    log_info("socket_open() setting up server socket. Binding to address 0.0.0.0.");
+
+    rc = bind(sock, (struct sockaddr *)&address, (socklen_t)sizeof(address));
+    if(rc < 0) {
+        perror("Error from bind(): ");
+        printf("ERROR: Unable to bind() socket: %d\n", rc);
+        socket_close(sock);
+        return (SOCKET)ERR_SOCKET_BIND;
+    }
+
+    rc = listen(sock, LISTEN_QUEUE);
+    if(rc < 0) {
+        log_info("ERROR: Unable to call listen() on socket: %d\n", rc);
+        socket_close(sock);
+        return (SOCKET)ERR_SOCKET_LISTEN;
     }
 
     return sock;

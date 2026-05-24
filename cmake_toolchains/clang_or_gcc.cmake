@@ -12,7 +12,7 @@ else()
     # Don't set static linker options if sanitizers are enabled in Debug mode
     if(NOT (USE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug"))
         set(STATIC_C_LINKER_OPTIONS "-static")
-        set(STATIC_CXX_LINKER_OPTIONS "-static")
+        set(STATIC_CXX_LINKER_OPTIONS "-static-libgcc;-static-libstdc++")
     endif()
 endif()
 
@@ -30,6 +30,8 @@ if(BUILD_32_BIT)
     set(EXTRA_COMPILE_FLAGS_MINSIZEREL "${EXTRA_COMPILE_FLAGS_MINSIZEREL} -m32")
     set(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -m32")
     set(EXTRA_LINK_FLAGS "-m32")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m32")
 endif()
 
 set(CMAKE_C_FLAGS_MINSIZEREL " -Os -DNDEBUG -DPLCTAG_COMPILE_DEBUG_LEVEL=3 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -std=c11 ${EXTRA_COMPILE_FLAGS_MINSIZEREL}")

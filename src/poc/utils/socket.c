@@ -807,13 +807,14 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     msg.msg_name = (void*)&addr->addr;
     msg.msg_namelen = addr->addr_len;
     msg.msg_iov = vecs;
-    msg.msg_iovlen = (int)vec_count;
 
 #ifdef UTIL_BSD_OS_TYPE
-    /* On BSD/macOS, SO_NOSIGPIPE was set at socket creation */
+    /* On BSD/macOS, msg_iovlen is int and SO_NOSIGPIPE was set at socket creation */
+    msg.msg_iovlen = (int)vec_count;
     ssize_t sent = sendmsg(sock, &msg, 0);
 #else
-    /* On Linux, MSG_NOSIGNAL prevents SIGPIPE when writing to closed sockets */
+    /* On Linux, msg_iovlen is size_t and MSG_NOSIGNAL prevents SIGPIPE */
+    msg.msg_iovlen = vec_count;
     ssize_t sent = sendmsg(sock, &msg, MSG_NOSIGNAL);
 #endif
     

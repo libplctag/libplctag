@@ -89,10 +89,12 @@ tag_byte_order_t system_tag_byte_order = {.is_allocated = 0,
 
 
 plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                            void *userdata) {
+                            void *userdata, plc_tag_p src_tag) {
     int rc = PLCTAG_STATUS_OK;
     system_tag_p tag = NULL;
     const char *name = attr_get_str(attribs, "name", NULL);
+
+    (void)src_tag;
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, 0, "Starting.");
 
@@ -121,6 +123,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
      * in case we need to abort later.
      */
     tag->vtable = &system_tag_vtable;
+    tag->protocol_type = TAG_PROTOCOL_SYSTEM;
 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);

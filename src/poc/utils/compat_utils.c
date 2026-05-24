@@ -81,10 +81,14 @@ int compat_mutex_lock(compat_mutex_t *mutex) { return pthread_mutex_lock(mutex);
 int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
     struct timespec ts;
 
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);
 
     ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
     ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
+    if(ts.tv_nsec >= 1000000000) {
+        ts.tv_sec += 1;
+        ts.tv_nsec -= 1000000000;
+    }
 
     return pthread_mutex_timedlock(mutex, &ts);
 }
@@ -92,17 +96,17 @@ int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duratio
 #    else /* __APPLE__ is defined */
 /* macOS does not provide an implementation of pthread_mutex_timedlock() */
 int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
+    static const struct timespec sleep_ts = { 0, 1000000 }; /* 1ms */
     int64_t end_time = compat_time_ms() + timeout_duration_ms;
 
     if(!mutex) { return -1; }
 
     while(1) {
-        if(compat_mutex_trylock(mutex)) { return 0; }
+        if(compat_mutex_trylock(mutex) == 0) { return 0; }
 
         if(compat_time_ms() >= end_time) { return -1; /* timeout */ }
 
-        /* yield the CPU */
-        compat_thread_yield();
+        nanosleep(&sleep_ts, NULL);
     }
 
     return 0;
@@ -154,7 +158,7 @@ int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) { return pthrea
 
 int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
     ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
     if(ts.tv_nsec >= 1000000000) {

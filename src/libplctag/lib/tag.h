@@ -73,6 +73,32 @@ struct tag_vtable_t {
 
 typedef struct tag_vtable_t *tag_vtable_p;
 
+typedef enum {
+    TAG_PROTOCOL_UNKNOWN = 0,
+    TAG_PROTOCOL_SYSTEM = 1,
+    TAG_PROTOCOL_AB = 2,
+    TAG_PROTOCOL_AB_CONNECTION = 3,
+    TAG_PROTOCOL_MODBUS = 4,
+    TAG_PROTOCOL_OMRON = 5,
+    TAG_PROTOCOL_MB_CONNECTION = 6,
+    TAG_PROTOCOL_OMRON_CONNECTION = 7
+} tag_protocol_t;
+
+
+/* Shared connection event types — used by AB, Modbus, and Omron connection tags */
+
+typedef enum {
+    TAG_CONN_EVENT_SEND_REQUEST_STARTED = 1,
+    TAG_CONN_EVENT_SEND_REQUEST_COMPLETED = 2,
+    TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED = 3,
+    TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED = 4,
+} tag_conn_event_type_t;
+
+typedef struct {
+    int32_t event_type; /* tag_conn_event_type_t */
+    int32_t status;
+} tag_conn_event_t;
+
 
 /* byte ordering */
 
@@ -136,6 +162,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t tag_id;                          \
     int connection_group_id;                 \
     int bit;                                 \
+    int protocol_type;                       \
     atomic_bool abort_requested;             \
     int8_t event_creation_complete_status;   \
     int8_t event_deletion_started_status;    \

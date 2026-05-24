@@ -40,6 +40,7 @@
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
+#include <libplctag/protocols/ab/connection_tag.h>
 #include <libplctag/protocols/ab/eip_cip.h>
 #include <libplctag/protocols/ab/eip_cip_special.h>
 #include <libplctag/protocols/ab/eip_lgx_pccc.h>
@@ -56,6 +57,12 @@
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
+
+/* Minimal view of AB device-tag layout needed for source-session sharing. */
+typedef struct ab_connection_tag_view_s {
+    TAG_BASE_STRUCT;
+    ab_session_p session;
+} ab_connection_tag_view_t;
 
 /*
  * Externally visible global variables
@@ -164,7 +171,7 @@ void ab_teardown(void) {
 
 
 plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                        void *userdata) {
+                        void *userdata, plc_tag_p src_tag) {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
@@ -172,7 +179,12 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Starting.");
 
     /* short circuit for split Omron*/
-    if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata); }
+    if(get_plc_type(attribs) == AB_PLC_OMRON_NJNX) { return omron_tag_create(attribs, tag_callback_func, userdata, src_tag); }
+
+    /* short circuit for device tag */
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        return (plc_tag_p)ab_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    }
 
     /*
      * allocate memory for the new tag.  Do this first so that
@@ -193,6 +205,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
 
     tag->vtable = &default_vtable;
+    tag->protocol_type = TAG_PROTOCOL_AB;
 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
@@ -210,12 +223,31 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      *
      */
 
-    if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
-        /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return (plc_tag_p)NULL;
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: {
+                ab_tag_p src = (ab_tag_p)src_tag;
+                tag->plc_type = src->plc_type;
+                break;
+            }
+
+            case TAG_PROTOCOL_AB_CONNECTION: {
+                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
+                tag->plc_type = src_device->session ? src_device->session->plc_type : AB_PLC_NONE;
+                break;
+            }
+
+            default: tag->plc_type = AB_PLC_NONE; break;
+        }
+    } else {
+        if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
+            /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+            rc_dec(tag);
+            return (plc_tag_p)NULL;
+        }
     }
 
     /* set up any required settings based on the cpu type. */
@@ -282,10 +314,35 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      *
      * All tags need sessions.  They are the TCP connection to the gateway PLC.
      */
-    if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
-        tag->status = PLCTAG_ERR_BAD_GATEWAY;
-        return (plc_tag_p)tag;
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: {
+                ab_tag_p src = (ab_tag_p)src_tag;
+                tag->session = rc_inc(src->session);
+                break;
+            }
+
+            case TAG_PROTOCOL_AB_CONNECTION: {
+                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
+                tag->session = rc_inc(src_device->session);
+                break;
+            }
+
+            default: tag->session = NULL; break;
+        }
+
+        if(!tag->session) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
+            tag->status = PLCTAG_ERR_NOT_FOUND;
+            return (plc_tag_p)tag;
+        }
+    } else {
+        if(session_find_or_create(&tag->session, attribs, NULL) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
+            tag->status = PLCTAG_ERR_BAD_GATEWAY;
+            return (plc_tag_p)tag;
+        }
     }
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);
@@ -363,7 +420,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up Logix tag.");
 
             /* Logix tags need a path. */
-            if(path == NULL && tag->plc_type == AB_PLC_LGX) {
+            if(!src_tag && path == NULL && tag->plc_type == AB_PLC_LGX) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "A path is required for Logix-class PLCs!");
                 tag->status = PLCTAG_ERR_BAD_PARAM;
                 return (plc_tag_p)tag;
@@ -414,7 +471,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             break;
 
         case AB_PLC_GENERIC:
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up generic CIP device tag.");
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up generic CIP connection tag.");
 
             /* Generic type supports optional path for reaching modules in chassis */
             if(path && str_length(path)) {
@@ -745,14 +802,16 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id,
-                   "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
             critical_block(tag->api_mutex) {
-                if(req != tag->req) {
+                if(tag->req == req) {
+                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id,
+                           "rc_dec: Releasing tag-owned reference to request of tag %" PRId32 ".", tag->tag_id);
+                    tag->req = NULL;
+                    rc_dec(req);
+                } else {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
                            "Request changed out from underneath us during abort process!");
                 }
-                tag->req = rc_dec(tag->req);
             }
 
             req = rc_dec(req);

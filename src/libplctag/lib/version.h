@@ -43,10 +43,10 @@
  */
 
 // clang-format off
-#define LIB_VER_STRING "2.6.16"
+#define LIB_VER_STRING "2.7.0"
 #define LIB_VER_MAJOR (2)
-#define LIB_VER_MINOR (6)
-#define LIB_VER_PATCH (16)
+#define LIB_VER_MINOR (7)
+#define LIB_VER_PATCH (0)
 
 extern const char *VERSION;
 extern const uint64_t version_major;

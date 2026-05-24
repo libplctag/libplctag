@@ -54,6 +54,8 @@
 
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
+#    define OMRON_CONN_EVENT_RING_SIZE (8)
+#    define OMRON_CONN_EVENT_RING_MASK (OMRON_CONN_EVENT_RING_SIZE - 1)
 
 
 struct omron_conn_t {
@@ -122,6 +124,10 @@ struct omron_conn_t {
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
 
+    /* event ring for device tags (single writer: connection handler thread) */
+    tag_conn_event_t conn_event_ring[OMRON_CONN_EVENT_RING_SIZE];
+    atomic_int32_t conn_event_ring_write_idx;
+
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
 };
@@ -164,7 +170,7 @@ uint64_t conn_get_new_seq_id(omron_conn_p sess);
 extern int conn_startup(void);
 extern void conn_teardown(void);
 
-extern int conn_find_or_create(omron_conn_p *conn, attr attribs);
+extern int conn_find_or_create(omron_conn_p *conn, attr attribs, int *is_new_conn);
 extern int conn_get_max_payload(omron_conn_p conn);
 extern int conn_get_available_cip_payload_space(omron_conn_p conn);
 extern int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *request);

@@ -1,0 +1,26 @@
+FROM alpine:latest
+
+# Configure apk with retry logic for transient network failures
+RUN echo 'http_request_timeout=120' >> /etc/apk/apk.conf
+
+# Install packages with retry loop to handle transient network issues
+RUN for attempt in 1 2 3; do \
+    echo "Attempt $attempt/3: Updating package list..." && \
+    apk update && \
+    apk add --no-cache \
+      cmake \
+      make \
+      gcc \
+      musl-dev && \
+    echo "Installation successful" && \
+    exit 0 || \
+    (if [ $attempt -lt 3 ]; then \
+      echo "Attempt $attempt failed, waiting 15 seconds before retry..."; \
+      sleep 15; \
+    else \
+      echo "All 3 attempts failed"; \
+      exit 1; \
+    fi); \
+    done
+
+WORKDIR /src

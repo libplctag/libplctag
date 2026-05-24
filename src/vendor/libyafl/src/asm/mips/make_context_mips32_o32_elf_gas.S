@@ -1,0 +1,92 @@
+/*
+            Copyright Oliver Kowalke 2009.
+   Distributed under the Boost Software License, Version 1.0.
+      (See accompanying file LICENSE_1_0.txt or copy at
+          http://www.boost.org/LICENSE_1_0.txt)
+*/
+
+/*******************************************************
+ *                                                     *
+ *  -------------------------------------------------  *
+ *  |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  *
+ *  -------------------------------------------------  *
+ *  |  0  |  4  |  8  |  12 |  16 |  20 |  24 |  28 |  *
+ *  -------------------------------------------------  *
+ *  |    F20    |    F22    |    F24    |    F26    |  *
+ *  -------------------------------------------------  *
+ *  -------------------------------------------------  *
+ *  |  8  |  9  |  10 |  11 |  12 |  13 |  14 |  15 |  *
+ *  -------------------------------------------------  *
+ *  |  32 |  36 |  40 |  44 |  48 |  52 |  56 |  60 |  *
+ *  -------------------------------------------------  *
+ *  |    F28    |    F30    |  S0 |  S1 |  S2 |  S3 |  *
+ *  -------------------------------------------------  *
+ *  -------------------------------------------------  *
+ *  |  16 |  17 |  18 |  19 |  20 |  21 |  22 |  23 |  *
+ *  -------------------------------------------------  *
+ *  |  64 |  68 |  72 |  76 |  80 |  84 |  88 |  92 |  *
+ *  -------------------------------------------------  *
+ *  |  S4 |  S5 |  S6 |  S7 |  FP |hiddn|  RA |  PC |  *
+ *  -------------------------------------------------  *
+ *  -------------------------------------------------  *
+ *  |  24 |  25 |  26 |  27 |  28 |  29 |  30 |  31 |  *
+ *  -------------------------------------------------  *
+ *  |  96 | 100 | 104 | 108 | 112 | 116 | 120 | 124 |  *
+ *  -------------------------------------------------  *
+ *  |       ABI ARGS        |  GP | FCTX| DATA|     |  *
+ *  -------------------------------------------------  *
+ *                                                     *
+ * *****************************************************/
+
+.file "make_mips32_o32_elf_gas.S"
+.text
+.globl yafl_make_context
+.hidden yafl_make_context
+.align 2
+.type yafl_make_context,@function
+.ent yafl_make_context
+yafl_make_context:
+#ifdef __PIC__
+.set    noreorder
+.cpload $t9
+.set    reorder
+#endif
+    # shift address in A0 to lower 16 byte boundary
+    li $v1, -16 # 0xfffffffffffffff0
+    and $v0, $v1, $a0
+
+    # reserve space for context-data on context-stack
+    #  includes an extra 32 bytes for:
+    #  - 16-byte incoming argument area required by the MIPS ABI on first entry
+    #  - 4 bytes to save our GP register used in finish
+    #  - 12 bytes of reserved scratch/alignment space retained with the original frame layout
+    addiu $v0, $v0, -128
+
+    # third arg of yafl_make_context() == address of context-function
+    sw  $a2, 92($v0)
+    # save global pointer in context-data
+    sw  $gp, 112($v0)
+
+    # compute abs address of label finish
+    la  $t9, finish
+    # save address of finish as return-address for context-function
+    # will be entered after context-function returns
+    sw  $t9, 88($v0)
+
+    jr  $ra # return pointer to context-data
+
+finish:
+    # reload our gp register (needed for la)
+    lw $gp, 16($sp)
+
+    # call _exit(0)
+    #  the previous function should have left the 16 bytes incoming argument
+    #  area on the stack which we reuse for calling _exit
+    la $t9, _exit
+    move $a0, $zero
+    jr $t9
+.end yafl_make_context
+.size yafl_make_context, .-yafl_make_context
+
+/* Mark that we don't need executable stack.  */
+.section .note.GNU-stack,"",%progbits

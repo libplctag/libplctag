@@ -223,7 +223,7 @@ static void print_statistics(server_ctx_t *server) {
     fprintf(stderr, "║        MODBUS SERVER (COROUTINE) PERFORMANCE STATISTICS          ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║ Runtime: %.2f seconds                                            \n", runtime_sec);
-    fprintf(stderr, "║ Total requests: %" PRId64 "                                              \n", (long long)total_reqs);
+    fprintf(stderr, "║ Total requests: %" PRId64 "                                              \n", (int64_t)total_reqs);
     if(runtime_sec > 0) {
         fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n",
                 (double)total_reqs / (double)runtime_sec);
@@ -232,9 +232,9 @@ static void print_statistics(server_ctx_t *server) {
     fprintf(stderr, "║                       CLIENT STATISTICS                          ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║ Clients connected:    %" PRId64 "                                     \n",
-            (long long)stats->clients_connected);
+            (int64_t)stats->clients_connected);
     fprintf(stderr, "║ Clients disconnected: %" PRId64 "                                     \n",
-            (long long)stats->clients_disconnected);
+            (int64_t)stats->clients_disconnected);
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║                     RESPONSE TIME SUMMARY                        ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
@@ -246,8 +246,8 @@ static void print_statistics(server_ctx_t *server) {
 
         fprintf(stderr, "║ Average:  %8.2f us                                            \n", mean);
         fprintf(stderr, "║ Std Dev:  %8.2f us                                            \n", stddev);
-        fprintf(stderr, "║ Minimum:  %8lld us                                            \n", (long long)min_time);
-        fprintf(stderr, "║ Maximum:  %8lld us                                            \n", (long long)max_time);
+        fprintf(stderr, "║ Minimum:  %8" PRId64 " us                                            \n", (int64_t)min_time);
+        fprintf(stderr, "║ Maximum:  %8" PRId64 " us                                            \n", (int64_t)max_time);
 
         fprintf(stderr, "╠══════════════════════════════════════════════════════════════╣\n");
         fprintf(stderr, "║                    LATENCY BREAKDOWN (avg)                       ║\n");
@@ -294,7 +294,7 @@ static void print_statistics(server_ctx_t *server) {
         fprintf(stderr, "║  %-12s │", hist_bucket_label(i));
         for(int j = 0; j < bar_len; j++) { fprintf(stderr, "█"); }
         for(int j = bar_len; j < 30; j++) { fprintf(stderr, " "); }
-        fprintf(stderr, "│ %6lld (%5.1f%%)\n", (long long)count, pct);
+        fprintf(stderr, "│ %6" PRId64 " (%5.1f%%)\n", (int64_t)count, pct);
     }
 
     fprintf(stderr, "╚══════════════════════════════════════════════════════════════════╝\n");
