@@ -147,6 +147,20 @@ int conn_startup(void) {
 void conn_teardown(void) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting.");
 
+    /* Mark all conns as terminating to wake handler threads quickly. */
+    if(conns && conn_mutex) {
+        critical_block(conn_mutex) {
+            int n = vector_length(conns);
+            for(int i = 0; i < n; i++) {
+                omron_conn_p conn = vector_get(conns, i);
+                if(conn) {
+                    conn->terminating = 1;
+                    if(conn->wait_cond) { cond_signal(conn->wait_cond); }
+                }
+            }
+        }
+    }
+
     if(conns && conn_mutex) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Waiting for conns to terminate.");
 
@@ -155,9 +169,8 @@ void conn_teardown(void) {
 
             critical_block(conn_mutex) { remaining_conns = vector_length(conns); }
 
-            /* wait for things to terminate. */
             if(remaining_conns > 0) {
-                sleep_ms(10);  // MAGIC
+                sleep_ms(10);
             } else {
                 break;
             }
@@ -170,17 +183,10 @@ void conn_teardown(void) {
         conns = NULL;
     }
 
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn mutex.");
-
-    if(conn_mutex) {
-        mutex_destroy((mutex_p *)&conn_mutex);
-        conn_mutex = NULL;
-    }
-
-    /* Wait for all active handler threads to complete.
-     * Use an atomic counter to track active threads.
-     * Wait up to 5 seconds (5000 ms) with 20ms polling intervals.
-     */
+    /* Wait for handler threads BEFORE destroying conn_mutex — handler threads
+     * may still be holding conn->mutex (not conn_mutex) during their final
+     * cleanup, and musl returns freed memory to the OS immediately, making
+     * any use-after-free a SIGSEGV. */
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Waiting for handler threads to complete.");
     int64_t start_time = time_ms();
     int64_t timeout_ms = 5000;
@@ -201,6 +207,13 @@ void conn_teardown(void) {
     }
 
     if(active_count == 0) { pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "All handler threads completed."); }
+
+    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn mutex.");
+
+    if(conn_mutex) {
+        mutex_destroy((mutex_p *)&conn_mutex);
+        conn_mutex = NULL;
+    }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
 }
