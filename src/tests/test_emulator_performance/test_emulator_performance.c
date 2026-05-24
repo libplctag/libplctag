@@ -62,9 +62,9 @@
 #define TEST_TAG_PATH_TEMPLATE \
     "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray&connection_group_id=%d"
 
-static volatile int terminate = 0;
+static compat_atomic_int32_t terminate = {0};
 
-void handle_interrupt(void) { terminate = 1; }
+void handle_interrupt(void) { compat_atomic_store_int32(&terminate, 1); }
 
 static void run_test(size_t num_threads);
 static void *test_func(void *arg);
@@ -85,11 +85,12 @@ int main(void) {
     fprintf(stderr, "Starting tests...\n\n");
 
     /* increase the connection group count each time */
-    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !terminate; thread_count += THREAD_INC) {
+    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !compat_atomic_load_int32(&terminate);
+        thread_count += THREAD_INC) {
         run_test((thread_count == 0) ? 1 : thread_count);
     }
 
-    if(terminate) {
+    if(compat_atomic_load_int32(&terminate)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "\nTests aborted by user!\n");
     } else {
@@ -101,7 +102,7 @@ int main(void) {
 }
 
 
-static volatile int end_test_run = 0;
+static compat_atomic_int32_t end_test_run = {0};
 
 
 void run_test(size_t thread_count) {
@@ -111,7 +112,7 @@ void run_test(size_t thread_count) {
     int64_t end_time_ms = start_time_ms + TEST_TIME_MS;
     int64_t total_test_run_time = 0;
 
-    end_test_run = 0;
+    compat_atomic_store_int32(&end_test_run, 0);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Test %zu threads for %dms... \n", thread_count, TEST_TIME_MS);
@@ -122,9 +123,9 @@ void run_test(size_t thread_count) {
     }
 
     /* wait for the test to end. */
-    while(end_time_ms > compat_time_ms() && !terminate) { compat_sleep_ms(100, NULL); }
+    while(end_time_ms > compat_time_ms() && !compat_atomic_load_int32(&terminate)) { compat_sleep_ms(100, NULL); }
 
-    end_test_run = 1;
+    compat_atomic_store_int32(&end_test_run, 1);
 
     /* join with the threads and add up the iterations. */
     for(size_t thread_index = 0; thread_index < thread_count; thread_index++) {
@@ -149,7 +150,7 @@ void *test_func(void *arg) {
     int iteration_count = 0;
     int64_t longest_read = 0;
 
-    while(!end_test_run) {
+    while(!compat_atomic_load_int32(&end_test_run)) {
         char tag_str[250] = {0};
         int32_t tag = 0;
         int rc = PLCTAG_STATUS_OK;
@@ -176,7 +177,7 @@ void *test_func(void *arg) {
         }
 
         /* read as fast as we can */
-        while(!end_test_run) {
+        while(!compat_atomic_load_int32(&end_test_run)) {
             start_ms = compat_time_ms();
             rc = plc_tag_read(tag, TAG_OP_TIMEOUT_MS);
             end_ms = compat_time_ms();

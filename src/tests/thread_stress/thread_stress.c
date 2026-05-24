@@ -70,9 +70,9 @@ void usage(void) {
 }
 
 
-volatile int go = 0;
+static compat_atomic_int32_t go = {0};
 
-static void interrupt_handler(void) { go = 1; }
+static void interrupt_handler(void) { compat_atomic_store_int32(&go, 1); }
 
 /*
  * This test program creates a lot of threads that read the same tag in
@@ -110,9 +110,9 @@ void *test_runner(void *data) {
     *min_io_time = 1000000000L;
 
     /* wait until all threads ready. */
-    while(!go) { compat_sleep_ms(10, NULL); }
+    while(!compat_atomic_load_int32(&go)) { compat_sleep_ms(10, NULL); }
 
-    while(go) {
+    while(compat_atomic_load_int32(&go)) {
         int64_t start = 0;
         int64_t io_time = 0;
 
@@ -236,13 +236,13 @@ int main(int argc, char **argv) {
     compat_sleep_ms(100, NULL);
 
     /* launch the threads */
-    go = 1;
+    compat_atomic_store_int32(&go, 1);
 
     start = compat_time_ms();
 
-    while(go && (--count_down) > 0) { compat_sleep_ms(100, NULL); }
+    while(compat_atomic_load_int32(&go) && (--count_down) > 0) { compat_sleep_ms(100, NULL); }
 
-    go = 0;
+    compat_atomic_store_int32(&go, 0);
 
     total_run_time = compat_time_ms() - start;
 

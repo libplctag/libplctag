@@ -48,7 +48,7 @@
 */
 
 
-static volatile int terminate = 0;
+static compat_atomic_int32_t terminate = {0};
 
 static void interrupt_handler(void);
 static void *thread_func(void *arg);
@@ -84,13 +84,13 @@ int main(void) {
     }
 
     /* wait while we test */
-    while(!terminate && (end_time > compat_time_ms())) {
+    while(!compat_atomic_load_int32(&terminate) && (end_time > compat_time_ms())) {
         compat_sleep_ms(1000, NULL);
         // NOLINTNEXTLINE
         fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - compat_time_ms()));
     }
 
-    terminate = 1;
+    compat_atomic_store_int32(&terminate, 1);
 
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) { compat_thread_join(threads[task_id], NULL); }
 
@@ -99,7 +99,7 @@ int main(void) {
 
 
 /* a signal handling function that sets terminate to 1. */
-void interrupt_handler(void) { terminate = 1; }
+void interrupt_handler(void) { compat_atomic_store_int32(&terminate, 1); }
 
 
 /*
@@ -117,7 +117,7 @@ void *thread_func(void *arg) {
     snprintf(tag_str, sizeof(tag_str),
              "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray&connection_group_id=%d", task_id);
 
-    while(!terminate) {
+    while(!compat_atomic_load_int32(&terminate)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Task %d creating tag\n", task_id);
 
@@ -139,7 +139,7 @@ void *thread_func(void *arg) {
                 // NOLINTNEXTLINE
                 fprintf(stderr, "Task %d read failed with error %s\n", task_id, plc_tag_decode_error(rc));
             }
-        } while(rc == PLCTAG_STATUS_OK && !terminate);
+        } while(rc == PLCTAG_STATUS_OK && !compat_atomic_load_int32(&terminate));
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Task %d destroying tag %" PRId32 "\n", task_id, tag);
