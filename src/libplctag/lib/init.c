@@ -35,6 +35,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab.h>
+#include <libplctag/protocols/enip/enip.h>
 #include <libplctag/protocols/mb/modbus.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/system/system.h>
@@ -63,6 +64,8 @@ struct {
     /* Allen-Bradley PLCs */
     {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
     {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol = "enip-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
+    {.protocol = "enip_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
     {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
     {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
 
@@ -168,6 +171,9 @@ void destroy_modules(void) {
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down ENIP module.");
+    enip_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
     lib_teardown();
@@ -285,6 +291,14 @@ int initialize_modules(void) {
     rc = omron_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing ENIP module.");
+    rc = enip_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize ENIP module!");
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }

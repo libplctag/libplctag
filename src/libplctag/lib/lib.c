@@ -42,6 +42,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
 #include <libplctag/protocols/ab/ab.h>
+#include <libplctag/protocols/enip/enip.h>
 #include <libplctag/protocols/mb/modbus.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
@@ -1029,6 +1030,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
             case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
+
+            case TAG_PROTOCOL_ENIP:
+            case TAG_PROTOCOL_ENIP_CONNECTION: tag_constructor = enip_tag_create; break;
 
             case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
             case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;

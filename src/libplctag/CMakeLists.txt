@@ -31,6 +31,9 @@ endif()
 message("Adding AB protocol sources to build.")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab")
 
+message("Adding ENIP protocol sources to build.")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/enip")
+
 # set up the library sources
 set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.h"
@@ -71,6 +74,12 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hashtable.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hashtable.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/enip_wait.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/enip_wait.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/arena.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/arena.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/bytes.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/bytes.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/macros.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/random_utils.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/random_utils.h"
@@ -82,6 +91,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
 list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")
+list(APPEND libplctag_SRCS "${ENIP_PROTOCOL_SOURCES}")
 
 
 macro(print_all_ar_link_variables)
