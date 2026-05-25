@@ -50,8 +50,9 @@ Replace the active-only vector model with linked lists and preserve current fair
 2. Scheduler iteration remains single-threaded (PLC handler thread).
 3. Tag insertion/removal may occur concurrently from API threads under mutex protection.
 4. Cursor-safe removal behavior:
-   - If removed tag == current cursor, advance cursor safely.
    - If removed tag == next cursor target, rebind next cursor to next valid element.
+  - No separate current cursor is required; current processing tag is protected by temporary rc_inc reference.
+  - If rc_inc() returns NULL for a candidate cursor target, skip it and advance to the next element.
 5. Must preserve reference-count lifecycle correctness with rc_alloc/rc_inc/rc_dec.
 6. Connection tag callback emission latency target is <100ms after connection state changes.
 
@@ -62,7 +63,6 @@ Per PLC connection:
 - request_list:
   - head
   - tail
-  - cursor_current
   - cursor_next
 - connection_list for @connection tags, same fields.
 
@@ -102,9 +102,16 @@ Fairness requirement (from existing behavior):
 - Any pointer captured from a list and used outside mutex scope must hold a temporary rc_inc reference.
 - Removal path must:
   - update list links,
-  - repair cursor pointers,
+  - repair cursor_next if it points at the removed node,
   - clear list-membership flags,
   - then allow rc_dec flow.
+
+Cursor model clarification:
+
+- cursor_next is the only persistent iterator cursor stored in the list.
+- current tag is a temporary local variable in the scheduler loop, acquired with rc_inc while holding plc mutex.
+- after acquiring current (rc_inc success), scheduler advances cursor_next under plc mutex before releasing lock.
+- if rc_inc(candidate) returns NULL, scheduler treats candidate as dying, advances cursor_next, and continues scan.
 
 ### 3.6 Compatibility / Migration Notes
 
