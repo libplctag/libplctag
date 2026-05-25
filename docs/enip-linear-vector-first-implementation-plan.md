@@ -1,16 +1,19 @@
 # ENIP Linear Vector-First Implementation Plan
 
-Date: 2026-05-24
-Status: Draft for execution
+Date: 2026-05-25
+Status: Decision-locked for execution
 Supersedes strategy: Modbus linked-list-first refactor
 
 Source requirements documents:
 1. docs/generic-eip-and-modbus-scheduler-rework-request.md
 2. docs/generic-eip-and-modbus-scheduler-implementation-plan.md (superseded plan, still used as requirement detail source)
+3. coding_guidelines.md
+4. docs/enip-linear-vector-first-implementation-contract.md
 
 Requirement inheritance note:
 1. This ENIP-first plan is authoritative for execution order.
 2. Behavioral and packing requirements defined in the two source documents remain mandatory unless this plan explicitly tightens them.
+3. Decision-locked details in docs/enip-linear-vector-first-implementation-contract.md are mandatory for implementation and review.
 
 ## 0.1 ENIP Requirement Traceability (Behavior and Packing)
 
@@ -391,7 +394,7 @@ Core functions:
 7. enip_conn_process_frames(enip_conn_p conn)
 8. enip_conn_handle_disconnect(enip_conn_p conn, int reason)
 
-## 5. Question Burn-Down (No Unanswered Questions)
+## 5. Question Burn-Down (Decision-Locked)
 
 Format:
 - Question
@@ -430,7 +433,7 @@ Format:
 - Validation action: Measure CPU and latency vs true blocking mode in test harness.
 
 6. What timeout model do wrappers use?
-- Answer: Absolute deadlines to avoid drift across repeated partial waits.
+- Answer: Keep absolute-deadline accounting internally to avoid drift, but application-level timeout behavior is authoritative. Internal waits use explicit timeout args and a large default (30s) when no tighter call-site timeout is provided.
 - Confidence: High.
 - Validation action: Timeout accuracy test under repeated wake/partial I/O.
 
@@ -475,9 +478,9 @@ Format:
 - Validation action: Track fallback counters and unexpected-downgrade logs.
 
 15. Should metadata be in first executable ENIP milestone?
-- Answer: No. First milestone is read/write core with vector scheduler and linear loop.
+- Answer: Yes. Phase 1 includes metadata, and metadata should be implemented before general read/write operation flow.
 - Confidence: High.
-- Validation action: Phase gate blocks metadata scope creep before core stabilization.
+- Validation action: Phase gate blocks read/write operation flow until metadata prerequisites are implemented.
 
 16. How are metadata misses cached?
 - Answer: Root symbol negative cache per connection, invalidated on reconnect/metadata reload.
@@ -510,12 +513,12 @@ Format:
 - Validation action: Revisit only if profiling shows clear bottleneck.
 
 22. What should be done when wrapper returns WAKE during a long send?
-- Answer: Continue respecting deadline and retry send unless terminate/abort conditions force exit.
+- Answer: Return WAKE with restart state so the same connection lifecycle can resume the send. Restart state does not survive reconnect or socket error.
 - Confidence: Medium.
 - Validation action: Add partial-send + wake race tests.
 
 23. Are platform wrappers identical between posix and windows?
-- Answer: Interface identical, internals differ. ENIP wrapper layer normalizes outcome semantics.
+- Answer: Interface identical, internals differ. Reuse existing platform-to-library status mapping behavior and keep ENIP wrapper outcomes library-consistent.
 - Confidence: High.
 - Validation action: Run same wrapper test matrix on both platforms in CI.
 
@@ -525,9 +528,9 @@ Format:
 - Validation action: Constructor validates no plc attr dependency.
 
 25. Do we have unresolved architecture questions?
-- Answer: Yes. See Drill-Down Questions section.
+- Answer: No for Phase-1 execution. Remaining work is implementation and validation, not architecture selection.
 - Confidence: High.
-- Validation action: Resolve each question before coding wrapper and memory layers.
+- Validation action: Execute implementation checklist and collect pass/fail matrix evidence.
 
 ## 6. Drill-Down Questions Requiring Decisions
 
@@ -555,7 +558,7 @@ Status: resolved.
 - Decision: read EIP header into 24-byte arena-backed Bytes, then allocate/read payload-sized arena-backed Bytes, and keep encode/decode in Bytes helpers only.
 
 8. Timeout budget source:
-- Decision: explicit timeout args only.
+- Decision: explicit timeout args only; application timeouts are authoritative and internal fallback timeout defaults to 30 seconds.
 
 9. Event mask composition:
 - Decision: internal event masks.
@@ -563,17 +566,28 @@ Status: resolved.
 10. API compatibility rollout:
 - Decision: ENIP-only first; AB/Omron later via ENIP code path; Modbus later.
 
+11. Socket error policy:
+- Decision: any socket error forces disconnect + socket close + retry wait using calc_retry_time()-style policy.
+
+12. Restart-state lifecycle:
+- Decision: restart state is used only for WAKE in the current connection lifecycle and is discarded on reconnect/error.
+
+13. Locking and delay policy:
+- Decision: do not hold delay-prone operations under mutexes; avoid holding api_mutex and plc mutex at the same time except unavoidable vtable-entry insertion paths.
+
 ## 7. Phase-1 Execution Checklist (Immediate)
 
 1. Add protocol mapping for enip-tcp and enip_tcp.
 2. Create ENIP connection and tag scaffolding with active_tags vector.
-3. Implement wait wrapper layer and wake semantics tests.
-4. Implement linear connect/session flow (TCP, Register Session, Identity, FO policy).
-5. Implement vector-based request build/send/receive/match/complete loop.
-6. Add reconnect and response-rearm behavior.
-7. Add telemetry and callback latency warnings.
-8. Run simulator + targeted hardware smoke tests.
-9. Freeze and review before metadata/features expansion.
+3. Implement metadata phase-1 inventory and phase-2 gating states before general read/write operation flow.
+4. Implement wait wrapper layer and wake semantics tests.
+5. Implement linear connect/session flow (TCP, Register Session, Identity, FO policy).
+6. Implement vector-based request build/send/receive/match/complete loop.
+7. Add reconnect and response-rearm behavior.
+8. Enforce socket-error disconnect + retry scheduling and WAKE-only restart semantics.
+9. Add telemetry and callback latency warnings.
+10. Run simulator + targeted hardware smoke tests.
+11. Freeze and review before metadata/features expansion.
 
 ## 8. Acceptance Checklist (Requirement-to-Validation Map)
 
@@ -617,7 +631,7 @@ Metadata and packing dependency:
 
 Connection behavior and error policy:
 1. Protocol-level logical errors complete the affected request/tag without tearing down healthy connection.
-2. Socket/framing/state-corruption faults force hard close and reconnect.
+2. Any socket error and framing/state-corruption fault forces hard close and reconnect.
 3. Idle timeout follows graceful disconnect policy when possible.
 4. 0x0A unsupported detection downgrades only the live connection (nonpersistent across reconnect/process restart).
 
