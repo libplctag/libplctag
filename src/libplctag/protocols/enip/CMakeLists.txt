@@ -1,5 +1,12 @@
 set(ENIP_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_connection_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_conn.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_metadata.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_packetizer.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_name.c"
                     PARENT_SCOPE
 )

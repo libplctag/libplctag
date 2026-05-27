@@ -31,21 +31,44 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/protocols/enip/enip.h>
-#include <platform.h>
-#include <utils/debug.h>
+#ifndef __LIBPLCTAG_ENIP_TAG_H__
+#    define __LIBPLCTAG_ENIP_TAG_H__ 1
 
-int enip_init(void) { return PLCTAG_STATUS_OK; }
+#    include <libplctag/lib/tag.h>
 
-void enip_teardown(void) {}
+typedef enum {
+    ENIP_TAG_OP_IDLE = 0,
+    ENIP_TAG_OP_METADATA_PHASE1 = 1,
+    ENIP_TAG_OP_METADATA_PHASE2 = 2,
+    ENIP_TAG_OP_REQUEST = 3,
+    ENIP_TAG_OP_RESPONSE = 4,
+    ENIP_TAG_OP_COMPLETE = 5,
+    ENIP_TAG_OP_ERROR = 6,
+} enip_tag_op_state_t;
 
-plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                          void *userdata, plc_tag_p src_tag) {
-    const char *name = attr_get_str(attribs, "name", NULL);
+typedef struct enip_tag_t {
+    TAG_BASE_STRUCT;
 
-    if((name && str_cmp_i(name, "@connection") == 0) || (src_tag && src_tag->protocol_type == TAG_PROTOCOL_ENIP_CONNECTION)) {
-        return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
-    }
+    int32_t op_state;
+    int32_t metadata_state;
 
-    return enip_protocol_tag_create(attribs, tag_callback_func, userdata, src_tag);
-}
+    uint32_t sequence_id;
+    uint32_t transaction_id;
+
+    uint8_t metadata_phase1_ready;
+    uint8_t metadata_phase2_ready;
+    uint8_t metadata_required;
+
+    uint8_t rearm_on_reconnect;
+    uint8_t was_in_response_state;
+} enip_tag_t;
+
+typedef struct enip_connection_tag_t {
+    TAG_BASE_STRUCT;
+
+    int32_t callback_latency_last_ms;
+    int32_t callback_latency_max_ms;
+    int32_t queue_depth;
+} enip_connection_tag_t;
+
+#endif

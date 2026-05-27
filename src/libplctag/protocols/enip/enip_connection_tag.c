@@ -32,20 +32,88 @@
  ***************************************************************************/
 
 #include <libplctag/protocols/enip/enip.h>
-#include <platform.h>
+#include <libplctag/protocols/enip/tag.h>
 #include <utils/debug.h>
+#include <utils/rc.h>
 
-int enip_init(void) { return PLCTAG_STATUS_OK; }
 
-void enip_teardown(void) {}
+static int enip_connection_abort(plc_tag_p p_tag) {
+    (void)p_tag;
+    return PLCTAG_STATUS_OK;
+}
 
-plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                          void *userdata, plc_tag_p src_tag) {
-    const char *name = attr_get_str(attribs, "name", NULL);
 
-    if((name && str_cmp_i(name, "@connection") == 0) || (src_tag && src_tag->protocol_type == TAG_PROTOCOL_ENIP_CONNECTION)) {
-        return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+static int enip_connection_status(plc_tag_p p_tag) {
+    enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
+
+    if(!tag) { return PLCTAG_ERR_NULL_PTR; }
+
+    return tag->status;
+}
+
+
+static int enip_connection_tickler(plc_tag_p p_tag) {
+    enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
+
+    if(!tag) { return PLCTAG_ERR_NULL_PTR; }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int enip_connection_get_int_attrib(plc_tag_p p_tag, const char *attrib_name, int default_value) {
+    enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
+
+    if(!tag || !attrib_name) { return default_value; }
+
+    if(str_cmp_i(attrib_name, "queue_depth") == 0) { return tag->queue_depth; }
+
+    if(str_cmp_i(attrib_name, "callback_latency_last_ms") == 0) { return tag->callback_latency_last_ms; }
+
+    if(str_cmp_i(attrib_name, "callback_latency_max_ms") == 0) { return tag->callback_latency_max_ms; }
+
+    return default_value;
+}
+
+
+static void enip_connection_tag_destructor(void *ptr) {
+    enip_connection_tag_t *tag = (enip_connection_tag_t *)ptr;
+
+    if(!tag) { return; }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "ENIP connection tag destructor.");
+}
+
+
+static struct tag_vtable_t enip_connection_tag_vtable = {
+    .abort = enip_connection_abort,
+    .status = enip_connection_status,
+    .tickler = enip_connection_tickler,
+    .get_int_attrib = enip_connection_get_int_attrib,
+};
+
+
+plc_tag_p enip_connection_tag_create(attr attribs,
+                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                     void *userdata, plc_tag_p src_tag) {
+    enip_connection_tag_t *tag = (enip_connection_tag_t *)rc_alloc(sizeof(enip_connection_tag_t), enip_connection_tag_destructor);
+    int rc;
+
+    (void)src_tag;
+
+    if(!tag) { return NULL; }
+
+    tag->vtable = &enip_connection_tag_vtable;
+    tag->protocol_type = TAG_PROTOCOL_ENIP_CONNECTION;
+
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        tag->status = (int8_t)rc;
+        rc_dec(tag);
+        return NULL;
     }
 
-    return enip_protocol_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+
+    return (plc_tag_p)tag;
 }
