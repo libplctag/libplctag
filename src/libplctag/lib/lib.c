@@ -104,26 +104,15 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 #        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
-        case DLL_PROCESS_ATTACH:
-            // fprintf(stderr, "DllMain called with DLL_PROCESS_ATTACH\n");
-            break;
+        case DLL_PROCESS_ATTACH: break;
 
-        case DLL_PROCESS_DETACH:
-            // fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
-            plc_tag_shutdown();
-            break;
+        case DLL_PROCESS_DETACH: plc_tag_shutdown(); break;
 
-        case DLL_THREAD_ATTACH:
-            // fprintf(stderr, "DllMain called with DLL_THREAD_ATTACH\n");
-            break;
+        case DLL_THREAD_ATTACH: break;
 
-        case DLL_THREAD_DETACH:
-            // fprintf(stderr, "DllMain called with DLL_THREAD_DETACH\n");
-            break;
+        case DLL_THREAD_DETACH: break;
 
-        default:
-            // fprintf(stderr, "DllMain called with unexpected code %d!\n", fdwReason);
-            break;
+        default: break;
     }
 
     return TRUE;
