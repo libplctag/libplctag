@@ -105,7 +105,10 @@ Phase C: Build outgoing work from vector
 27. If deep metadata is available, estimate request bytes and expected response bytes for this candidate.
 28. Pack only if aggregate request and response budgets remain within negotiated connection size.
     - Aggregate budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Individual Request Sizes).
-    - Aggregate response budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Min response size 4-8 bytes).
+    - Aggregate response budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Estimated Response Sizes).
+    - Success write response: 4 bytes.
+    - Failure response: 6-8 bytes.
+    - Read response: requested size clamped to remaining buffer. Large reads will fill remaining space.
 29. Encode request payload into an arena-backed Bytes tx buffer (no request object allocation).
     - Implement client-side "mirror image" of encoding logic in `src/poc/ab_server_fiber`.
 30. Record correlation fields on tag (sequence, transaction id, op state, and multi-service packet index/offset).

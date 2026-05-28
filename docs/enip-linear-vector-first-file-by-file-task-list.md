@@ -145,15 +145,17 @@ Done when:
 
 Tasks:
 1. Implement deterministic request budget estimation.
-2. Implement deterministic expected-response budget estimation (min 4-8 bytes).
+2. Implement response budget estimation based on operation type:
+   - Success write: 4 bytes.
+   - Failure: 6-8 bytes.
+   - Read: Requested size (clamped to remaining packet space).
 3. Enforce per-request and aggregate limits under negotiated size.
    - Overhead: 2 bytes (count) + 2 bytes per entry (offset).
 4. Apply fixed size rules for packing and response estimates (arrays are fixed size).
 5. Request entry adds 2-byte offset plus embedded request bytes.
 6. Response entry adds 2-byte offset plus embedded response bytes.
-7. Embedded response minimum is 4 bytes; error maximum is 8 bytes.
-8. Allow write trimming for oversized writes; do not trim read request shape.
-9. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
+7. Allow write trimming for oversized writes; do not trim read request shape.
+8. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
 
 Done when:
 1. Packing decisions are deterministic and respect both request and response budgets.

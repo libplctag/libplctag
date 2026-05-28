@@ -64,9 +64,11 @@ For multi-service packing:
 
 For response budgeting:
 1. Each response contributes 2 bytes for offset-table entry plus embedded CIP response bytes.
-2. Minimum embedded CIP response size is 4 bytes.
-3. Error embedded CIP response maximum is 8 bytes.
-4. Budgeting assumes no variable-sized arrays (arrays in PLCs are fixed-size).
+2. Success write response: 4 bytes.
+3. Failure response: 6 to 8 bytes.
+4. Read response: Large, depends on requested size and clamped to remaining space in the response packet.
+5. Packetizer must estimate worst-case response sizes (e.g., full buffer for large reads) to ensure total response aggregate fits in the negotiated communication size.
+6. Budgeting assumes no variable-sized arrays (arrays in PLCs are fixed-size).
 
 ### 3.6 Canonical Tag Name Rules
 
