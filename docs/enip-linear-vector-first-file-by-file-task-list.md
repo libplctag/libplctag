@@ -115,7 +115,10 @@ Done when:
 Tasks:
 1. Implement the linear connection thread loop from plan section 1.2.
 2. Implement connect/session bootstrap: TCP connect, Register Session, Identity, FOEx, FO fallback.
+   - Reference `src/libplctag/protocols/ab/defs` for packet structs.
+   - Implement client-side "mirror image" of encoding logic in `src/poc/ab_server_fiber`.
 3. Implement vector-based scheduling, send, receive, match, complete, retry, idle disconnect.
+   - Matching response for 0x0A requires context + multi-request index/offset.
 4. Enforce lock/refcount rules from contract.
 5. On reconnect, rearm RESPONSE tags back to REQUEST state.
 
@@ -127,24 +130,30 @@ Done when:
 
 Tasks:
 1. Implement phase-1 metadata inventory build for all root symbols.
+   - Call Service 0x55 (GetInstanceAttributeList) on Symbol Class 0x6B (Attribute 1).
 2. Implement phase-2 deep metadata fetch on first seen tag/path use.
+   - Reference `@tag` attributes in `src/libplctag/protocols/ab/eip_cip_special.c`.
 3. Block read/write packing until required metadata exists.
-4. Implement root-symbol negative cache with reconnect and reload invalidation.
+4. Implement root-symbol negative cache using `src/utils/hashtable.c`.
+   - Clear cache on reconnect or connection error.
 
 Done when:
 1. Metadata is required before general read/write packetization.
+2. Negative cache follows invalidation rules.
 
 ### 2.8 Create src/libplctag/protocols/enip/enip_packetizer.c
 
 Tasks:
 1. Implement deterministic request budget estimation.
-2. Implement deterministic expected-response budget estimation.
+2. Implement deterministic expected-response budget estimation (min 4-8 bytes).
 3. Enforce per-request and aggregate limits under negotiated size.
-4. Apply fixed size rules for packing and response estimates.
+   - Overhead: 2 bytes (count) + 2 bytes per entry (offset).
+4. Apply fixed size rules for packing and response estimates (arrays are fixed size).
 5. Request entry adds 2-byte offset plus embedded request bytes.
 6. Response entry adds 2-byte offset plus embedded response bytes.
 7. Embedded response minimum is 4 bytes; error maximum is 8 bytes.
 8. Allow write trimming for oversized writes; do not trim read request shape.
+9. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
 
 Done when:
 1. Packing decisions are deterministic and respect both request and response budgets.

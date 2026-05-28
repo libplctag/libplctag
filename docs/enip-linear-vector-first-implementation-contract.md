@@ -66,6 +66,7 @@ For response budgeting:
 1. Each response contributes 2 bytes for offset-table entry plus embedded CIP response bytes.
 2. Minimum embedded CIP response size is 4 bytes.
 3. Error embedded CIP response maximum is 8 bytes.
+4. Budgeting assumes no variable-sized arrays (arrays in PLCs are fixed-size).
 
 ### 3.6 Canonical Tag Name Rules
 
@@ -83,11 +84,28 @@ For response budgeting:
 3. Tag-level protocol errors (for example NOT_FOUND, privilege/write-denied) are tag failures, not connection teardown triggers.
 4. Read-only tags must reject write requests.
 
-### 3.8 Metadata Ordering
+### 3.8 Metadata Strategy
 
 1. Phase 1 must include metadata.
 2. Metadata should be implemented before general tag read/write execution.
 3. Read/write packing remains blocked until required metadata is available.
+4. **AB Metadata (Class 0x6B):** Use Service 0x55 (GetInstanceAttributeList) against Symbol Class 0x6B. Fetch Attribute 1 (Tag Name) for all root instances.
+5. **Phase 2 Details:** For deep metadata (type, size, dimensions), use attributes defined in the `@tag` implementation (see `src/libplctag/protocols/ab/eip_cip_special.[ch]`).
+6. **Negative Cache:** Use a hash table (`src/utils/hashtable.h`). Clear the cache immediately on connection break or error.
+
+### 3.9 Response Matching (Multi-Service)
+
+1. Use Sender Context + Packet Index + Offset:
+   - When using 0x0A (Multi-Service), the 8-byte Sender Context is shared by several requests.
+   - Tags must record the session `sender_context` AND their own `index` and `offset` within the multi-service request frame.
+   - Matching a response requires confirming both the context and the position within the multiplexed result.
+
+### 3.10 Capability Matrix
+
+1. Profile includes:
+   - `supports_0x0A` (Multi-Service)
+   - `supports_extended_fo` (Forward Open Extended)
+   - `max_packet_buffer_size` (negotiated communication size)
 
 ## 4. Existing Code Anchors (Do Not Re-Define)
 
@@ -96,6 +114,8 @@ These references are normative anchors for behavior reuse:
 2. Program-scope listing and naming behavior: src/tools/list_tags_logix/list_tags_logix.c.
 3. Public abort semantics entrypoint: src/libplctag/lib/lib.c (plc_tag_abort).
 4. Existing AB CIP tag parser grammar and segment handling: src/libplctag/protocols/ab/cip.c.
+5. **Encoding/Decoding Patterns:** [src/poc/ab_server_fiber](src/poc/ab_server_fiber) uses `Bytes` functions for packet processing. Implement the **mirror image** (client-side) of these patterns.
+6. **Packet Layouts:** See [src/libplctag/protocols/ab/defs](src/libplctag/protocols/ab/defs) for C-struct representations of ENIP/CIP headers and commands.
 
 ## 5. Acceptance Expectations
 

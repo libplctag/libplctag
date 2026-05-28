@@ -78,7 +78,10 @@ Phase B: Ensure transport/session capability state
 9. On Register Session failure: hard-close and retry.
 10. Perform Get Identity request/response.
 11. Build capability profile from identity (manufacturer/device type first, product string second).
-12. Perform phase-1 metadata inventory build for all root tags (minimal cache: root name + root identity/instance mapping).
+    - Detect `supports_0x0A`, `supports_extended_fo`, and `max_packet_buffer_size`.
+12. Perform phase-1 metadata inventory build for all root tags.
+    - Call Service 0x55 (GetInstanceAttributeList) on Class 0x6B (Symbol Class).
+    - Fetch Attribute 1 (Tag Name) for root symbol inventory.
 13. Mark metadata inventory generation complete for this connection attempt.
 14. Attempt Forward Open Extended once.
 15. If FOEx fails, attempt old Forward Open once for this attempt.
@@ -90,17 +93,22 @@ Phase C: Build outgoing work from vector
 17. Capture now_ms.
 18. Lock plc mutex.
 19. Find first due REQUEST-state tag(s) in active_tags, preserving current vector sort semantics.
+    - Tags waiting for metadata remain in vector with `op_time` set to `now` (highest priority).
 20. Stop selection when packet budget reached, in-flight limit reached, or no due tags.
 21. For each selected tag candidate:
 22. Take rc_inc(candidate) under plc mutex.
 23. Unlock plc mutex.
 24. Lock candidate api_mutex.
 25. Revalidate tag still eligible (not aborted/destroying/op changed).
-26. If deep metadata for this tag/path is missing, schedule metadata phase-2 operation state and skip read/write packing for this tag until metadata completes.
+26. If deep metadata for this tag/path is missing, schedule metadata phase-2 operation state and skip read/write packing for this tag until metadata completes. 
+    - Reference attributes defined in `@tag` code (`src/libplctag/protocols/ab/eip_cip_special.c`).
 27. If deep metadata is available, estimate request bytes and expected response bytes for this candidate.
 28. Pack only if aggregate request and response budgets remain within negotiated connection size.
+    - Aggregate budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Individual Request Sizes).
+    - Aggregate response budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Min response size 4-8 bytes).
 29. Encode request payload into an arena-backed Bytes tx buffer (no request object allocation).
-30. Record correlation fields on tag (sequence, transaction id, op state).
+    - Implement client-side "mirror image" of encoding logic in `src/poc/ab_server_fiber`.
+30. Record correlation fields on tag (sequence, transaction id, op state, and multi-service packet index/offset).
 31. Relock plc mutex briefly to update pending counters/op ordering as needed.
 32. Unlock plc mutex.
 33. Unlock api_mutex.
@@ -130,9 +138,9 @@ Phase F: Receive and frame assembly
 48. Once full header and payload are available, dispatch by ENIP command (RegisterSession response, SendRRData, SendUnitData, UnregisterSession response, etc.).
 
 Phase G: Match and complete tag work
-48. Extract correlation key (transaction id/sequence and route context).
+48. Extract correlation key (sender_context AND multi-service index/offset).
 49. Lock plc mutex.
-50. Find matching RESPONSE-state tag in active_tags (vector scan, same model as Modbus response matching).
+50. Find matching RESPONSE-state tag in active_tags (vector scan).
 51. If no match, mark orphan response metric and discard frame.
 52. If match, rc_inc(tag) and unlock plc mutex.
 53. Lock tag api_mutex.
