@@ -64,7 +64,46 @@ Main loop structure:
 
 ### 1.2 Linear Flow Step-By-Step (Executable Outline)
 
+Manufacturer dispatch invariant:
+1. Shared scheduler/transport code must not contain AB-vs-OMRON behavior branches.
+2. Select `mfg_ops` once per connection from identity/capability and call strategy hooks thereafter.
+3. Shared loop owns only generic progression (wake, mutexing, vector ordering, send/recv, retries).
+4. Path parsing/encoding core rules are fixed: symbolic tag segments use `0x91` with odd-length padding, array index segments use `0x28/0x29/0x2A`, and route parsing is pair-based `(port, link)`.
+5. Route aliases `A`/`a` and `B`/`b` are treated as port selectors `18` and `19` for extended IP segments.
+
+Pseudo-code skeleton:
+
+```text
+conn.mfg_ops = select_mfg_ops(identity)
+
+for each due tag in active_tags:
+    lock(tag)
+    if tag metadata missing:
+        schedule metadata op
+    else:
+        req_desc = conn.mfg_ops.encode_request(tag, budgets)
+        if req_desc.fits:
+            append_to_packet(req_desc)
+            mark_response_pending(tag, req_desc.correlation)
+    unlock(tag)
+
+send_packet()
+resp_list = recv_packet()
+
+for each resp in resp_list:
+    tag = match_tag(resp.correlation)
+    lock(tag)
+    result = conn.mfg_ops.decode_response(tag, resp)
+    tag.byte_offset += result.bytes_progress
+    if result.needs_more:
+        reschedule_request(tag)
+    else:
+        finalize_tag(tag)
+    unlock(tag)
+```
+
 Phase A: Preconditions and wake reason
+
 1. Read wake reason flags (external wake, timeout, socket ready, terminate).
 2. If terminate, go to shutdown path.
 3. If library is shutting down, go to shutdown path.
@@ -103,17 +142,18 @@ Phase C: Build outgoing work from vector
 26. If deep metadata for this tag/path is missing, schedule metadata phase-2 operation state and skip read/write packing for this tag until metadata completes. 
     - Reference attributes defined in `@tag` code (`src/libplctag/protocols/ab/eip_cip_special.c`).
 27. If deep metadata is available, estimate request bytes and expected response bytes for this candidate.
+    - Call manufacturer strategy estimator hooks; do not branch in shared code by PLC type.
 28. Pack only if aggregate request and response budgets remain within negotiated connection size.
     - Aggregate budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Individual Request Sizes).
     - Aggregate response budget = 2 (Service Count) + N*(2 for offset table entry) + Sum(Estimated Response Sizes).
     - Success write response: 4 bytes.
     - Failure response: 6-8 bytes.
     - Read response: requested size clamped to remaining buffer. Large reads will fill remaining space.
-    - **Unified Trimming:** Implement trimming once for all PLC types (AB, Omron, PCCC).
-      - Trim/alter all reads so results fit in the response packet.
-      - Trim all writes so the request fits into the request packet.
+        - Shared packetizer enforces budgets only; manufacturer strategy decides service/path/chunk fields.
+        - AB strategy and OMRON strategy may both trim, but by separate strategy logic.
 29. Encode request payload into an arena-backed Bytes tx buffer (no request object allocation).
     - Implement client-side "mirror image" of encoding logic in `src/poc/ab_server_fiber`.
+    - For path encoding/decoding, apply contract rules from section 3.12 in docs/enip-linear-vector-first-implementation-contract.md.
 30. Record correlation fields on tag (sequence, transaction id, op state, and multi-service packet index/offset).
 31. Relock plc mutex briefly to update pending counters/op ordering as needed.
 32. Unlock plc mutex.
@@ -328,14 +368,18 @@ Goals:
 1. Add capability profile derivation from identity.
 2. Add packet budget logic and selective multi-request packing using deterministic metadata-backed size estimates.
 3. Add 0x0A downgrade behavior (connection-local, nonpersistent).
+4. Add manufacturer strategy dispatch and enforce no AB/OMRON branching in shared packetizer/scheduler paths.
 
 Deliverables:
 1. Capability profile structure.
-2. Packetizer integrated into build phase.
+2. Shared packetizer integrated into build phase.
+3. Manufacturer strategy modules for AB and OMRON request/response handling.
 
 Exit criteria:
 1. Budget limits enforced by negotiated size for both request and expected response aggregates.
 2. Unsupported 0x0A downgrades correctly.
+3. Shared code has no manufacturer-specific `if/else` branches.
+4. AB and OMRON behaviors are validated through strategy-specific tests.
 
 ## Phase 4: Metadata Scheduler Integration
 

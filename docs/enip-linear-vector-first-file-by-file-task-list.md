@@ -14,6 +14,9 @@ Depends on:
 3. Do not hold delay-prone operations under mutexes.
 4. Restart state is only for WAKE in the current connection lifecycle.
 5. Any socket error triggers disconnect and reconnect flow.
+6. Shared ENIP code must not contain PLC-type branching logic such as `if AB ... else if OMRON ...`.
+7. Shared code may reuse only manufacturer-neutral fields (for example byte offset and generic pending state).
+8. Service selection, request/response encoding, and chunking behavior must be implemented per manufacturer strategy module.
 
 ## 1. Build and Protocol Registration
 
@@ -119,12 +122,30 @@ Tasks:
    - Implement client-side "mirror image" of encoding logic in `src/poc/ab_server_fiber`.
 3. Implement vector-based scheduling, send, receive, match, complete, retry, idle disconnect.
    - Matching response for 0x0A requires context + multi-request index/offset.
-4. Enforce lock/refcount rules from contract.
-5. On reconnect, rearm RESPONSE tags back to REQUEST state.
+4. Select manufacturer strategy once per connection and store function table pointer on connection object.
+5. Invoke strategy hooks for request build and response decode; do not branch by PLC type in this file.
+6. Enforce lock/refcount rules from contract.
+7. On reconnect, rearm RESPONSE tags back to REQUEST state.
 
 Done when:
 1. Simulator can run basic read/write cycles through ENIP connection loop.
 2. Reconnect simulation safely rearms pending tags.
+3. No AB/OMRON branching appears in shared connection loop logic.
+
+Pseudo-code checkpoint:
+
+```text
+conn.mfg_ops = select_mfg_ops(identity)
+
+for tag in due_tags:
+   req = conn.mfg_ops.encode_request(tag, budgets)
+   if req.fits:
+      packet.add(req)
+
+for resp in packet.responses:
+   result = conn.mfg_ops.decode_response(tag, resp)
+   tag.byte_offset += result.bytes_progress
+```
 
 ### 2.7 Create src/libplctag/protocols/enip/enip_metadata.c
 
@@ -152,19 +173,51 @@ Tasks:
 3. Enforce per-request and aggregate limits under negotiated size.
    - Overhead: 2 bytes (count) + 2 bytes per entry (offset).
 4. Apply fixed size rules for packing and response estimates (arrays are fixed size).
-5. **Implement Unified Trimming Logic:**
-   - Solve once for all PLC types (AB, Omron, PCCC).
-   - Alter all reads so response data fits in the response packet.
-   - Trim all writes so the request payload fits in the request packet.
-6. Request entry adds 2-byte offset plus embedded request bytes.
-7. Response entry adds 2-byte offset plus embedded response bytes.
-8. Allow write trimming for oversized writes (all PLCs); do not trim Logix read request shape.
-9. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
+5. Keep this file manufacturer-neutral: budget math only (no service/path/chunking decisions).
+6. Trimming decisions are requested from manufacturer strategy hooks and validated against shared budgets.
+7. Request entry adds 2-byte offset plus embedded request bytes.
+8. Response entry adds 2-byte offset plus embedded response bytes.
+9. Allow write trimming for oversized writes through strategy-specific chunk builders.
+10. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
 
 Done when:
 1. Packing decisions are deterministic and respect both request and response budgets.
+2. No AB/OMRON conditional logic exists in shared packetizer code.
 
-### 2.9 Create src/libplctag/protocols/enip/enip_name.c
+### 2.9 Create src/libplctag/protocols/enip/enip_mfg_ops.h
+
+Tasks:
+1. Define manufacturer strategy interface (`encode_read`, `decode_read`, `encode_write`, `decode_write`, `needs_more`).
+2. Define shared neutral structs for chunk/result descriptors.
+3. Define strategy selection helper used by connection bootstrap.
+
+Done when:
+1. Shared code can call strategy hooks without manufacturer conditionals.
+
+### 2.10 Create src/libplctag/protocols/enip/enip_mfg_ab.c
+
+Tasks:
+1. Implement AB read/write request builders with AB services and AB field ordering.
+2. For reads, use AB semantics: request total element count, parse actual returned payload, advance byte offset by actual bytes returned.
+3. Continue read chunks while AB response indicates fragmented status.
+4. Apply fixed path encode/decode rules for AB-compatible symbolic and array segments:
+   - Symbolic `0x91` + length + bytes + odd-length pad.
+   - Array indexes `0x28/0x29/0x2A` by index width.
+
+Done when:
+1. AB behavior matches existing AB CIP semantics in isolated strategy tests.
+
+### 2.11 Create src/libplctag/protocols/enip/enip_mfg_omron.c
+
+Tasks:
+1. Implement OMRON 0x80 simple data segment request path encoding.
+2. Compute request chunk sizes client-side so request and expected response both fit packet budgets.
+3. Advance offset according to strategy-managed chunk progression contract.
+
+Done when:
+1. OMRON chunking works without shared-code AB/OMRON branches.
+
+### 2.12 Create src/libplctag/protocols/enip/enip_name.c
 
 Tasks:
 1. Implement canonical name handling for ENIP path encoding.
@@ -172,9 +225,15 @@ Tasks:
 3. Preserve program-scope namespace handling compatible with existing Program: behavior.
 4. Enforce array index rule: either no indexes or all indexes.
 5. Reuse existing separators and formatting semantics already accepted by library behavior.
+6. Implement tag path encode/decode helpers that round-trip symbolic and numeric index segments.
+7. Implement route token normalization helpers for pair-based parsing and alias handling:
+   - `A`/`a` normalize to `18`.
+   - `B`/`b` normalize to `19`.
+8. Ensure extended IP route encoding emits `[port][ascii_len][ascii_ip][pad_if_needed]` for `18,<ipv4>` and `19,<ipv4>` forms.
 
 Done when:
 1. Name parsing and canonicalization follow contract constraints.
+2. Tag and route encode/decode behavior matches the contract section for path segments and alias handling.
 
 ## 3. Wait Wrappers and Buffer Utilities
 

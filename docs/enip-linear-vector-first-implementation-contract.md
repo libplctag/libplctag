@@ -110,6 +110,116 @@ For response budgeting:
    - `supports_extended_fo` (Forward Open Extended)
    - `max_packet_buffer_size` (negotiated communication size)
 
+### 3.11 Manufacturer Isolation Rule
+
+1. Shared ENIP code may contain only manufacturer-neutral fields and flow control.
+2. Shared tag/connection state may include generic fields such as `byte_offset`, pending state, deadlines, and correlation keys.
+3. CIP service choices, path segment formats, request encoding, response decoding, and chunk progression logic are manufacturer specific.
+4. Do not implement shared logic with PLC type branching patterns such as `if AB do X, if OMRON do Y`.
+5. Manufacturer-specific behavior must be isolated behind manufacturer strategy entry points selected at connection setup.
+6. New PLC behaviors must be added by implementing a new strategy module, not by extending shared code branches.
+
+Pseudo-code (required shape):
+
+```text
+struct enip_mfg_ops {
+   encode_read_chunk(tag, arena, budget_req, budget_resp) -> req_desc
+   decode_read_chunk(tag, resp_bytes) -> chunk_result
+   encode_write_chunk(tag, arena, budget_req) -> req_desc
+   decode_write_chunk(tag, resp_bytes) -> write_result
+   needs_more_read(chunk_result) -> bool
+   needs_more_write(tag) -> bool
+}
+
+on_connection_start(identity):
+   conn.mfg_ops = select_mfg_ops(identity)
+
+build_cycle(tag):
+   req = conn.mfg_ops.encode_read_chunk(tag, arena, budget_req, budget_resp)
+   send(req)
+
+receive_cycle(tag, resp):
+   result = conn.mfg_ops.decode_read_chunk(tag, resp)
+   tag.byte_offset += result.bytes_consumed
+   if conn.mfg_ops.needs_more_read(result):
+      schedule_again(tag)
+```
+
+AB strategy rules:
+1. Read service uses 0x52 and includes byte offset after element count.
+2. Request can keep full logical element count while next request offset advances by actual bytes returned.
+3. Continue while CIP status indicates fragmented response.
+
+OMRON strategy rules:
+1. Use simple data segment 0x80 in request path with offset and chunk length.
+2. Client must select chunk length before sending so both request and expected response fit budgets.
+3. Offset advances by requested/accepted chunk progression according to strategy contract.
+
+### 3.12 CIP Path Encode/Decode Contract (Tag and Route)
+
+This section locks path parsing/encoding behavior for the ENIP linear path and must remain compatible with existing AB CIP parser behavior.
+
+Tag path encode/decode rules:
+1. Symbolic segment encoding uses ANSI Extended Symbol format: `0x91`, length byte, symbol bytes, and one zero pad byte when symbol length is odd.
+2. Array index encoding uses element logical segments:
+   - `0x28` + 1-byte value for 0..255.
+   - `0x29` + 1-byte pad + 2-byte little-endian value for 256..65535.
+   - `0x2A` + 1-byte pad + 4-byte little-endian value for larger values.
+3. Tag decode must reverse the above forms and preserve canonical rules already locked in section 3.6.
+
+Route path encode/decode rules:
+1. Route paths are parsed as ordered pairs of `(port, link)` semantics.
+2. Numeric path segments remain valid as-is.
+3. Extended IP routing supports numeric forms `18,<ipv4>` and `19,<ipv4>`.
+4. Aliases `A`/`a` and `B`/`b` are accepted for the extended IP port selector and are equivalent to:
+   - `A` == `18`
+   - `B` == `19`
+5. Encoding for extended IP segment remains: one byte port selector (`18` or `19`), one byte ASCII length, ASCII IPv4 bytes, then zero padding to 16-bit boundary when needed.
+6. Decode must normalize aliases to their numeric selector values for transport encoding and expose equivalent semantics.
+
+Pseudo-code (normative intent):
+
+```text
+encode_tag_path("myTag[4].field1"):
+  sym("myTag") -> 0x91 len bytes [pad if odd]
+  idx(4) -> 0x28 0x04
+  sym("field1") -> 0x91 len bytes [pad if odd]
+
+encode_route_tokens(tokens):
+  for each token pair:
+    if token is "A"/"a": token = 18
+    if token is "B"/"b": token = 19
+    if token is 18 or 19 and next token is ipv4:
+       emit [port][ascii_len][ascii_ip][pad_if_needed]
+    else:
+       emit numeric segment bytes
+```
+
+Byte-level worked examples (normative for review):
+
+1. Tag path: `myTag[4].field1`
+    - Symbol `myTag`:
+       - `91 05 6D 79 54 61 67 00`
+    - Index `[4]`:
+       - `28 04`
+    - Symbol `field1`:
+       - `91 06 66 69 65 6C 64 31`
+    - Encoded path bytes (without leading word count):
+       - `91 05 6D 79 54 61 67 00 28 04 91 06 66 69 65 6C 64 31`
+    - Encoded path bytes (with leading word count byte used by tag-name encoding):
+       - `09 91 05 6D 79 54 61 67 00 28 04 91 06 66 69 65 6C 64 31`
+
+2. Route path with alias: `1,3,A,192.168.1.2,1,0`
+    - Alias normalization:
+       - `A -> 18` (`0x12`)
+    - Equivalent normalized route: `1,3,18,192.168.1.2,1,0`
+    - Segment bytes:
+       - `1,3` -> `01 03`
+       - `18,192.168.1.2` -> `12 0B 31 39 32 2E 31 36 38 2E 31 2E 32 00`
+       - `1,0` -> `01 00`
+    - Encoded route bytes:
+       - `01 03 12 0B 31 39 32 2E 31 36 38 2E 31 2E 32 00 01 00`
+
 ## 4. Existing Code Anchors (Do Not Re-Define)
 
 These references are normative anchors for behavior reuse:
