@@ -152,10 +152,14 @@ Tasks:
 3. Enforce per-request and aggregate limits under negotiated size.
    - Overhead: 2 bytes (count) + 2 bytes per entry (offset).
 4. Apply fixed size rules for packing and response estimates (arrays are fixed size).
-5. Request entry adds 2-byte offset plus embedded request bytes.
-6. Response entry adds 2-byte offset plus embedded response bytes.
-7. Allow write trimming for oversized writes; do not trim read request shape.
-8. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
+5. **Implement Unified Trimming Logic:**
+   - Solve once for all PLC types (AB, Omron, PCCC).
+   - Alter all reads so response data fits in the response packet.
+   - Trim all writes so the request payload fits in the request packet.
+6. Request entry adds 2-byte offset plus embedded request bytes.
+7. Response entry adds 2-byte offset plus embedded response bytes.
+8. Allow write trimming for oversized writes (all PLCs); do not trim Logix read request shape.
+9. Reference `src/poc/ab_server_fiber` for `Bytes` usage patterns.
 
 Done when:
 1. Packing decisions are deterministic and respect both request and response budgets.

@@ -59,8 +59,9 @@ Required implementation guardrails:
 
 For multi-service packing:
 1. Each request contributes 2 bytes for offset-table entry plus encoded request bytes.
-2. Read request payloads are already minimal and are not trimmed smaller.
-3. Write request payloads may be trimmed by sending smaller portions of write data.
+2. **Unified Trimming Logic:** All PLC types (Logix, Omron, PCCC) use a shared trimming implementation.
+3. **Read Trimming:** Read requests must be trimmed/altered so that the resulting read data fits into the response packet. This solves the problem once for Omron/PCCC and applies identically to AB/Logix without performance loss.
+4. **Write Trimming:** Write request payloads are trimmed by sending smaller portions of write data so that the request fits into the request packet.
 
 For response budgeting:
 1. Each response contributes 2 bytes for offset-table entry plus embedded CIP response bytes.

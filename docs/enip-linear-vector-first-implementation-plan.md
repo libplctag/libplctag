@@ -109,6 +109,9 @@ Phase C: Build outgoing work from vector
     - Success write response: 4 bytes.
     - Failure response: 6-8 bytes.
     - Read response: requested size clamped to remaining buffer. Large reads will fill remaining space.
+    - **Unified Trimming:** Implement trimming once for all PLC types (AB, Omron, PCCC).
+      - Trim/alter all reads so results fit in the response packet.
+      - Trim all writes so the request fits into the request packet.
 29. Encode request payload into an arena-backed Bytes tx buffer (no request object allocation).
     - Implement client-side "mirror image" of encoding logic in `src/poc/ab_server_fiber`.
 30. Record correlation fields on tag (sequence, transaction id, op state, and multi-service packet index/offset).
