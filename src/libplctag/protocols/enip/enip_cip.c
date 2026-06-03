@@ -405,3 +405,38 @@ Bytes enip_cip_parse_response(Bytes response, uint8_t *general_status,
     *data_out = remaining;
     return remaining;
 }
+
+
+/* Phase 2: Strip CIP type code from ReadTag response data.
+ *
+ * ReadTag (0x4C) responses include a type code prefix:
+ *   - If first byte & 0xA0 != 0: struct type (4 bytes total: marker + reserved + uint16 type)
+ *   - Otherwise: atomic type (2 bytes: uint16 little-endian type code)
+ *
+ * This function skips the prefix and returns the remaining data payload.
+ * Returns bytes_null() if input is too short. */
+Bytes enip_cip_strip_type_code(Bytes response_data) {
+    if(bytes_is_null(response_data)) {
+        return bytes_null();
+    }
+
+    /* Minimum 2 bytes for atomic type code. */
+    if(response_data.len < 2) {
+        return bytes_null();
+    }
+
+    /* Check if struct type (first byte has 0xA0 bits set). */
+    uint8_t first_byte = response_data.data[0];
+    size_t type_code_len = 2; /* Default to atomic (2 bytes) */
+
+    if((first_byte & 0xA0) != 0) {
+        /* Struct type requires 4 bytes total. */
+        if(response_data.len < 4) {
+            return bytes_null();
+        }
+        type_code_len = 4;
+    }
+
+    /* Return slice starting after type code. */
+    return bytes_slice(response_data, type_code_len, response_data.len - type_code_len);
+}

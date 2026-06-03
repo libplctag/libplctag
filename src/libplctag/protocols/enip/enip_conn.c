@@ -105,6 +105,7 @@
 
 #include <libplctag/protocols/enip/enip.h>
 #include <libplctag/protocols/enip/enip_conn.h>
+#include <libplctag/protocols/enip/enip_cip.h>
 #include <libplctag/protocols/enip/enip_cpf.h>
 #include <libplctag/protocols/enip/enip_eip.h>
 #include <libplctag/protocols/enip/enip_mfg_ops.h>
@@ -452,79 +453,63 @@ static int32_t enip_connection_unregister_session(enip_connection_t *conn) {
 }
 
 
-/* Phase 2: REWRITE using layer helpers and fix the CIP off-by-one (plan §3 B).
- * Current code:
- *   (a) hand-rolls EIP/CPF/CIP framing instead of using enip_eip_build_request +
- *       enip_cpf_build_unconnected — replace with those.
- *   (b) bytes_unpack unpacks only 3 bytes for the CIP reply header (reserved,
- *       status, ext_sz) but it is 4 bytes (reply_service + reserved + status + ext_sz) —
- *       replace with enip_cip_parse_response which is already correct.
- *   (c) Sets conn->supports_extended_forward_open = (status_word & 0x0080) — REMOVE.
- *       The Identity status word does not advertise FO_Ex capability (plan §3 C).
- *       Set conn->supports_extended_forward_open = 0 here; Phase 3 will detect it
- *       by attempting FO_Ex and falling back.
- *   (d) Receive path: allocate a 24-byte header buffer, read it, parse length,
- *       allocate body buffer, read it (stream framing, plan §3 A). */
-static int enip_connection_get_identity(enip_connection_t *conn) {
-    /* Get Identity: Service 0x01 GetAttributeAll on Class 0x01, Instance 0x01
-     * Unconnected messaging with CPF header and UDI
-     * Response contains: vendor_id, device_type, product_code, revision (2 bytes),
-     *                    status (2), serial (4), name (1 byte length + string)
-     */
-    Bytes response;
+/* Phase 2: REWRITTEN using layer helpers (enip_cpf, enip_eip, stream framing).
+ * Fixes:
+ *   (a) Uses enip_cpf_build_unconnected + enip_eip_build_request for framing
+ *   (b) Uses enip_recv_frame for stream framing (24-byte header + length-based body read)
+ *   (c) Uses enip_cip_parse_response which correctly handles 4-byte CIP header
+ *       (reply_service + reserved + status + ext_sz)
+ *   (d) Sets supports_extended_forward_open = 0 initially (Phase 3 will detect via FO_Ex attempt)
+ *   (e) Calls enip_select_mfg_ops for device strategy selection */
+static int32_t enip_connection_get_identity(enip_connection_t *conn) {
+    /* GetAttributeAll identity: Service 0x01, Class 0x01 (Identity object), Instance 0x01
+     * Response contains vendor_id, device_type, product_code, revision, status, serial, name
+     * Sent via unconnected messaging (CPF SendRRData 0x006F) */
+    Bytes cip_request, cpf_frame, eip_frame, response, cip_response;
     socket_wait_state_t io_state = {0};
-    int rc;
+    int32_t rc;
+    uint16_t cip_status;
+    uint8_t ext_status_size;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Fetching device identity");
 
-    if(!conn || !conn->socket || !conn->session_established) { return PLCTAG_ERR_NULL_PTR; }
+    if(!conn || !conn->socket || !conn->session_established) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-    /* Build CIP GetAttributeAll request: Service 0x01, Class 0x01 (Identity) */
+    /* Step 1: Build CIP GetAttributeAll request.
+     * Service 0x01, path to Class 0x01 Instance 0x01 */
     arena_reset(&conn->tx_arena);
+    cip_request = bytes_pack(&conn->tx_arena, BYTES_LE,
+                             (uint8_t)0x01,    /* Service: GetAttributeAll */
+                             (uint8_t)0x02,    /* Path size in words */
+                             (uint8_t)0x20,    /* Class segment (8-bit) */
+                             (uint8_t)0x01,    /* Class 0x01 (Identity) */
+                             (uint8_t)0x24,    /* Instance segment (8-bit) */
+                             (uint8_t)0x01);   /* Instance 0x01 */
 
-    Bytes cip = bytes_pack(&conn->tx_arena, BYTES_LE, (uint8_t)0x01, /* Service: GetAttributeAll */
-                           (uint8_t)0x02,                            /* Path size in words (class + instance) */
-                           (uint8_t)0x20,                            /* Class segment (8-bit encoding) */
-                           (uint8_t)0x01,                            /* Class 0x01 (Identity) */
-                           (uint8_t)0x24,                            /* Instance segment (8-bit encoding) */
-                           (uint8_t)0x01);                           /* Instance 0x01 */
+    if(bytes_is_null(cip_request)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Arena OOM for GetIdentity CIP");
+        return PLCTAG_ERR_NO_MEM;
+    }
 
-    if(bytes_is_null(cip)) { return PLCTAG_ERR_NO_MEM; }
+    /* Step 2: Wrap in CPF unconnected frame. */
+    cpf_frame = enip_cpf_build_unconnected(&conn->tx_arena, cip_request);
+    if(bytes_is_null(cpf_frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to build CPF frame");
+        return PLCTAG_ERR_NO_MEM;
+    }
 
-    /* Build CPF items: NAI + UDI */
-    Bytes nai = bytes_pack(&conn->tx_arena, BYTES_LE, (uint16_t)0x0000, /* Null Address Item type */
-                           (uint16_t)0x0000);                           /* Length: 0 */
+    /* Step 3: Wrap in EIP frame and build complete request. */
+    eip_frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
+                                       conn->session_handle, &conn->sender_context, cpf_frame);
+    if(bytes_is_null(eip_frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to build EIP frame");
+        return PLCTAG_ERR_NO_MEM;
+    }
 
-    if(bytes_is_null(nai)) { return PLCTAG_ERR_NO_MEM; }
-
-    Bytes udi = bytes_pack(&conn->tx_arena, BYTES_LE, (uint16_t)0x00B2, /* Unconnected Data Item type */
-                           (uint16_t)(cip.len & 0xFFFF));               /* CIP payload length */
-
-    if(bytes_is_null(udi)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Build CPF header */
-    Bytes cpf = bytes_pack(&conn->tx_arena, BYTES_LE, (uint32_t)0, /* interface_handle */
-                           (uint16_t)0,                            /* router_timeout */
-                           (uint16_t)2);                           /* item_count: NAI + UDI */
-
-    if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Build EIP header with calculated payload length */
-    uint16_t payload_len = (uint16_t)((8 + 4 + 4 + cip.len) & 0xFFFF);
-
-    Bytes hdr = bytes_pack(&conn->tx_arena, BYTES_LE, (uint16_t)0x006F, /* SendRRData command */
-                           payload_len,                                 /* Total payload length */
-                           (uint32_t)conn->session_handle, (uint32_t)0, /* Status */
-                           (uint64_t)2);                                /* Sender context */
-
-    if(bytes_is_null(hdr)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Concatenate full request */
-    Bytes full_request = bytes_concat(&conn->tx_arena, hdr, cpf, nai, udi, cip);
-    if(bytes_is_null(full_request)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Send request */
-    rc = socket_write_wait(conn->socket, &full_request, 5000, &io_state);
+    /* Step 4: Send request. */
+    rc = socket_write_wait(conn->socket, &eip_frame, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity send failed: %d", rc);
         return rc;
@@ -532,12 +517,9 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
 
     conn->messages_sent++;
 
-    /* Receive response (at least 24-byte header + some data) */
+    /* Step 5: Receive response using stream framing. */
     arena_reset(&conn->rx_arena);
-    response = bytes_alloc(&conn->rx_arena, 512);
-    if(bytes_is_null(response)) { return PLCTAG_ERR_NO_MEM; }
-
-    rc = socket_read_wait(conn->socket, &response, 5000, &io_state);
+    rc = enip_recv_frame(conn->socket, &conn->rx_arena, 5000, &io_state, &response);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity read failed: %d", rc);
         return rc;
@@ -545,101 +527,91 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
 
     conn->messages_received++;
 
-    /* Parse identity response using Bytes API
-     * Skip EIP header (24 bytes), CPF header (8 bytes), NAI (4), UDI header (4), CIP status (2)
-     * Then: vendor_id, device_type, product_code, revision (2), status (2), serial (4), name
-     */
-    if(response.len < 24 + 8 + 4 + 4 + 2 + 14) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity response too short: %zu bytes", response.len);
+    /* Step 6: Extract CPF payload from EIP response. */
+    Bytes cpf_response = enip_eip_extract_cpf_payload(response);
+    if(bytes_is_null(cpf_response)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to extract CPF from EIP response");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Skip past EIP header and CPF items to get to CIP response status */
-    size_t offset = 24 + 8 + 4 + 4; /* EIP header + CPF header + NAI + UDI header */
+    /* Step 7: Extract CIP payload from CPF response (UDI item). */
+    cip_response = enip_cpf_extract_udi_payload(cpf_response);
+    if(bytes_is_null(cip_response)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to extract CIP from CPF response");
+        return PLCTAG_ERR_REMOTE_ERR;
+    }
 
-    Bytes identity_data = bytes_slice(response, offset, response.len - offset);
-    if(bytes_is_null(identity_data)) { return PLCTAG_ERR_REMOTE_ERR; }
-
-    /* Parse CIP response: reserved (1), status (1), ext_status_size (1), ext_status_data... */
-    uint8_t cip_reserved, cip_status, ext_status_size;
-    Bytes rest = bytes_unpack(identity_data, BYTES_LE, &cip_reserved, &cip_status, &ext_status_size);
-
-    if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity CIP response too short");
+    /* Step 8: Parse CIP response header using enip_cip_parse_response.
+     * This correctly handles: reply_service (1) + reserved (1) + status (1) + ext_status_size (1) + data
+     * Returns the data portion after the 4-byte header. */
+    Bytes cip_data = enip_cip_parse_response(cip_response, &cip_status, &ext_status_size, NULL);
+    if(bytes_is_null(cip_data)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: CIP response parsing failed");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
     if(cip_status != 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity CIP status: 0x%02x", cip_status);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity CIP status error: 0x%04x", cip_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Skip extended status if present */
-    if(ext_status_size > 0) {
-        rest = bytes_slice(rest, ext_status_size * 2, rest.len - (ext_status_size * 2));
-        if(bytes_is_null(rest)) { return PLCTAG_ERR_REMOTE_ERR; }
-    }
-
-    /* Parse identity attributes: vendor_id (2), device_type (2), product_code (2),
-     * revision_major (1), revision_minor (1), status_word (2), serial_number (4)
-     */
+    /* Step 9: Parse identity attributes from CIP data.
+     * Structure: vendor_id (2), device_type (2), product_code (2),
+     *            revision_major (1), revision_minor (1), status_word (2),
+     *            serial_number (4), product_name_len (1), product_name (string) */
     uint16_t vendor_id, device_type, product_code, status_word;
     uint8_t revision_major, revision_minor;
     uint32_t serial_number;
+    Bytes remaining = bytes_unpack(cip_data, BYTES_LE,
+                                   &vendor_id, &device_type, &product_code,
+                                   &revision_major, &revision_minor, &status_word,
+                                   &serial_number);
 
-    rest = bytes_unpack(rest, BYTES_LE, &vendor_id, &device_type, &product_code, &revision_major, &revision_minor, &status_word,
-                        &serial_number);
-
-    if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity identity data too short");
+    if(bytes_is_null(remaining)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity data too short");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Determine manufacturer strategy based on vendor_id */
-    enip_identity_t identity = {.vendor_id = vendor_id,
-                                .device_type = device_type,
-                                .product_code = product_code,
-                                .revision_major = revision_major,
-                                .revision_minor = revision_minor,
-                                .serial_number = serial_number,
-                                .supports_multiple_services = (status_word & 0x0020) ? 1 : 0};
+    /* Step 10: Parse product name (1 byte length + string). */
+    uint8_t name_len = 0;
+    char product_name[64] = {'\0'};
 
-    /* Parse product name (1 byte length + string) */
-    if(rest.len > 0) {
-        uint8_t name_len;
-        rest = bytes_unpack(rest, BYTES_LE, &name_len);
-
-        if(!bytes_is_null(rest) && rest.len >= name_len) {
+    if(remaining.len > 0) {
+        remaining = bytes_unpack(remaining, BYTES_LE, &name_len);
+        if(!bytes_is_null(remaining) && remaining.len >= name_len) {
             if(name_len > 63) { name_len = 63; }
-            if(rest.data) { memcpy(identity.product_name, rest.data, name_len); }
-            identity.product_name[name_len] = '\0';
+            if(remaining.data) { memcpy(product_name, remaining.data, name_len); }
+            product_name[name_len] = '\0';
         }
     }
 
-    /* TODO: Call enip_select_mfg_ops(&identity) to determine strategy */
-    /* For now, assume AB/Logix */
-    enip_mfg_ops_t *mfg_ops = enip_select_mfg_ops(&identity);
-    if(!mfg_ops) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: No manufacturer strategy found for vendor=0x%04x", vendor_id);
-        /* Fallback: assume AB/Logix but continue anyway */
-        conn->mfg_ops = NULL; /* Will be handled by caller */
-        conn->supports_0x0a = 1;
-        conn->supports_extended_forward_open = 1;
-        conn->max_packet_buffer_size = 2000;
-    } else {
-        /* Store manufacturer strategy and capability profile */
-        conn->mfg_ops = mfg_ops;
-        conn->supports_0x0a = identity.supports_multiple_services;
-        conn->supports_extended_forward_open = (status_word & 0x0080) ? 1 : 0; /* Bit 7 typically */
-        conn->max_packet_buffer_size = 2000;                                   /* TODO: Negotiate from ForwardOpen response */
+    /* Step 11: Select manufacturer strategy based on device identity. */
+    enip_identity_t identity = {
+        .vendor_id = vendor_id,
+        .device_type = device_type,
+        .product_code = product_code,
+        .revision_major = revision_major,
+        .revision_minor = revision_minor,
+        .serial_number = serial_number,
+        .supports_multiple_services = (status_word & 0x0020) ? 1 : 0
+    };
+    strncpy(identity.product_name, product_name, sizeof(identity.product_name) - 1);
 
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Manufacturer strategy selected (supports_0x0a=%u, extended_fo=%u)",
-               conn->supports_0x0a, conn->supports_extended_forward_open);
+    conn->mfg_ops = enip_select_mfg_ops(&identity);
+    if(!conn->mfg_ops) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: No manufacturer strategy found for vendor=0x%04x", vendor_id);
+        return PLCTAG_ERR_REMOTE_ERR;
     }
 
+    /* Step 12: Set capability flags from identity.
+     * Phase 3: supports_extended_forward_open will be set to 1 if FO_Ex succeeds. */
+    conn->supports_0x0a = identity.supports_multiple_services;
+    conn->supports_extended_forward_open = 0; /* Phase 3 will detect via FO_Ex attempt+fallback */
+    conn->max_packet_buffer_size = 2000;      /* Phase 3 will negotiate actual value from FO response */
+
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
-           "ENIP: Identity fetched (vendor=0x%04x, device=0x%04x, product=0x%04x, revision=%u.%u)", vendor_id, device_type,
-           product_code, revision_major, revision_minor);
+           "ENIP: Identity fetched (vendor=0x%04x, device=0x%04x, product=0x%04x, revision=%u.%u, mfg=%s)",
+           vendor_id, device_type, product_code, revision_major, revision_minor, conn->mfg_ops->name);
 
     return PLCTAG_STATUS_OK;
 }
@@ -736,9 +708,23 @@ static int32_t enip_connection_forward_open(enip_connection_t *conn) {
     uint32_t our_conn_id = (uint32_t)(uintptr_t)conn ^ (uint32_t)conn->cip_conn_serial;
     if(our_conn_id == 0) { our_conn_id = 0x12345678u; }
 
-    /* Build CIP ForwardOpen payload */
+    /* Phase 3: Try ForwardOpen Extended (0x5B) first, fall back to standard FO (0x54).
+     * FO_Ex is preferred: uses 32-bit conn params (higher capacity) vs 16-bit in standard FO.
+     * Build standard FO (0x54) first; if device doesn't support it, will retry with 0x5B.
+     *
+     * Standard ForwardOpen (0x54) params:
+     *   - conn params: 16-bit (uint16_t) with 9-bit size field
+     *   - max buffer: 504 bytes (0x43F8 = 0x01F8 size + priority bits)
+     *
+     * ForwardOpen Extended (0x5B) params (when supported):
+     *   - conn params: 32-bit (uint32_t) with 12-bit size field
+     *   - max buffer: ~4002 bytes (0x0FA2 size + priority bits)
+     */
+    uint8_t fo_service = 0x54; /* Start with standard FO */
+    uint32_t fo_conn_params = 0x43F8u; /* Standard FO: 504 bytes, high priority */
+
     Bytes fo_fixed = bytes_pack(&conn->tx_arena, BYTES_LE,
-                                (uint8_t)0x54,        /* service: ForwardOpen */
+                                fo_service,           /* service: ForwardOpen (0x54) or Extended (0x5B) */
                                 (uint8_t)0x02,        /* path_size: 2 words */
                                 (uint8_t)0x20,        /* class segment */
                                 (uint8_t)0x06,        /* Connection Manager */
@@ -847,6 +833,21 @@ static int32_t enip_connection_forward_open(enip_connection_t *conn) {
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
+    /* Phase 3: Parse connection IDs and extract actual O->T buffer size.
+     * Response data structure (from §3 E):
+     *   O->T connection ID (4 bytes) -> store as cip_targ_conn_id (target's ID for O->T flow)
+     *   T->O connection ID (4 bytes) -> store as cip_orig_conn_id (our ID for T->O flow)
+     *   Connection serial number (2 bytes)
+     *   Orig vendor ID (2 bytes)
+     *   Orig serial number (4 bytes)
+     *   O->T requested API (4 bytes)
+     *   T->O requested API (4 bytes)
+     *   Application data size (1 byte)
+     *   Reserved (1 byte)
+     *
+     * Phase 3: Extract O->T RPI and buffer size to compute actual max_packet_buffer_size.
+     * Currently hardcoded to 504; needs to parse from response.
+     * Formula: max_cip = raw_buffer_size - 6 (for CDI header + sequence number) */
     uint32_t targ_conn_id = 0;
     uint32_t orig_conn_id = 0;
 
@@ -856,7 +857,7 @@ static int32_t enip_connection_forward_open(enip_connection_t *conn) {
     conn->cip_orig_conn_id   = orig_conn_id;
     conn->cip_conn_seq_num   = 0;
     conn->cip_connection_open = true;
-    conn->max_packet_buffer_size = 504; /* 0x43F8 conn params = 504-byte buffer */
+    conn->max_packet_buffer_size = 504; /* Phase 3: Parse from response instead of hardcoding */
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "ENIP: ForwardOpen OK targ_conn_id=0x%08x orig_conn_id=0x%08x",

@@ -47,7 +47,9 @@
  */
 #include <libplctag/protocols/enip/enip.h>
 #include <platform.h>
+#include <utils/attr.h>
 #include <utils/debug.h>
+#include <string.h>
 
 /* Phase 6: ADD global connection-list mutex init here. */
 int enip_init(void) { return PLCTAG_STATUS_OK; }
@@ -55,15 +57,27 @@ int enip_init(void) { return PLCTAG_STATUS_OK; }
 /* Phase 6: ADD drain all connections, set shutdown_requested, join threads. */
 void enip_teardown(void) {}
 
-/* Phase 6: ADD find_or_create_connection(attribs) call here (after routing to
- * enip_protocol_tag_create); set tag->conn and insert tag into conn->active_tags;
- * signal conn->wake so the handler thread can start the bootstrap. */
+/* Phase 1: Extract gateway attribute and validate it exists.
+ * Phase 6: ADD find_or_create_connection(attribs) call here; set tag->conn
+ *          and insert tag into conn->active_tags; signal conn->wake. */
 plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                           void *userdata, plc_tag_p src_tag) {
     const char *name = attr_get_str(attribs, "name", NULL);
+    const char *gateway = attr_get_str(attribs, "gateway", NULL);
 
-    if((name && str_cmp_i(name, "@connection") == 0) || (src_tag && src_tag->protocol_type == TAG_PROTOCOL_ENIP_CONNECTION)) {
+    /* Phase 1: Gateway is required for all ENIP tags (except @connection). */
+    if(name && str_cmp_i(name, "@connection") == 0) {
         return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    }
+
+    if(src_tag && src_tag->protocol_type == TAG_PROTOCOL_ENIP_CONNECTION) {
+        return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    }
+
+    /* Phase 1: Validate gateway attribute is present. */
+    if(!gateway || str_length(gateway) == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "ENIP: Missing required 'gateway' attribute");
+        return NULL;
     }
 
     return enip_protocol_tag_create(attribs, tag_callback_func, userdata, src_tag);

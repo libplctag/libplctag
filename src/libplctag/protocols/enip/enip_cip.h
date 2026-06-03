@@ -118,5 +118,14 @@ extern Bytes enip_cip_write_tag_fragmented_request(Arena *arena, const uint8_t *
 extern Bytes enip_cip_parse_response(Bytes response, uint8_t *general_status,
                                      uint8_t *extended_status_size, Bytes *data_out);
 
+/* Phase 2: Strip CIP type code from ReadTag response data.
+ * ReadTag responses begin with a 2 or 4-byte type code:
+ *   - If first byte == 0xA0 (struct bit set): 4 bytes (0xA0 + reserved + uint16 type)
+ *   - Otherwise: 2 bytes (little-endian uint16 type code)
+ * This function returns the payload after the type code, or bytes_null() if too short.
+ * Typical use: after enip_cip_parse_response, call this on the data portion before
+ * copying to tag->data. */
+extern Bytes enip_cip_strip_type_code(Bytes response_data);
+
 /* Phase 4: ADD here — enip_cip_read_tag_omron_request(0x4C + 0x80 data segment). */
 /* Phase 4: ADD here — enip_cip_write_tag_omron_request(0x4D + 0x80 data segment). */
