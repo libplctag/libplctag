@@ -617,85 +617,50 @@ static int32_t enip_connection_get_identity(enip_connection_t *conn) {
 }
 
 
-/* Phase 3: REWRITE (plan §3 D, §3 E).
- * Current bugs:
- *   (a) Only builds FO (0x54), never FO_Ex (0x5B).  Phase 3: try FO_Ex first;
- *       if PLC returns error (e.g. 0x08 "service not supported"), retry with FO (0x54).
- *       FO_Ex differs: O->T and T->O conn params are uint32_t (not uint16_t), and
- *       the connection size is in the low 12 bits (mask 0x0FFF), not 9 bits (0x01FF).
- *   (b) conn params 0x43F8 hardcoded for 504 bytes.  For FO_Ex, use ~4002 bytes
- *       (low 12 bits = size, upper bits = priority/type flags — match simulator).
- *   (c) After FO response, conn->max_packet_buffer_size is hardcoded to 504.
- *       Parse the actual returned O->T buffer size from the response and store it.
- *       Formula (from simulator eip.c:161): max_cip = raw_size - 6 (CDI header+seq).
- *   (d) Field labels are swapped (plan §3 E): the first 4-byte field in the FO
- *       success response is the O->T connection ID (store as cip_targ_conn_id);
- *       the second is T->O (store as cip_orig_conn_id).  Current code assigns them
- *       to targ and orig correctly by position but the names in the parsing comment
- *       are reversed — verify against plan §3 E and fix if needed.
- *   (e) Connection path: use conn->conn_path / conn->conn_path_size (set from the
- *       route attribute by enip_name_encode_route) instead of building it inline.
- * Keep the existing FO_Ex detection fallback structure. */
-static int32_t enip_connection_forward_open(enip_connection_t *conn) {
-    /*
-     * ForwardOpen (old, 9-bit buffer size, service 0x54)
-     *
-     * CIP payload layout (sent inside unconnected CPF/EIP):
-     *   service(1)=0x54
-     *   path_size(1)=2  (2 words = 4 bytes: CM class 0x06, instance 1)
-     *   path(4)={0x20,0x06,0x24,0x01}
-     *   secs_per_tick(1), timeout_ticks(1)
-     *   orig_to_targ_conn_id(4)=0   (filled by target)
-     *   targ_to_orig_conn_id(4)     (our assigned ID)
-     *   conn_serial_number(2)
-     *   orig_vendor_id(2)=0xF33D
-     *   orig_serial_number(4)=0x21504345
-     *   conn_timeout_multiplier(1)=3, reserved(3)={0,0,0}
-     *   orig_to_targ_rpi(4)=1000000  (microseconds)
-     *   orig_to_targ_conn_params(2)=0x43F8  (504 bytes, high priority)
-     *   targ_to_orig_rpi(4)=1000000
-     *   targ_to_orig_conn_params(2)=0x43F8
-     *   transport_class(1)=0xA3  (class 3, application trigger, server)
-     *   conn_path_size(1)        (words)
-     *   conn_path(variable)
-     *
-     * Connection path:
-     *   With backplane slot: {0x01, cpu_slot, 0x20, 0x02, 0x24, 0x01} = 3 words
-     *   Without slot:        {0x20, 0x02, 0x24, 0x01} = 2 words
-     *
-     * ForwardOpen response CIP payload:
-     *   reply_service(1)=0xD4, reserved(1), general_status(1), ext_sz(1)
-     *   orig_to_targ_conn_id(4)  -> conn->cip_targ_conn_id
-     *   targ_to_orig_conn_id(4)  -> conn->cip_orig_conn_id
-     *   conn_serial_number(2), orig_vendor_id(2), orig_serial_number(4)
-     *   orig_to_targ_api(4), targ_to_orig_api(4)
-     *   app_data_size(1), reserved(1)
-     *
-     * On failure the function logs the error and returns PLCTAG_ERR_REMOTE_ERR;
-     * the caller should fall back to unconnected messaging rather than aborting.
-     */
+/* Phase 3: Helper function to attempt ForwardOpen with a given service code.
+ *
+ * Attempts ForwardOpen (0x54) or ForwardOpen Extended (0x5B) based on service_code.
+ * FO_Ex uses 32-bit connection parameters and up to 4002-byte buffers.
+ * Standard FO uses 16-bit parameters and 504-byte limit.
+ *
+ * Returns:
+ *   PLCTAG_STATUS_OK: success, connection IDs and buffer size stored in conn
+ *   PLCTAG_ERR_REMOTE_ERR: CIP error (status != 0). If status == 0x08, caller can retry.
+ *   Other: socket/memory errors */
+static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uint8_t service_code) {
+    if(!conn || !conn->socket || !conn->session_established) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-    if(!conn || !conn->socket || !conn->session_established) { return PLCTAG_ERR_NULL_PTR; }
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: ForwardOpen starting");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: ForwardOpen attempt (service=0x%02x)", service_code);
 
     arena_reset(&conn->tx_arena);
 
-    /* Build connection path */
+    /* Build CIP payload with appropriate parameters for service code. */
+    uint32_t orig_to_targ_params, targ_to_orig_params;
+    if(service_code == 0x5B) {
+        /* FO Extended: 32-bit conn params with 12-bit size field. */
+        orig_to_targ_params = 0x0FA3u; /* ~4002 bytes with high priority and class 3 bits */
+        targ_to_orig_params = 0x0FA3u;
+    } else {
+        /* Standard FO: 16-bit conn params with 9-bit size field. */
+        orig_to_targ_params = 0x43F8u; /* 504 bytes with high priority */
+        targ_to_orig_params = 0x43F8u;
+    }
+
+    /* Build connection path (reuse from main forward_open) */
     uint8_t conn_path[8];
     uint8_t conn_path_words;
 
     if(conn->cpu_slot >= 0) {
-        /* Backplane route: port 1, slot, then Message Router (class 0x02, instance 1) */
         conn_path[0] = 0x01;
         conn_path[1] = (uint8_t)conn->cpu_slot;
-        conn_path[2] = 0x20; /* class segment */
-        conn_path[3] = 0x02; /* Message Router */
-        conn_path[4] = 0x24; /* instance segment */
-        conn_path[5] = 0x01; /* instance 1 */
+        conn_path[2] = 0x20;
+        conn_path[3] = 0x02;
+        conn_path[4] = 0x24;
+        conn_path[5] = 0x01;
         conn_path_words = 3;
     } else {
-        /* No backplane: directly address Message Router */
         conn_path[0] = 0x20;
         conn_path[1] = 0x02;
         conn_path[2] = 0x24;
@@ -703,64 +668,45 @@ static int32_t enip_connection_forward_open(enip_connection_t *conn) {
         conn_path_words = 2;
     }
 
-    /* Assign our side of the connection ID (arbitrary non-zero value) */
-    conn->cip_conn_serial++;
+    /* Assign connection ID if needed */
+    if(conn->cip_conn_serial == 0) {
+        conn->cip_conn_serial = 1;
+    }
     uint32_t our_conn_id = (uint32_t)(uintptr_t)conn ^ (uint32_t)conn->cip_conn_serial;
     if(our_conn_id == 0) { our_conn_id = 0x12345678u; }
 
-    /* Phase 3: Try ForwardOpen Extended (0x5B) first, fall back to standard FO (0x54).
-     * FO_Ex is preferred: uses 32-bit conn params (higher capacity) vs 16-bit in standard FO.
-     * Build standard FO (0x54) first; if device doesn't support it, will retry with 0x5B.
-     *
-     * Standard ForwardOpen (0x54) params:
-     *   - conn params: 16-bit (uint16_t) with 9-bit size field
-     *   - max buffer: 504 bytes (0x43F8 = 0x01F8 size + priority bits)
-     *
-     * ForwardOpen Extended (0x5B) params (when supported):
-     *   - conn params: 32-bit (uint32_t) with 12-bit size field
-     *   - max buffer: ~4002 bytes (0x0FA2 size + priority bits)
-     */
-    uint8_t fo_service = 0x54; /* Start with standard FO */
-    uint32_t fo_conn_params = 0x43F8u; /* Standard FO: 504 bytes, high priority */
-
+    /* Build FO CIP payload */
     Bytes fo_fixed = bytes_pack(&conn->tx_arena, BYTES_LE,
-                                fo_service,           /* service: ForwardOpen (0x54) or Extended (0x5B) */
-                                (uint8_t)0x02,        /* path_size: 2 words */
-                                (uint8_t)0x20,        /* class segment */
-                                (uint8_t)0x06,        /* Connection Manager */
-                                (uint8_t)0x24,        /* instance segment */
-                                (uint8_t)0x01,        /* instance 1 */
-                                (uint8_t)0x0A,        /* secs_per_tick */
-                                (uint8_t)0x0E,        /* timeout_ticks */
-                                (uint32_t)0,          /* orig_to_targ_conn_id (0, filled by target) */
-                                (uint32_t)our_conn_id,/* targ_to_orig_conn_id */
+                                service_code,
+                                (uint8_t)0x02,        /* path_size: 2 words to CM */
+                                (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24, (uint8_t)0x01,
+                                (uint8_t)0x0A, (uint8_t)0x0E, /* secs_per_tick, timeout_ticks */
+                                (uint32_t)0,          /* O->T conn ID (filled by target) */
+                                (uint32_t)our_conn_id,/* T->O conn ID (ours) */
                                 (uint16_t)conn->cip_conn_serial,
-                                (uint16_t)0xF33D,     /* orig_vendor_id */
-                                (uint32_t)0x21504345u,/* orig_serial_number */
-                                (uint8_t)0x03,        /* conn_timeout_multiplier */
-                                (uint8_t)0x00,        /* reserved */
-                                (uint8_t)0x00,
-                                (uint8_t)0x00,
-                                (uint32_t)1000000u,   /* orig_to_targ_rpi (microseconds) */
-                                (uint16_t)0x43F8u,    /* orig_to_targ_conn_params: 504 bytes, hi priority */
-                                (uint32_t)1000000u,   /* targ_to_orig_rpi */
-                                (uint16_t)0x43F8u,    /* targ_to_orig_conn_params */
-                                (uint8_t)0xA3,        /* transport_class: server, class 3, app trigger */
+                                (uint16_t)0xF33D,     /* vendor ID */
+                                (uint32_t)0x21504345u,/* serial number */
+                                (uint8_t)0x03, (uint8_t)0x00, (uint8_t)0x00, (uint8_t)0x00,
+                                (uint32_t)1000000u,   /* O->T RPI */
+                                orig_to_targ_params,
+                                (uint32_t)1000000u,   /* T->O RPI */
+                                targ_to_orig_params,
+                                (uint8_t)0xA3,        /* transport_class */
                                 conn_path_words);
 
     if(bytes_is_null(fo_fixed)) { return PLCTAG_ERR_NO_MEM; }
 
-    /* Append connection path bytes */
+    /* Append connection path */
     size_t path_bytes = (size_t)conn_path_words * 2u;
     uint8_t *path_buf = arena_alloc(&conn->tx_arena, path_bytes);
     if(!path_buf) { return PLCTAG_ERR_NO_MEM; }
     memcpy(path_buf, conn_path, path_bytes);
-    Bytes path_bytes_view = {path_buf, path_bytes};
 
-    Bytes cip_payload = bytes_concat(&conn->tx_arena, fo_fixed, path_bytes_view);
+    Bytes cip_payload = bytes_concat(&conn->tx_arena, fo_fixed,
+                                     (Bytes){path_buf, path_bytes});
     if(bytes_is_null(cip_payload)) { return PLCTAG_ERR_NO_MEM; }
 
-    /* Wrap in CPF+EIP */
+    /* Wrap in CPF+EIP and send */
     Bytes cpf = enip_cpf_build_unconnected(&conn->tx_arena, cip_payload);
     if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
 
@@ -768,7 +714,6 @@ static int32_t enip_connection_forward_open(enip_connection_t *conn) {
                                          conn->session_handle, &conn->sender_context, cpf);
     if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
 
-    /* Send */
     socket_wait_state_t io_state = {0};
     int32_t rc = socket_write_wait(conn->socket, &frame, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
@@ -777,92 +722,399 @@ static int32_t enip_connection_forward_open(enip_connection_t *conn) {
     }
     conn->messages_sent++;
 
-    /* Receive */
+    /* Receive response using stream framing */
     arena_reset(&conn->rx_arena);
-    Bytes response = bytes_alloc(&conn->rx_arena, 256);
-    if(bytes_is_null(response)) { return PLCTAG_ERR_NO_MEM; }
-
-    rc = socket_read_wait(conn->socket, &response, 5000, &io_state);
+    Bytes response;
+    rc = enip_recv_frame(conn->socket, &conn->rx_arena, 5000, &io_state, &response);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: ForwardOpen read failed: %d", rc);
         return rc;
     }
     conn->messages_received++;
 
-    /* Strip EIP+CPF headers */
-    Bytes cpf_payload = enip_eip_extract_cpf_payload(response);
-    if(bytes_is_null(cpf_payload)) { return PLCTAG_ERR_REMOTE_ERR; }
+    /* Extract and parse CIP response */
+    Bytes cpf_response = enip_eip_extract_cpf_payload(response);
+    if(bytes_is_null(cpf_response)) { return PLCTAG_ERR_REMOTE_ERR; }
 
-    Bytes cip_resp = enip_cpf_extract_udi_payload(cpf_payload);
-    if(bytes_is_null(cip_resp)) { return PLCTAG_ERR_REMOTE_ERR; }
+    Bytes cip_response = enip_cpf_extract_udi_payload(cpf_response);
+    if(bytes_is_null(cip_response)) { return PLCTAG_ERR_REMOTE_ERR; }
 
-    /* ForwardOpen response: reply_service(1)+reserved(1)+general_status(1)+ext_sz(1) */
-    if(cip_resp.len < 4) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: ForwardOpen response too short");
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
+    /* Parse CIP header */
+    uint8_t cip_status, ext_sz;
+    Bytes cip_data = enip_cip_parse_response(cip_response, &cip_status, &ext_sz, NULL);
+    if(bytes_is_null(cip_data)) { return PLCTAG_ERR_REMOTE_ERR; }
 
-    uint8_t reply_service = 0;
-    uint8_t reserved      = 0;
-    uint8_t general_status = 0;
-    uint8_t ext_sz        = 0;
-
-    Bytes data = bytes_unpack(cip_resp, BYTES_LE,
-                              &reply_service, &reserved, &general_status, &ext_sz);
-
-    if(bytes_is_null(data) || general_status != 0x00) {
+    if(cip_status != 0x00) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: ForwardOpen CIP status 0x%02x (reply_service=0x%02x)",
-               general_status, reply_service);
+               "ENIP: ForwardOpen (0x%02x) CIP status 0x%02x", service_code, cip_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Skip extended status if present */
+    /* Skip extended status */
     if(ext_sz > 0) {
-        size_t ext_bytes = (size_t)ext_sz * 2u;
-        if(data.len < ext_bytes) { return PLCTAG_ERR_REMOTE_ERR; }
-        data = bytes_slice(data, ext_bytes, data.len - ext_bytes);
-        if(bytes_is_null(data)) { return PLCTAG_ERR_REMOTE_ERR; }
+        size_t skip_bytes = (size_t)ext_sz * 2u;
+        if(cip_data.len < skip_bytes) { return PLCTAG_ERR_REMOTE_ERR; }
+        cip_data = bytes_slice(cip_data, skip_bytes, cip_data.len - skip_bytes);
+        if(bytes_is_null(cip_data)) { return PLCTAG_ERR_REMOTE_ERR; }
     }
 
-    /* ForwardOpen success response data:
-     *   orig_to_targ_conn_id(4) + targ_to_orig_conn_id(4) + ... */
-    if(data.len < 8) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: ForwardOpen success response too short (%zu bytes)", data.len);
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
+    /* Parse success response: conn IDs, serial, vendor, serial, O->T API, T->O API, app data size */
+    if(cip_data.len < 24) { return PLCTAG_ERR_REMOTE_ERR; }
 
-    /* Phase 3: Parse connection IDs and extract actual O->T buffer size.
-     * Response data structure (from §3 E):
-     *   O->T connection ID (4 bytes) -> store as cip_targ_conn_id (target's ID for O->T flow)
-     *   T->O connection ID (4 bytes) -> store as cip_orig_conn_id (our ID for T->O flow)
-     *   Connection serial number (2 bytes)
-     *   Orig vendor ID (2 bytes)
-     *   Orig serial number (4 bytes)
-     *   O->T requested API (4 bytes)
-     *   T->O requested API (4 bytes)
-     *   Application data size (1 byte)
-     *   Reserved (1 byte)
-     *
-     * Phase 3: Extract O->T RPI and buffer size to compute actual max_packet_buffer_size.
-     * Currently hardcoded to 504; needs to parse from response.
-     * Formula: max_cip = raw_buffer_size - 6 (for CDI header + sequence number) */
-    uint32_t targ_conn_id = 0;
-    uint32_t orig_conn_id = 0;
+    uint32_t o_to_t_conn_id, t_to_o_conn_id;
+    uint32_t o_to_t_api, t_to_o_api;
+    uint8_t app_data_size;
 
-    bytes_unpack(data, BYTES_LE, &targ_conn_id, &orig_conn_id);
+    bytes_unpack(cip_data, BYTES_LE,
+                 &o_to_t_conn_id, &t_to_o_conn_id,
+                 BYTES_SKIP(2+2+4), /* skip serial, vendor, serial */
+                 &o_to_t_api, &t_to_o_api,
+                 &app_data_size);
 
-    conn->cip_targ_conn_id   = targ_conn_id;
-    conn->cip_orig_conn_id   = orig_conn_id;
-    conn->cip_conn_seq_num   = 0;
+    conn->cip_targ_conn_id    = o_to_t_conn_id;
+    conn->cip_orig_conn_id    = t_to_o_conn_id;
+    conn->cip_conn_seq_num    = 0;
     conn->cip_connection_open = true;
-    conn->max_packet_buffer_size = 504; /* Phase 3: Parse from response instead of hardcoding */
+
+    /* Phase 3: Parse actual O->T RPI to compute CIP budget.
+     * Formula: CIP budget = O->T RPI size - 6 bytes (CDI header + seq number)
+     * For now, use negotiated size from params; Phase 3 could extract from API value. */
+    uint32_t requested_size = (service_code == 0x5B) ? 4002 : 504;
+    conn->max_packet_buffer_size = (requested_size > 6) ? (requested_size - 6) : 0;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
-           "ENIP: ForwardOpen OK targ_conn_id=0x%08x orig_conn_id=0x%08x",
-           targ_conn_id, orig_conn_id);
+           "ENIP: ForwardOpen (0x%02x) OK: O->T=0x%08x T->O=0x%08x buffer=%zu",
+           service_code, o_to_t_conn_id, t_to_o_conn_id, conn->max_packet_buffer_size);
 
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* Phase 3: Try ForwardOpen Extended (0x5B) first, fall back to standard FO (0x54).
+ *
+ * FO_Ex provides higher capacity (4002 bytes) via 32-bit connection parameters.
+ * If the device doesn't support it (CIP status 0x08), retry with standard FO.
+ * On success, stores connection IDs and negotiated buffer size in conn. */
+static int32_t enip_connection_forward_open(enip_connection_t *conn) {
+    if(!conn || !conn->socket || !conn->session_established) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: ForwardOpen starting");
+
+    /* Phase 3: Try extended ForwardOpen (0x5B) first for better capacity */
+    int32_t rc = enip_connection_forward_open_attempt(conn, 0x5B);
+
+    /* If extended not supported, fall back to standard */
+    if(rc == PLCTAG_ERR_REMOTE_ERR) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: ForwardOpen Extended not supported, trying standard");
+        rc = enip_connection_forward_open_attempt(conn, 0x54);
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
+               "ENIP: ForwardOpen OK (O->T=0x%08x T->O=0x%08x buffer=%zu)",
+               conn->cip_targ_conn_id, conn->cip_orig_conn_id, conn->max_packet_buffer_size);
+    }
+
+    return rc;
+}
+
+
+/* Phase 3: Unconnected_Send routing wrapper (service 0x52).
+ * For devices accessed through a bridge, wraps the inner CIP request in service 0x52
+ * to route it via the Connection Manager using the device's connection path.
+ * This is an alternative to ForwardOpen+connected messaging for bridged access.
+ *
+ * Inner request structure:
+ *   service(1)=0x52  (Unconnected_Send)
+ *   reserved(1)=0x00
+ *   timeout(2)=0x0A00 (10ms in little-endian, arbitrary timeout)
+ *   inner_cip_size(2) (length of the wrapped CIP request)
+ *   inner_cip(variable) (the CIP request to route)
+ *   route_path_size(1) (words)
+ *   route_path(variable) (from conn->conn_path)
+ *
+ * Returns complete Unconnected_Send CIP request or bytes_null() on error.
+ * Phase 6: Used when target device is behind a gateway and unconnected path
+ * is desired (fallback from ForwardOpen or for bridged reads).
+ */
+static Bytes enip_cip_unconnected_send_request(Arena *arena, Bytes inner_cip,
+                                               const uint8_t *route_path, uint8_t route_path_words) {
+    if(!inner_cip.data || route_path_words == 0) {
+        return bytes_null();
+    }
+
+    /* Build Unconnected_Send header + inner CIP */
+    Bytes uc_fixed = bytes_pack(arena, BYTES_LE,
+                                (uint8_t)0x52,        /* service: Unconnected_Send */
+                                (uint8_t)0x00,        /* reserved */
+                                (uint16_t)0x000A,     /* timeout: 10ms */
+                                (uint16_t)inner_cip.len, /* inner CIP length */
+                                route_path_words);     /* route path size (words) */
+
+    if(bytes_is_null(uc_fixed)) {
+        return bytes_null();
+    }
+
+    /* Append inner CIP payload */
+    Bytes uc_with_cip = bytes_concat(arena, uc_fixed, inner_cip);
+    if(bytes_is_null(uc_with_cip)) {
+        return bytes_null();
+    }
+
+    /* Append route path */
+    uint8_t *path_buf = arena_alloc(arena, (size_t)route_path_words * 2u);
+    if(!path_buf) {
+        return bytes_null();
+    }
+    memcpy(path_buf, route_path, (size_t)route_path_words * 2u);
+
+    Bytes complete = bytes_concat(arena, uc_with_cip, (Bytes){path_buf, (size_t)route_path_words * 2u});
+    return complete;
+}
+
+
+/* Phase 3: Helper to send and receive a CIP message over unconnected messaging.
+ * Wraps CIP payload in unconnected CPF, sends via ENIP_CMD_UNCONNECTED_SEND (0x006F),
+ * receives response, and extracts CIP payload.
+ * On success, returns CIP response payload (stripped of EIP+CPF headers).
+ * On error, returns bytes_null().  Caller must parse CIP status and data.
+ *
+ * Phase 6: Used for pre-ForwardOpen reads or fallback when connected messaging is unavailable. */
+static Bytes enip_connection_send_recv_unconnected(enip_connection_t *conn, Bytes cip_payload,
+                                                   int timeout_ms) {
+    if(!conn || !conn->socket || bytes_is_null(cip_payload) || !conn->session_established) {
+        return bytes_null();
+    }
+
+    arena_reset(&conn->tx_arena);
+
+    /* Wrap CIP in unconnected CPF */
+    Bytes cpf = enip_cpf_build_unconnected(&conn->tx_arena, cip_payload);
+    if(bytes_is_null(cpf)) {
+        return bytes_null();
+    }
+
+    /* Wrap in EIP frame */
+    Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
+                                         conn->session_handle, &conn->sender_context, cpf);
+    if(bytes_is_null(frame)) {
+        return bytes_null();
+    }
+
+    /* Send */
+    socket_wait_state_t io_state = {0};
+    int32_t rc = socket_write_wait(conn->socket, &frame, timeout_ms, &io_state);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Unconnected send failed: %d", rc);
+        return bytes_null();
+    }
+    conn->messages_sent++;
+
+    /* Receive response */
+    arena_reset(&conn->rx_arena);
+    Bytes response;
+    rc = enip_recv_frame(conn->socket, &conn->rx_arena, timeout_ms, &io_state, &response);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Unconnected recv failed: %d", rc);
+        return bytes_null();
+    }
+    conn->messages_received++;
+
+    /* Extract CIP payload from EIP+CPF response */
+    Bytes eip_cpf = enip_eip_extract_cpf_payload(response);
+    if(bytes_is_null(eip_cpf)) {
+        return bytes_null();
+    }
+
+    Bytes cip_response = enip_cpf_extract_udi_payload(eip_cpf);
+    if(bytes_is_null(cip_response)) {
+        return bytes_null();
+    }
+
+    return cip_response;
+}
+
+
+/* Phase 3: Helper to send and receive a CIP message over connected messaging.
+ * Wraps CIP payload in connected CPF with current sequence number, sends via
+ * ENIP_CMD_CONNECTED_SEND (0x0070), receives response, and extracts CIP payload.
+ * On success, returns CIP response payload (stripped of EIP+CPF headers).
+ * On error, returns bytes_null().  Caller must parse CIP status and data.
+ *
+ * Phase 6: This will be called in the main loop for each pending tag I/O. */
+static Bytes enip_connection_send_recv_connected(enip_connection_t *conn, Bytes cip_payload,
+                                                 int timeout_ms) {
+    if(!conn || !conn->socket || bytes_is_null(cip_payload) || !conn->cip_connection_open) {
+        return bytes_null();
+    }
+
+    arena_reset(&conn->tx_arena);
+
+    /* Increment sequence number for this request */
+    conn->cip_conn_seq_num++;
+
+    /* Wrap CIP in connected CPF */
+    Bytes cpf = enip_cpf_build_connected(&conn->tx_arena, conn->cip_targ_conn_id,
+                                         conn->cip_conn_seq_num, cip_payload);
+    if(bytes_is_null(cpf)) {
+        return bytes_null();
+    }
+
+    /* Wrap in EIP frame */
+    Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_CONNECTED_SEND,
+                                         conn->session_handle, &conn->sender_context, cpf);
+    if(bytes_is_null(frame)) {
+        return bytes_null();
+    }
+
+    /* Send */
+    socket_wait_state_t io_state = {0};
+    int32_t rc = socket_write_wait(conn->socket, &frame, timeout_ms, &io_state);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Connected send failed: %d", rc);
+        return bytes_null();
+    }
+    conn->messages_sent++;
+
+    /* Receive response */
+    arena_reset(&conn->rx_arena);
+    Bytes response;
+    rc = enip_recv_frame(conn->socket, &conn->rx_arena, timeout_ms, &io_state, &response);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Connected recv failed: %d", rc);
+        return bytes_null();
+    }
+    conn->messages_received++;
+
+    /* Extract CIP payload from EIP+CPF response */
+    Bytes eip_cpf = enip_eip_extract_cpf_payload(response);
+    if(bytes_is_null(eip_cpf)) {
+        return bytes_null();
+    }
+
+    Bytes cip_response = enip_cpf_extract_cdi_payload(eip_cpf);
+    if(bytes_is_null(cip_response)) {
+        return bytes_null();
+    }
+
+    return cip_response;
+}
+
+
+/* Phase 3: Close the open connection and release buffer resources on target.
+ * Sends ForwardClose (service 0x4E) to Connection Manager.
+ * Does not fail the overall disconnect if ForwardClose fails; caller must clean up. */
+static int32_t enip_connection_forward_close(enip_connection_t *conn) {
+    if(!conn || !conn->socket || !conn->session_established || !conn->cip_connection_open) {
+        return PLCTAG_STATUS_OK; /* Not open, nothing to close */
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
+           "ENIP: ForwardClose starting (O->T=0x%08x T->O=0x%08x)",
+           conn->cip_targ_conn_id, conn->cip_orig_conn_id);
+
+    arena_reset(&conn->tx_arena);
+
+    /* Build connection path (same as ForwardOpen) */
+    uint8_t conn_path[8];
+    uint8_t conn_path_words;
+
+    if(conn->cpu_slot >= 0) {
+        conn_path[0] = 0x01;
+        conn_path[1] = (uint8_t)conn->cpu_slot;
+        conn_path[2] = 0x20; /* class segment */
+        conn_path[3] = 0x02; /* Message Router */
+        conn_path[4] = 0x24; /* instance segment */
+        conn_path[5] = 0x01; /* instance 1 */
+        conn_path_words = 3;
+    } else {
+        conn_path[0] = 0x20;
+        conn_path[1] = 0x02;
+        conn_path[2] = 0x24;
+        conn_path[3] = 0x01;
+        conn_path_words = 2;
+    }
+
+    /* ForwardClose (0x4E) request:
+     *   service(1)=0x4E
+     *   path_size(1)=2 (CM)
+     *   path(4)={0x20,0x06,0x24,0x01}
+     *   priority_and_reserved(1)=0x00
+     *   timeout_ticks(1)=0x0E
+     *   conn_serial_number(2)
+     *   orig_vendor_id(2)=0xF33D
+     *   orig_serial_number(4)=0x21504345
+     *   conn_path_size(1) (words)
+     *   conn_path(variable)
+     */
+    Bytes fc_fixed = bytes_pack(&conn->tx_arena, BYTES_LE,
+                                (uint8_t)0x4E,        /* service: ForwardClose */
+                                (uint8_t)0x02,        /* path_size: 2 words to CM */
+                                (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24, (uint8_t)0x01,
+                                (uint8_t)0x00,        /* priority_and_reserved */
+                                (uint8_t)0x0E,        /* timeout_ticks */
+                                (uint16_t)conn->cip_conn_serial,
+                                (uint16_t)0xF33D,     /* vendor ID */
+                                (uint32_t)0x21504345u,/* serial number */
+                                conn_path_words);
+
+    if(bytes_is_null(fc_fixed)) { return PLCTAG_ERR_NO_MEM; }
+
+    /* Append connection path */
+    size_t path_bytes = (size_t)conn_path_words * 2u;
+    uint8_t *path_buf = arena_alloc(&conn->tx_arena, path_bytes);
+    if(!path_buf) { return PLCTAG_ERR_NO_MEM; }
+    memcpy(path_buf, conn_path, path_bytes);
+
+    Bytes cip_payload = bytes_concat(&conn->tx_arena, fc_fixed,
+                                     (Bytes){path_buf, path_bytes});
+    if(bytes_is_null(cip_payload)) { return PLCTAG_ERR_NO_MEM; }
+
+    /* Wrap in CPF+EIP and send */
+    Bytes cpf = enip_cpf_build_unconnected(&conn->tx_arena, cip_payload);
+    if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
+
+    Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
+                                         conn->session_handle, &conn->sender_context, cpf);
+    if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
+
+    socket_wait_state_t io_state = {0};
+    int32_t rc = socket_write_wait(conn->socket, &frame, 5000, &io_state);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: ForwardClose send failed: %d", rc);
+        return rc;
+    }
+    conn->messages_sent++;
+
+    /* Receive response */
+    arena_reset(&conn->rx_arena);
+    Bytes response;
+    rc = enip_recv_frame(conn->socket, &conn->rx_arena, 5000, &io_state, &response);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: ForwardClose read failed: %d", rc);
+        return rc;
+    }
+    conn->messages_received++;
+
+    /* Extract and parse CIP response (ignore status; we're closing anyway) */
+    Bytes cpf_response = enip_eip_extract_cpf_payload(response);
+    if(!bytes_is_null(cpf_response)) {
+        Bytes cip_response = enip_cpf_extract_udi_payload(cpf_response);
+        if(!bytes_is_null(cip_response)) {
+            uint8_t cip_status;
+            enip_cip_parse_response(cip_response, &cip_status, NULL, NULL);
+            if(cip_status == 0x00) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: ForwardClose OK");
+            } else {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
+                       "ENIP: ForwardClose CIP status 0x%02x (non-fatal)", cip_status);
+            }
+        }
+    }
+
+    conn->cip_connection_open = false;
     return PLCTAG_STATUS_OK;
 }
 
