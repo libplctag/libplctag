@@ -1560,10 +1560,11 @@ void *enip_connection_thread_entry(void *arg) {
 
         /* Phase B: Session bootstrap if needed */
         if(!conn->session_established) {
-            const char *host = "192.168.1.100"; /* TODO: Get from tag attributes */
-            int port = 44818;
+            /* Phase 3: Use actual host/port from connection. Phase 6 will populate from attributes. */
+            const char *host = conn->host[0] ? conn->host : "192.168.1.100";
+            int port = conn->port ? conn->port : 44818;
 
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Bootstrap sequence starting");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Bootstrap sequence starting (host=%s port=%d)", host, port);
 
             /* TCP connect */
             rc = enip_connection_tcp_connect(conn, host, port, 5000);
@@ -1583,6 +1584,7 @@ void *enip_connection_thread_entry(void *arg) {
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
+                conn->cip_connection_open = 0;
                 continue;
             }
 
@@ -1590,19 +1592,23 @@ void *enip_connection_thread_entry(void *arg) {
             rc = enip_connection_get_identity(conn);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity failed, reconnecting");
+                enip_connection_unregister_session(conn);
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
+                conn->cip_connection_open = 0;
                 continue;
             }
 
-            /* Forward Open (stub for now) */
+            /* Phase 3: Forward Open (negotiates connected messaging) */
             rc = enip_connection_forward_open(conn);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: ForwardOpen failed, reconnecting");
+                enip_connection_unregister_session(conn);
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
+                conn->cip_connection_open = 0;
                 continue;
             }
 
@@ -1610,9 +1616,12 @@ void *enip_connection_thread_entry(void *arg) {
             rc = enip_connection_phase1_metadata(conn);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Phase-1 metadata failed, reconnecting");
+                enip_connection_forward_close(conn);
+                enip_connection_unregister_session(conn);
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
+                conn->cip_connection_open = 0;
                 continue;
             }
 
@@ -1624,9 +1633,14 @@ void *enip_connection_thread_entry(void *arg) {
         int64_t now_ms = time_ms();
         if(conn->session_established && (now_ms - conn->last_message_time_ms) > 60000) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Idle disconnect after 60s inactivity");
+            if(conn->cip_connection_open) {
+                enip_connection_forward_close(conn);
+            }
+            enip_connection_unregister_session(conn);
             socket_close(conn->socket);
             conn->socket = NULL;
             conn->session_established = 0;
+            conn->cip_connection_open = 0;
             conn->connection_attempt_count = 0;
         }
 
@@ -1645,9 +1659,14 @@ void *enip_connection_thread_entry(void *arg) {
                 rc_send = socket_write_wait(conn->socket, &request, 5000, &io_state);
                 if(rc_send != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Request send failed: %d, reconnecting", rc_send);
+                    if(conn->cip_connection_open) {
+                        enip_connection_forward_close(conn);
+                    }
+                    enip_connection_unregister_session(conn);
                     socket_close(conn->socket);
                     conn->socket = NULL;
                     conn->session_established = 0;
+                    conn->cip_connection_open = 0;
                 } else {
                     conn->messages_sent++;
 
@@ -1673,9 +1692,14 @@ void *enip_connection_thread_entry(void *arg) {
                             }
                         } else {
                             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Response receive failed: %d, reconnecting", rc_recv);
+                            if(conn->cip_connection_open) {
+                                enip_connection_forward_close(conn);
+                            }
+                            enip_connection_unregister_session(conn);
                             socket_close(conn->socket);
                             conn->socket = NULL;
                             conn->session_established = 0;
+                            conn->cip_connection_open = 0;
                         }
                     }
                 }
@@ -1687,11 +1711,21 @@ void *enip_connection_thread_entry(void *arg) {
         sleep_ms(10);
     }
 
-    /* Phase J: Shutdown */
+    /* Phase J: Shutdown — close connection and session cleanly */
+    if(conn->session_established) {
+        if(conn->cip_connection_open) {
+            enip_connection_forward_close(conn);
+        }
+        enip_connection_unregister_session(conn);
+    }
+
     if(conn->socket) {
         socket_close(conn->socket);
         conn->socket = NULL;
     }
+
+    conn->session_established = 0;
+    conn->cip_connection_open = 0;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Connection thread exited");
     return NULL;
