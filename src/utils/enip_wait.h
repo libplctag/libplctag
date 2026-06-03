@@ -39,7 +39,7 @@ typedef struct {
 
 extern int socket_read_wait(sock_p s, Bytes *dst, int timeout_ms, socket_wait_state_t *io_state);
 extern int socket_write_wait(sock_p s, const Bytes *src, int timeout_ms, socket_wait_state_t *io_state);
-extern int socket_connect_wait(sock_p s, int timeout_ms, socket_wait_state_t *io_state);
-extern int socket_connect_tcp_start_wait(sock_p s, const char *host, int port, int timeout_ms, socket_wait_state_t *io_state);
+/* Start the TCP connect and block (up to timeout_ms) until it completes. */
+extern int socket_connect_wait(sock_p s, const char *host, int port, int timeout_ms, socket_wait_state_t *io_state);
 
 #endif

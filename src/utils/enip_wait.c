@@ -190,7 +190,7 @@ int socket_write_wait(sock_p s, const Bytes *src, int timeout_ms, socket_wait_st
 }
 
 
-int socket_connect_wait(sock_p s, int timeout_ms, socket_wait_state_t *io_state) {
+static int connect_poll_wait(sock_p s, int timeout_ms, socket_wait_state_t *io_state) {
     int64_t deadline_ms;
 
     if(!s) { return PLCTAG_ERR_NULL_PTR; }
@@ -233,7 +233,7 @@ int socket_connect_wait(sock_p s, int timeout_ms, socket_wait_state_t *io_state)
 }
 
 
-int socket_connect_tcp_start_wait(sock_p s, const char *host, int port, int timeout_ms, socket_wait_state_t *io_state) {
+int socket_connect_wait(sock_p s, const char *host, int port, int timeout_ms, socket_wait_state_t *io_state) {
     int rc;
 
     if(!s || !host) { return PLCTAG_ERR_NULL_PTR; }
@@ -254,5 +254,5 @@ int socket_connect_tcp_start_wait(sock_p s, const char *host, int port, int time
     }
 
     wait_state_set(io_state, ENIP_WAIT_OP_CONNECT_START, ENIP_WAIT_STATUS_OK, (Bytes){0}, 0, 0, 3);
-    return socket_connect_wait(s, timeout_ms, io_state);
+    return connect_poll_wait(s, timeout_ms, io_state);
 }

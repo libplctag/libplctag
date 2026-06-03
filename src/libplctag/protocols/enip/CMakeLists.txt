@@ -1,6 +1,8 @@
 set(ENIP_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_mfg_ops.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_cip.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip_connection_tag.c"
@@ -8,5 +10,10 @@ set(ENIP_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip_metadata.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip_packetizer.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/enip_name.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_cip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_mfg_ab.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_mfg_omron.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_mfg_pccc.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_mfg_selector.c"
                     PARENT_SCOPE
 )

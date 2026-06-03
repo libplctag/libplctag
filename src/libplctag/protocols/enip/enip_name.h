@@ -1,3 +1,4 @@
+#pragma once
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -32,39 +33,47 @@
  ***************************************************************************/
 
 /*
- * ENIP Protocol Entry Point
+ * Tag Name Utilities
  *
- * STATUS: KEEP AS-IS for Phases 0-5.  Phase 6 additions needed.
+ * STATUS: KEEP AS-IS for all phases.  No changes needed.
+ *   enip_name_extract_root and enip_name_encode_path are used from Phase 2.
+ *   enip_name_encode_route is wired in Phase 3 (currently never called).
  *
- * This file is the public entry point registered with the tag dispatch table.
- * enip_tag_create routes to either a @connection tag or a normal protocol tag.
+ * enip_name_extract_root -- pull the first path segment (before '[' or '.')
+ *   Used to look up instance IDs in the Phase-1 root symbol cache.
  *
- * Phase 6: enip_init must set up the global connection list and its mutex
- *          (mirroring modbus.c mb_mutex + plcs linked list).
- *          enip_tag_create must call find_or_create_connection(attribs) and
- *          insert the new tag into conn->active_tags.
- *          enip_teardown must drain and destroy all connections.
+ * enip_name_encode_path -- encode a full tag path string into ANSI CIP bytes
+ *   Delegates to enip_cip_encode_tag_path(); wrapper for call-site convenience.
+ *
+ * enip_name_encode_route -- encode a backplane/port route string into CIP
+ *   port segment bytes.
+ *
+ *   Route string format:  "A,0" | "B,1" | "1,192.168.1.10"
+ *     - Port letter: A (port 18) or B (port 19)
+ *     - Port number: 1..15 as a decimal integer
+ *     - Link address: decimal slot number, or dotted-decimal IP for Ethernet ports
+ *
+ *   Output is an even number of bytes (padded with 0x00 if needed) ready to
+ *   append to a CIP path.  path_size_words = output_len / 2.
  */
-#include <libplctag/protocols/enip/enip.h>
-#include <platform.h>
-#include <utils/debug.h>
 
-/* Phase 6: ADD global connection-list mutex init here. */
-int enip_init(void) { return PLCTAG_STATUS_OK; }
+#include <stddef.h>
+#include <stdint.h>
 
-/* Phase 6: ADD drain all connections, set shutdown_requested, join threads. */
-void enip_teardown(void) {}
+/* Phase 2: call during tag creation to get the root name for symbol cache lookup.
+ * Copy the root name (first segment before '[' or '.') from tag_path into buf.
+ * buf is null-terminated on success.
+ * Returns the number of characters written (not counting the null terminator),
+ * or 0 if tag_path is empty or the root segment exceeds buf_size-1. */
+extern size_t enip_name_extract_root(const char *tag_path, char *buf, size_t buf_size);
 
-/* Phase 6: ADD find_or_create_connection(attribs) call here (after routing to
- * enip_protocol_tag_create); set tag->conn and insert tag into conn->active_tags;
- * signal conn->wake so the handler thread can start the bootstrap. */
-plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                          void *userdata, plc_tag_p src_tag) {
-    const char *name = attr_get_str(attribs, "name", NULL);
+/* Phase 2: call during tag creation to pre-encode the tag path for I/O requests.
+ * Encode tag_path into ANSI CIP Extended Symbol format in buf[buf_size].
+ * Returns bytes written, or 0 on error.  Delegates to enip_cip_encode_tag_path(). */
+extern size_t enip_name_encode_path(const char *tag_path, uint8_t *buf, size_t buf_size);
 
-    if((name && str_cmp_i(name, "@connection") == 0) || (src_tag && src_tag->protocol_type == TAG_PROTOCOL_ENIP_CONNECTION)) {
-        return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
-    }
-
-    return enip_protocol_tag_create(attribs, tag_callback_func, userdata, src_tag);
-}
+/* Phase 3: call from enip_connection_create with the "path" attribute (e.g. "1,4").
+ * Store result in conn->conn_path / conn->conn_path_size (size in 16-bit words).
+ * Encode a route string into CIP port segment bytes in buf[buf_size].
+ * Returns bytes written (always even, padded if necessary), or 0 on error. */
+extern size_t enip_name_encode_route(const char *route, uint8_t *buf, size_t buf_size);

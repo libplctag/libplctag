@@ -31,18 +31,40 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+/*
+ * ENIP @connection Tag Implementation
+ *
+ * STATUS: MOSTLY CORRECT through Phase 5.  Phase 0 and Phase 6 changes needed.
+ *
+ * This file implements the vtable for the @connection diagnostic tag — the tag
+ * returned when the user creates a tag with protocol=enip and a @connection path.
+ * It surfaces per-connection metrics (queue_depth, latency) as readable attributes.
+ *
+ * Phase 0: change all int return types to int32_t (plan §0 coding standards).
+ *          change DEBUG_MODULE_LIB to DEBUG_MODULE_ENIP in pdebug calls.
+ *
+ * Phase 6 (Engine): the tickler and get_int_attrib need access to the owning
+ *   enip_connection_t.  Add a back-pointer field to enip_connection_tag_t (or
+ *   look it up via a global connection list).  Then:
+ *   - tickler: read conn->last_callback_latency_ms / conn->messages_sent etc.
+ *     and store into tag->callback_latency_last_ms and tag->queue_depth.
+ *   - get_int_attrib: add "state" attribute returning the DISCONNECTED/OPENING/READY enum.
+ */
+
 #include <libplctag/protocols/enip/enip.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 
 
+/* Phase 0: change return type from int to int32_t.  No functional change. */
 static int enip_connection_abort(plc_tag_p p_tag) {
     (void)p_tag;
     return PLCTAG_STATUS_OK;
 }
 
 
+/* Phase 0: change return type from int to int32_t.  No functional change. */
 static int enip_connection_status(plc_tag_p p_tag) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
 
@@ -52,6 +74,10 @@ static int enip_connection_status(plc_tag_p p_tag) {
 }
 
 
+/* Phase 0: change return type from int to int32_t.
+ * Phase 6: read latency/queue_depth from the owning enip_connection_t and store
+ *          into tag->callback_latency_last_ms, tag->callback_latency_max_ms,
+ *          and tag->queue_depth so callers can plc_tag_get_int_attrib them. */
 static int enip_connection_tickler(plc_tag_p p_tag) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
 
@@ -61,6 +87,9 @@ static int enip_connection_tickler(plc_tag_p p_tag) {
 }
 
 
+/* Phase 0: change return type from int to int32_t.
+ * Phase 6: add "state" attribute returning DISCONNECTED(0)/OPENING(1)/READY(2)
+ *          by reading conn->state from the owning enip_connection_t. */
 static int enip_connection_get_int_attrib(plc_tag_p p_tag, const char *attrib_name, int default_value) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
 
@@ -76,6 +105,7 @@ static int enip_connection_get_int_attrib(plc_tag_p p_tag, const char *attrib_na
 }
 
 
+/* Phase 0: change DEBUG_MODULE_LIB to DEBUG_MODULE_ENIP. No other changes. */
 static void enip_connection_tag_destructor(void *ptr) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)ptr;
 
@@ -85,6 +115,7 @@ static void enip_connection_tag_destructor(void *ptr) {
 }
 
 
+/* Phase 6: add set_int_attrib entry if needed for write-back; otherwise keep as-is. */
 static struct tag_vtable_t enip_connection_tag_vtable = {
     .abort = enip_connection_abort,
     .status = enip_connection_status,
@@ -93,6 +124,10 @@ static struct tag_vtable_t enip_connection_tag_vtable = {
 };
 
 
+/* Phase 0: correct as-is.
+ * Phase 6: after plc_tag_generic_init_tag, look up or create the owning
+ *          enip_connection_t and store a back-pointer in the tag so tickler
+ *          can read live metrics. */
 plc_tag_p enip_connection_tag_create(attr attribs,
                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                      void *userdata, plc_tag_p src_tag) {

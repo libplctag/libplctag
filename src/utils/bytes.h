@@ -74,6 +74,9 @@ extern void bytes_zero(Bytes b);
 /* True when b.data is NULL. */
 static inline bool bytes_is_null(Bytes b) { return b.data == NULL; }
 
+/* Return a null (empty, data==NULL) Bytes value for use as a sentinel/error return. */
+static inline Bytes bytes_null(void) { return (Bytes){NULL, 0}; }
+
 /* Return the filled portion of original given the unfilled remainder.
  * Typical use: Bytes packet = bytes_filled(buf, rest_after_pack_into); */
 static inline Bytes bytes_filled(Bytes original, Bytes rest) { return (Bytes){original.data, original.len - rest.len}; }
