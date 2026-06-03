@@ -58,14 +58,14 @@
 
 
 /* Phase 0: change return type from int to int32_t.  No functional change. */
-static int enip_connection_abort(plc_tag_p p_tag) {
+static int32_t enip_connection_abort(plc_tag_p p_tag) {
     (void)p_tag;
     return PLCTAG_STATUS_OK;
 }
 
 
 /* Phase 0: change return type from int to int32_t.  No functional change. */
-static int enip_connection_status(plc_tag_p p_tag) {
+static int32_t enip_connection_status(plc_tag_p p_tag) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -78,7 +78,7 @@ static int enip_connection_status(plc_tag_p p_tag) {
  * Phase 6: read latency/queue_depth from the owning enip_connection_t and store
  *          into tag->callback_latency_last_ms, tag->callback_latency_max_ms,
  *          and tag->queue_depth so callers can plc_tag_get_int_attrib them. */
-static int enip_connection_tickler(plc_tag_p p_tag) {
+static int32_t enip_connection_tickler(plc_tag_p p_tag) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -90,7 +90,7 @@ static int enip_connection_tickler(plc_tag_p p_tag) {
 /* Phase 0: change return type from int to int32_t.
  * Phase 6: add "state" attribute returning DISCONNECTED(0)/OPENING(1)/READY(2)
  *          by reading conn->state from the owning enip_connection_t. */
-static int enip_connection_get_int_attrib(plc_tag_p p_tag, const char *attrib_name, int default_value) {
+static int32_t enip_connection_get_int_attrib(plc_tag_p p_tag, const char *attrib_name, int default_value) {
     enip_connection_tag_t *tag = (enip_connection_tag_t *)p_tag;
 
     if(!tag || !attrib_name) { return default_value; }
@@ -111,7 +111,7 @@ static void enip_connection_tag_destructor(void *ptr) {
 
     if(!tag) { return; }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "ENIP connection tag destructor.");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, tag->tag_id, "ENIP connection tag destructor.");
 }
 
 

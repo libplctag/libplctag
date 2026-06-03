@@ -36,7 +36,7 @@
  *
  * STATUS: KEEP AS-IS.  Two cosmetic fixes needed.
  *
- * Phase 0: Change DEBUG_MODULE_LIB to DEBUG_MODULE_ENIP in all pdebug calls.
+ * Phase 0: Change DEBUG_MODULE_ENIP to DEBUG_MODULE_ENIP in all pdebug calls.
  * Phase 0: No functional changes — selection logic is correct.
  *
  * The function is called from enip_connection_get_identity after parsing the
@@ -61,15 +61,15 @@
  * Strategy Selection Function
  * ============================================================================ */
 
-/* Phase 0: change DEBUG_MODULE_LIB -> DEBUG_MODULE_ENIP in all pdebug calls inside.
+/* Phase 0: change DEBUG_MODULE_ENIP -> DEBUG_MODULE_ENIP in all pdebug calls inside.
  * Phase 2: called from enip_connection_get_identity — correct as-is. */
 enip_mfg_ops_t *enip_select_mfg_ops(enip_identity_t *identity) {
     if(!identity) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: NULL identity in select_mfg_ops");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: NULL identity in select_mfg_ops");
         return NULL;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Selecting strategy for vendor=0x%04x device=0x%04x product=0x%04x",
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Selecting strategy for vendor=0x%04x device=0x%04x product=0x%04x",
            identity->vendor_id, identity->device_type, identity->product_code);
 
     /* Allen-Bradley family */
@@ -81,7 +81,7 @@ enip_mfg_ops_t *enip_select_mfg_ops(enip_identity_t *identity) {
          * - 0x6B: Generic Programmable Logic Controller (catchall)
          */
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Selected AB/Logix strategy");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Selected AB/Logix strategy");
         return &enip_mfg_ab;
     }
 
@@ -92,7 +92,7 @@ enip_mfg_ops_t *enip_select_mfg_ops(enip_identity_t *identity) {
          * - 0x01: Generic PLC (typical for Omron ENJ)
          */
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Selected OMRON strategy");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Selected OMRON strategy");
         return &enip_mfg_omron;
     }
 
@@ -104,12 +104,12 @@ enip_mfg_ops_t *enip_select_mfg_ops(enip_identity_t *identity) {
        && (strstr(identity->product_name, "PLC5") || strstr(identity->product_name, "SLC")
            || strstr(identity->product_name, "DH"))) {
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Selected PCCC strategy (detected by name)");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Selected PCCC strategy (detected by name)");
         return &enip_mfg_pccc;
     }
 
     /* Default fallback: Try AB/Logix for unknown Allen-Bradley-compatible devices */
-    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Unknown vendor 0x%04x, falling back to AB strategy", identity->vendor_id);
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Unknown vendor 0x%04x, falling back to AB strategy", identity->vendor_id);
     return &enip_mfg_ab;
 }
 

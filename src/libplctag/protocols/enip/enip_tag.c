@@ -62,7 +62,7 @@
  */
 
 /* Phase 0: change return type int -> int32_t; correct as-is otherwise. */
-static int enip_tag_abort(plc_tag_p p_tag) {
+static int32_t enip_tag_abort(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -77,7 +77,7 @@ static int enip_tag_abort(plc_tag_p p_tag) {
 
 /* Phase 0: change return type int -> int32_t.
  * Phase 6: add tag->op_time = time_ms(); signal conn->wake. */
-static int enip_tag_read(plc_tag_p p_tag) {
+static int32_t enip_tag_read(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -91,7 +91,7 @@ static int enip_tag_read(plc_tag_p p_tag) {
 
 
 /* Phase 0: change return type int -> int32_t.  Correct as-is otherwise. */
-static int enip_tag_status(plc_tag_p p_tag) {
+static int32_t enip_tag_status(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -105,7 +105,7 @@ static int enip_tag_status(plc_tag_p p_tag) {
 
 
 /* Phase 0: change return type int -> int32_t.  Correct as-is otherwise. */
-static int enip_tag_tickler(plc_tag_p p_tag) {
+static int32_t enip_tag_tickler(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -116,7 +116,7 @@ static int enip_tag_tickler(plc_tag_p p_tag) {
 
 /* Phase 0: change return type int -> int32_t.
  * Phase 6: add tag->op_time = time_ms(); signal conn->wake. */
-static int enip_tag_write(plc_tag_p p_tag) {
+static int32_t enip_tag_write(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -130,7 +130,7 @@ static int enip_tag_write(plc_tag_p p_tag) {
 
 
 /* Phase 6: implement by calling cond_signal(conn->wake) to wake the handler thread. */
-static int enip_tag_wake_plc(plc_tag_p p_tag) {
+static int32_t enip_tag_wake_plc(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -140,7 +140,7 @@ static int enip_tag_wake_plc(plc_tag_p p_tag) {
 
 
 /* Phase 0: change return type int -> int32_t.  Correct as-is otherwise. */
-static int enip_tag_data_written(plc_tag_p p_tag) {
+static int32_t enip_tag_data_written(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
@@ -156,7 +156,7 @@ static void enip_tag_destructor(void *ptr) {
 
     if(!tag) { return; }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "ENIP tag destructor.");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, tag->tag_id, "ENIP tag destructor.");
 }
 
 

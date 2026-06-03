@@ -39,7 +39,7 @@
  * Phase 0 (compile fix):
  *   - Replace conn->sender_context_base with conn->sender_context everywhere
  *     (four sites: lines ~307, ~949, ~1014, ~1046 — grep to confirm).
- *   - Change all DEBUG_MODULE_LIB to DEBUG_MODULE_ENIP in pdebug calls.
+ *   - Change all DEBUG_MODULE_ENIP to DEBUG_MODULE_ENIP in pdebug calls.
  *
  * Phase 1 (Transport + EIP session):
  *   - Replace enip_connection_register_session: reads exactly 24 bytes (the EIP
@@ -108,6 +108,7 @@
 #include <libplctag/protocols/enip/enip_cpf.h>
 #include <libplctag/protocols/enip/enip_eip.h>
 #include <libplctag/protocols/enip/enip_mfg_ops.h>
+#include <libplctag/protocols/enip/enip_stream.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <platform.h>
 #include <stdbool.h>
@@ -136,7 +137,7 @@ static void enip_connection_destructor(void *ptr) {
 
     if(!conn) { return; }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Destroying connection");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Destroying connection");
 
     conn->shutdown_requested = 1;
 
@@ -205,7 +206,7 @@ enip_tag_t *enip_connection_find_pending_request(enip_connection_t *conn, uint64
 
                 mutex_unlock(conn->pending_requests_mutex);
 
-                pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "ENIP: Matched response sender_context=0x%016llx to tag",
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP: Matched response sender_context=0x%016llx to tag",
                        (unsigned long long)sender_context);
 
                 return tag;
@@ -215,7 +216,7 @@ enip_tag_t *enip_connection_find_pending_request(enip_connection_t *conn, uint64
 
     mutex_unlock(conn->pending_requests_mutex);
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: No pending request found for sender_context=0x%016llx",
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: No pending request found for sender_context=0x%016llx",
            (unsigned long long)sender_context);
 
     return NULL;
@@ -241,7 +242,7 @@ int enip_connection_remove_pending_request(enip_connection_t *conn, enip_tag_t *
 
             mutex_unlock(conn->pending_requests_mutex);
 
-            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "ENIP: Removed tag from pending_requests");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP: Removed tag from pending_requests");
 
             return PLCTAG_STATUS_OK;
         }
@@ -249,7 +250,7 @@ int enip_connection_remove_pending_request(enip_connection_t *conn, enip_tag_t *
 
     mutex_unlock(conn->pending_requests_mutex);
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Tag not found in pending_requests");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Tag not found in pending_requests");
 
     return PLCTAG_ERR_NOT_FOUND;
 }
@@ -266,7 +267,7 @@ static int enip_connection_tcp_connect(enip_connection_t *conn, const char *host
     socket_wait_state_t io_state = {0};
     int rc;
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: TCP connect to %s:%d", host, port);
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: TCP connect to %s:%d", host, port);
 
     if(!conn || !host) { return PLCTAG_ERR_NULL_PTR; }
 
@@ -279,20 +280,20 @@ static int enip_connection_tcp_connect(enip_connection_t *conn, const char *host
     /* Create TCP socket */
     rc = socket_create(&conn->socket);
     if(rc != PLCTAG_STATUS_OK || !conn->socket) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to create TCP socket: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to create TCP socket: %d", rc);
         return PLCTAG_ERR_OPEN;
     }
 
     /* Connect with restart state support */
     rc = socket_connect_wait(conn->socket, host, port, timeout_ms, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: TCP connect failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: TCP connect failed: %d", rc);
         socket_close(conn->socket);
         conn->socket = NULL;
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: TCP connected");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: TCP connected");
     return PLCTAG_STATUS_OK;
 }
 
@@ -308,11 +309,11 @@ static int enip_connection_register_session(enip_connection_t *conn) {
      * EIP Header (24 bytes) + protocol_version (2 bytes) + options (2 bytes) = 28 bytes total
      * Payload length = 4 bytes
      */
-    Bytes request, response_header;
+    Bytes request;
     socket_wait_state_t io_state = {0};
-    int rc;
+    int32_t rc;
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Registering session");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Registering session");
 
     if(!conn || !conn->socket) { return PLCTAG_ERR_NULL_PTR; }
 
@@ -328,54 +329,50 @@ static int enip_connection_register_session(enip_connection_t *conn) {
                          (uint16_t)0x0000);                           /* options */
 
     if(bytes_is_null(request)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Arena OOM for RegisterSession");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Arena OOM for RegisterSession");
         return PLCTAG_ERR_NO_MEM;
     }
 
     /* Send request */
     rc = socket_write_wait(conn->socket, &request, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: RegisterSession send failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: RegisterSession send failed: %d", rc);
         return rc;
     }
 
     conn->messages_sent++;
 
-    /* Receive response header (24 bytes EIP header minimum) */
+    /* Receive response using stream framing (24-byte header + payload). */
     arena_reset(&conn->rx_arena);
-    response_header = bytes_alloc(&conn->rx_arena, 24);
-    if(bytes_is_null(response_header)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Arena OOM for response");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    rc = socket_read_wait(conn->socket, &response_header, 5000, &io_state);
+    Bytes response;
+    rc = enip_recv_frame(conn->socket, &conn->rx_arena, 5000, &io_state, &response);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: RegisterSession read failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: RegisterSession read failed: %d", rc);
         return rc;
     }
 
     conn->messages_received++;
 
-    /* Parse response header to extract session handle and status
-     * Offset 4-7: session handle (assigned by target)
-     * Offset 8-11: status code (should be 0)
+    /* Parse response to extract session handle and status.
+     * EIP response structure:
+     *   Offset 4-7: session_handle (assigned by target)
+     *   Offset 8-11: status code (0 = success)
      */
-    if(response_header.len < 12) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: RegisterSession response too short");
+    if(response.len < 12) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: RegisterSession response too short");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
     uint32_t resp_status;
-    bytes_unpack(response_header, BYTES_LE, BYTES_SKIP(4), &conn->session_handle, &resp_status);
+    bytes_unpack(response, BYTES_LE, BYTES_SKIP(4), &conn->session_handle, &resp_status);
 
     if(resp_status != 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: RegisterSession response status: 0x%08x", resp_status);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: RegisterSession response status: 0x%08x", resp_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
     if(conn->session_handle == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: RegisterSession returned zero handle");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: RegisterSession returned zero handle");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -385,13 +382,13 @@ static int enip_connection_register_session(enip_connection_t *conn) {
     /* Initialize metadata cache after session established */
     conn->metadata_cache = hashtable_create(128);
     if(!conn->metadata_cache) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to create metadata cache hashtable");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to create metadata cache hashtable");
         /* Non-fatal: continue without cache */
     }
 
     rc = mutex_create(&conn->metadata_cache_mutex);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to create metadata cache mutex: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to create metadata cache mutex: %d", rc);
         if(conn->metadata_cache) {
             hashtable_destroy(conn->metadata_cache);
             conn->metadata_cache = NULL;
@@ -399,7 +396,57 @@ static int enip_connection_register_session(enip_connection_t *conn) {
         /* Non-fatal: continue without cache */
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Session established (handle=0x%08x)", conn->session_handle);
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Session established (handle=0x%08x)", conn->session_handle);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* Phase 1: Send UnregisterSession and close connection.
+ * Used to clean up EIP session before disconnecting.
+ * Command 0x66 with existing session handle.
+ * No response parsing required — just send and close. */
+static int32_t enip_connection_unregister_session(enip_connection_t *conn) {
+    /* UnregisterSession: Command 0x66
+     * EIP Header (24 bytes) + no additional payload = 24 bytes total
+     * Payload length = 0 bytes
+     */
+    Bytes request;
+    socket_wait_state_t io_state = {0};
+    int32_t rc;
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Unregistering session (handle=0x%08x)", conn->session_handle);
+
+    if(!conn || !conn->socket) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* Build UnregisterSession request using Bytes API. */
+    arena_reset(&conn->tx_arena);
+    request = bytes_pack(&conn->tx_arena, BYTES_LE,
+                         (uint16_t)0x0066,              /* Command: UnregisterSession */
+                         (uint16_t)0,                   /* Length: no payload */
+                         conn->session_handle,          /* Session handle to unregister */
+                         (uint32_t)0,                   /* Status */
+                         (uint64_t)1,                   /* Sender context */
+                         (uint32_t)0);                  /* Options (reserved) */
+
+    if(bytes_is_null(request)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Arena OOM for UnregisterSession");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /* Send request. */
+    rc = socket_write_wait(conn->socket, &request, 5000, &io_state);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: UnregisterSession send failed: %d", rc);
+        return rc;
+    }
+
+    conn->messages_sent++;
+    conn->session_established = 0;
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: UnregisterSession sent");
 
     return PLCTAG_STATUS_OK;
 }
@@ -428,7 +475,7 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
     socket_wait_state_t io_state = {0};
     int rc;
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Fetching device identity");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Fetching device identity");
 
     if(!conn || !conn->socket || !conn->session_established) { return PLCTAG_ERR_NULL_PTR; }
 
@@ -479,7 +526,7 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
     /* Send request */
     rc = socket_write_wait(conn->socket, &full_request, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity send failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity send failed: %d", rc);
         return rc;
     }
 
@@ -492,7 +539,7 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
 
     rc = socket_read_wait(conn->socket, &response, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity read failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity read failed: %d", rc);
         return rc;
     }
 
@@ -503,7 +550,7 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
      * Then: vendor_id, device_type, product_code, revision (2), status (2), serial (4), name
      */
     if(response.len < 24 + 8 + 4 + 4 + 2 + 14) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity response too short: %zu bytes", response.len);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity response too short: %zu bytes", response.len);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -518,12 +565,12 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
     Bytes rest = bytes_unpack(identity_data, BYTES_LE, &cip_reserved, &cip_status, &ext_status_size);
 
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity CIP response too short");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity CIP response too short");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
     if(cip_status != 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity CIP status: 0x%02x", cip_status);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity CIP status: 0x%02x", cip_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -544,7 +591,7 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
                         &serial_number);
 
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity identity data too short");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity identity data too short");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -573,7 +620,7 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
     /* For now, assume AB/Logix */
     enip_mfg_ops_t *mfg_ops = enip_select_mfg_ops(&identity);
     if(!mfg_ops) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: No manufacturer strategy found for vendor=0x%04x", vendor_id);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: No manufacturer strategy found for vendor=0x%04x", vendor_id);
         /* Fallback: assume AB/Logix but continue anyway */
         conn->mfg_ops = NULL; /* Will be handled by caller */
         conn->supports_0x0a = 1;
@@ -586,11 +633,11 @@ static int enip_connection_get_identity(enip_connection_t *conn) {
         conn->supports_extended_forward_open = (status_word & 0x0080) ? 1 : 0; /* Bit 7 typically */
         conn->max_packet_buffer_size = 2000;                                   /* TODO: Negotiate from ForwardOpen response */
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Manufacturer strategy selected (supports_0x0a=%u, extended_fo=%u)",
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Manufacturer strategy selected (supports_0x0a=%u, extended_fo=%u)",
                conn->supports_0x0a, conn->supports_extended_forward_open);
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "ENIP: Identity fetched (vendor=0x%04x, device=0x%04x, product=0x%04x, revision=%u.%u)", vendor_id, device_type,
            product_code, revision_major, revision_minor);
 
@@ -842,7 +889,7 @@ static int enip_connection_match_response(enip_connection_t *conn, Bytes respons
 
     /* Parse EIP response header to extract sender_context */
     if(response.len < 24) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Response header too short (%zu bytes)", response.len);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Response header too short (%zu bytes)", response.len);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -865,18 +912,18 @@ static int enip_connection_match_response(enip_connection_t *conn, Bytes respons
         bytes_unpack(response, BYTES_LE, &resp_command, &resp_length, &resp_session, &resp_status, &resp_context, &resp_options);
 
     if(bytes_is_null(remaining)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to parse EIP response header");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to parse EIP response header");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
     if(resp_status != 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Response EIP status: 0x%08x (error)", resp_status);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Response EIP status: 0x%08x (error)", resp_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
     /* Store context in conn for Phase H to extract and route */
     conn->last_message_time_ms = time_ms();
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Response matched (context=0x%016llx, length=%u)",
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Response matched (context=0x%016llx, length=%u)",
            (unsigned long long)resp_context, resp_length);
 
     return PLCTAG_STATUS_OK;
@@ -955,7 +1002,7 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
     }
 
     if(bytes_is_null(cip_payload)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: No UDI found in CPF response");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: No UDI found in CPF response");
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -988,19 +1035,19 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
             } else if(rc_decode == PLCTAG_ERR_PARTIAL || chunk_result.needs_retry) {
                 /* Partial response - tag needs more data */
                 tag->op_state = ENIP_TAG_OP_REQUEST; /* Re-queue for next cycle */
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Tag needs more data (partial response)");
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag needs more data (partial response)");
                 tags_processed++;
             } else {
                 /* Decode error */
                 tag->op_state = ENIP_TAG_OP_ERROR;
                 if(tag->callback) { tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc_decode, tag->userdata); }
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Decode failed for tag: %d", rc_decode);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Decode failed for tag: %d", rc_decode);
                 tags_processed++;
             }
         }
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Processed %d tags from response", tags_processed);
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Processed %d tags from response", tags_processed);
 
     return PLCTAG_STATUS_OK;
 }
@@ -1037,7 +1084,7 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
     if(!conn || !conn->active_tags || !out_request) { return PLCTAG_ERR_NULL_PTR; }
 
     if(!conn->mfg_ops) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: No manufacturer strategy available");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: No manufacturer strategy available");
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -1068,7 +1115,7 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
         size_t rough_estimate = ((size_t)tags_with_work * 64U) + overhead;
         if(rough_estimate > (size_t)conn->max_packet_buffer_size) {
             /* Too many tags, will handle in next cycle */
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Estimated %zu bytes exceeds budget %u, splitting batch",
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Estimated %zu bytes exceeds budget %u, splitting batch",
                    rough_estimate, conn->max_packet_buffer_size);
             break;
         }
@@ -1093,21 +1140,21 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
             int rc_est = conn->mfg_ops->estimate_request_size((enip_tag_t *)tag, conn, &conn->tx_arena, tag_req_budget,
                                                               tag_resp_budget, &req_desc);
             if(rc_est != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Tag %d estimation failed: %d, stopping batch", i, rc_est);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag %d estimation failed: %d, stopping batch", i, rc_est);
                 break;
             }
 
             /* Check if this tag would exceed budget */
             if(estimated_request_size + req_desc.request_size + overhead > (size_t)conn->max_packet_buffer_size
                || estimated_response_size + req_desc.estimated_response_size > (size_t)conn->max_packet_buffer_size) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Tag %d would exceed budget, stopping batch", i);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag %d would exceed budget, stopping batch", i);
                 break;
             }
 
             /* Encode the CIP payload */
             int rc_enc = conn->mfg_ops->encode_request((enip_tag_t *)tag, conn, &conn->tx_arena, &req_desc);
             if(rc_enc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Tag %d encoding failed: %d, skipping", i, rc_enc);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag %d encoding failed: %d, skipping", i, rc_enc);
                 continue;
             }
 
@@ -1121,7 +1168,7 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
             tag->write_in_flight = 0;
             tag->tag_is_dirty = 0;
 
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Encoded tag %d (%zu bytes request, %zu bytes response)", i,
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Encoded tag %d (%zu bytes request, %zu bytes response)", i,
                    req_desc.request_size, req_desc.estimated_response_size);
         }
 
@@ -1129,7 +1176,7 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
     }
 
     if(tags_encoded == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: No tags successfully encoded");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: No tags successfully encoded");
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -1182,7 +1229,7 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
     *out_request = full_request;
     conn->sender_context += (uint32_t)tags_encoded;
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Built request from %d tags (%zu bytes total request, %zu bytes response)",
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Built request from %d tags (%zu bytes total request, %zu bytes response)",
            tags_encoded, estimated_request_size, estimated_response_size);
 
     return PLCTAG_STATUS_OK;
@@ -1204,12 +1251,12 @@ static int enip_connection_phase1_metadata(enip_connection_t *conn) {
      */
     int rc;
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Fetching phase-1 metadata (manufacturer-specific)");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Fetching phase-1 metadata (manufacturer-specific)");
 
     if(!conn || !conn->socket || !conn->session_established) { return PLCTAG_ERR_NULL_PTR; }
 
     if(!conn->mfg_ops || !conn->mfg_ops->fetch_phase1_metadata) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: No phase-1 metadata callback available");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: No phase-1 metadata callback available");
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -1219,11 +1266,11 @@ static int enip_connection_phase1_metadata(enip_connection_t *conn) {
     /* Call manufacturer-specific phase-1 metadata fetch */
     rc = conn->mfg_ops->fetch_phase1_metadata(conn, &conn->tx_arena);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Phase-1 metadata fetch failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Phase-1 metadata fetch failed: %d", rc);
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Phase-1 metadata fetched successfully");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Phase-1 metadata fetched successfully");
     return PLCTAG_STATUS_OK;
 }
 
@@ -1248,11 +1295,11 @@ void *enip_connection_thread_entry(void *arg) {
     int rc;
 
     if(!conn) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: NULL connection passed to thread");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: NULL connection passed to thread");
         return NULL;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Connection thread started");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Connection thread started");
 
     while(!conn->shutdown_requested) {
         /* Phase A: Terminate check */
@@ -1263,7 +1310,7 @@ void *enip_connection_thread_entry(void *arg) {
             const char *host = "192.168.1.100"; /* TODO: Get from tag attributes */
             int port = 44818;
 
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Bootstrap sequence starting");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Bootstrap sequence starting");
 
             /* TCP connect */
             rc = enip_connection_tcp_connect(conn, host, port, 5000);
@@ -1271,7 +1318,7 @@ void *enip_connection_thread_entry(void *arg) {
                 conn->connection_attempt_count++;
                 int backoff = (1 << (conn->connection_attempt_count < 13 ? conn->connection_attempt_count : 13));
                 conn->retry_deadline_ms = time_ms() + backoff;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: TCP connect failed, retry in %dms", backoff);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: TCP connect failed, retry in %dms", backoff);
                 sleep_ms(10);
                 continue;
             }
@@ -1279,7 +1326,7 @@ void *enip_connection_thread_entry(void *arg) {
             /* RegisterSession */
             rc = enip_connection_register_session(conn);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: RegisterSession failed, reconnecting");
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: RegisterSession failed, reconnecting");
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
@@ -1289,7 +1336,7 @@ void *enip_connection_thread_entry(void *arg) {
             /* Get Identity */
             rc = enip_connection_get_identity(conn);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: GetIdentity failed, reconnecting");
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity failed, reconnecting");
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
@@ -1299,7 +1346,7 @@ void *enip_connection_thread_entry(void *arg) {
             /* Forward Open (stub for now) */
             rc = enip_connection_forward_open(conn);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: ForwardOpen failed, reconnecting");
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: ForwardOpen failed, reconnecting");
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
@@ -1309,7 +1356,7 @@ void *enip_connection_thread_entry(void *arg) {
             /* Phase-1 Metadata */
             rc = enip_connection_phase1_metadata(conn);
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Phase-1 metadata failed, reconnecting");
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Phase-1 metadata failed, reconnecting");
                 socket_close(conn->socket);
                 conn->socket = NULL;
                 conn->session_established = 0;
@@ -1317,13 +1364,13 @@ void *enip_connection_thread_entry(void *arg) {
             }
 
             conn->connection_attempt_count = 0;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Connection UP");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Connection UP");
         }
 
         /* Phase I: Idle disconnect - check for inactivity timeout (60 seconds) */
         int64_t now_ms = time_ms();
         if(conn->session_established && (now_ms - conn->last_message_time_ms) > 60000) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Idle disconnect after 60s inactivity");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Idle disconnect after 60s inactivity");
             socket_close(conn->socket);
             conn->socket = NULL;
             conn->session_established = 0;
@@ -1344,7 +1391,7 @@ void *enip_connection_thread_entry(void *arg) {
                 /* Phase D: Send request */
                 rc_send = socket_write_wait(conn->socket, &request, 5000, &io_state);
                 if(rc_send != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Request send failed: %d, reconnecting", rc_send);
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Request send failed: %d, reconnecting", rc_send);
                     socket_close(conn->socket);
                     conn->socket = NULL;
                     conn->session_established = 0;
@@ -1363,16 +1410,16 @@ void *enip_connection_thread_entry(void *arg) {
                             /* Phase G: Match response to pending requests via sender_context */
                             int rc_match = enip_connection_match_response(conn, response);
                             if(rc_match != PLCTAG_STATUS_OK) {
-                                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Response match failed: %d", rc_match);
+                                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Response match failed: %d", rc_match);
                             } else {
                                 /* Phase H: Decode responses and invoke tag callbacks */
                                 int rc_decode = enip_connection_decode_response(conn, response);
                                 if(rc_decode != PLCTAG_STATUS_OK) {
-                                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP: Decode failed: %d", rc_decode);
+                                    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Decode failed: %d", rc_decode);
                                 }
                             }
                         } else {
-                            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Response receive failed: %d, reconnecting", rc_recv);
+                            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Response receive failed: %d, reconnecting", rc_recv);
                             socket_close(conn->socket);
                             conn->socket = NULL;
                             conn->session_established = 0;
@@ -1380,7 +1427,7 @@ void *enip_connection_thread_entry(void *arg) {
                     }
                 }
             } else if(rc_build != PLCTAG_ERR_NO_DATA) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Request build failed: %d", rc_build);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Request build failed: %d", rc_build);
             }
         }
 
@@ -1393,7 +1440,7 @@ void *enip_connection_thread_entry(void *arg) {
         conn->socket = NULL;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Connection thread exited");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Connection thread exited");
     return NULL;
 }
 
@@ -1413,26 +1460,26 @@ enip_connection_t *enip_connection_create(void) {
     int rc;
 
     if(!conn) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to allocate connection");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to allocate connection");
         return NULL;
     }
 
     /* Initialize arena (32KB for request/response buffers) */
     rc = arena_init(&conn->tx_arena, 32768);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to init TX arena: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to init TX arena: %d", rc);
         rc_dec(conn);
         return NULL;
     }
 
     rc = arena_init(&conn->rx_arena, 32768);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP: Failed to init RX arena: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to init RX arena: %d", rc);
         rc_dec(conn);
         return NULL;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP: Connection created");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Connection created");
     return conn;
 }
 

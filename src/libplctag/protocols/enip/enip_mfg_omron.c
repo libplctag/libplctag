@@ -80,7 +80,7 @@
 
 /* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
  * Phase 8: DELETE — replaced by encode_chunk. */
-static int enip_mfg_omron_estimate_request_size(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
+static int32_t enip_mfg_omron_estimate_request_size(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
                                                 size_t req_budget, size_t resp_budget, enip_req_desc_t *result) {
     /* Estimate sizes for Omron CIP requests using service 0x80 (simple data segment)
      * Omron typically uses fixed-size segments for direct memory access.
@@ -102,7 +102,7 @@ static int enip_mfg_omron_estimate_request_size(struct enip_tag_t *tag, struct e
     if(data_size > 2048) { data_size = 2048; }
     result->estimated_response_size = 8 + data_size;
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "ENIP/OMRON: estimate %zu req / %zu resp", result->request_size,
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/OMRON: estimate %zu req / %zu resp", result->request_size,
            result->estimated_response_size);
 
     return PLCTAG_STATUS_OK;
@@ -111,133 +111,31 @@ static int enip_mfg_omron_estimate_request_size(struct enip_tag_t *tag, struct e
 /* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line) — this currently
  * passes wrong argument count to enip_cip_read/write_tag_request and will not compile.
  * Phase 8: DELETE — replaced by encode_chunk (see file-level comment). */
-static int enip_mfg_omron_encode_request(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
+static int32_t enip_mfg_omron_encode_request(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
                                          enip_req_desc_t *result) {
-    /* Encode CIP request for Omron using shared ReadTag/WriteTag services
-     *
-     * Omron uses standard CIP services 0x4C (ReadTag) and 0x4D (WriteTag),
-     * identical to Allen-Bradley. Uses shared encoding layer.
-     */
-
-    if(!result || !tag || !conn || !arena) { return PLCTAG_ERR_NULL_PTR; }
-
-    /* Phase-2 metadata gate: Fetch metadata on first request if not already fetched */
-    if(!tag->metadata_phase2_ready) {
-        const char *tag_name = "tag"; /* TODO: get actual tag name from tag structure */
-
-        uint16_t symbol_type = 0;
-        uint16_t element_size = 0;
-        uint32_t array_dims[3] = {0, 0, 0};
-
-        int rc = enip_metadata_fetch_tag_info(conn, tag_name, &symbol_type, &element_size, array_dims);
-
-        if(rc == PLCTAG_STATUS_OK) {
-            tag->elem_size = element_size;
-            tag->elem_count = array_dims[0];
-            tag->metadata_phase2_ready = 1;
-
-            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP/OMRON: Metadata fetched for instance %u (size=%u, count=%u)",
-                   tag->tag_instance_id, element_size, array_dims[0]);
-        } else if(rc == PLCTAG_ERR_NOT_FOUND) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "ENIP/OMRON: Metadata not available yet for instance %u",
-                   tag->tag_instance_id);
-            return PLCTAG_STATUS_PENDING;
-        } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP/OMRON: Metadata fetch failed for instance %u: %d", tag->tag_instance_id,
-                   rc);
-            tag->elem_size = tag->elem_size > 0 ? tag->elem_size : 4;
-            tag->metadata_phase2_ready = 1;
-        }
-    }
-
-    /* Use shared CIP layer with pre-encoded tag path (encoded at tag creation time) */
-    Bytes cip_request;
-    if(result->is_write) {
-        size_t write_len = (tag->elem_count > 0) ? (tag->elem_count * tag->elem_size) : tag->size;
-        cip_request = enip_cip_write_tag_request(arena, tag->encoded_tag_path, tag->encoded_tag_path_len, result->sequence_id,
-                                                 tag->data, write_len);
-    } else {
-        uint32_t elem_count = (tag->elem_count > 0) ? (uint32_t)tag->elem_count : 1;
-        if(elem_count > 2048) { elem_count = 2048; }
-        cip_request = enip_cip_read_tag_request(arena, tag->encoded_tag_path, tag->encoded_tag_path_len, result->sequence_id,
-                                                (uint16_t)elem_count);
-    }
-
-    if(bytes_is_null(cip_request)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP/OMRON: CIP request encoding failed");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    result->request_size = cip_request.len;
-    result->estimated_response_size =
-        20 + ((tag->elem_count > 0 ? tag->elem_count : 1) * (tag->elem_size > 0 ? tag->elem_size : 4));
-    if(result->estimated_response_size > 2048) { result->estimated_response_size = 2048; }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "ENIP/OMRON: encoded request (%zu bytes)", cip_request.len);
-
-    return PLCTAG_STATUS_OK;
+    (void)tag; (void)conn; (void)arena; (void)result;
+    return PLCTAG_ERR_UNSUPPORTED;
 }
 
 /* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
  * Phase 8: DELETE — replaced by accept_chunk (see file-level comment). */
-static int enip_mfg_omron_decode_response(struct enip_tag_t *tag, struct enip_connection_t *conn, Bytes response_payload,
+static int32_t enip_mfg_omron_decode_response(struct enip_tag_t *tag, struct enip_connection_t *conn, Bytes response_payload,
                                           uint32_t correlation_id, enip_chunk_result_t *result) {
-    /* Decode CIP response from Omron PLC using shared response parser
-     *
-     * Omron uses standard CIP response format, identical to Allen-Bradley
-     */
-
-    if(!result || !tag || !response_payload.data) { return PLCTAG_ERR_NULL_PTR; }
-    memset(result, 0, sizeof(*result));
-
-    /* Use shared CIP response parser */
-    uint16_t cip_status = 0;
-    uint8_t ext_status_size = 0;
-    Bytes data = {NULL, 0};
-
-    Bytes parsed = enip_cip_parse_response(response_payload, &cip_status, &ext_status_size, &data);
-
-    if(bytes_is_null(parsed)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP/OMRON: Response parsing failed");
-        result->cip_status = 0xFFFF;
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    result->cip_status = cip_status;
-
-    if(cip_status != 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP/OMRON: CIP status error: 0x%04x", cip_status);
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    /* Copy response data to tag buffer (if present) */
-    if(!bytes_is_null(data) && data.len > 0 && tag->data) {
-        size_t copy_len = (data.len < tag->size) ? data.len : tag->size;
-        memcpy(tag->data, data.data, copy_len);
-        result->elements_decoded = (copy_len + tag->elem_size - 1) / tag->elem_size;
-    } else {
-        result->elements_decoded = tag->elem_count > 0 ? (uint32_t)tag->elem_count : 1;
-    }
-
-    result->needs_retry = 0;
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "ENIP/OMRON: response decoded status=0x%04x, %d elements", cip_status,
-           result->elements_decoded);
-
-    return PLCTAG_STATUS_OK;
+    (void)tag; (void)conn; (void)response_payload; (void)correlation_id; (void)result;
+    return PLCTAG_ERR_UNSUPPORTED;
 }
 
-/* Phase 0: leave as-is (returns 0, compiles fine).
+/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
  * Phase 8: DELETE — replaced by accept_chunk return value. */
-static int enip_mfg_omron_needs_more(struct enip_tag_t *tag, enip_chunk_result_t *result) {
-    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "ENIP/OMRON: needs more (stub)");
-    return 0;
+static int32_t enip_mfg_omron_needs_more(struct enip_tag_t *tag, enip_chunk_result_t *result) {
+    (void)tag; (void)result;
+    return PLCTAG_ERR_UNSUPPORTED;
 }
 
 /* Phase 8: this no-op is correct for OMRON — NJ/NX does not support the
  * GetInstanceAttributeList on class 0x6B.  Keep this body; just remove the
  * misleading TODO and fix the debug module to DEBUG_MODULE_ENIP. */
-static int enip_mfg_omron_fetch_phase1_metadata(struct enip_connection_t *conn, Arena *arena) {
+static int32_t enip_mfg_omron_fetch_phase1_metadata(struct enip_connection_t *conn, Arena *arena) {
     /*
      * Phase-1 metadata for Omron devices: manufacturer-specific queries
      *
@@ -250,12 +148,12 @@ static int enip_mfg_omron_fetch_phase1_metadata(struct enip_connection_t *conn, 
      * For now, skip the metadata phase and allow Phase C (request building) to proceed.
      */
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "ENIP/OMRON: Phase-1 metadata fetch (stub - skipping)");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP/OMRON: Phase-1 metadata fetch (stub - skipping)");
 
     if(!conn || !arena) { return PLCTAG_ERR_NULL_PTR; }
 
     /* TODO: Implement Omron-specific metadata query */
-    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ENIP/OMRON: Phase-1 metadata not yet implemented");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP/OMRON: Phase-1 metadata not yet implemented");
 
     return PLCTAG_STATUS_OK;
 }
