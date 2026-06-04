@@ -1288,18 +1288,23 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
 }
 
 
-/* Phase 6: REPLACE this function entirely.
- * Phase 4: Stub out to use new encode_chunk callback interface.
- * Current implementation tries to use old estimate_request_size/encode_request callbacks.
+/* Phase 3: Use connected messaging for building requests.
+ * Phase 6 will: pick one tag from active_tags, call encode_chunk to get CIP bytes,
+ * wrap in connected CPF+EIP (using the layer helpers), and return.
+ * Multi-service batching (0x0A) is Phase 5.
  *
- * Phase 6 replacement: pick one tag from active_tags (front of sorted queue),
- * call encode_chunk to get the CIP bytes, wrap in CPF+EIP (using the layer
- * helpers), and return.  Multi-service batching (0x0A) is Phase 5. */
+ * Phase 3: For now, stub out to return ERR_NO_DATA when no connection is open,
+ * or use connected send_recv for testing when connection is available. */
 static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_request) {
-    /* Phase C: Build outgoing requests from active_tags vector
-     * Phase 4: Stub — returns ERR_NO_DATA. Phase 6 will implement using encode_chunk. */
-    (void)conn;
-    (void)out_request;
+    if(!conn || !out_request) { return PLCTAG_ERR_NULL_PTR; }
+
+    /* Phase 3: Only proceed if we have an open connected path */
+    if(!conn->cip_connection_open) {
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    /* Phase 6: Build request from tags using encode_chunk.
+     * For now, Phase 3 returns NO_DATA to avoid send/recv cycle until Phase 4 adds tags. */
     return PLCTAG_ERR_NO_DATA;
 }
 
