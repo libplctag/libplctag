@@ -1,3 +1,4 @@
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -90,9 +91,8 @@
 
 
 /* ============================================================================
- * Stub Implementations (TODO: Fill in with real PCCC logic)
+ * Phase 9: Stub Implementations (encode_chunk / accept_chunk)
  * ============================================================================ */
-
 
 /* Phase 9: this no-op is correct for PCCC devices — they do not support symbol
  * enumeration.  Keep this body; fix debug module to DEBUG_MODULE_ENIP and
@@ -131,12 +131,15 @@ static int enip_mfg_pccc_fetch_phase1_metadata(struct enip_connection_t *conn, A
 
 /* Phase 4: stubs for fragmentation callbacks. Phase 9 will implement PCCC logic. */
 static Bytes enip_mfg_pccc_encode_chunk(struct enip_tag_t *tag, Arena *arena, size_t cip_budget) {
-    (void)tag; (void)arena; (void)cip_budget;
+    (void)tag;
+    (void)arena;
+    (void)cip_budget;
     return bytes_null();
 }
 
 static int32_t enip_mfg_pccc_accept_chunk(struct enip_tag_t *tag, Bytes cip_response) {
-    (void)tag; (void)cip_response;
+    (void)tag;
+    (void)cip_response;
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
@@ -144,9 +147,7 @@ static int32_t enip_mfg_pccc_accept_chunk(struct enip_tag_t *tag, Bytes cip_resp
  * PCCC Strategy Structure (Phase 4)
  * ============================================================================ */
 
-enip_mfg_ops_t enip_mfg_pccc = {
-    .encode_chunk = enip_mfg_pccc_encode_chunk,
-    .accept_chunk = enip_mfg_pccc_accept_chunk,
-    .fetch_phase1_metadata = enip_mfg_pccc_fetch_phase1_metadata,
-    .name = "PCCC"
-};
+enip_mfg_ops_t enip_mfg_pccc = {.encode_chunk = enip_mfg_pccc_encode_chunk,
+                                .accept_chunk = enip_mfg_pccc_accept_chunk,
+                                .fetch_phase1_metadata = enip_mfg_pccc_fetch_phase1_metadata,
+                                .name = "PCCC"};
