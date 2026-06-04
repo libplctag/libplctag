@@ -468,7 +468,7 @@ static int32_t enip_connection_get_identity(enip_connection_t *conn) {
     Bytes cip_request, cpf_frame, eip_frame, response, cip_response;
     socket_wait_state_t io_state = {0};
     int32_t rc;
-    uint16_t cip_status;
+    uint8_t cip_status;
     uint8_t ext_status_size;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Fetching device identity");
@@ -1272,12 +1272,25 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
             if(!tag) { continue; }
 
             /* Only process tags that are waiting for response */
-            if(tag->op_state != ENIP_TAG_OP_REQUEST) { continue; }
+            if(tag->op_state != ENIP_TAG_OP_REQUEST && tag->op_state != ENIP_TAG_OP_RESPONSE) { continue; }
 
-            /* Phase 6: Call manufacturer accept_chunk callback (replaces decode_response)
-             * For now, stub out this Phase 6 work. */
-            (void)cip_payload;
-            (void)resp_context;
+            /* Phase 4: Call manufacturer accept_chunk callback to process response */
+            int32_t rc = conn->mfg_ops->accept_chunk(tag, cip_payload);
+
+            if(rc == PLCTAG_STATUS_OK) {
+                /* Operation complete */
+                tag->op_state = ENIP_TAG_OP_COMPLETE;
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag operation complete");
+            } else if(rc == PLCTAG_ERR_PARTIAL) {
+                /* More chunks needed - move back to REQUEST state for next cycle */
+                tag->op_state = ENIP_TAG_OP_REQUEST;
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag needs more data (partial response)");
+            } else {
+                /* Error occurred */
+                tag->op_state = ENIP_TAG_OP_ERROR;
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Tag operation failed: %d", rc);
+            }
+
             tags_processed++;
         }
     }
@@ -1288,24 +1301,71 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
 }
 
 
-/* Phase 3: Use connected messaging for building requests.
- * Phase 6 will: pick one tag from active_tags, call encode_chunk to get CIP bytes,
- * wrap in connected CPF+EIP (using the layer helpers), and return.
+/* Phase 4: Build requests using encode_chunk callbacks.
+ * Picks next tag from active_tags with pending work and calls encode_chunk
+ * to build the CIP request. Wraps in connected CPF+EIP and returns.
  * Multi-service batching (0x0A) is Phase 5.
  *
- * Phase 3: For now, stub out to return ERR_NO_DATA when no connection is open,
- * or use connected send_recv for testing when connection is available. */
+ * Returns: PLCTAG_STATUS_OK if request built and returned,
+ *          PLCTAG_ERR_NO_DATA if no pending work,
+ *          PLCTAG_ERR_* on failure. */
 static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_request) {
     if(!conn || !out_request) { return PLCTAG_ERR_NULL_PTR; }
 
-    /* Phase 3: Only proceed if we have an open connected path */
+    /* Only proceed if we have an open connected path */
     if(!conn->cip_connection_open) {
         return PLCTAG_ERR_NO_DATA;
     }
 
-    /* Phase 6: Build request from tags using encode_chunk.
-     * For now, Phase 3 returns NO_DATA to avoid send/recv cycle until Phase 4 adds tags. */
-    return PLCTAG_ERR_NO_DATA;
+    enip_tag_t *tag_to_process = NULL;
+
+    /* Find first tag with pending work (REQUEST state) */
+    critical_block(conn->active_tags_mutex) {
+        int tag_count = vector_length((vector_p)conn->active_tags);
+        for(int i = 0; i < tag_count; i++) {
+            enip_tag_t *tag = (enip_tag_t *)vector_get((vector_p)conn->active_tags, i);
+            if(tag && tag->op_state == ENIP_TAG_OP_REQUEST) {
+                tag_to_process = tag;
+                break;
+            }
+        }
+    }
+
+    if(!tag_to_process) {
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    /* Reset arena and build request using manufacturer callback */
+    arena_reset(&conn->tx_arena);
+
+    /* Estimate CIP budget for request (connected buffer - protocol overhead) */
+    size_t cip_budget = (conn->max_packet_buffer_size > 20) ? (conn->max_packet_buffer_size - 20) : 0;
+
+    /* Call encode_chunk to build the next CIP request */
+    Bytes cip_request = conn->mfg_ops->encode_chunk(tag_to_process, &conn->tx_arena, cip_budget);
+    if(bytes_is_null(cip_request)) {
+        /* No more data to send for this tag - operation complete */
+        tag_to_process->op_state = ENIP_TAG_OP_RESPONSE;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    /* Wrap CIP in connected CPF */
+    Bytes cpf = enip_cpf_build_connected(&conn->tx_arena, conn->cip_targ_conn_id,
+                                         conn->cip_conn_seq_num, cip_request);
+    if(bytes_is_null(cpf)) {
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /* Wrap in EIP frame for connected send */
+    Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_CONNECTED_SEND,
+                                         conn->session_handle, &conn->sender_context, cpf);
+    if(bytes_is_null(frame)) {
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    conn->cip_conn_seq_num++;
+    *out_request = frame;
+    return PLCTAG_STATUS_OK;
 }
 
 
