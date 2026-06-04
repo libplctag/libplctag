@@ -109,6 +109,7 @@
 #include <libplctag/protocols/enip/enip_cpf.h>
 #include <libplctag/protocols/enip/enip_eip.h>
 #include <libplctag/protocols/enip/enip_mfg_ops.h>
+#include <libplctag/protocols/enip/enip_packetizer.h>
 #include <libplctag/protocols/enip/enip_stream.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <platform.h>
@@ -1259,39 +1260,105 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Route CIP payload to each tag that was in the request batch
-     * Identify tags by checking which ones have op_state == ENIP_TAG_OP_REQUEST
-     */
+    /* Phase 5: Check if this is a 0x0A batch response or single response */
     int tags_processed = 0;
+    uint8_t service_reply = (cip_payload.len > 0) ? cip_payload.data[0] : 0;
 
-    critical_block(conn->active_tags_mutex) {
-        int tag_count = vector_length((vector_p)conn->active_tags);
+    if(service_reply == 0x8A) {
+        /* 0x0A batch response: extract individual responses using offset table */
+        if(cip_payload.len < 6) { return PLCTAG_ERR_REMOTE_ERR; }
 
-        for(int i = 0; i < tag_count; i++) {
-            enip_tag_t *tag = (enip_tag_t *)vector_get((vector_p)conn->active_tags, i);
-            if(!tag) { continue; }
+        uint8_t cip_status = cip_payload.data[2];
+        uint8_t ext_sz = cip_payload.data[3];
+        uint16_t slot_count = 0;
 
-            /* Only process tags that are waiting for response */
-            if(tag->op_state != ENIP_TAG_OP_REQUEST && tag->op_state != ENIP_TAG_OP_RESPONSE) { continue; }
+        Bytes remaining = bytes_unpack(bytes_slice(cip_payload, 4, cip_payload.len - 4),
+                                      BYTES_LE, &slot_count);
+        if(bytes_is_null(remaining)) { return PLCTAG_ERR_REMOTE_ERR; }
 
-            /* Phase 4: Call manufacturer accept_chunk callback to process response */
-            int32_t rc = conn->mfg_ops->accept_chunk(tag, cip_payload);
+        /* Skip extended status if present */
+        size_t offset_table_start = 6 + (size_t)ext_sz * 2;
+        if(offset_table_start + slot_count * 2 > cip_payload.len) { return PLCTAG_ERR_REMOTE_ERR; }
 
-            if(rc == PLCTAG_STATUS_OK) {
-                /* Operation complete */
-                tag->op_state = ENIP_TAG_OP_COMPLETE;
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag operation complete");
-            } else if(rc == PLCTAG_ERR_PARTIAL) {
-                /* More chunks needed - move back to REQUEST state for next cycle */
-                tag->op_state = ENIP_TAG_OP_REQUEST;
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag needs more data (partial response)");
-            } else {
-                /* Error occurred */
-                tag->op_state = ENIP_TAG_OP_ERROR;
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Tag operation failed: %d", rc);
+        /* Extract offsets and individual responses */
+        critical_block(conn->active_tags_mutex) {
+            int tag_count = vector_length((vector_p)conn->active_tags);
+            uint32_t slot_idx = 0;
+
+            for(int i = 0; i < tag_count && slot_idx < slot_count; i++) {
+                enip_tag_t *tag = (enip_tag_t *)vector_get((vector_p)conn->active_tags, i);
+                if(!tag || (tag->op_state != ENIP_TAG_OP_REQUEST && tag->op_state != ENIP_TAG_OP_RESPONSE)) {
+                    continue;
+                }
+
+                /* Read offset for this slot */
+                uint16_t offset = 0;
+                Bytes offset_bytes = bytes_slice(cip_payload, offset_table_start + slot_idx * 2, 2);
+                if(bytes_is_null(offset_bytes) || bytes_unpack(offset_bytes, BYTES_LE, &offset).len == 0) {
+                    break;
+                }
+
+                /* Read next offset to determine response end */
+                uint16_t next_offset = (slot_idx + 1 < slot_count) ? cip_payload.len : cip_payload.len;
+                if(slot_idx + 1 < slot_count) {
+                    Bytes next_offset_bytes = bytes_slice(cip_payload, offset_table_start + (slot_idx + 1) * 2, 2);
+                    if(!bytes_is_null(next_offset_bytes)) {
+                        bytes_unpack(next_offset_bytes, BYTES_LE, &next_offset);
+                    }
+                }
+
+                /* Extract this slot's response */
+                if(offset < cip_payload.len && next_offset <= cip_payload.len) {
+                    Bytes slot_response = bytes_slice(cip_payload, offset, next_offset - offset);
+                    if(!bytes_is_null(slot_response)) {
+                        /* Call accept_chunk for this response */
+                        int32_t rc = conn->mfg_ops->accept_chunk(tag, slot_response);
+
+                        if(rc == PLCTAG_STATUS_OK) {
+                            tag->op_state = ENIP_TAG_OP_COMPLETE;
+                            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Batched tag operation complete");
+                        } else if(rc == PLCTAG_ERR_PARTIAL) {
+                            tag->op_state = ENIP_TAG_OP_REQUEST;
+                            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Batched tag needs more data");
+                        } else {
+                            tag->op_state = ENIP_TAG_OP_ERROR;
+                            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Batched tag operation failed: %d", rc);
+                        }
+
+                        tags_processed++;
+                        slot_idx++;
+                    }
+                }
             }
+        }
+    } else {
+        /* Single response - process RESPONSE-state tags */
+        critical_block(conn->active_tags_mutex) {
+            int tag_count = vector_length((vector_p)conn->active_tags);
 
-            tags_processed++;
+            for(int i = 0; i < tag_count; i++) {
+                enip_tag_t *tag = (enip_tag_t *)vector_get((vector_p)conn->active_tags, i);
+                if(!tag) { continue; }
+
+                /* Only process tags that are waiting for response */
+                if(tag->op_state != ENIP_TAG_OP_REQUEST && tag->op_state != ENIP_TAG_OP_RESPONSE) { continue; }
+
+                /* Call manufacturer accept_chunk callback to process response */
+                int32_t rc = conn->mfg_ops->accept_chunk(tag, cip_payload);
+
+                if(rc == PLCTAG_STATUS_OK) {
+                    tag->op_state = ENIP_TAG_OP_COMPLETE;
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag operation complete");
+                } else if(rc == PLCTAG_ERR_PARTIAL) {
+                    tag->op_state = ENIP_TAG_OP_REQUEST;
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag needs more data (partial response)");
+                } else {
+                    tag->op_state = ENIP_TAG_OP_ERROR;
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Tag operation failed: %d", rc);
+                }
+
+                tags_processed++;
+            }
         }
     }
 
@@ -1301,10 +1368,11 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
 }
 
 
-/* Phase 4: Build requests using encode_chunk callbacks.
- * Picks next tag from active_tags with pending work and calls encode_chunk
- * to build the CIP request. Wraps in connected CPF+EIP and returns.
- * Multi-service batching (0x0A) is Phase 5.
+/* Phase 5: Build requests with multi-service 0x0A batching support.
+ * Collects multiple REQUEST-state tags, uses packetizer to determine batching strategy:
+ * - If single tag fits alone: send as single CIP request
+ * - If multiple tags fit with 0x0A: batch them together
+ * - Otherwise: send first tag, defer remainder to next cycle
  *
  * Returns: PLCTAG_STATUS_OK if request built and returned,
  *          PLCTAG_ERR_NO_DATA if no pending work,
@@ -1317,41 +1385,120 @@ static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_re
         return PLCTAG_ERR_NO_DATA;
     }
 
-    enip_tag_t *tag_to_process = NULL;
+    arena_reset(&conn->tx_arena);
 
-    /* Find first tag with pending work (REQUEST state) */
+    /* Collect all REQUEST-state tags and build their CIP requests */
+    enip_tag_t *tags[ENIP_PKT_MAX_SLOTS];
+    Bytes cip_requests[ENIP_PKT_MAX_SLOTS];
+    uint32_t tag_count = 0;
+
+    size_t cip_budget = enip_packetizer_cip_budget(conn->max_packet_buffer_size, true);
+
     critical_block(conn->active_tags_mutex) {
-        int tag_count = vector_length((vector_p)conn->active_tags);
-        for(int i = 0; i < tag_count; i++) {
+        int total_tags = vector_length((vector_p)conn->active_tags);
+        for(int i = 0; i < total_tags && tag_count < ENIP_PKT_MAX_SLOTS; i++) {
             enip_tag_t *tag = (enip_tag_t *)vector_get((vector_p)conn->active_tags, i);
-            if(tag && tag->op_state == ENIP_TAG_OP_REQUEST) {
-                tag_to_process = tag;
-                break;
+            if(!tag || tag->op_state != ENIP_TAG_OP_REQUEST) { continue; }
+
+            /* Build CIP request for this tag */
+            Bytes cip_req = conn->mfg_ops->encode_chunk(tag, &conn->tx_arena, cip_budget);
+            if(bytes_is_null(cip_req)) {
+                /* Tag operation complete, move to RESPONSE state */
+                tag->op_state = ENIP_TAG_OP_RESPONSE;
+                continue;
             }
+
+            tags[tag_count] = tag;
+            cip_requests[tag_count] = cip_req;
+            tag_count++;
         }
     }
 
-    if(!tag_to_process) {
+    if(tag_count == 0) {
         return PLCTAG_ERR_NO_DATA;
     }
 
-    /* Reset arena and build request using manufacturer callback */
-    arena_reset(&conn->tx_arena);
+    /* Build final CIP payload (single or 0x0A batched) */
+    Bytes cip_payload = bytes_null();
 
-    /* Estimate CIP budget for request (connected buffer - protocol overhead) */
-    size_t cip_budget = (conn->max_packet_buffer_size > 20) ? (conn->max_packet_buffer_size - 20) : 0;
+    if(tag_count == 1) {
+        /* Single request - use as-is */
+        cip_payload = cip_requests[0];
+    } else if(conn->supports_0x0a) {
+        /* Multiple requests - try 0x0A batching if supported */
+        enip_pkt_plan_t plan;
+        plan.slot_count = tag_count;
+        plan.use_connected = true;
+        plan.max_buffer = conn->max_packet_buffer_size;
 
-    /* Call encode_chunk to build the next CIP request */
-    Bytes cip_request = conn->mfg_ops->encode_chunk(tag_to_process, &conn->tx_arena, cip_budget);
-    if(bytes_is_null(cip_request)) {
-        /* No more data to send for this tag - operation complete */
-        tag_to_process->op_state = ENIP_TAG_OP_RESPONSE;
-        return PLCTAG_ERR_NO_DATA;
+        /* Fill in request/response sizes for packetizer validation */
+        for(uint32_t i = 0; i < tag_count; i++) {
+            plan.slot_req_sizes[i] = (uint16_t)cip_requests[i].len;
+            /* Estimate response size: assume max for now (Phase 5.5 could optimize) */
+            plan.slot_resp_sizes[i] = (uint16_t)(cip_budget > 100 ? 100 : cip_budget);
+        }
+
+        int32_t plan_rc = enip_packetizer_plan(&plan);
+        if(plan_rc == PLCTAG_STATUS_OK) {
+            /* Build 0x0A wrapper with offset table and payloads */
+            Bytes multi_header = bytes_pack(&conn->tx_arena, BYTES_LE,
+                                           (uint8_t)0x0A,      /* Service: Multiple Service Request */
+                                           (uint8_t)0x02,      /* Path size: 2 words to Connection Manager */
+                                           (uint8_t)0x20, (uint8_t)0x06, /* Connection Manager class/instance */
+                                           (uint8_t)0x00,      /* Reserved */
+                                           (uint16_t)tag_count); /* Slot count */
+
+            if(bytes_is_null(multi_header)) {
+                return PLCTAG_ERR_NO_MEM;
+            }
+
+            /* Build offset table - offsets point to start of each CIP request within the payload */
+            Bytes offset_table = bytes_null();
+            uint16_t current_offset = (uint16_t)(tag_count * 2); /* After offset table */
+
+            for(uint32_t i = 0; i < tag_count; i++) {
+                uint16_t offset = current_offset;
+                Bytes offset_bytes = bytes_pack(&conn->tx_arena, BYTES_LE, offset);
+                if(bytes_is_null(offset_bytes)) { return PLCTAG_ERR_NO_MEM; }
+
+                if(i == 0) {
+                    offset_table = offset_bytes;
+                } else {
+                    offset_table = bytes_concat(&conn->tx_arena, offset_table, offset_bytes);
+                    if(bytes_is_null(offset_table)) { return PLCTAG_ERR_NO_MEM; }
+                }
+
+                current_offset += cip_requests[i].len;
+            }
+
+            /* Concatenate: header + offset_table + all CIP payloads */
+            Bytes temp = bytes_concat(&conn->tx_arena, multi_header, offset_table);
+            if(bytes_is_null(temp)) { return PLCTAG_ERR_NO_MEM; }
+
+            for(uint32_t i = 0; i < tag_count; i++) {
+                temp = bytes_concat(&conn->tx_arena, temp, cip_requests[i]);
+                if(bytes_is_null(temp)) { return PLCTAG_ERR_NO_MEM; }
+            }
+
+            cip_payload = temp;
+        } else {
+            /* 0x0A doesn't fit - send first tag only, defer remainder */
+            cip_payload = cip_requests[0];
+            tag_count = 1;
+        }
+    } else {
+        /* Device doesn't support 0x0A - send first tag only */
+        cip_payload = cip_requests[0];
+        tag_count = 1;
     }
 
-    /* Wrap CIP in connected CPF */
+    if(bytes_is_null(cip_payload)) {
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /* Wrap in connected CPF */
     Bytes cpf = enip_cpf_build_connected(&conn->tx_arena, conn->cip_targ_conn_id,
-                                         conn->cip_conn_seq_num, cip_request);
+                                         conn->cip_conn_seq_num, cip_payload);
     if(bytes_is_null(cpf)) {
         return PLCTAG_ERR_NO_MEM;
     }
