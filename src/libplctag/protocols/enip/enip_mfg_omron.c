@@ -78,59 +78,6 @@
  * Stub Implementations (TODO: Fill in with real Omron 0x80 logic)
  * ============================================================================ */
 
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
- * Phase 8: DELETE — replaced by encode_chunk. */
-static int32_t enip_mfg_omron_estimate_request_size(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
-                                                size_t req_budget, size_t resp_budget, enip_req_desc_t *result) {
-    /* Estimate sizes for Omron CIP requests using service 0x80 (simple data segment)
-     * Omron typically uses fixed-size segments for direct memory access.
-     */
-
-    if(!result) { return PLCTAG_ERR_NULL_PTR; }
-    memset(result, 0, sizeof(*result));
-
-    if(!tag) { return PLCTAG_ERR_NULL_PTR; }
-
-    /* Request: Service (1) + segment type (1) + offset (2-4) + size = ~20-30 bytes */
-    result->request_size = 30;
-
-    /* Response: Status (2) + data (tag_size bytes) */
-    uint32_t elem_count = tag->elem_count > 0 ? (uint32_t)tag->elem_count : 1;
-    uint32_t elem_size = tag->elem_size > 0 ? (uint32_t)tag->elem_size : 4;
-    size_t data_size = elem_count * elem_size;
-
-    if(data_size > 2048) { data_size = 2048; }
-    result->estimated_response_size = 8 + data_size;
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/OMRON: estimate %zu req / %zu resp", result->request_size,
-           result->estimated_response_size);
-
-    return PLCTAG_STATUS_OK;
-}
-
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line) — this currently
- * passes wrong argument count to enip_cip_read/write_tag_request and will not compile.
- * Phase 8: DELETE — replaced by encode_chunk (see file-level comment). */
-static int32_t enip_mfg_omron_encode_request(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
-                                         enip_req_desc_t *result) {
-    (void)tag; (void)conn; (void)arena; (void)result;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
- * Phase 8: DELETE — replaced by accept_chunk (see file-level comment). */
-static int32_t enip_mfg_omron_decode_response(struct enip_tag_t *tag, struct enip_connection_t *conn, Bytes response_payload,
-                                          uint32_t correlation_id, enip_chunk_result_t *result) {
-    (void)tag; (void)conn; (void)response_payload; (void)correlation_id; (void)result;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
- * Phase 8: DELETE — replaced by accept_chunk return value. */
-static int32_t enip_mfg_omron_needs_more(struct enip_tag_t *tag, enip_chunk_result_t *result) {
-    (void)tag; (void)result;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
 
 /* Phase 8: this no-op is correct for OMRON — NJ/NX does not support the
  * GetInstanceAttributeList on class 0x6B.  Keep this body; just remove the
@@ -163,9 +110,24 @@ static int32_t enip_mfg_omron_fetch_phase1_metadata(struct enip_connection_t *co
  * OMRON Strategy Structure
  * ============================================================================ */
 
-enip_mfg_ops_t enip_mfg_omron = {.estimate_request_size = enip_mfg_omron_estimate_request_size,
-                                 .encode_request = enip_mfg_omron_encode_request,
-                                 .decode_response = enip_mfg_omron_decode_response,
-                                 .needs_more = enip_mfg_omron_needs_more,
-                                 .fetch_phase1_metadata = enip_mfg_omron_fetch_phase1_metadata,
-                                 .name = "OMRON"};
+/* Phase 4: stubs for fragmentation callbacks. Phase 8 will implement 0x80 data segment logic. */
+static Bytes enip_mfg_omron_encode_chunk(struct enip_tag_t *tag, Arena *arena, size_t cip_budget) {
+    (void)tag; (void)arena; (void)cip_budget;
+    return bytes_null();
+}
+
+static int32_t enip_mfg_omron_accept_chunk(struct enip_tag_t *tag, Bytes cip_response) {
+    (void)tag; (void)cip_response;
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+/* ============================================================================
+ * OMRON Strategy Structure (Phase 4)
+ * ============================================================================ */
+
+enip_mfg_ops_t enip_mfg_omron = {
+    .encode_chunk = enip_mfg_omron_encode_chunk,
+    .accept_chunk = enip_mfg_omron_accept_chunk,
+    .fetch_phase1_metadata = enip_mfg_omron_fetch_phase1_metadata,
+    .name = "OMRON"
+};

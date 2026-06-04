@@ -82,9 +82,9 @@ typedef struct enip_tag_t {
     int32_t elem_size;     /* size of each element in bytes */
     uint16_t data_type;    /* CIP data type code (e.g. 0x00C4 = DINT) */
 
-    /* Phase 4: rename to chunk_offset; update all sites that reference byte_offset.
-     * Used by both AB (0x52/0x53 byte offset field) and OMRON (data segment byte_offset field). */
-    uint32_t byte_offset;  /* chunk cursor in bytes; 0 = start of tag */
+    /* Phase 4: chunk cursor for fragmented I/O operations.
+     * Used by both AB (0x52/0x53 byte offset field) and OMRON (data segment offset). */
+    uint32_t chunk_offset;  /* current byte position in tag data; 0 = start */
 
     bool metadata_phase1_ready;
     bool metadata_phase2_ready;

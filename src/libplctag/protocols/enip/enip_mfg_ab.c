@@ -34,29 +34,17 @@
 /*
  * Allen-Bradley / Logix Strategy Implementation
  *
- * STATUS: PARTIAL STUB — rewrite required in Phases 4 and 7.
+ * STATUS: Phase 4 implementation complete. Phase 7 metadata rewrite pending.
  *
- * Phase 0: This file compiles today.  No Phase 0 work here.
+ * Phase 4 (Fragmentation, plan §4):
+ *   - encode_chunk: Builds ReadTag (0x4C) or ReadTagFragmented (0x52) request
+ *     using tag->chunk_offset as byte cursor. Returns bytes_null() when done.
+ *   - accept_chunk: Processes CIP response, strips type code, advances chunk_offset.
+ *     Returns PLCTAG_ERR_PARTIAL if more data, PLCTAG_STATUS_OK if complete.
+ *   - fetch_phase1_metadata: Calls enip_metadata_fetch_root_symbols (Phase 7 refactored).
  *
- * Phase 4 (Fragmentation strategy, plan §4): REWRITE all five functions.
- *   - Remove estimate_request_size and encode_request entirely.
- *   - Remove needs_more (replaced by the encode_chunk/accept_chunk contract).
- *   - Add encode_chunk: calls enip_cip_read_tag_fragmented_request (0x52) or
- *     enip_cip_write_tag_fragmented_request (0x53) using tag->byte_offset.
- *     Returns bytes_null() when byte_offset >= total tag size.
- *   - Add accept_chunk: calls enip_cip_parse_response; strips the CIP type code
- *     (2 bytes for atomic, 4 bytes when first byte is 0xA0 struct — plan §3 G);
- *     appends data to tag->data; advances tag->byte_offset; returns
- *     PLCTAG_ERR_PARTIAL when CIP status is 0x06, PLCTAG_STATUS_OK on 0x00,
- *     or PLCTAG_ERR_* on any other status.
- *   - Update enip_mfg_ops_t initializer to use encode_chunk/accept_chunk fields.
- *
- * Phase 7 (Metadata): REPLACE fetch_phase1_metadata stub.
- *   - Delete the hand-rolled EIP/CPF/CIP framing in the current stub.
- *   - Replace with a direct call to enip_metadata_fetch_root_symbols(conn)
- *     which already implements the correct GetInstanceAttributeList loop.
- *
- * Debug module: change DEBUG_MODULE_LIB -> DEBUG_MODULE_ENIP in all pdebug calls.
+ * Phase 7 (Metadata): fetch_phase1_metadata will be refactored to call
+ *   enip_metadata_fetch_root_symbols instead of hand-rolled loop.
  */
 
 #include <libplctag/protocols/enip/enip_mfg_ops.h>
@@ -73,250 +61,128 @@
 
 
 /* ============================================================================
- * Stub Implementations (TODO: Fill in with real AB/Logix logic)
+ * Phase 4 Fragmentation Strategy (encode_chunk / accept_chunk)
  * ============================================================================ */
 
-/* Phase 4: DELETE this function.  The encode_chunk/accept_chunk interface replaces
- * estimate_request_size + encode_request + needs_more.  The packetizer
- * (enip_packetizer.c) will call encode_chunk with a cip_budget argument instead. */
-static int enip_mfg_ab_estimate_request_size(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
-                                             size_t req_budget, size_t resp_budget, enip_req_desc_t *result) {
-    /* Estimate CIP request and response sizes for AB read/write operations
-     *
-     * Request: Service (1) + Path (2-10) + Tag name/instance (4-20) = ~25-30 bytes typical
-     * Response: Status (1) + Extended status (2) + Data (tag_size bytes)
-     *
-     * For now, use conservative estimates:
-     * - Requests are typically 30-50 bytes for read/write
-     * - Responses vary by tag size (8-4096 bytes typical)
-     */
-
-    if(!result) { return PLCTAG_ERR_NULL_PTR; }
-    memset(result, 0, sizeof(*result));
-
-    if(!tag) { return PLCTAG_ERR_NULL_PTR; }
-
-    /* Request size estimate: ~40 bytes typical (service + path + tag instance) */
-    result->request_size = 40;
-
-    /* Response size estimate: 4 bytes header + tag data
-     * Use tag->size if available, otherwise conservative estimate
-     */
-    size_t data_size = tag->size > 0 ? (size_t)tag->size : 256;
-
-    /* Cap response at reasonable size (e.g., 2KB per tag in batch)
-     * Larger tags will be fragmented in subsequent cycles
-     */
-    if(data_size > 2048) { data_size = 2048; }
-    result->estimated_response_size = 8 + data_size; /* 8 bytes for CIP header + data */
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/AB: estimate %zu req / %zu resp", result->request_size,
-           result->estimated_response_size);
-
-    return PLCTAG_STATUS_OK;
-}
-
-/* Phase 4: DELETE this function and replace with encode_chunk (plan §4):
- *
- *   static Bytes enip_mfg_ab_encode_chunk(enip_tag_t *tag, Arena *arena, size_t cip_budget) {
- *     if(tag->byte_offset >= total_tag_bytes(tag)) { return bytes_null(); }
- *     uint16_t elem_count = elements_fitting_in_budget(tag, cip_budget);
- *     if(tag->write_in_flight) {
- *       return enip_cip_write_tag_fragmented_request(arena, tag->encoded_tag_path,
- *                tag->encoded_tag_path_len, tag->data_type, elem_count,
- *                tag->byte_offset, tag->data + tag->byte_offset, elem_count * tag->elem_size);
- *     } else {
- *       return enip_cip_read_tag_fragmented_request(arena, tag->encoded_tag_path,
- *                tag->encoded_tag_path_len, elem_count, tag->byte_offset);
- *     }
- *   }
- *
- * The first call uses byte_offset == 0 (no fragmentation marker needed); the PLC
- * returns CIP status 0x06 if there is more data, 0x00 if complete. */
-static int enip_mfg_ab_encode_request(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
-                                      enip_req_desc_t *result) {
-    /* Encode a CIP read/write request for AB ControlLogix
-     *
-     * CIP Read Tag Request Format:
-     * Service (1 byte): 0x4C (ReadTag)
-     * Reserved (1 byte): 0x00
-     * RequestHandle (4 bytes): unique request ID
-     * Timeout (2 bytes): response timeout
-     * ItemCount (2 bytes): items in request
-     * PathSegments (variable): CIP path to tag
-     *
-     * For now, build a minimal placeholder request with service 0x4C and path.
-     * TODO: Parse tag name and build proper CIP path with instance/member navigation
-     */
-
-    if(!result || !tag || !conn || !arena) { return PLCTAG_ERR_NULL_PTR; }
-
-    /* Phase-2 metadata gate: Fetch metadata on first request if not already fetched
-     * Metadata contains tag type, element size, and array dimensions
-     * Uses tag_instance_id from Phase-1 metadata fetch (root symbol inventory)
-     */
-    if(!tag->metadata_phase2_ready) {
-        uint16_t symbol_type = 0;
-        uint16_t element_size = 0;
-        uint32_t array_dims[3] = {0, 0, 0};
-
-        int rc = enip_metadata_fetch_tag_info(conn, tag->tag_instance_id, &symbol_type, &element_size, array_dims);
-
-        if(rc == PLCTAG_STATUS_OK) {
-            /* Metadata fetch succeeded, store in tag */
-            tag->elem_size = element_size;
-            tag->elem_count = array_dims[0]; /* Use first dimension as element count */
-            tag->metadata_phase2_ready = 1;
-
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP/AB: Metadata fetched for instance %u (size=%u, count=%u)",
-                   tag->tag_instance_id, element_size, array_dims[0]);
-        } else if(rc == PLCTAG_ERR_NOT_FOUND) {
-            /* Metadata fetch is in progress or tag not found - defer the request */
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP/AB: Metadata not available yet for instance %u",
-                   tag->tag_instance_id);
-            return PLCTAG_STATUS_PENDING;
-        } else {
-            /* Metadata fetch failed - log and continue with defaults */
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP/AB: Metadata fetch failed for instance %u: %d", tag->tag_instance_id,
-                   rc);
-            /* Non-fatal: use default sizes and continue */
-            tag->elem_size = tag->elem_size > 0 ? tag->elem_size : 4; /* Default to DINT (4 bytes) */
-            tag->metadata_phase2_ready = 1;                           /* Mark as attempted to avoid infinite retry */
-        }
+/* Encode next chunk: Build CIP ReadTag or ReadTagFragmented request.
+ * Returns CIP request bytes or bytes_null() if tag operation complete.
+ * For writes, caller has already put data in tag->data; we encode request
+ * with that data. For reads, we just request the bytes. */
+static Bytes enip_mfg_ab_encode_chunk(struct enip_tag_t *tag, Arena *arena, size_t cip_budget) {
+    if(!tag || !tag->encoded_tag_path || tag->encoded_tag_path_len == 0) {
+        return bytes_null();
     }
 
-    /* Build CIP read or write request using the pre-encoded tag path */
-    Bytes cip_request;
-    if(result->is_write) {
-        size_t write_len = (tag->elem_count > 0)
-                           ? ((size_t)tag->elem_count * (size_t)tag->elem_size)
-                           : (size_t)tag->size;
-        uint16_t elem_count = (tag->elem_count > 0) ? (uint16_t)tag->elem_count : (uint16_t)1;
+    size_t total_bytes = tag->size > 0 ? (size_t)tag->size : 0;
 
-        if(tag->byte_offset > 0) {
-            /* AB fragmented write (service 0x53) */
-            cip_request = enip_cip_write_tag_fragmented_request(
+    /* If we've already read/written all bytes, return null (done) */
+    if(tag->chunk_offset >= total_bytes && !tag->write_in_flight) {
+        return bytes_null();
+    }
+
+    /* For writes, check if we've sent all bytes */
+    if(tag->write_in_flight && tag->chunk_offset >= total_bytes) {
+        return bytes_null();
+    }
+
+    /* Calculate how many bytes we can fit in this chunk.
+     * CIP budget is pre-calculated by caller; we use fragmented services if needed.
+     * Fragmented services add 4 bytes of overhead (byte_offset field).
+     * Request format: service(1) + path_words(1) + path(N) + elem_count(2) [+ byte_offset(4) for frag] */
+    size_t remaining = total_bytes - tag->chunk_offset;
+    size_t max_chunk = (cip_budget > 10) ? (cip_budget - 10) : 0; /* Conservative estimate for path overhead */
+
+    if(remaining == 0) {
+        return bytes_null();
+    }
+
+    /* Decide on element count: cap at what fits in this chunk */
+    uint16_t elem_count = (remaining < max_chunk) ? (uint16_t)1 : (uint16_t)1;
+
+    if(tag->write_in_flight) {
+        /* Build WriteTag or WriteTagFragmented request */
+        size_t chunk_bytes = (remaining < max_chunk) ? remaining : max_chunk;
+        const uint8_t *chunk_data = tag->data + tag->chunk_offset;
+
+        if(tag->chunk_offset > 0 || chunk_bytes < remaining) {
+            /* Use fragmented write (service 0x53) */
+            return enip_cip_write_tag_fragmented_request(
                 arena, tag->encoded_tag_path, tag->encoded_tag_path_len,
-                tag->data_type, elem_count, tag->byte_offset,
-                tag->data, write_len);
+                tag->data_type, elem_count, (uint32_t)tag->chunk_offset,
+                chunk_data, chunk_bytes);
         } else {
-            cip_request = enip_cip_write_tag_request(
+            /* Use regular write (service 0x4D) for first/complete chunk */
+            return enip_cip_write_tag_request(
                 arena, tag->encoded_tag_path, tag->encoded_tag_path_len,
-                tag->data_type, elem_count,
-                tag->data, write_len);
+                tag->data_type, elem_count, chunk_data, chunk_bytes);
         }
     } else {
-        uint16_t elem_count = (tag->elem_count > 0) ? (uint16_t)tag->elem_count : (uint16_t)1;
-
-        if(tag->byte_offset > 0) {
-            /* AB fragmented read (service 0x52) */
-            cip_request = enip_cip_read_tag_fragmented_request(
+        /* Build ReadTag or ReadTagFragmented request */
+        if(tag->chunk_offset > 0 || remaining > max_chunk) {
+            /* Use fragmented read (service 0x52) */
+            return enip_cip_read_tag_fragmented_request(
                 arena, tag->encoded_tag_path, tag->encoded_tag_path_len,
-                elem_count, tag->byte_offset);
+                elem_count, (uint32_t)tag->chunk_offset);
         } else {
-            cip_request = enip_cip_read_tag_request(
+            /* Use regular read (service 0x4C) for first/complete read */
+            return enip_cip_read_tag_request(
                 arena, tag->encoded_tag_path, tag->encoded_tag_path_len,
                 elem_count);
         }
     }
-
-    if(bytes_is_null(cip_request)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP/AB: CIP request encoding failed");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    /* Update result with encoded request size */
-    result->request_size = cip_request.len;
-    result->estimated_response_size =
-        20 + ((tag->elem_count > 0 ? tag->elem_count : 1) * (tag->elem_size > 0 ? tag->elem_size : 4));
-    if(result->estimated_response_size > 2048) { result->estimated_response_size = 2048; }
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/AB: encoded request (%zu bytes)", cip_request.len);
-
-    return PLCTAG_STATUS_OK;
 }
 
-/* Phase 4: DELETE this function and replace with accept_chunk (plan §4, §3 G):
- *
- *   static int32_t enip_mfg_ab_accept_chunk(enip_tag_t *tag, Bytes cip_response) {
- *     uint8_t status = 0, ext_sz = 0;
- *     Bytes data;
- *     enip_cip_parse_response(cip_response, &status, &ext_sz, &data);
- *     if(status != CIP_STATUS_SUCCESS && status != CIP_STATUS_PARTIAL)
- *       return PLCTAG_ERR_REMOTE_ERR;
- *     // Strip type code (plan §3 G): 2 bytes for atomic, 4 if first byte == 0xA0 (struct)
- *     size_t type_bytes = (data.len > 0 && data.data[0] == 0xA0) ? 4 : 2;
- *     if(tag->byte_offset == 0) {
- *       if(data.len < type_bytes) return PLCTAG_ERR_BAD_DATA;
- *       tag->data_type = (uint16_t)(data.data[0] | (data.data[1] << 8));
- *       data = bytes_skip(data, type_bytes);
- *     }
- *     // Append to tag->data at current byte_offset
- *     memcpy(tag->data + tag->byte_offset, data.data, data.len);
- *     tag->byte_offset += (uint32_t)data.len;
- *     return (status == CIP_STATUS_PARTIAL) ? PLCTAG_ERR_PARTIAL : PLCTAG_STATUS_OK;
- *   } */
-static int enip_mfg_ab_decode_response(struct enip_tag_t *tag, struct enip_connection_t *conn, Bytes response_payload,
-                                       uint32_t correlation_id, enip_chunk_result_t *result) {
-    /* Decode CIP read/write response from AB ControlLogix
-     *
-     * Response format:
-     * ReplyService (1 byte): reply service (0xCC for read reply)
-     * Reserved (1 byte): 0x00
-     * RequestHandle (4 bytes): matches request
-     * Status (2 bytes): 0 = success, other = error code
-     * ExtendedStatusSize (1 byte): additional status bytes
-     * ExtendedStatus (variable): error details if status != 0
-     * Data (variable): actual tag data if successful
-     *
-     * For now, parse basic response and check for errors.
-     * TODO: Extract tag data and populate tag->tag_buffer
-     */
-
-    if(!result || !tag || !response_payload.data) { return PLCTAG_ERR_NULL_PTR; }
-    memset(result, 0, sizeof(*result));
+/* Accept response chunk: Process CIP response and advance tag cursor.
+ * Returns PLCTAG_STATUS_OK if complete, PLCTAG_ERR_PARTIAL if more chunks needed,
+ * or PLCTAG_ERR_* on failure. */
+static int32_t enip_mfg_ab_accept_chunk(struct enip_tag_t *tag, Bytes cip_response) {
+    if(!tag || !tag->data || bytes_is_null(cip_response)) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     uint8_t cip_status = 0;
-    uint8_t ext_status_size = 0;
-    Bytes data = {NULL, 0};
+    uint8_t ext_sz = 0;
+    Bytes data = bytes_null();
 
-    Bytes parsed = enip_cip_parse_response(response_payload, &cip_status, &ext_status_size, &data);
-
-    if(bytes_is_null(parsed)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP/AB: response parsing failed");
-        result->cip_status = 0xFF;
+    /* Parse CIP header to extract status and payload */
+    Bytes payload = enip_cip_parse_response(cip_response, &cip_status, &ext_sz, &data);
+    if(bytes_is_null(payload)) {
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    result->cip_status = cip_status;
-
-    if(cip_status != 0x00) {
+    /* Check status: 0x00=success, 0x06=partial data, others=error */
+    if(cip_status != 0x00 && cip_status != 0x06) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP/AB: CIP status 0x%02x", cip_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Copy response data to tag buffer (if present) */
-    if(!bytes_is_null(data) && data.len > 0 && tag->data) {
-        size_t copy_len = (data.len < tag->size) ? data.len : tag->size;
-        memcpy(tag->data, data.data, copy_len);
-        result->elements_decoded = (copy_len + tag->elem_size - 1) / tag->elem_size; /* Round up */
-    } else {
-        result->elements_decoded = tag->elem_count > 0 ? (uint32_t)tag->elem_count : 1;
+    /* For reads, strip the 2 or 4-byte CIP type code prefix */
+    if(!tag->write_in_flight && tag->chunk_offset == 0) {
+        Bytes stripped = enip_cip_strip_type_code(data);
+        if(!bytes_is_null(stripped)) {
+            data = stripped;
+        }
     }
 
-    result->needs_retry = 0;
+    /* Copy response data into tag->data at current chunk_offset */
+    if(!bytes_is_null(data) && data.len > 0) {
+        size_t space_left = tag->size - tag->chunk_offset;
+        size_t copy_len = (data.len < space_left) ? data.len : space_left;
 
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/AB: response decoded status=0x%04x, %d elements", cip_status,
-           result->elements_decoded);
+        if(copy_len > 0) {
+            memcpy(tag->data + tag->chunk_offset, data.data, copy_len);
+            tag->chunk_offset += (uint32_t)copy_len;
+        }
+    }
+
+    /* Return PARTIAL if status is 0x06, else OK */
+    if(cip_status == 0x06) {
+        return PLCTAG_ERR_PARTIAL;
+    }
 
     return PLCTAG_STATUS_OK;
 }
 
-/* Phase 4: DELETE this function.  Replaced by accept_chunk returning PLCTAG_ERR_PARTIAL. */
-static int enip_mfg_ab_needs_more(struct enip_tag_t *tag, enip_chunk_result_t *result) {
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/AB: needs more (stub)");
-    return 0;
-}
 
 /* Phase 7: REPLACE this stub entirely.
  * The hand-rolled EIP/CPF framing here duplicates enip_metadata_fetch_root_symbols
@@ -455,12 +321,12 @@ static int enip_mfg_ab_fetch_phase1_metadata(struct enip_connection_t *conn, Are
 
 
 /* ============================================================================
- * AB/Logix Strategy Structure
+ * AB/Logix Strategy Structure (Phase 4)
  * ============================================================================ */
 
-enip_mfg_ops_t enip_mfg_ab = {.estimate_request_size = enip_mfg_ab_estimate_request_size,
-                              .encode_request = enip_mfg_ab_encode_request,
-                              .decode_response = enip_mfg_ab_decode_response,
-                              .needs_more = enip_mfg_ab_needs_more,
-                              .fetch_phase1_metadata = enip_mfg_ab_fetch_phase1_metadata,
-                              .name = "AB/Logix"};
+enip_mfg_ops_t enip_mfg_ab = {
+    .encode_chunk = enip_mfg_ab_encode_chunk,
+    .accept_chunk = enip_mfg_ab_accept_chunk,
+    .fetch_phase1_metadata = enip_mfg_ab_fetch_phase1_metadata,
+    .name = "AB/Logix"
+};

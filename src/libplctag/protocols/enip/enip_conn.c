@@ -1274,29 +1274,11 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
             /* Only process tags that are waiting for response */
             if(tag->op_state != ENIP_TAG_OP_REQUEST) { continue; }
 
-            /* Call manufacturer decode_response callback */
-            enip_chunk_result_t chunk_result = {0};
-            int rc_decode = conn->mfg_ops->decode_response(tag, conn, cip_payload, (uint32_t)resp_context, &chunk_result);
-
-            if(rc_decode == PLCTAG_STATUS_OK) {
-                /* Response complete - invoke tag callback */
-                if(tag->callback) {
-                    tag->op_state = ENIP_TAG_OP_COMPLETE;
-                    tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc_decode, tag->userdata);
-                }
-                tags_processed++;
-            } else if(rc_decode == PLCTAG_ERR_PARTIAL || chunk_result.needs_retry) {
-                /* Partial response - tag needs more data */
-                tag->op_state = ENIP_TAG_OP_REQUEST; /* Re-queue for next cycle */
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag needs more data (partial response)");
-                tags_processed++;
-            } else {
-                /* Decode error */
-                tag->op_state = ENIP_TAG_OP_ERROR;
-                if(tag->callback) { tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc_decode, tag->userdata); }
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Decode failed for tag: %d", rc_decode);
-                tags_processed++;
-            }
+            /* Phase 6: Call manufacturer accept_chunk callback (replaces decode_response)
+             * For now, stub out this Phase 6 work. */
+            (void)cip_payload;
+            (void)resp_context;
+            tags_processed++;
         }
     }
 
@@ -1307,185 +1289,18 @@ static int enip_connection_decode_response(enip_connection_t *conn, Bytes respon
 
 
 /* Phase 6: REPLACE this function entirely.
- * Current problems:
- *   (a) Allocates cip_payloads vector but never puts anything in it and destroys it
- *       immediately — remove it (Phase 0 compile cleanup).
- *   (b) Uses conn->sender_context_base (undeclared) — Phase 0 fix: use
- *       conn->sender_context.  Before calling enip_eip_build_request, copy the
- *       current counter value into each tag's transaction_id for later correlation.
- *   (c) Hand-rolls EIP/CPF/NAI/UDI headers instead of calling the layer helpers.
- *   (d) The multi-service 0x0A wrapper has a TODO but is never built.
+ * Phase 4: Stub out to use new encode_chunk callback interface.
+ * Current implementation tries to use old estimate_request_size/encode_request callbacks.
  *
  * Phase 6 replacement: pick one tag from active_tags (front of sorted queue),
  * call encode_chunk to get the CIP bytes, wrap in CPF+EIP (using the layer
  * helpers), and return.  Multi-service batching (0x0A) is Phase 5. */
 static int enip_connection_build_requests(enip_connection_t *conn, Bytes *out_request) {
     /* Phase C: Build outgoing requests from active_tags vector
-     *
-     * Iterate active_tags, call manufacturer encode functions, aggregate requests.
-     * Enforces budget (max_packet_buffer_size).
-     *
-     * Algorithm:
-     * 1. Scan active_tags for pending work (read_in_flight, write_in_flight, tag_is_dirty)
-     * 2. For each tag, estimate size using mfg_ops->estimate_request_size()
-     * 3. If total estimated fits in budget, encode using mfg_ops->encode_request()
-     * 4. Accumulate CIP payloads into arena
-     * 5. Build EIP header + CPF + CIP aggregate
-     * 6. Return full request or PLCTAG_ERR_NO_DATA if no work
-     */
-
-    if(!conn || !conn->active_tags || !out_request) { return PLCTAG_ERR_NULL_PTR; }
-
-    if(!conn->mfg_ops) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: No manufacturer strategy available");
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    /* Lock active_tags to safely iterate and encode */
-    int tags_encoded = 0;
-    size_t estimated_request_size = 0;
-    size_t estimated_response_size = 0;
-
-    critical_block(conn->active_tags_mutex) {
-        int tag_count = vector_length((vector_p)conn->active_tags);
-        if(tag_count <= 0) { break; }
-
-        /* Reset arena for this request cycle */
-        arena_reset(&conn->tx_arena);
-
-        /* First pass: scan for tags with pending work and estimate total size */
-        int tags_with_work = 0;
-
-        for(int i = 0; i < tag_count; i++) {
-            plc_tag_p tag = (plc_tag_p)vector_get((vector_p)conn->active_tags, i);
-            if(tag && (tag->read_in_flight || tag->write_in_flight || tag->tag_is_dirty)) { tags_with_work++; }
-        }
-
-        if(tags_with_work == 0) { break; }
-
-        /* Rough budget check (assume ~64 bytes per tag) before full encoding */
-        size_t overhead = 50; /* EIP header + CPF wrapper */
-        size_t rough_estimate = ((size_t)tags_with_work * 64U) + overhead;
-        if(rough_estimate > (size_t)conn->max_packet_buffer_size) {
-            /* Too many tags, will handle in next cycle */
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Estimated %zu bytes exceeds budget %u, splitting batch",
-                   rough_estimate, conn->max_packet_buffer_size);
-            break;
-        }
-
-        /* Second pass: encode tags that fit in budget */
-        vector_p cip_payloads = vector_create(10, 5);
-        if(!cip_payloads) { break; }
-
-        for(int i = 0; i < tag_count && tags_encoded < 10; i++) { /* Limit to 10 tags per batch */
-            plc_tag_p tag = (plc_tag_p)vector_get((vector_p)conn->active_tags, i);
-            if(!tag || (!tag->read_in_flight && !tag->write_in_flight && !tag->tag_is_dirty)) { continue; }
-
-            /* Estimate request size for this tag */
-            enip_req_desc_t req_desc = {0};
-            req_desc.sequence_id = conn->sender_context + (uint32_t)tags_encoded;
-            req_desc.is_write = (tag->write_in_flight || tag->tag_is_dirty) ? 1 : 0;
-            req_desc.multi_request_index = (uint16_t)tags_encoded;
-
-            size_t tag_req_budget = (size_t)conn->max_packet_buffer_size - overhead - estimated_request_size;
-            size_t tag_resp_budget = (size_t)conn->max_packet_buffer_size - estimated_response_size;
-
-            int rc_est = conn->mfg_ops->estimate_request_size((enip_tag_t *)tag, conn, &conn->tx_arena, tag_req_budget,
-                                                              tag_resp_budget, &req_desc);
-            if(rc_est != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag %d estimation failed: %d, stopping batch", i, rc_est);
-                break;
-            }
-
-            /* Check if this tag would exceed budget */
-            if(estimated_request_size + req_desc.request_size + overhead > (size_t)conn->max_packet_buffer_size
-               || estimated_response_size + req_desc.estimated_response_size > (size_t)conn->max_packet_buffer_size) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag %d would exceed budget, stopping batch", i);
-                break;
-            }
-
-            /* Encode the CIP payload */
-            int rc_enc = conn->mfg_ops->encode_request((enip_tag_t *)tag, conn, &conn->tx_arena, &req_desc);
-            if(rc_enc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Tag %d encoding failed: %d, skipping", i, rc_enc);
-                continue;
-            }
-
-            /* Record payload offset and size in vector for later assembly */
-            estimated_request_size += req_desc.request_size;
-            estimated_response_size += req_desc.estimated_response_size;
-            tags_encoded++;
-
-            /* Clear pending work flags (will be re-set if chunking or error) */
-            tag->read_in_flight = 0;
-            tag->write_in_flight = 0;
-            tag->tag_is_dirty = 0;
-
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Encoded tag %d (%zu bytes request, %zu bytes response)", i,
-                   req_desc.request_size, req_desc.estimated_response_size);
-        }
-
-        vector_destroy(cip_payloads);
-    }
-
-    if(tags_encoded == 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: No tags successfully encoded");
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    /* Build full EIP request: header + CPF + CIP aggregate
-     * The arena now contains all encoded CIP payloads written sequentially.
-     * We'll add wrapper headers and then use bytes_concat to assemble the final request.
-     */
-    size_t cip_size = conn->tx_arena.length;
-    if(cip_size == 0) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Create a Bytes reference to the CIP data already in arena */
-    Bytes cip_data = {conn->tx_arena.buffer, cip_size};
-
-    /* Build EIP header */
-    uint16_t payload_len = (uint16_t)((8 + 4 + cip_size) & 0xFFFF);
-    Bytes eip_hdr = bytes_pack(&conn->tx_arena, BYTES_LE, (uint16_t)0x006F, /* SendRRData command */
-                               payload_len,                                 /* Total payload length */
-                               (uint32_t)conn->session_handle, (uint32_t)0, /* Status */
-                               (uint64_t)conn->sender_context);             /* Sender context */
-
-    if(bytes_is_null(eip_hdr)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Build CPF header */
-    Bytes cpf_hdr = bytes_pack(&conn->tx_arena, BYTES_LE, (uint32_t)0, /* interface_handle */
-                               (uint16_t)0,                            /* router_timeout */
-                               (uint16_t)2);                           /* item_count: NAI + UDI */
-
-    if(bytes_is_null(cpf_hdr)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Build NAI item (Null Address Item: type=0x0000, length=0) */
-    Bytes nai = bytes_pack(&conn->tx_arena, BYTES_LE, (uint16_t)0x0000, (uint16_t)0x0000);
-
-    if(bytes_is_null(nai)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Build UDI item (Unconnected Data Item: type=0x00B2, length=cip_size) */
-    Bytes udi = bytes_pack(&conn->tx_arena, BYTES_LE, (uint16_t)0x00B2, (uint16_t)(cip_size & 0xFFFF));
-
-    if(bytes_is_null(udi)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Allocate a new buffer that assembles headers + CIP data in correct order
-     * NOTE: This uses a separate allocation, which is intentional to ensure proper
-     * framing (EIP + CPF + NAI + UDI headers followed by CIP payload).
-     * For now, we'll build a simple aggregate without multi-service wrapper.
-     * TODO: Multi-service 0x0A support for supports_0x0a
-     */
-    Bytes full_request = bytes_concat(&conn->tx_arena, eip_hdr, cpf_hdr, nai, udi, cip_data);
-    if(bytes_is_null(full_request)) { return PLCTAG_ERR_NO_MEM; }
-
-    /* Return the request */
-    *out_request = full_request;
-    conn->sender_context += (uint32_t)tags_encoded;
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Built request from %d tags (%zu bytes total request, %zu bytes response)",
-           tags_encoded, estimated_request_size, estimated_response_size);
-
-    return PLCTAG_STATUS_OK;
+     * Phase 4: Stub — returns ERR_NO_DATA. Phase 6 will implement using encode_chunk. */
+    (void)conn;
+    (void)out_request;
+    return PLCTAG_ERR_NO_DATA;
 }
 
 

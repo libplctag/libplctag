@@ -93,60 +93,6 @@
  * Stub Implementations (TODO: Fill in with real PCCC logic)
  * ============================================================================ */
 
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
- * Phase 9: DELETE — replaced by encode_chunk. */
-static int enip_mfg_pccc_estimate_request_size(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
-                                               size_t req_budget, size_t resp_budget, enip_req_desc_t *result) {
-    /* Estimate sizes for PCCC CIP requests using service 0x4B (Execute PCCC)
-     * PCCC requests wrap DF1 protocol in CIP envelope.
-     */
-
-    if(!result) { return PLCTAG_ERR_NULL_PTR; }
-    memset(result, 0, sizeof(*result));
-
-    if(!tag) { return PLCTAG_ERR_NULL_PTR; }
-
-    /* Request: Service 0x4B + routing + PCCC command = ~40-60 bytes typical */
-    result->request_size = 50;
-
-    /* Response: PCCC status + data (tag_size bytes) */
-    uint32_t elem_count = tag->elem_count > 0 ? (uint32_t)tag->elem_count : 1;
-    uint32_t elem_size = tag->elem_size > 0 ? (uint32_t)tag->elem_size : 4;
-    size_t data_size = elem_count * elem_size;
-
-    if(data_size > 2048) { data_size = 2048; }
-    result->estimated_response_size = 8 + data_size;
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/PCCC: estimate %zu req / %zu resp", result->request_size,
-           result->estimated_response_size);
-
-    return PLCTAG_STATUS_OK;
-}
-
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line) — currently passes
- * wrong argument count to enip_cip_read/write_tag_request and will not compile.
- * Phase 9: DELETE — replaced by encode_chunk (see file-level comment).
- * Salvageable: the file-type → element_size mapping logic (move to a helper). */
-static int32_t enip_mfg_pccc_encode_request(struct enip_tag_t *tag, struct enip_connection_t *conn, Arena *arena,
-                                        enip_req_desc_t *result) {
-    (void)tag; (void)conn; (void)arena; (void)result;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-/* Phase 0: stub to return PLCTAG_ERR_UNSUPPORTED (one line).
- * Phase 9: DELETE — replaced by accept_chunk (see file-level comment). */
-static int32_t enip_mfg_pccc_decode_response(struct enip_tag_t *tag, struct enip_connection_t *conn, Bytes response_payload,
-                                         uint32_t correlation_id, enip_chunk_result_t *result) {
-    (void)tag; (void)conn; (void)response_payload; (void)correlation_id; (void)result;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-/* Phase 0: leave as-is (returns 0, compiles fine).
- * Phase 9: DELETE — replaced by accept_chunk return value. */
-static int enip_mfg_pccc_needs_more(struct enip_tag_t *tag, enip_chunk_result_t *result) {
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0, "ENIP/PCCC: needs more (stub)");
-    return 0;
-}
 
 /* Phase 9: this no-op is correct for PCCC devices — they do not support symbol
  * enumeration.  Keep this body; fix debug module to DEBUG_MODULE_ENIP and
@@ -183,9 +129,24 @@ static int enip_mfg_pccc_fetch_phase1_metadata(struct enip_connection_t *conn, A
  * PCCC Strategy Structure
  * ============================================================================ */
 
-enip_mfg_ops_t enip_mfg_pccc = {.estimate_request_size = enip_mfg_pccc_estimate_request_size,
-                                .encode_request = enip_mfg_pccc_encode_request,
-                                .decode_response = enip_mfg_pccc_decode_response,
-                                .needs_more = enip_mfg_pccc_needs_more,
-                                .fetch_phase1_metadata = enip_mfg_pccc_fetch_phase1_metadata,
-                                .name = "PCCC"};
+/* Phase 4: stubs for fragmentation callbacks. Phase 9 will implement PCCC logic. */
+static Bytes enip_mfg_pccc_encode_chunk(struct enip_tag_t *tag, Arena *arena, size_t cip_budget) {
+    (void)tag; (void)arena; (void)cip_budget;
+    return bytes_null();
+}
+
+static int32_t enip_mfg_pccc_accept_chunk(struct enip_tag_t *tag, Bytes cip_response) {
+    (void)tag; (void)cip_response;
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+/* ============================================================================
+ * PCCC Strategy Structure (Phase 4)
+ * ============================================================================ */
+
+enip_mfg_ops_t enip_mfg_pccc = {
+    .encode_chunk = enip_mfg_pccc_encode_chunk,
+    .accept_chunk = enip_mfg_pccc_accept_chunk,
+    .fetch_phase1_metadata = enip_mfg_pccc_fetch_phase1_metadata,
+    .name = "PCCC"
+};
