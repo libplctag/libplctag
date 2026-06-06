@@ -1588,11 +1588,12 @@ static int32_t enip_ensure_due_tags_metadata(enip_connection_t *conn, int64_t no
             }
             if(tag->data) {
                 tag->meta.generation = conn->metadata_generation;
+                tag->meta.state = ENIP_META_READY;  /* Mark metadata as valid (plan §3.3) */
             } else if(!tag->data) {
                 tag->status = PLCTAG_ERR_NO_MEM;
                 tag->op.op_state = ENIP_OP_IDLE;
-                
-                
+
+
             }
         }
 
@@ -1600,6 +1601,112 @@ static int32_t enip_ensure_due_tags_metadata(enip_connection_t *conn, int64_t no
     }
 
     return PLCTAG_STATUS_OK;
+}
+
+
+/* ============================================================================
+ * Intrusive Queue API (Phase 5) — §6.2
+ * ============================================================================
+ *
+ * Sorted linked list of tags by op_time (ascending). No allocation; pointer surgery only.
+ * Caller is responsible for holding queue_mutex. */
+
+/* Insert tag into queue maintaining ascending op_time order. No-op if already linked. */
+static void enip_queue_link(enip_connection_t *conn, enip_tag_t *tag) {
+    if(!conn || !tag) { return; }
+
+    /* Already linked? */
+    if(tag->op.q_next || tag->op.q_prev || conn->queue_head == tag) {
+        return;
+    }
+
+    /* Empty queue: becomes the head */
+    if(!conn->queue_head) {
+        conn->queue_head = tag;
+        conn->queue_tail = tag;
+        tag->op.q_next = NULL;
+        tag->op.q_prev = NULL;
+        return;
+    }
+
+    /* Find insertion point: scan for first tag with op_time >= this tag's op_time */
+    enip_tag_t *walker = conn->queue_head;
+    while(walker && walker->op.op_time < tag->op.op_time) {
+        walker = walker->op.q_next;
+    }
+
+    if(!walker) {
+        /* Insert at tail: all existing tags are earlier */
+        tag->op.q_prev = conn->queue_tail;
+        tag->op.q_next = NULL;
+        conn->queue_tail->op.q_next = tag;
+        conn->queue_tail = tag;
+    } else if(walker == conn->queue_head) {
+        /* Insert at head: this tag is earliest */
+        tag->op.q_next = conn->queue_head;
+        tag->op.q_prev = NULL;
+        conn->queue_head->op.q_prev = tag;
+        conn->queue_head = tag;
+    } else {
+        /* Insert in the middle */
+        tag->op.q_next = walker;
+        tag->op.q_prev = walker->op.q_prev;
+        walker->op.q_prev->op.q_next = tag;
+        walker->op.q_prev = tag;
+    }
+}
+
+/* Unlink tag from queue. No-op if not linked. */
+static void enip_queue_unlink(enip_connection_t *conn, enip_tag_t *tag) {
+    if(!conn || !tag) { return; }
+
+    /* Not linked? */
+    if(!tag->op.q_next && !tag->op.q_prev && conn->queue_head != tag) {
+        return;
+    }
+
+    if(tag->op.q_prev) {
+        tag->op.q_prev->op.q_next = tag->op.q_next;
+    } else {
+        /* tag is head */
+        conn->queue_head = tag->op.q_next;
+    }
+
+    if(tag->op.q_next) {
+        tag->op.q_next->op.q_prev = tag->op.q_prev;
+    } else {
+        /* tag is tail */
+        conn->queue_tail = tag->op.q_prev;
+    }
+
+    tag->op.q_next = NULL;
+    tag->op.q_prev = NULL;
+}
+
+/* Return head tag if due (op_time <= now_ms), else NULL. No ref taken. */
+static enip_tag_t *enip_queue_peek_due(enip_connection_t *conn, int64_t now_ms) {
+    if(!conn || !conn->queue_head) { return NULL; }
+
+    if(conn->queue_head->op.op_time <= now_ms) {
+        return conn->queue_head;
+    }
+
+    return NULL;
+}
+
+/* Return ms until head is due: 0 if due, ENIP_WORK_WAIT_MS if empty, else delta.
+ * Acquires and releases queue_mutex. */
+static int64_t enip_queue_next_wait(enip_connection_t *conn, int64_t now_ms) {
+    int64_t wait_ms = ENIP_WORK_WAIT_MS;
+
+    critical_block(conn->queue_mutex) {
+        if(!conn->queue_head) { break; }
+
+        int64_t until_due = conn->queue_head->op.op_time - now_ms;
+        wait_ms = (until_due <= 0) ? 0 : until_due;
+    }
+
+    return wait_ms;
 }
 
 

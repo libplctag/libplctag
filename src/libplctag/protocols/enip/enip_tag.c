@@ -46,19 +46,21 @@
 /*
  * ENIP Tag vtable and tag-creation implementation.
  *
- * STATUS: KEEP vtable functions as-is; enip_protocol_tag_create needs Phase 6 changes.
+ * STATUS: Phase 6. Metadata validity gate implemented.
  *
  * Phase 0: Change DEBUG_MODULE_LIB to DEBUG_MODULE_ENIP in enip_tag_destructor.
  *          Change return types from int to int32_t on all vtable functions (plan §0).
  *
- * Phase 6: In enip_protocol_tag_create, add:
- *   - Extract byte_order from attribs ("@byte_order" attribute).
- *   - Allocate and zero tag->data (tag->size bytes) using mem_alloc.
- *   - Set tag->metadata_required = (plc=ControlLogix/CompactLogix) ? true : false.
- *
- * Phase 6: In enip_tag_abort:
- *   - Also remove the tag from conn->active_tags if it is there.
+ * Phase 6: Metadata validity predicate (plan §3.3):
+ *   - Tag metadata usable iff: meta.state == ENIP_META_READY && meta.generation == conn->metadata_generation
+ *   - Used by tag_status (PENDING until usable) and get_int_attrib (expose only when usable)
  */
+
+/* Metadata validity gate (plan §3.3): true iff metadata is READY and current generation. */
+static bool enip_metadata_usable(enip_tag_t *tag) {
+    if(!tag || !tag->conn) { return false; }
+    return (tag->meta.state == ENIP_META_READY && tag->meta.generation == tag->conn->metadata_generation);
+}
 
 /* Phase 0: change return type int -> int32_t; correct as-is otherwise. */
 static int32_t enip_tag_abort(plc_tag_p p_tag) {
@@ -78,11 +80,14 @@ static int32_t enip_tag_read(plc_tag_p p_tag) {
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
+    if(!tag->conn) { return PLCTAG_ERR_NULL_PTR; }
+
     tag->op.op_state = ENIP_OP_REQUEST;
     tag->op.op_time  = time_ms();
     tag->op.kind     = ENIP_OP_KIND_READ;
+    tag->op.chunk_offset = 0;
 
-    if(tag->conn && tag->conn->link.socket) {
+    if(tag->conn->link.socket) {
         socket_wake(tag->conn->link.socket);
     }
 
@@ -96,6 +101,11 @@ static int32_t enip_tag_status(plc_tag_p p_tag) {
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
     if(tag->status != PLCTAG_STATUS_OK) { return tag->status; }
+
+    /* PENDING if metadata is not yet usable or operation is in flight (plan §3.3) */
+    if(!enip_metadata_usable(tag)) {
+        return PLCTAG_STATUS_PENDING;
+    }
 
     if(tag->op.op_state == ENIP_OP_REQUEST || tag->op.op_state == ENIP_OP_INFLIGHT) {
         return PLCTAG_STATUS_PENDING;
@@ -120,11 +130,14 @@ static int32_t enip_tag_write(plc_tag_p p_tag) {
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
+    if(!tag->conn) { return PLCTAG_ERR_NULL_PTR; }
+
     tag->op.op_state = ENIP_OP_REQUEST;
     tag->op.op_time  = time_ms();
     tag->op.kind     = ENIP_OP_KIND_WRITE;
+    tag->op.chunk_offset = 0;
 
-    if(tag->conn && tag->conn->link.socket) {
+    if(tag->conn->link.socket) {
         socket_wake(tag->conn->link.socket);
     }
 
@@ -151,6 +164,32 @@ static int32_t enip_tag_data_written(plc_tag_p p_tag) {
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
     return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t enip_tag_get_int_attrib(plc_tag_p p_tag, const char *attrib_name, int default_value) {
+    enip_tag_t *tag = (enip_tag_t *)p_tag;
+
+    if(!tag || !attrib_name) { return default_value; }
+
+    /* Only expose metadata when usable (plan §3.3, §2.1) */
+    if(!enip_metadata_usable(tag)) {
+        return default_value;
+    }
+
+    if(str_cmp_i(attrib_name, "elem_size") == 0) {
+        return (int32_t)tag->meta.elem_size;
+    }
+
+    if(str_cmp_i(attrib_name, "elem_count") == 0) {
+        return (int32_t)tag->meta.elem_count;
+    }
+
+    if(str_cmp_i(attrib_name, "data_type") == 0) {
+        return (int32_t)tag->meta.data_type;
+    }
+
+    return default_value;
 }
 
 
@@ -190,6 +229,7 @@ static struct tag_vtable_t enip_tag_vtable = {
     .write = enip_tag_write,
     .wake_plc = enip_tag_wake_plc,
     .tag_data_written = enip_tag_data_written,
+    .get_int_attrib = enip_tag_get_int_attrib,
 };
 
 
