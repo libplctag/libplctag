@@ -40,11 +40,15 @@
 
 typedef struct enip_tag_t *enip_tag_p;
 typedef struct enip_connection_tag_t *enip_connection_tag_p;
+typedef struct enip_connection_t enip_connection_t;
 
 void enip_teardown(void);
 int enip_init(void);
 plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                           void *userdata, plc_tag_p src_tag);
+
+/* Registry functions (plan §3.1): find or create a shared connection */
+extern enip_connection_t *enip_registry_find_or_create(attr attribs);
 plc_tag_p enip_protocol_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                    void *userdata, plc_tag_p src_tag);
 plc_tag_p enip_connection_tag_create(attr attribs,

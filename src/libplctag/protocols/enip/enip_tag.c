@@ -280,24 +280,22 @@ plc_tag_p enip_protocol_tag_create(attr attribs, void (*tag_callback_func)(int32
         }
     }
 
-    /* Wire up the connection back-pointer and add to active_tags.
-     * TODO: replace with find_or_create_connection() for connection sharing. */
-    enip_connection_t *conn = enip_connection_create(attribs);
+    /* Wire up the connection back-pointer and add to active_tags (plan §3.1).
+     * Uses registry to share connections by gateway+path. */
+    enip_connection_t *conn = enip_registry_find_or_create(attribs);
     if(!conn) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to create connection for tag '%s'", tag_path_str);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to find or create connection for tag '%s'", tag_path_str);
         rc_dec(tag);
         return NULL;
     }
 
-    tag->conn       = rc_inc(conn);
+    tag->conn       = conn;  /* already rc_inc'd by registry */
     tag->op.op_time = time_ms();
 
     critical_block(conn->active_tags_mutex) {
         vector_insert(conn->active_tags, vector_length(conn->active_tags), tag);
         tag->in_active_tags = true;
     }
-
-    rc_dec(conn); /* release the create ref; tag->conn now owns the only ref */
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, tag->tag_id,
            "ENIP tag created: root_name='%s' full_path='%s' (encoded_len=%zu)",

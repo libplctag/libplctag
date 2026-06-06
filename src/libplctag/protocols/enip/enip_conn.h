@@ -99,6 +99,8 @@ typedef struct enip_session_t {
  * (plan §4.3)
  * ============================================================================ */
 struct enip_connection_t {
+    struct enip_connection_t *next;  /* for global registry linked list (phase 3)         */
+
     enip_link_t    link;
     enip_session_t session;
 

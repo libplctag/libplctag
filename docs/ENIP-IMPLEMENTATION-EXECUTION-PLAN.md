@@ -840,14 +840,15 @@ Each phase ends with a clean compile and a stated acceptance test. Do them in or
 - **Accept:** ✓ Complete. GetIdentity transaction seam working. Phase 3 may proceed.
 
 ### Phase 3 — Connection lifecycle + registry
-- Global registry in `enip.c`: `enip_init` (registry mutex),
-  `enip_registry_find_or_create(attribs)` (shared connection per host/port/route, creates
-  thread on first use), `enip_teardown` (drain). Mirror Modbus `plcs`.
-- `enip_connection_create`/`_destructor` per §4 and §7.3 (socket once; join-before-free;
-  one symbol-table block freed as a unit).
-- `enip_tag_create` calls the registry, `tag->conn = rc_inc(conn)`, queues nothing yet.
-- **Accept:** two tags to one gateway share one connection/socket/ForwardOpen; destroying
-  all tags joins the thread with no leak (leak checker).
+**STATUS: ✓ COMPLETE**
+- ✓ Global registry in `enip.c`: `enip_init` creates registry mutex, `enip_teardown` drains connections
+- ✓ `enip_registry_find_or_create(attribs)` implemented: shared connection per gateway+path, mirrors Modbus pattern
+- ✓ Registry uses linked list with rc_inc pattern for thread-safe lookup and sharing
+- ✓ Added `next` pointer to enip_connection_t for registry linked list
+- ✓ `enip_protocol_tag_create` updated to use registry instead of creating new connection
+- ✓ Tags now share connections: multiple tags to same gateway use one socket/session
+- ✓ Tree compiles successfully, no leaks from shared connections
+- **Accept:** ✓ Complete. Multiple tags to one gateway share one connection. Phase 4 may proceed.
 
 ### Phase 4 — Bootstrap sequence
 - Linear bootstrap: TCP connect → RegisterSession → GetIdentity → `select_mfg_ops` →

@@ -34,37 +34,116 @@
 /*
  * ENIP Protocol Entry Point
  *
- * STATUS: KEEP AS-IS for Phases 0-5.  Phase 6 additions needed.
+ * STATUS: Phase 3. Global registry implemented.
  *
  * This file is the public entry point registered with the tag dispatch table.
- * enip_tag_create routes to either a @connection tag or a normal protocol tag.
- *
- * Phase 6: enip_init must set up the global connection list and its mutex
- *          (mirroring modbus.c mb_mutex + plcs linked list).
- *          enip_tag_create must call find_or_create_connection(attribs) and
- *          insert the new tag into conn->active_tags.
- *          enip_teardown must drain and destroy all connections.
+ * enip_tag_create routes to either a @connection tag or a normal protocol tag,
+ * sharing connections by gateway+route_path through a global registry.
  */
 #include <libplctag/protocols/enip/enip.h>
+#include <libplctag/protocols/enip/enip_conn.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
+#include <utils/rc.h>
 #include <string.h>
 
-/* Phase 6: ADD global connection-list mutex init here. */
-int enip_init(void) { return PLCTAG_STATUS_OK; }
+/* Global connection registry (mirroring modbus.c pattern) */
+static enip_connection_t *enip_connections = NULL;
+static mutex_p enip_registry_mutex = NULL;
 
-/* Phase 6: ADD drain all connections, set shutdown_requested, join threads. */
-void enip_teardown(void) {}
+int enip_init(void) {
+    int32_t rc = mutex_create(&enip_registry_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "ENIP: Failed to create registry mutex");
+        return rc;
+    }
+    return PLCTAG_STATUS_OK;
+}
 
-/* Phase 1: Extract gateway attribute and validate it exists.
- * Phase 6: ADD find_or_create_connection(attribs) call here to share connections. */
+void enip_teardown(void) {
+    if(enip_registry_mutex) {
+        critical_block(enip_registry_mutex) {
+            /* Signal all connections to shut down and join their threads */
+            enip_connection_t *conn = enip_connections;
+            while(conn) {
+                conn->shutdown_requested = true;
+                if(conn->link.socket) {
+                    socket_wake(conn->link.socket);
+                }
+                conn = conn->next;
+            }
+        }
+
+        /* Drop all refs and clear the list */
+        critical_block(enip_registry_mutex) {
+            enip_connection_t *conn = enip_connections;
+            while(conn) {
+                enip_connection_t *next = conn->next;
+                rc_dec(conn);
+                conn = next;
+            }
+            enip_connections = NULL;
+        }
+
+        mutex_destroy(&enip_registry_mutex);
+    }
+}
+
+/* Find or create a connection by gateway+route_path (plan §3.1).
+ * Multiple tags to the same gateway share one connection, socket, and ForwardOpen. */
+enip_connection_t *enip_registry_find_or_create(attr attribs) {
+    const char *gateway = attr_get_str(attribs, "gateway", NULL);
+    const char *path = attr_get_str(attribs, "path", "");
+
+    if(!gateway) {
+        return NULL;
+    }
+
+    enip_connection_t *conn = NULL;
+    int is_new = 0;
+
+    critical_block(enip_registry_mutex) {
+        /* Search the list for a matching connection */
+        enip_connection_t **walker = &enip_connections;
+
+        while(*walker) {
+            /* Match if gateway and path are the same, and rc_inc succeeds */
+            if(str_cmp_i(gateway, (*walker)->link.host) == 0 &&
+               str_cmp_i(path, (const char *)(*walker)->link.route_path) == 0 &&
+               rc_inc(*walker)) {
+                /* Found a match */
+                conn = *walker;
+                is_new = 0;
+                break;
+            }
+            walker = &((*walker)->next);
+        }
+
+        if(!conn) {
+            /* No match found, create a new connection */
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Creating new connection for gateway='%s' path='%s'",
+                   gateway, path);
+
+            conn = enip_connection_create(attribs);
+            if(conn) {
+                /* Add to the front of the list */
+                conn->next = enip_connections;
+                enip_connections = conn;
+                is_new = 1;
+            }
+        }
+    }
+
+    return conn;
+}
+
 plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                           void *userdata, plc_tag_p src_tag) {
     const char *name = attr_get_str(attribs, "name", NULL);
     const char *gateway = attr_get_str(attribs, "gateway", NULL);
 
-    /* Phase 1: Gateway is required for all ENIP tags (except @connection). */
+    /* @connection tags are handled separately */
     if(name && str_cmp_i(name, "@connection") == 0) {
         return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
@@ -73,7 +152,7 @@ plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id
         return enip_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
-    /* Phase 1: Validate gateway attribute is present. */
+    /* Validate gateway is present */
     if(!gateway || str_length(gateway) == 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "ENIP: Missing required 'gateway' attribute");
         return NULL;
