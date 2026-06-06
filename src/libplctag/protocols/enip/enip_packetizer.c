@@ -53,15 +53,15 @@
 #include <libplctag/protocols/enip/enip_packetizer.h>
 #include <utils/debug.h>
 
-/* Phase 5: correct as-is — no changes needed.  Call this to compute the per-message
- * CIP budget to pass as cip_budget to encode_chunk. */
-size_t enip_packetizer_cip_budget(size_t max_buffer, bool use_connected) {
-    size_t overhead = use_connected ? ENIP_PKT_CONNECTED_OVERHEAD
-                                    : ENIP_PKT_UNCONNECTED_OVERHEAD;
+/* Phase 1: compute CIP-payload budget from a ForwardOpen-negotiated size (plan §5.9).
+ * Subtracts only the CIP-layer overhead, not the full EIP+CPF stack. */
+size_t enip_packetizer_cip_budget(size_t cip_size, bool use_connected) {
+    size_t overhead = use_connected ? ENIP_PKT_CONNECTED_CIP_OVERHEAD
+                                    : ENIP_PKT_UNCONNECTED_CIP_OVERHEAD;
 
-    if(max_buffer <= overhead) { return 0; }
+    if(cip_size <= overhead) { return 0; }
 
-    return max_buffer - overhead;
+    return cip_size - overhead;
 }
 
 /* Phase 5: correct as-is — use this to gate whether a single tag fits without 0x0A. */
@@ -73,6 +73,107 @@ bool enip_packetizer_fits_single(size_t max_buffer, bool use_connected,
      * same buffer limit -- the PLC uses the same negotiated size for both. */
     return (budget > 0) && (req_size <= budget) && (resp_size <= budget);
 }
+
+uint32_t enip_chunk_elem_count(size_t data_budget, size_t elem_size, uint32_t remaining_elems) {
+    if(elem_size == 0 || data_budget < elem_size) { return 0; }
+    uint32_t fits = (uint32_t)(data_budget / elem_size);
+    if(fits > 65535u) { fits = 65535u; }
+    if(fits > remaining_elems) { fits = remaining_elems; }
+    return fits;
+}
+
+
+void enip_chunk_flat_to_index(uint32_t flat_idx, const uint32_t dims[3],
+                               int num_dims, uint32_t out_idx[3]) {
+    out_idx[0] = out_idx[1] = out_idx[2] = 0;
+
+    if(num_dims <= 0) { return; }
+
+    if(num_dims == 1) {
+        out_idx[0] = flat_idx;
+        return;
+    }
+
+    if(num_dims == 2) {
+        uint32_t d1 = (dims[1] > 0) ? dims[1] : 1u;
+        out_idx[1] = flat_idx % d1;
+        out_idx[0] = flat_idx / d1;
+        return;
+    }
+
+    /* 3D */
+    uint32_t d2 = (dims[2] > 0) ? dims[2] : 1u;
+    uint32_t d1 = (dims[1] > 0) ? dims[1] : 1u;
+    out_idx[2] = flat_idx % d2;
+    out_idx[1] = (flat_idx / d2) % d1;
+    out_idx[0] = flat_idx / (d2 * d1);
+}
+
+
+uint32_t enip_chunk_index_to_flat(const uint32_t idx[3], const uint32_t dims[3],
+                                   int num_dims) {
+    if(num_dims <= 1) { return idx[0]; }
+
+    uint32_t d2 = (dims[2] > 0) ? dims[2] : 1u;
+    uint32_t d1 = (dims[1] > 0) ? dims[1] : 1u;
+
+    if(num_dims == 2) { return idx[0] * d1 + idx[1]; }
+
+    return idx[0] * (d1 * d2) + idx[1] * d2 + idx[2];
+}
+
+
+enip_chunk_split_result_t enip_chunk_split(
+    size_t req_avail,
+    size_t resp_avail,
+    uint32_t remaining,
+    size_t elem_size,
+    uint32_t req_fixed,
+    uint32_t resp_fixed,
+    bool is_write) {
+
+    enip_chunk_split_result_t result = {0, 0, 0};
+
+    if(elem_size == 0 || remaining == 0) { return result; }
+    if(req_avail < req_fixed || resp_avail < resp_fixed) { return result; }
+
+    /* Available data budget in each direction */
+    size_t req_data_budget = req_avail - (size_t)req_fixed;
+    size_t resp_data_budget = resp_avail - (size_t)resp_fixed;
+
+    /* For writes, the request carries the data; for reads, the response does.
+     * Both directions must accommodate their share. */
+    size_t usable_bytes = is_write
+        ? (req_data_budget < resp_data_budget ? req_data_budget : resp_data_budget)
+        : (resp_data_budget < req_data_budget ? resp_data_budget : req_data_budget);
+
+    /* Cap to the number of remaining elements */
+    if(usable_bytes > (size_t)remaining * elem_size) {
+        usable_bytes = (size_t)remaining * elem_size;
+    }
+
+    /* Element alignment: for atomic types (elem_size <= 8), align to elem_size;
+     * for aggregates, align to 8-byte boundaries. */
+    size_t unit = elem_size < 8 ? elem_size : 8;
+    size_t chunk_bytes = (usable_bytes / unit) * unit;
+
+    if(chunk_bytes < unit) { return result; }
+
+    /* Compute the request and response body sizes */
+    size_t req_body_size = (size_t)req_fixed + (is_write ? chunk_bytes : 0);
+    size_t resp_body_size = (size_t)resp_fixed + (is_write ? 0 : chunk_bytes);
+
+    if(req_body_size > (size_t)UINT32_MAX || resp_body_size > (size_t)UINT32_MAX) {
+        return result;
+    }
+
+    result.data_bytes = (uint32_t)chunk_bytes;
+    result.req_body = (uint32_t)req_body_size;
+    result.resp_body = (uint32_t)resp_body_size;
+
+    return result;
+}
+
 
 /* Phase 5: correct as-is — call this to determine how many tags fit in one 0x0A batch.
  * On return, plan->slot_count tells the caller how many sub-requests to pack. */

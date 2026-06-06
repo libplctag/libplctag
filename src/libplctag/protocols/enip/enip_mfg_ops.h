@@ -73,12 +73,17 @@ struct enip_connection_t;
 typedef struct enip_mfg_ops_t {
     /* Encode next chunk: Build CIP request for tag's next operation.
      * Called by connection loop to get the next request to send.
-     * Returns CIP request bytes ready to wrap in CPF+EIP, or bytes_null()
-     * if no more data to send (operation complete).
      *
-     * Cannot fail (arena is pre-sized and validated at tag setup time).
-     * Returns bytes_null() only to signal end-of-data, never as error. */
-    Bytes (*encode_chunk)(struct enip_tag_t *tag, Arena *arena, size_t cip_budget);
+     * req_budget:  bytes available for this slot's entire request body
+     *              (= max_packet_buffer_size - framing - running req totals - SLOT_OVERHEAD)
+     * resp_budget: bytes available for this slot's entire response body (same formula)
+     *
+     * The hook subtracts its manufacturer-fixed header sizes to get the data budget,
+     * then calls enip_chunk_split() for dual-budget, element-aligned sizing (§15.4).
+     *
+     * Returns CIP request bytes ready to wrap in CPF+EIP, or bytes_null() on error. */
+    Bytes (*encode_chunk)(struct enip_tag_t *tag, Arena *arena,
+                          size_t req_budget, size_t resp_budget);
 
     /* Accept response chunk: Process one CIP response and advance tag cursor.
      * Called by connection loop after receiving a response.
@@ -96,6 +101,12 @@ typedef struct enip_mfg_ops_t {
      * Returns: PLCTAG_STATUS_OK on success, PLCTAG_ERR_* on failure.
      * Failures trigger reconnect in enip_connection_thread_entry. */
     int32_t (*fetch_phase1_metadata)(struct enip_connection_t *conn, Arena *arena);
+
+    /* Fetch per-tag type/size/dimensions on first use (lazy phase-2 metadata).
+     * Called by enip_ensure_due_tags_metadata before the first encode_chunk.
+     * Must fill tag->data_type, tag->elem_size, tag->elem_count.
+     * OMRON and PCCC may implement this as a no-op returning PLCTAG_STATUS_OK. */
+    int32_t (*fetch_tag_metadata)(struct enip_tag_t *tag);
 
     /* Human-readable name for debugging/logging (e.g., "AB/Logix", "OMRON") */
     const char *name;

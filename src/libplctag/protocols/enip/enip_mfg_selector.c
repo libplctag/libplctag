@@ -44,6 +44,7 @@
  * Maps Get Identity response (vendor_id, device_type) to the correct mfg_ops struct.
  */
 
+#include <inttypes.h>
 #include <libplctag/protocols/enip/enip_mfg_ops.h>
 #include <utils/debug.h>
 #include <string.h>
@@ -69,7 +70,8 @@ enip_mfg_ops_t *enip_select_mfg_ops(enip_identity_t *identity) {
         return NULL;
     }
 
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Selecting strategy for vendor=0x%04x device=0x%04x product=0x%04x",
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
+           "ENIP: Selecting strategy for vendor=0x%04" PRIx16 " device=0x%04" PRIx16 " product=0x%04" PRIx16,
            identity->vendor_id, identity->device_type, identity->product_code);
 
     /* Allen-Bradley family */
@@ -109,7 +111,7 @@ enip_mfg_ops_t *enip_select_mfg_ops(enip_identity_t *identity) {
     }
 
     /* Default fallback: Try AB/Logix for unknown Allen-Bradley-compatible devices */
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Unknown vendor 0x%04x, falling back to AB strategy", identity->vendor_id);
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Unknown vendor 0x%04" PRIx16 ", falling back to AB strategy", identity->vendor_id);
     return &enip_mfg_ab;
 }
 

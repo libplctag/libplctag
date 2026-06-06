@@ -32,37 +32,19 @@
  ***************************************************************************/
 
 /*
- * ENIP Metadata Cache Management
+ * ENIP Metadata Fetch
  *
- * STATUS: MOSTLY CORRECT.  Two fixes required; otherwise keep as-is.
+ * Phase-1: root symbol inventory (name -> instance_id, connection-wide).
+ * Phase-2: per-tag type/size/dims (lazy, stored in tag->meta, plan §3.3).
  *
- * Phase 7 (Metadata & identity-driven feature enable):
- *   Fix enip_metadata_fetch_root_symbols: add system-tag filtering (plan §3 L):
- *     skip entries where name starts with "__", name contains ":", or
- *     (symbol_type & 0x1000) is set.  Record (symbol_type & 0x8000) as
- *     "is_struct" in enip_root_symbol_entry_t.
- *   No other changes to this file are needed for Phases 1-6.
+ * The per-connection metadata_cache (hashtable) has been removed.  Results
+ * from phase-2 fetches are now written directly into tag->meta by the caller
+ * (the engine, Phase 4).  enip_metadata_fetch_tag_info returns the values
+ * via out-parameters; the engine is responsible for storing them.
  *
- * Two-phase metadata strategy:
- *   Phase 1 (eager, connection startup): enip_metadata_fetch_root_symbols fetches
- *     ALL tag names and instance IDs using GetInstanceAttributeList (service 0x55)
- *     on Symbol Class 0x6B, requesting ONLY attribute 0x01 (name).
- *     Wire format per entry: instance_id(4) + string_len(2) + name_bytes.
- *     Results stored in root_symbol_cache keyed by hash(name).
- *
- *   Phase 2 (lazy, first use): enip_metadata_fetch_tag_info fetches symbol_type,
- *     element_size, and array_dims for a specific instance_id using
- *     GetInstanceAttributeList on that instance, requesting attributes 0x02, 0x07, 0x08.
- *     Results cached in metadata_cache keyed by instance_id.
- *
- * Phase 1 fix required in enip_metadata_fetch_root_symbols:
- *   Change the CIP request to ask for only attribute 0x01 (attr_count=1).
- *   Change the wire parse: remove unpack of sym_type, elem_sz, dims;
- *   minimum entry size drops from 22 to 6 bytes (instance_id(4) + name_len(2)).
- *   Remove sym_type/elem_sz/dims from enip_root_symbol_store call/signature.
- *   Upgrade instance_id field from uint16_t to uint32_t (Logix v20+ returns 32-bit IDs).
- *
- * Debug module: this file correctly uses DEBUG_MODULE_ENIP throughout.
+ * Phase 7: add system-tag filtering in enip_metadata_fetch_root_symbols:
+ *   skip entries where name starts with "__", name contains ":", or
+ *   (symbol_type & 0x1000) is set.
  */
 
 #include <libplctag/protocols/enip/enip.h>
@@ -70,6 +52,7 @@
 #include <libplctag/protocols/enip/enip_conn.h>
 #include <libplctag/protocols/enip/enip_cpf.h>
 #include <libplctag/protocols/enip/enip_eip.h>
+#include <inttypes.h>
 #include <platform.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
@@ -80,92 +63,9 @@
 #include <string.h>
 
 /* ============================================================================
- * Lazy metadata cache (instance_id -> symbol_type / element_size / array_dims)
- * Populated by enip_metadata_fetch_tag_info on first use of each tag.
- * ============================================================================ */
-
-/* Phase 1: correct as-is — no changes needed. */
-static int32_t enip_metadata_get_cached(enip_connection_t *conn, uint32_t tag_instance_id,
-                                         uint16_t *symbol_type_out, uint16_t *element_size_out,
-                                         uint32_t *array_dims_out) {
-    if(!conn || !conn->metadata_cache) { return PLCTAG_ERR_NULL_PTR; }
-
-    int64_t key = (int64_t)tag_instance_id;
-
-    mutex_lock(conn->metadata_cache_mutex);
-    enip_metadata_cache_entry_t *entry =
-        (enip_metadata_cache_entry_t *)hashtable_get(conn->metadata_cache, key);
-
-    if(entry) {
-        *symbol_type_out  = entry->symbol_type;
-        *element_size_out = entry->element_size;
-        memcpy(array_dims_out, entry->array_dims, sizeof(entry->array_dims));
-        mutex_unlock(conn->metadata_cache_mutex);
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0,
-               "ENIP: metadata cache hit for instance %u", tag_instance_id);
-        return PLCTAG_STATUS_OK;
-    }
-
-    mutex_unlock(conn->metadata_cache_mutex);
-    return PLCTAG_ERR_NOT_FOUND;
-}
-
-/* Phase 1: correct as-is — no changes needed. */
-static int32_t enip_metadata_set_cached(enip_connection_t *conn, uint32_t tag_instance_id,
-                                         uint16_t symbol_type, uint16_t element_size,
-                                         const uint32_t *array_dims) {
-    if(!conn || !conn->metadata_cache || !array_dims) { return PLCTAG_ERR_NULL_PTR; }
-
-    int64_t key = (int64_t)tag_instance_id;
-
-    enip_metadata_cache_entry_t *entry =
-        (enip_metadata_cache_entry_t *)mem_alloc(sizeof(enip_metadata_cache_entry_t));
-    if(!entry) { return PLCTAG_ERR_NO_MEM; }
-
-    entry->symbol_type  = symbol_type;
-    entry->element_size = element_size;
-    memcpy(entry->array_dims, array_dims, sizeof(entry->array_dims));
-
-    mutex_lock(conn->metadata_cache_mutex);
-    int32_t rc = (int32_t)hashtable_put(conn->metadata_cache, key, entry);
-    mutex_unlock(conn->metadata_cache_mutex);
-
-    if(rc != 0) {
-        mem_free(entry);
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0,
-           "ENIP: metadata cached for instance %u (type=0x%04x size=%u)",
-           tag_instance_id, symbol_type, element_size);
-    return PLCTAG_STATUS_OK;
-}
-
-/* Phase 6: call this on every disconnect/reconnect to force re-fetch on next connect. */
-void enip_metadata_cache_clear(enip_connection_t *conn) {
-    if(!conn || !conn->metadata_cache) { return; }
-
-    mutex_lock(conn->metadata_cache_mutex);
-
-    for(int32_t i = 0; i < hashtable_capacity(conn->metadata_cache); i++) {
-        enip_metadata_cache_entry_t *entry =
-            (enip_metadata_cache_entry_t *)hashtable_get_index(conn->metadata_cache, i);
-        if(entry) { mem_free(entry); }
-    }
-
-    hashtable_destroy(conn->metadata_cache);
-    conn->metadata_cache = NULL;
-
-    mutex_unlock(conn->metadata_cache_mutex);
-
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Phase-2 metadata cache cleared");
-}
-
-/* ============================================================================
  * Phase-1 root symbol cache (hash(name) -> enip_root_symbol_entry_t)
  * ============================================================================ */
 
-/* Phase 6: call this alongside enip_metadata_cache_clear on disconnect. */
 void enip_root_symbol_cache_clear(enip_connection_t *conn) {
     if(!conn || !conn->root_symbol_cache) { return; }
 
@@ -185,9 +85,6 @@ void enip_root_symbol_cache_clear(enip_connection_t *conn) {
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Phase-1 root symbol cache cleared");
 }
 
-/* Phase 7: correct as-is — no changes needed.
- * Called by the engine (Phase 6) to resolve tag->tag_name -> tag->tag_instance_id
- * after the root symbol inventory completes. */
 enip_root_symbol_entry_t *enip_metadata_find_root_symbol(enip_connection_t *conn,
                                                           const char *name) {
     if(!conn || !conn->root_symbol_cache || !name) { return NULL; }
@@ -200,25 +97,18 @@ enip_root_symbol_entry_t *enip_metadata_find_root_symbol(enip_connection_t *conn
         (enip_root_symbol_entry_t *)hashtable_get(conn->root_symbol_cache, key);
     mutex_unlock(conn->root_symbol_mutex);
 
-    /* Check name to guard against hash collisions */
     if(entry && strcmp(entry->name, name) == 0) { return entry; }
     return NULL;
 }
 
-/* Phase 1: SIMPLIFY signature — remove symbol_type, element_size, array_dims parameters.
- * Phase 1: Remove the lines that set entry->symbol_type, entry->element_size, entry->array_dims.
- * New signature: enip_root_symbol_store(conn, instance_id, name, name_len).
- * Phase 7: add system-tag filter in the CALLER (fetch_root_symbols) before this call. */
 static int32_t enip_root_symbol_store(enip_connection_t *conn, uint32_t instance_id,
-                                       uint16_t symbol_type, uint16_t element_size,
-                                       const uint32_t *array_dims,
                                        const char *name, uint16_t name_len) {
     if(!conn || !conn->root_symbol_cache || !name || name_len == 0) {
         return PLCTAG_ERR_NULL_PTR;
     }
     if(name_len >= (uint16_t)sizeof(((enip_root_symbol_entry_t *)0)->name)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: root symbol name too long (%u bytes), skipping", (uint32_t)name_len);
+               "ENIP: root symbol name too long (%" PRIu16 " bytes), skipping", name_len);
         return PLCTAG_STATUS_OK;
     }
 
@@ -229,10 +119,7 @@ static int32_t enip_root_symbol_store(enip_connection_t *conn, uint32_t instance
         (enip_root_symbol_entry_t *)mem_alloc(sizeof(enip_root_symbol_entry_t));
     if(!entry) { return PLCTAG_ERR_NO_MEM; }
 
-    entry->instance_id  = instance_id;
-    entry->symbol_type  = symbol_type;
-    entry->element_size = element_size;
-    memcpy(entry->array_dims, array_dims, sizeof(entry->array_dims));
+    entry->instance_id = instance_id;
     memcpy(entry->name, name, (size_t)name_len);
     entry->name[name_len] = '\0';
 
@@ -252,53 +139,35 @@ static int32_t enip_root_symbol_store(enip_connection_t *conn, uint32_t instance
  * Phase-1 Fetch: Root Symbol Inventory
  *
  * Service 0x55 (GetInstanceAttributeList) on Symbol Class 0x6B.
+ * Requests ONLY attribute 0x01 (name).
+ * Wire format per entry: instance_id(4) + name_len(2) + name_bytes.
  *
- * Phase 1: change to request ONLY attribute 0x01 (name).  Set attr_count=1.
- * Wire format per entry then becomes: instance_id(4) + name_len(2) + name_bytes.
- * Minimum entry size = 6 bytes (not 22).  Remove unpack of sym_type/elem_sz/dims.
- * Remove those arguments from the enip_root_symbol_store call.
- * Upgrade local instance_id variable from uint16_t to uint32_t.
- *
- * Fragmentation: start at instance_id 0, record last_instance_id from each
- * response, repeat from last_instance_id+1 until zero entries returned.
- * CIP status 0x06 (partial) = more packets follow.  0x00 = last packet.
+ * Phase 7: add system-tag filter: skip names starting with "__" or containing ":".
  * ============================================================================ */
-
-/* Phase 1 REWRITE: change attr_count from 4 to 1, request only 0x01 (name).
- * Phase 1: upgrade instance_id variable to uint32_t.
- * Phase 1: change while(entries.len >= 22) to while(entries.len >= 6).
- * Phase 1: remove sym_type/elem_sz/dims from bytes_unpack call and store call.
- * Phase 7: add system-tag filter after name extraction:
- *   if(name_len >= 2 && name[0]=='_' && name[1]=='_') continue;
- *   if(memchr(name, ':', name_len)) continue;
- */
 int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
-    if(!conn || !conn->socket || !conn->session_established) { return PLCTAG_ERR_NULL_PTR; }
+    if(!conn || !conn->link.socket || !conn->session.established) { return PLCTAG_ERR_NULL_PTR; }
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "ENIP: fetching root symbol inventory (service 0x55 on class 0x6B)");
 
-    uint16_t instance_id  = 0;
-    int32_t  total        = 0;
-    int32_t  fragment     = 0;
+    uint32_t instance_id = 0;
+    int32_t  total       = 0;
+    int32_t  fragment    = 0;
 
     while(true) {
         arena_reset(&conn->tx_arena);
 
-        /* CIP request: service(1) + path_size_words(1) + path(6) + attr_count(2) + attrs(8) */
+        /* CIP request: only attribute 0x01 (name) */
         Bytes cip = bytes_pack(&conn->tx_arena, BYTES_LE,
                                (uint8_t)CIP_SVC_GET_INSTANCE_ATTR_LIST,
-                               (uint8_t)0x03,        /* path_size_words = 3 words = 6 bytes */
-                               (uint8_t)0x20,        /* class segment tag */
-                               (uint8_t)0x6B,        /* Symbol class */
-                               (uint8_t)0x25,        /* 16-bit instance segment tag */
-                               (uint8_t)0x00,        /* pad */
+                               (uint8_t)0x03,         /* path_size_words = 3 */
+                               (uint8_t)0x20,
+                               (uint8_t)0x6B,         /* Symbol class */
+                               (uint8_t)0x25,
+                               (uint8_t)0x00,
                                (uint16_t)instance_id,
-                               (uint16_t)4,          /* attribute count */
-                               (uint16_t)0x02,       /* symbol_type */
-                               (uint16_t)0x07,       /* element_size */
-                               (uint16_t)0x08,       /* array_dims */
-                               (uint16_t)0x01);      /* name */
+                               (uint16_t)1,           /* attr_count = 1 */
+                               (uint16_t)0x01);       /* name */
 
         if(bytes_is_null(cip)) { return PLCTAG_ERR_NO_MEM; }
 
@@ -306,11 +175,12 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
         if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
 
         Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
-                                             conn->session_handle, &conn->sender_context, cpf);
+                                             conn->session.session_handle,
+                                             &conn->session.sender_context, cpf);
         if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
 
         socket_wait_state_t io_state = {0};
-        int32_t rc = socket_write_wait(conn->socket, &frame, 5000, &io_state);
+        int32_t rc = socket_write_wait(conn->link.socket, &frame, 5000, &io_state);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                    "ENIP: root symbol send failed (fragment %d): %d", fragment, rc);
@@ -322,7 +192,7 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
         Bytes response = bytes_alloc(&conn->rx_arena, 4096);
         if(bytes_is_null(response)) { return PLCTAG_ERR_NO_MEM; }
 
-        rc = socket_read_wait(conn->socket, &response, 5000, &io_state);
+        rc = socket_read_wait(conn->link.socket, &response, 5000, &io_state);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                    "ENIP: root symbol read failed (fragment %d): %d", fragment, rc);
@@ -343,43 +213,38 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
 
         if(bytes_is_null(parsed)) { return PLCTAG_ERR_REMOTE_ERR; }
 
+        /* Status interpretation: shared code does NOT hard-code 0x06 (plan §9.1).
+         * The walk continues while entries are returned; stop on empty response. */
         if(cip_status != CIP_STATUS_SUCCESS && cip_status != CIP_STATUS_PARTIAL) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-                   "ENIP: root symbol CIP status 0x%02x (fragment %d)", cip_status, fragment);
-            /* PLCs that do not support this query return an error here; treat as non-fatal */
-            return PLCTAG_STATUS_OK;
+                   "ENIP: root symbol CIP status 0x%02" PRIx8 " (fragment %d)", cip_status, fragment);
+            return PLCTAG_STATUS_OK;  /* non-fatal: device may not support this */
         }
 
-        /* Parse tag_list_entry records.
-         * Fixed part: instance_id(4)+symbol_type(2)+element_size(2)+dims(12)+name_len(2)=22 */
+        /* Each entry: instance_id(4) + name_len(2) + name_bytes */
         int32_t  count_this = 0;
-        uint32_t last_id    = (uint32_t)instance_id;
+        uint32_t last_id    = instance_id;
 
-        while(entries.len >= 22) {
-            uint32_t inst_id = 0;
-            uint16_t sym_type = 0;
-            uint16_t elem_sz  = 0;
-            uint32_t dims[3]  = {0, 0, 0};
+        while(entries.len >= 6) {
+            uint32_t inst_id  = 0;
             uint16_t name_len = 0;
 
-            Bytes rest = bytes_unpack(entries, BYTES_LE,
-                                      &inst_id, &sym_type, &elem_sz,
-                                      &dims[0], &dims[1], &dims[2],
-                                      &name_len);
+            Bytes rest = bytes_unpack(entries, BYTES_LE, &inst_id, &name_len);
 
             if(bytes_is_null(rest) || rest.len < (size_t)name_len) { break; }
 
             if(name_len > 0 && name_len < 128) {
-                rc = enip_root_symbol_store(conn, inst_id, sym_type, elem_sz, dims,
+                rc = enip_root_symbol_store(conn, inst_id,
                                             (const char *)rest.data, name_len);
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-                           "ENIP: failed to store root symbol instance %u: %d", inst_id, rc);
+                           "ENIP: failed to store root symbol instance %" PRIu32 ": %d",
+                           inst_id, rc);
                 }
 
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0,
-                       "ENIP: symbol instance=%u type=0x%04x size=%u name='%.*s'",
-                       inst_id, sym_type, elem_sz, (int32_t)name_len, rest.data);
+                       "ENIP: symbol instance=%" PRIu32 " name='%.*s'",
+                       inst_id, (int)name_len, rest.data);
             }
 
             last_id = inst_id;
@@ -390,15 +255,15 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
         }
 
         pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
-               "ENIP: fragment %d: %d entries (last_id=%u status=0x%02x)",
+               "ENIP: fragment %d: %d entries (last_id=%" PRIu32 " status=0x%02" PRIx8 ")",
                fragment, count_this, last_id, cip_status);
 
         fragment++;
 
         if(count_this == 0 || cip_status == CIP_STATUS_SUCCESS) { break; }
 
-        instance_id = (uint16_t)(last_id + 1u);
-        if(instance_id == 0u) { break; } /* wrapped */
+        instance_id = last_id + 1u;
+        if(instance_id == 0u) { break; }
     }
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
@@ -409,29 +274,18 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
 }
 
 /* ============================================================================
- * Lazy Fetch: Per-Tag Type/Size/Dims
- * Called the first time a tag is used, after Phase 1 resolved instance_id.
+ * Phase-2: Per-Tag Type / Size / Dims
+ *
+ * Caller (engine, Phase 4) stores results in tag->meta.
  * ============================================================================ */
-
-/* Phase 1: correct as-is — no changes needed.
- * Fetches attributes 0x02 (symbol_type), 0x07 (element_size), 0x08 (array_dims)
- * for a specific instance_id.  Call this from the engine when tag->metadata_phase2_ready
- * is false, before issuing the first read/write for the tag.
- * Results are cached so each instance_id is only fetched once per session. */
 int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_instance_id,
                                       uint16_t *symbol_type_out, uint16_t *element_size_out,
                                       uint32_t *array_dims_out) {
-    if(!conn || !conn->socket || !conn->session_established) { return PLCTAG_ERR_NULL_PTR; }
+    if(!conn || !conn->link.socket || !conn->session.established) { return PLCTAG_ERR_NULL_PTR; }
     if(!symbol_type_out || !element_size_out || !array_dims_out) { return PLCTAG_ERR_NULL_PTR; }
 
-    if(conn->metadata_cache) {
-        int32_t rc = enip_metadata_get_cached(conn, tag_instance_id, symbol_type_out,
-                                               element_size_out, array_dims_out);
-        if(rc == PLCTAG_STATUS_OK) { return PLCTAG_STATUS_OK; }
-    }
-
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
-           "ENIP: fetching Phase-2 metadata for instance %u", tag_instance_id);
+           "ENIP: fetching Phase-2 metadata for instance %" PRIu32, tag_instance_id);
 
     arena_reset(&conn->tx_arena);
 
@@ -442,9 +296,9 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
                            (uint8_t)0x25,  (uint8_t)0x00,
                            (uint16_t)tag_instance_id,
                            (uint16_t)3,
-                           (uint16_t)0x02,
-                           (uint16_t)0x07,
-                           (uint16_t)0x08);
+                           (uint16_t)0x02,   /* symbol_type */
+                           (uint16_t)0x07,   /* element_size */
+                           (uint16_t)0x08);  /* array_dims   */
 
     if(bytes_is_null(cip)) { return PLCTAG_ERR_NO_MEM; }
 
@@ -452,14 +306,15 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
     if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
 
     Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
-                                         conn->session_handle, &conn->sender_context, cpf);
+                                         conn->session.session_handle,
+                                         &conn->session.sender_context, cpf);
     if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
 
     socket_wait_state_t io_state = {0};
-    int32_t rc = socket_write_wait(conn->socket, &frame, 5000, &io_state);
+    int32_t rc = socket_write_wait(conn->link.socket, &frame, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: Phase-2 send failed for instance %u: %d", tag_instance_id, rc);
+               "ENIP: Phase-2 send failed for instance %" PRIu32 ": %d", tag_instance_id, rc);
         return rc;
     }
     conn->messages_sent++;
@@ -468,10 +323,10 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
     Bytes response = bytes_alloc(&conn->rx_arena, 512);
     if(bytes_is_null(response)) { return PLCTAG_ERR_NO_MEM; }
 
-    rc = socket_read_wait(conn->socket, &response, 5000, &io_state);
+    rc = socket_read_wait(conn->link.socket, &response, 5000, &io_state);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: Phase-2 read failed for instance %u: %d", tag_instance_id, rc);
+               "ENIP: Phase-2 read failed for instance %" PRIu32 ": %d", tag_instance_id, rc);
         return rc;
     }
     conn->messages_received++;
@@ -489,14 +344,14 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
 
     if(bytes_is_null(parsed) || cip_status != CIP_STATUS_SUCCESS) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: Phase-2 CIP status 0x%02x for instance %u", cip_status, tag_instance_id);
+               "ENIP: Phase-2 CIP status 0x%02" PRIx8 " for instance %" PRIu32,
+               cip_status, tag_instance_id);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* Response payload: symbol_type(2) + element_size(2) + dims[3](12) = 16 bytes */
     if(data.len < 16) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: Phase-2 response too short (%zu bytes) for instance %u",
+               "ENIP: Phase-2 response too short (%zu bytes) for instance %" PRIu32,
                data.len, tag_instance_id);
         return PLCTAG_ERR_REMOTE_ERR;
     }
@@ -511,10 +366,10 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
     *element_size_out = elem_sz;
     memcpy(array_dims_out, dims, sizeof(dims));
 
-    enip_metadata_set_cached(conn, tag_instance_id, sym_type, elem_sz, dims);
-
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
-           "ENIP: Phase-2 for instance %u: type=0x%04x size=%u dims=[%u,%u,%u]",
+           "ENIP: Phase-2 for instance %" PRIu32
+           ": type=0x%04" PRIx16 " size=%" PRIu16
+           " dims=[%" PRIu32 ",%" PRIu32 ",%" PRIu32 "]",
            tag_instance_id, sym_type, elem_sz, dims[0], dims[1], dims[2]);
 
     return PLCTAG_STATUS_OK;

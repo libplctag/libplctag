@@ -58,8 +58,7 @@ int enip_init(void) { return PLCTAG_STATUS_OK; }
 void enip_teardown(void) {}
 
 /* Phase 1: Extract gateway attribute and validate it exists.
- * Phase 6: ADD find_or_create_connection(attribs) call here; set tag->conn
- *          and insert tag into conn->active_tags; signal conn->wake. */
+ * Phase 6: ADD find_or_create_connection(attribs) call here to share connections. */
 plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                           void *userdata, plc_tag_p src_tag) {
     const char *name = attr_get_str(attribs, "name", NULL);

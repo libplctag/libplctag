@@ -36,120 +36,116 @@
 #include <platform.h>
 #include <stdbool.h>
 #include <utils/arena.h>
+#include <utils/attr.h>
+#include <utils/enip_wait.h>
 #include <utils/hashtable.h>
 #include <utils/vector.h>
 
 typedef struct enip_connection_t enip_connection_t;
 typedef struct enip_tag_t enip_tag_t;
 
-/* Metadata cache entry for Phase-2 (per-tag type and dimension info).
- * Key in metadata_cache: (int64_t)tag_instance_id. */
-typedef struct {
-    uint16_t symbol_type;
-    uint16_t element_size;
-    uint32_t array_dims[3];
-} enip_metadata_cache_entry_t;
-
-/* Root symbol entry for Phase-1 (name -> instance_id mapping).
- * Key in root_symbol_cache: hash(name).
- *
- * Phase 1: remove symbol_type, element_size, array_dims.  Phase 1 fetches only
- * attribute 0x01 (name); type/size/dims come from the lazy Phase-2 fetch. */
+/* Root symbol entry for the phase-1 name → instance_id table.
+ * Stored in a single contiguous block of symbol_count rows (plan §4.4).
+ * No per-symbol malloc; the whole table is freed as a unit on disconnect. */
 typedef struct {
     char     name[128];
     uint32_t instance_id;
-    uint16_t symbol_type;   /* Phase 1: DELETE — fetched lazily in Phase 2 */
-    uint16_t element_size;  /* Phase 1: DELETE — fetched lazily in Phase 2 */
-    uint32_t array_dims[3]; /* Phase 1: DELETE — fetched lazily in Phase 2 */
 } enip_root_symbol_entry_t;
 
-/*
- * ENIP Connection State
- *
- * Manages one EtherNet/IP session from TCP connect through active I/O to
- * disconnect.  All fields that are not purely read-only after init must be
- * accessed only while holding the relevant mutex.
- */
+/* ============================================================================
+ * enip_link_t — transport sub-struct (plan §4.1)
+ * ============================================================================ */
+typedef struct enip_link_t {
+    sock_p  socket;              /* created ONCE in create; close() keeps the wake pipe */
+    socket_wait_state_t io;      /* restartable I/O state shared by send/recv wrappers  */
+    char    host[128];
+    uint16_t port;               /* default 44818                                        */
+
+    /* route to the CPU: parsed from the "path" attribute, e.g. "1,0"                   */
+    uint8_t  route_path[64];     /* raw CIP segment bytes                                */
+    uint8_t  route_path_words;   /* size in 16-bit words; 0 = no routing                 */
+    int8_t   cpu_slot;           /* convenience: backplane slot, or -1 if none           */
+} enip_link_t;
+
+/* ============================================================================
+ * enip_session_t — negotiated EIP + CIP session sub-struct (plan §4.2)
+ * ============================================================================ */
+typedef struct enip_session_t {
+    /* EIP encapsulation session */
+    uint32_t session_handle;     /* from RegisterSession                                  */
+    uint64_t sender_context;     /* monotonically increasing; stamped into each request   */
+    bool     established;
+
+    /* CIP connected messaging (from ForwardOpen) */
+    uint32_t cip_targ_conn_id;   /* O->T id returned by the PLC; goes in the CAI         */
+    uint32_t cip_orig_conn_id;   /* T->O id we assigned                                   */
+    uint16_t cip_conn_serial;    /* connection serial used in ForwardOpen/Close           */
+    uint16_t cip_seq_num;        /* incremented before each connected send                */
+    bool     cip_connection_open;
+
+    /* Negotiated CIP packet sizes from ForwardOpen, per direction (plan §5.9).
+     * The usable CIP-payload budget = these values minus the CDI/UDI overhead. */
+    uint32_t cip_size_o_to_t;   /* originator->target: bounds our REQUEST frames         */
+    uint32_t cip_size_t_to_o;   /* target->originator: bounds the RESPONSE frames        */
+    uint32_t unconnected_cap;   /* unconnected message cap (~504 typical)                */
+
+    /* capabilities */
+    bool     supports_multi_service;       /* generic CIP 0x0A packing (plan §9.2)       */
+    bool     used_extended_forward_open;   /* true if 0x5B succeeded                      */
+} enip_session_t;
+
+/* ============================================================================
+ * enip_connection_t — one connection, shared by all tags to the same gateway
+ * (plan §4.3)
+ * ============================================================================ */
 struct enip_connection_t {
-    /* Socket */
-    sock_p  socket;
-    int64_t last_socket_error_time;
+    enip_link_t    link;
+    enip_session_t session;
 
-    /* EIP session */
-    uint32_t session_handle;
-    uint64_t sender_context;
-    bool     session_established;
+    enip_mfg_ops_t *mfg_ops;       /* selected after GetIdentity (plan §9)              */
 
-    /* CIP connected-messaging session (established via ForwardOpen) */
-    uint32_t cip_orig_conn_id;    /* our connection ID (we assigned) */
-    uint32_t cip_targ_conn_id;    /* target's connection ID (from ForwardOpen response) */
-    uint16_t cip_conn_seq_num;    /* incremented for each connected send */
-    uint16_t cip_conn_serial;     /* serial number used in ForwardOpen */
-    bool     cip_connection_open; /* true after a successful ForwardOpen */
-
-    /* Device capability (from GetIdentity response) */
-    bool     supports_0x0a;                  /* multi-service (0x0A) */
-    bool     supports_extended_forward_open; /* ForwardOpen Extended (0x5B) */
-    uint32_t max_packet_buffer_size;         /* negotiated connection size */
-
-    /* Connection path (backplane route, e.g. {0x01, slot, 0x20, 0x02, 0x24, 0x01}) */
-    uint8_t conn_path[64];
-    uint8_t conn_path_size; /* size in 16-bit words */
-
-    /* Target address */
-    char     host[128];
-    uint16_t port;
-    int8_t   cpu_slot; /* >= 0 for backplane slot, -1 if no slot */
-
-    /* Manufacturer strategy */
-    enip_mfg_ops_t *mfg_ops;
-
-    /* Phase-1 root symbol cache: hash(name) -> enip_root_symbol_entry_t */
-    hashtable_p root_symbol_cache;
+    /* phase-1 root symbol cache: name → instance_id (plan §4.4)                        */
+    hashtable_p root_symbol_cache;  /* hash(name) -> enip_root_symbol_entry_t*           */
     mutex_p     root_symbol_mutex;
+    int32_t     symbol_count;       /* from class 0x6B attr 3; used to presize the table */
+    uint32_t    symbol_max_instance;/* from class 0x6B attr 2; iteration stop bound      */
 
-    /* Phase-2 per-tag metadata cache: (int64_t)instance_id -> enip_metadata_cache_entry_t */
-    hashtable_p metadata_cache;
-    mutex_p     metadata_cache_mutex;
-
-    /* Active tags queued for I/O */
+    /* active-tag list (Phase 5 replaces this with the intrusive queue below).           */
     vector_p active_tags;
     mutex_p  active_tags_mutex;
 
-    /* Pending requests for response correlation */
-    vector_p pending_requests;
-    mutex_p  pending_requests_mutex;
+    /* Phase 5: intrusive active-tag queue (plan §6).  HEAD sorted ascending by op_time. */
+    enip_tag_t *queue_head;
+    enip_tag_t *queue_tail;
+    mutex_p     queue_mutex;
 
-    /* Per-direction scratch arenas (reset each request cycle) */
+    /* per-direction scratch arenas; reset each cycle, never freed until destroy         */
     Arena tx_arena;
     Arena rx_arena;
 
-    /* Retry and idle tracking */
-    int64_t retry_deadline_ms;
-    int32_t connection_attempt_count;
+    /* reported status + reconnect bookkeeping */
+    int32_t state;                  /* PLCTAG_CONN_STATUS_*; reporting only              */
+    int32_t metadata_generation;    /* bumped per successful (re)connect (plan §3.3)     */
     int64_t last_message_time_ms;
-    int64_t last_callback_latency_ms;
+    int32_t connect_attempt_count;
 
-    /* Statistics */
+    /* statistics */
     uint64_t messages_sent;
     uint64_t messages_received;
-    uint64_t errors_count;
 
-    bool shutdown_requested;
-
-    /* Phase 6: ADD the following fields:
-     *   int32_t state              connection state enum: DISCONNECTED(0)/OPENING(1)/READY(2)
-     *   cond_p  wake               condvar — signal to wake the handler thread
-     *   socket_wait_state_t io     per-thread restartable I/O state (plan §1.5.2)
-     *   size_t  cip_budget         computed from max_packet_buffer_size after ForwardOpen
-     */
+    bool     shutdown_requested;
+    thread_p thread;
 };
 
-/* Phase-1: fetch all root symbol names and instance IDs from the PLC.
+/* Create a new connection: initializes vectors/mutexes, parses gateway and path
+ * from attribs ("gateway"="host[:port]", "path"="1,0,...").  Returns NULL on error. */
+extern enip_connection_t *enip_connection_create(attr attribs);
+
+/* phase-1: fetch all root symbol names and instance IDs from the PLC.
  * Populates conn->root_symbol_cache.  Called once during connection setup. */
 extern int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn);
 
-/* Phase-2: fetch per-tag type, size, and dimension metadata on first use.
+/* phase-2: fetch per-tag type, size, and dimension metadata on first use.
  * array_dims_out must point to a uint32_t[3] array. */
 extern int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn,
                                             uint32_t tag_instance_id,
@@ -161,15 +157,8 @@ extern int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn,
 extern enip_root_symbol_entry_t *enip_metadata_find_root_symbol(enip_connection_t *conn,
                                                                  const char *name);
 
-/* Clear and free the Phase-2 metadata cache (call on disconnect/error). */
-extern void enip_metadata_cache_clear(enip_connection_t *conn);
-
-/* Clear and free the Phase-1 root symbol cache. */
+/* Clear and free the phase-1 root symbol cache. */
 extern void enip_root_symbol_cache_clear(enip_connection_t *conn);
 
-/* Phase G: sender_context correlation helpers */
-extern uint64_t    enip_connection_extract_sender_context(const uint8_t *eip_header);
-extern enip_tag_t *enip_connection_find_pending_request(enip_connection_t *conn,
-                                                         uint64_t sender_context);
-extern int32_t     enip_connection_remove_pending_request(enip_connection_t *conn,
-                                                           enip_tag_t *tag);
+/* Extract sender_context from an EIP response header (bytes 12-19, little-endian). */
+extern uint64_t enip_connection_extract_sender_context(const uint8_t *eip_header);

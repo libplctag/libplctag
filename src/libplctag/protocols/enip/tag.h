@@ -33,79 +33,35 @@
  ***************************************************************************/
 
 /*
- * ENIP tag type definitions.
+ * ENIP tag type definitions (plan §3).
  *
- * STATUS: MOSTLY CORRECT.  Several fields must be added in Phases 4 and 6.
+ * A tag is ONE rc_alloc block:
+ *   TAG_BASE_STRUCT  — generic, owned by lib.c (data, size, status, byte_order)
+ *   enip_tag_meta_t  — type info; owned by metadata code; read by getters
+ *   enip_operation_t — transient I/O state; owned exclusively by engine thread
+ *   tail bytes       — tag_name (NUL-terminated), then base encoded CIP path
  *
- * Phase 4 (Fragmentation): rename byte_offset -> chunk_offset (plan §4).
- *   The field is already uint32_t and byte-unit for both AB and OMRON; only the
- *   name changes.
- *
- * Phase 6 (Engine): add three fields to enip_tag_t:
- *   struct enip_connection_t *conn   back-pointer to owning connection
- *   int64_t op_time                  time_ms() when read/write was queued, for sorting
- *   bool    in_active_tags           true while the tag is in conn->active_tags
- *
- * Phase 6: remove the op_state values ENIP_TAG_OP_RESPONSE and ENIP_TAG_OP_COMPLETE
- *   if the engine handles those transitions internally without leaving the tag in
- *   those states; or keep them if the vtable status() function needs to report them.
- *
- * Phase 4: rename the comment on byte_offset to read:
- *   "chunk_offset: byte cursor into tag data for fragmented I/O (AB and OMRON)"
+ * Never add heap pointers that enip_tag_t owns.  The destructor calls
+ * mem_free(tag->data) and rc_dec(tag->conn) only.
  */
 
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/enip/enip_op.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum {
-    ENIP_TAG_OP_IDLE              = 0,
-    ENIP_TAG_OP_METADATA_PHASE1   = 1,
-    ENIP_TAG_OP_METADATA_PHASE2   = 2,
-    ENIP_TAG_OP_REQUEST           = 3,
-    ENIP_TAG_OP_RESPONSE          = 4,
-    ENIP_TAG_OP_COMPLETE          = 5,
-    ENIP_TAG_OP_ERROR             = 6,
-} enip_tag_op_state_t;
-
 typedef struct enip_tag_t {
-    TAG_BASE_STRUCT;
+    TAG_BASE_STRUCT;                    /* data, size, status, byte_order, etc.  */
 
-    int32_t op_state;
-    int32_t metadata_state;
+    struct enip_connection_t *conn;     /* back-pointer; holds an rc_inc ref     */
 
-    uint32_t sequence_id;
-    uint32_t transaction_id;
+    enip_tag_meta_t meta;              /* type info + validity gate (plan §3.3) */
+    enip_operation_t op;               /* transient I/O state (plan §3.2)       */
 
-    /* Element geometry (filled from Phase-2 metadata) */
-    int32_t elem_count;    /* number of elements in the tag */
-    int32_t elem_size;     /* size of each element in bytes */
-    uint16_t data_type;    /* CIP data type code (e.g. 0x00C4 = DINT) */
+    bool in_active_tags;               /* true while linked in conn's queue     */
 
-    /* Phase 4: chunk cursor for fragmented I/O operations.
-     * Used by both AB (0x52/0x53 byte offset field) and OMRON (data segment offset). */
-    uint32_t chunk_offset;  /* current byte position in tag data; 0 = start */
-
-    bool metadata_phase1_ready;
-    bool metadata_phase2_ready;
-    bool metadata_required;
-
-    bool rearm_on_reconnect;
-    bool was_in_response_state;
-
-    /* Phase 6: add three fields here:
-     *   - struct enip_connection_t *conn  (back-pointer to owning connection)
-     *   - int64_t op_time                 (time_ms() when read/write was queued, for queue sorting)
-     *   - bool in_active_tags             (true while this tag is in conn->active_tags)
-     */
-
-    /* Tag identification */
-    char *tag_name;            /* root name (e.g. "myTag" from "myTag[0].field") */
-    uint32_t tag_instance_id;  /* instance ID from Phase-1 root symbol inventory */
-
-    /* Pre-encoded tag path (allocated contiguously with the tag struct) */
-    uint8_t *encoded_tag_path;
-    size_t   encoded_tag_path_len;
+    char *tag_name;                    /* points into the tail; root symbol name */
+    /* tail: tag_name bytes (NUL-terminated), then base encoded CIP path bytes  */
 } enip_tag_t;
 
 typedef struct enip_connection_tag_t {

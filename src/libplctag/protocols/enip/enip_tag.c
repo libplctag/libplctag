@@ -32,11 +32,14 @@
  ***************************************************************************/
 
 #include <libplctag/protocols/enip/enip.h>
+#include <libplctag/protocols/enip/enip_conn.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <libplctag/protocols/enip/enip_cip.h>
+#include <platform.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 #include <utils/attr.h>
+#include <utils/vector.h>
 #include <string.h>
 
 
@@ -53,12 +56,8 @@
  *   - Allocate and zero tag->data (tag->size bytes) using mem_alloc.
  *   - Set tag->metadata_required = (plc=ControlLogix/CompactLogix) ? true : false.
  *
- * Phase 6: In enip_tag_read and enip_tag_write:
- *   - Update tag->op_time = time_ms() after setting op_state.
- *   - Signal conn->wake so the handler thread wakes immediately.
- *
  * Phase 6: In enip_tag_abort:
- *   - Also remove the tag from conn->pending_requests if it is there.
+ *   - Also remove the tag from conn->active_tags if it is there.
  */
 
 /* Phase 0: change return type int -> int32_t; correct as-is otherwise. */
@@ -67,30 +66,30 @@ static int32_t enip_tag_abort(plc_tag_p p_tag) {
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    tag->op_state = ENIP_TAG_OP_ERROR;
-    tag->read_in_flight = 0;
-    tag->write_in_flight = 0;
+    tag->op.op_state = ENIP_OP_DONE; /* terminal — engine will not re-issue */
+    tag->op.kind = ENIP_OP_KIND_NONE;
 
     return PLCTAG_STATUS_OK;
 }
 
 
-/* Phase 0: change return type int -> int32_t.
- * Phase 6: add tag->op_time = time_ms(); signal conn->wake. */
 static int32_t enip_tag_read(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    tag->op_state = ENIP_TAG_OP_REQUEST;
-    tag->read_in_flight = 1;
-    tag->read_complete = 0;
+    tag->op.op_state = ENIP_OP_REQUEST;
+    tag->op.op_time  = time_ms();
+    tag->op.kind     = ENIP_OP_KIND_READ;
+
+    if(tag->conn && tag->conn->link.socket) {
+        socket_wake(tag->conn->link.socket);
+    }
 
     return PLCTAG_STATUS_PENDING;
 }
 
 
-/* Phase 0: change return type int -> int32_t.  Correct as-is otherwise. */
 static int32_t enip_tag_status(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
@@ -98,7 +97,9 @@ static int32_t enip_tag_status(plc_tag_p p_tag) {
 
     if(tag->status != PLCTAG_STATUS_OK) { return tag->status; }
 
-    if(tag->read_in_flight || tag->write_in_flight) { return PLCTAG_STATUS_PENDING; }
+    if(tag->op.op_state == ENIP_OP_REQUEST || tag->op.op_state == ENIP_OP_INFLIGHT) {
+        return PLCTAG_STATUS_PENDING;
+    }
 
     return PLCTAG_STATUS_OK;
 }
@@ -114,32 +115,36 @@ static int32_t enip_tag_tickler(plc_tag_p p_tag) {
 }
 
 
-/* Phase 0: change return type int -> int32_t.
- * Phase 6: add tag->op_time = time_ms(); signal conn->wake. */
 static int32_t enip_tag_write(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    tag->op_state = ENIP_TAG_OP_REQUEST;
-    tag->write_in_flight = 1;
-    tag->write_complete = 0;
+    tag->op.op_state = ENIP_OP_REQUEST;
+    tag->op.op_time  = time_ms();
+    tag->op.kind     = ENIP_OP_KIND_WRITE;
+
+    if(tag->conn && tag->conn->link.socket) {
+        socket_wake(tag->conn->link.socket);
+    }
 
     return PLCTAG_STATUS_PENDING;
 }
 
 
-/* Phase 6: implement by calling cond_signal(conn->wake) to wake the handler thread. */
 static int32_t enip_tag_wake_plc(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    return PLCTAG_STATUS_PENDING;
+    if(tag->conn && tag->conn->link.socket) {
+        socket_wake(tag->conn->link.socket);
+    }
+
+    return PLCTAG_STATUS_OK;
 }
 
 
-/* Phase 0: change return type int -> int32_t.  Correct as-is otherwise. */
 static int32_t enip_tag_data_written(plc_tag_p p_tag) {
     enip_tag_t *tag = (enip_tag_t *)p_tag;
 
@@ -149,12 +154,29 @@ static int32_t enip_tag_data_written(plc_tag_p p_tag) {
 }
 
 
-/* Phase 0: change DEBUG_MODULE_LIB to DEBUG_MODULE_ENIP.
- * Phase 6: also remove the tag from conn->active_tags and conn->pending_requests. */
 static void enip_tag_destructor(void *ptr) {
     enip_tag_t *tag = (enip_tag_t *)ptr;
 
     if(!tag) { return; }
+
+    if(tag->in_active_tags && tag->conn
+       && tag->conn->active_tags && tag->conn->active_tags_mutex) {
+        critical_block(tag->conn->active_tags_mutex) {
+            int n = vector_length(tag->conn->active_tags);
+            for(int i = 0; i < n; i++) {
+                if(vector_get(tag->conn->active_tags, i) == tag) {
+                    vector_remove(tag->conn->active_tags, i);
+                    break;
+                }
+            }
+            tag->in_active_tags = false;
+        }
+    }
+
+    if(tag->data) { mem_free(tag->data); tag->data = NULL; }
+
+    /* Release the connection back-pointer ref acquired at tag creation. */
+    if(tag->conn) { rc_dec(tag->conn); tag->conn = NULL; }
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, tag->tag_id, "ENIP tag destructor.");
 }
@@ -231,17 +253,16 @@ plc_tag_p enip_protocol_tag_create(attr attribs, void (*tag_callback_func)(int32
     char *tag_name_storage = (char *)(encoded_path_buf + encoded_len);
     memcpy(tag_name_storage, tag_name_buf, tag_name_alloc);
 
-    /* Store encoded path pointer and size in tag */
-    tag->encoded_tag_path = encoded_path_buf;
-    tag->encoded_tag_path_len = encoded_len;
+    tag->op.encoded_path     = encoded_path_buf;
+    tag->op.encoded_path_len = (uint16_t)encoded_len;
 
-    /* Store root tag name and initialize instance ID (to be filled by Phase-1 metadata) */
-    tag->tag_name = tag_name_storage;
-    tag->tag_instance_id = 0; /* Will be set when Phase-1 metadata is fetched */
+    tag->tag_name          = tag_name_storage;
+    tag->meta.instance_id  = 0;   /* set when phase-1 metadata is fetched */
+    tag->meta.state        = ENIP_META_NONE;
+    tag->meta.needs_metadata = true;
 
     tag->vtable = &enip_tag_vtable;
     tag->protocol_type = TAG_PROTOCOL_ENIP;
-    tag->metadata_required = 1;
 
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
@@ -250,9 +271,37 @@ plc_tag_p enip_protocol_tag_create(attr attribs, void (*tag_callback_func)(int32
         return NULL;
     }
 
+    if(tag->meta.elem_size > 0 && tag->meta.elem_count > 0 && !tag->data) {
+        tag->size = tag->meta.elem_count * tag->meta.elem_size;
+        tag->data = (uint8_t *)mem_alloc(tag->size);
+        if(!tag->data) {
+            rc_dec(tag);
+            return NULL;
+        }
+    }
+
+    /* Wire up the connection back-pointer and add to active_tags.
+     * TODO: replace with find_or_create_connection() for connection sharing. */
+    enip_connection_t *conn = enip_connection_create(attribs);
+    if(!conn) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to create connection for tag '%s'", tag_path_str);
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->conn       = rc_inc(conn);
+    tag->op.op_time = time_ms();
+
+    critical_block(conn->active_tags_mutex) {
+        vector_insert(conn->active_tags, vector_length(conn->active_tags), tag);
+        tag->in_active_tags = true;
+    }
+
+    rc_dec(conn); /* release the create ref; tag->conn now owns the only ref */
+
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, tag->tag_id,
-           "ENIP tag created: root_name='%s' full_path='%s' (encoded_len=%zu, instance_id=0)", tag->tag_name, tag_path_str,
-           encoded_len);
+           "ENIP tag created: root_name='%s' full_path='%s' (encoded_len=%zu)",
+           tag->tag_name, tag_path_str, encoded_len);
 
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 

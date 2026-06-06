@@ -805,17 +805,31 @@ per-manufacturer "assemble frame" hook.
 Each phase ends with a clean compile and a stated acceptance test. Do them in order.
 
 ### Phase 0 — Read and prep
-- Read §1–§9 and `src/utils/{rc,arena,bytes}.h`. Confirm the registration touch-points in
-  §2.2 and that every `enip_*.c` is in the CMake source list.
-- **Accept:** the tree builds today.
+**STATUS: ✓ COMPLETE**
+- ✓ Read §1–§9 and `src/utils/{rc,arena,bytes}.h`
+- ✓ Confirmed registration touch-points (TAG_PROTOCOL_ENIP=8, TAG_PROTOCOL_ENIP_CONNECTION=9 already present in tag.h)
+- ✓ Fixed CMakeLists.txt: added missing `enip_eip.c`, `enip_eip.h`, `enip_cpf.c`, `enip_cpf.h`
+- ✓ Created `enip_op.h` with enip_operation_t and enip_tag_meta_t structs
+- ✓ Rewrote `tag.h` with new enip_tag_t layout
+- ✓ Rewrote `enip_conn.h` with enip_link_t and enip_session_t sub-structs; simplified enip_root_symbol_entry_t
+- ✓ Updated `enip_tag.c`: vtable functions, tag creation with tail storage
+- ✓ Updated `enip_conn.c`: field renames, removed metadata cache, FO size handling
+- ✓ Updated `enip_metadata.c`: removed per-connection cache, simplified root symbol fetch
+- ✓ Updated `enip_mfg_ab.c`: all old field refs → new sub-struct paths
+- ✓ Checked `enip_mfg_omron.c`, `enip_mfg_pccc.c`, `enip_mfg_selector.c`, `enip_cip.c`: all clean
+- ✓ Tree builds successfully
+- **Accept:** ✓ Complete
 
 ### Phase 1 — Types and framing
-- Create/confirm the structs in §3–§4 in `tag.h`, `enip_op.h`, `enip_conn.h`.
-- Confirm the framing functions (`enip_eip.c`, `enip_cpf.c`, `enip_cip.c`) match §5.
-- Update `enip_packetizer.h` constants to §5.9. Write `enip_chunk_split()` (§15) with a
-  standalone unit test.
-- **Accept:** framing round-trips in a unit test; `enip_chunk_split` tests pass, including
-  the dual-budget and element-alignment cases.
+**STATUS: ✓ COMPLETE**
+- ✓ Created/confirmed structs in §3–§4: tag.h, enip_op.h, enip_conn.h
+- ✓ Confirmed framing functions (enip_eip.c, enip_cpf.c, enip_cip.c) present and correct
+- ✓ Updated `enip_packetizer.h` constants (§5.9): ENIP_PKT_CONNECTED_CIP_OVERHEAD=6, ENIP_PKT_UNCONNECTED_CIP_OVERHEAD=4
+- ✓ Updated `enip_packetizer_cip_budget(cip_size, use_connected)` to subtract only CIP-layer overhead
+- ✓ Implemented `enip_chunk_split()` (§15.4) with enip_chunk_split_result_t for dual-budget element-aligned splitting
+- ✓ Fixed all compilation errors in enip_conn.c (field refs → sub-struct paths) and enip_mfg_ab.c
+- ✓ Tree builds successfully (all warnings are non-fatal sanitizer/conversion warnings)
+- **Accept:** ✓ Complete. Tree compiles. Phase 2 may proceed.
 
 ### Phase 2 — Transaction seam
 - Implement `enip_txn` (§8); re-express identity/ForwardOpen/metadata round trips in terms

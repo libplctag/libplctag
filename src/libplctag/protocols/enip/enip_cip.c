@@ -55,6 +55,7 @@
 #include <libplctag/protocols/enip/enip_cip.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
+#include <inttypes.h>
 #include <utils/debug.h>
 #include <string.h>
 
@@ -179,7 +180,7 @@ size_t enip_cip_encode_tag_path(const char *tag_name, uint8_t *buf, size_t buf_s
             size_t idx_size = enip_cip_encode_array_index(index, &buf[total], buf_size - total);
             if(idx_size == 0) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-                       "CIP: failed to encode array index %u", index);
+                       "CIP: failed to encode array index %" PRIu32, index);
                 return 0;
             }
 
@@ -388,7 +389,7 @@ Bytes enip_cip_parse_response(Bytes response, uint8_t *general_status,
     if(bytes_is_null(remaining)) { return bytes_null(); }
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_SPEW, 0,
-           "CIP response: service=0x%02x status=0x%02x ext_sz=%u",
+           "CIP response: service=0x%02" PRIx8 " status=0x%02" PRIx8 " ext_sz=%" PRIu8,
            reply_service, cip_status, ext_sz);
 
     *general_status = cip_status;

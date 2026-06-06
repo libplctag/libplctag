@@ -111,8 +111,9 @@ static int32_t enip_mfg_omron_fetch_phase1_metadata(struct enip_connection_t *co
  * ============================================================================ */
 
 /* Phase 4: stubs for fragmentation callbacks. Phase 8 will implement 0x80 data segment logic. */
-static Bytes enip_mfg_omron_encode_chunk(struct enip_tag_t *tag, Arena *arena, size_t cip_budget) {
-    (void)tag; (void)arena; (void)cip_budget;
+static Bytes enip_mfg_omron_encode_chunk(struct enip_tag_t *tag, Arena *arena,
+                                          size_t req_budget, size_t resp_budget) {
+    (void)tag; (void)arena; (void)req_budget; (void)resp_budget;
     return bytes_null();
 }
 
