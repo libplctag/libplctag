@@ -1,498 +1,1032 @@
-# ENIP Linear Vector-First Implementation Execution Plan
+# ENIP Implementation Execution Plan (Single-Allocation, Vector-Engine Rewrite)
 
-**Date:** 2026-05-28  
-**Status:** Ready for execution  
-**Source Authority:** Decisions locked in:
-- docs/enip-linear-vector-first-implementation-plan.md
-- docs/enip-linear-vector-first-implementation-contract.md
-- docs/enip-linear-vector-first-file-by-file-task-list.md
-- docs/enip-pccc-*.md (PCCC variant requirements)
+**Date:** 2026-06-06
+**Status:** Authoritative. Replaces all previous ENIP execution plans.
+**Audience:** A junior developer implementing this end to end. Every struct, every packet
+field, and every function is specified. Where a rule protects memory safety or
+concurrency, it is spelled out, not assumed.
 
 ---
 
-## 0. Executive Summary
+## 0. What we are building and why
 
-Build an alternate ENIP-TCP/ENIP_TCP C implementation for libplctag that:
-- Uses a vector-based active-work scheduler (same model as Modbus)
-- Implements linear, blocking-like control flow in the connection thread
-- Supports AB/Logix, OMRON, and PCCC devices through manufacturer strategy hooks
-- Enforces deterministic multi-request packing via phase-1/phase-2 metadata
-- Demonstrates feature parity with existing AB-EIP path for simulator and hardware tests
+We are building a new EtherNet/IP (ENIP over TCP) protocol module for libplctag, living
+in `src/libplctag/protocols/enip/`. It talks to Allen-Bradley/Rockwell Logix, OMRON
+NJ/NX, and PCCC-family controllers (PLC5/SLC/MicroLogix, including DH+ bridged and
+Logix-over-PCCC).
 
-**Key Constraint:** All PLC-type branching must be isolated in manufacturer strategy modules. Shared ENIP code contains only manufacturer-neutral fields and flow control.
+It mirrors the **Modbus** module (`src/libplctag/protocols/mb/modbus.c`) in shape:
 
-**Architecture Note:** The ENIP protocol implementation uses a three-layer separation for clarity and testability:
-- **Layer 1 (EIP):** RFC 3171 24-byte encapsulation header (command, length, session, status, context, options)
-- **Layer 2 (CPF):** Common Packet Format item framing (NAI, UDI, connected address/data items)
-- **Layer 3 (CIP):** Common Industrial Protocol service/path/data (delegated to manufacturer strategy modules via `mfg_ops` callbacks)
+- One background thread per connection.
+- A list of "active" tags the thread services.
+- The thread blocks on the socket's wake channel; the API thread wakes it by writing to
+  that channel. No condition variables, no polling, no `sleep_ms`.
 
-Request building proceeds **inside-out** (CIP → CPF → EIP) and response parsing proceeds **outside-in** (EIP → CPF → CIP) using zero-copy `bytes_slice()` for efficiency. All serialization uses the type-safe Bytes API (`bytes_pack`, `bytes_unpack`, `bytes_concat`) with no raw byte manipulation. See [src/libplctag/protocols/enip/LAYER-ARCHITECTURE.md](src/libplctag/protocols/enip/LAYER-ARCHITECTURE.md) for design details.
+It differs from Modbus in two deliberate ways:
 
----
+1. **Linear control flow.** The connection thread is straight-line blocking-style code
+   (connect → register → identify → open → serve loop), not a `switch(state)` machine.
+   The `PLCTAG_CONN_STATUS_*` values are *reported* to the application as events; they do
+   **not** drive control flow.
+2. **Manufacturer isolation.** All device-specific behavior lives behind a single
+   strategy vtable (`enip_mfg_ops_t`) on the connection. Shared code contains **zero**
+   `if(is_ab)…else if(is_omron)…` branching.
 
-## 1. Execution Phases
+### 0.1 The three hard constraints
 
-### Phase A: Foundation & Utilities (Prerequisite)
-Build reusable infrastructure isolated from ENIP-specific logic.
+1. **No runtime allocation in the steady state.** The library runs on embedded systems
+   with simple `malloc` implementations where fragmentation is fatal over time. After a
+   tag is created, servicing a read or write must not allocate or free anything on the
+   heap. We achieve this by:
+   - folding the operation state and the type metadata **into the tag's single
+     allocation** (§3),
+   - encoding requests into **per-connection scratch arenas** that are reset, never freed
+     (§5),
+   - using an **intrusive linked list** for the active-tag queue so enqueue/dequeue is
+     pointer surgery, not a growable vector (§6).
 
-**Tasks:**
-- [A.1] Copy Arena + Bytes utilities from src/poc/ab_server_fiber → src/utils/
-- [A.2] Implement wait wrappers (socket_read_wait, socket_write_wait, socket_connect_wait)
-- [A.3] Add these modules to CMakeLists.txt build
+2. **Bounded memory.** Because each tag holds exactly one operation slot and there is no
+   separate growable queue of buffered requests, total memory is `O(tags created)` plus
+   two fixed per-connection arenas. A buggy or malicious caller cannot inflate memory
+   beyond the tags it explicitly creates.
 
-**Dependencies:** None  
-**Accepts:** Standalone tests of Arena/Bytes and wait wrappers  
-
-**Exit Criteria:**
-- Wrappers compile and basic tests pass on target platform
-- ENIP code can include and use both modules
-
----
-
-### Phase B: Protocol Registration & Framework (2–3 files)
-Register ENIP protocol variants and scaffold the module structure.
-
-**Tasks:**
-- [B.1] Edit src/libplctag/lib/tag.h: Add ENIP_TCP and ENIP_TCP_CONN enum values
-- [B.2] Edit src/libplctag/lib/init.c: Map "enip-tcp" and "enip_tcp" to ENIP constructor
-- [B.3] Edit src/libplctag/lib/lib.c: Add ENIP dispatcher to create_from_tag switch
-- [B.4] Create src/libplctag/protocols/enip/CMakeLists.txt and export source list
-- [B.5] Create src/libplctag/protocols/enip/enip.h: Public API + init/teardown declarations
-- [B.6] Edit src/libplctag/CMakeLists.txt: Add ENIP source wiring
-- [B.7] Compile checkpoint: plctag_dyn and plctag_static build without ENIP implementations
-
-**Dependencies:** None (uses existing framework)  
-**Accepts:** Protocol selector integration; tags cannot be created yet  
-
-**Exit Criteria:**
-- `plc_tag_create(uri_with_protocol=enip-tcp)` succeeds in returning a tag handle
-- Tag vtable is wired but methods not yet implemented
+3. **The existing protocols and the generic API keep working.** This rewrite must not
+   break AB/Modbus/OMRON. See the caveat in §2.
 
 ---
 
-### Phase C: ENIP Core Tag & Connection Types (3–4 files)
-Define ENIP-specific tag, connection, and operational state.
+## 1. Separation of concerns (read this before writing any code)
 
-**Tasks:**
-- [C.1] Create src/libplctag/protocols/enip/tag.h: ENIP tag struct (state, correlation, metadata flags)
-- [C.2] Create src/libplctag/protocols/enip/enip_tag.c: Constructor + vtable stubs (read, write, status, abort, wake_plc)
-- [C.3] Create src/libplctag/protocols/enip/enip_connection_tag.c: @connection tag support
-- [C.4] Create src/libplctag/protocols/enip/enip_conn.h: Connection struct skeleton (mfg_ops, active_tags, session state)
-
-**Dependencies:** Phase B  
-**Accepts:** Tags can be created and destroyed safely; vtable methods are stubs  
-
-**Exit Criteria:**
-- ENIP tags move from creation to active_tags vector
-- Connection object persists across multiple tags
-- No crashes on tag destroy or connection close
-
----
-
-### Phase D: Manufacturer Strategy Interface (1 file)
-Define strategy hooks that isolate PLC-type logic from shared code.
-
-**Tasks:**
-- [D.1] Create src/libplctag/protocols/enip/enip_mfg_ops.h:
-  - struct enip_mfg_ops with encode_read, decode_read, encode_write, decode_write, needs_more callbacks
-  - struct req_desc and chunk_result for strategy communication
-  - Strategy selector function: select_mfg_ops(identity)
-
-**Dependencies:** Phase C  
-**Accepts:** Shared code can call manufacturer hooks without type branches  
-
-**Exit Criteria:**
-- No compiler warnings for missing strategy implementations
-- Can trace calls from shared packetizer to mfg_ops hooks
-
----
-
-### Phase E: Linear Connection Loop & I/O (Primary: enip_conn.c)
-Implement the heart of the new architecture.
-
-**Tasks:**
-- [E.1] Create src/libplctag/protocols/enip/enip_conn.c: Implement connection thread entry and main loop
-  - Phase A: Wake reason, terminate checks
-  - Phase B: TCP connect, Register Session, Get Identity, FOEx/FO, phase-1 metadata
-  - Phase C: Build outgoing requests from active_tags with refcount hand-offs
-  - Phase D: Send with socket_write_wait wrapper
-  - Phase E: Wait for I/O or wake
-  - Phase F: Receive and frame assembly with socket_read_wait wrapper
-  - Phase G: Match responses and complete tag work
-  - Phase H: Callbacks and telemetry
-  - Phase I: Idle disconnect and retry
-  - Phase J: Shutdown
-- [E.2] Implement metadata phase-1 inventory (Service 0x55, Class 0x6B) in enip_conn.c or separate enip_metadata.c
-- [E.3] Implement capability profile derivation (supports_0x0A, supports_extended_fo, max_packet_buffer_size)
-- [E.4] Implement reconnect rearm: Move RESPONSE-state tags back to REQUEST state on reconnect
-
-**Dependencies:** Phases A–D  
-**Accepts:** Simulator can run basic connect/disconnect cycles  
-
-**Exit Criteria:**
-- TCP connect and Register Session succeed
-- Phase-1 metadata is fetched and cached
-- Forward Open succeeds or fails gracefully with retry
-- Tags in REQUEST state are processed and moved to RESPONSE state
-- Reconnect preserves pending tags
-
----
-
-### Phase F: Packetizer & Budget Enforcement (1–2 files)
-Implement deterministic packet budget calculations and multi-request packing decision.
-
-**Tasks:**
-- [F.1] Create src/libplctag/protocols/enip/enip_packetizer.c:
-  - Estimate request encoded size per candidate tag (call mfg_ops hook)
-  - Estimate response size per candidate (based on read size, write ack, failure response)
-  - Enforce aggregate request and response budgets under negotiated connection size
-  - Decide which tags fit in outgoing packet
-  - Format multi-service (0x0A) packet with offset table if supported
-- [F.2] Implement write-trimming logic for oversized writes (call mfg_ops for chunk sizing)
-- [F.3] Enforce read-trimming so expected response fits budget
-
-**Dependencies:** Phases E–F (packetizer calls mfg_ops)  
-**Accepts:** Deterministic packing decisions; tags split into chunks when necessary  
-
-**Exit Criteria:**
-- Single request and multi-request (0x0A) packets respect budget constraints
-- Reads/writes that exceed single-packet size are automatically chunked
-- No AB/OMRON branching in shared packetizer code
-
----
-
-### Phase G: Metadata Phase-2 & Negative Cache (1 file)
-Implement on-demand deep metadata and cache negative lookups.
-
-**Tasks:**
-- [G.1] Create src/libplctag/protocols/enip/enip_metadata.c (if not in E.2):
-  - Implement phase-2 deep metadata fetch on first seen tag/path
-  - Reference attributes defined in @tag implementation (src/libplctag/protocols/ab/eip_cip_special.c)
-  - Block read/write packing until deep metadata is available for a tag
-  - Implement root-symbol negative cache using src/utils/hashtable.c
-  - Invalidate negative cache on reconnect or metadata reload
-
-**Dependencies:** Phase E  
-**Accepts:** Tags with missing metadata do not attempt packed operations; metadata is fetched on demand  
-
-**Exit Criteria:**
-- Negative cache is populated after metadata fetch fails
-- Metadata fetch is scheduler-managed, not blocking API threads
-- Tags block until their deep metadata is available
-
----
-
-### Phase H: AB/Logix Strategy Implementation (1 file)
-Implement the primary manufacturer-specific path for AB Logix devices.
-
-**Tasks:**
-- [H.1] Create src/libplctag/protocols/enip/enip_mfg_ab.c:
-  - Implement AB read request builder (service 0x52 + path + element_count + byte_offset)
-  - Implement AB write request builder (service 0x53)
-  - Implement AB response parser
-  - Apply fixed path encoding rules (0x91 for symbolic, 0x28/0x29/0x2A for array indexes)
-  - Implement AB chunking continuation check (parse fragmented status and needs_more logic)
-  - Register callbacks in select_mfg_ops for AB identity match
-
-**Dependencies:** Phases D–F  
-**Accepts:** AB symbolic reads/writes work; chunked operations continue until completion  
-
-**Exit Criteria:**
-- AB tag reads succeed end-to-end
-- AB tag writes succeed end-to-end
-- Chunked AB operations handle fragmented responses correctly
-- Response matching uses sender_context + multi-service index/offset
-
----
-
-### Phase I: OMRON Strategy Implementation (1 file)
-Implement manufacturer-specific path for OMRON devices.
-
-**Tasks:**
-- [I.1] Create src/libplctag/protocols/enip/enip_mfg_omron.c:
-  - Implement OMRON read/write request builders (0x80 simple data segment)
-  - Compute chunk sizes client-side so both request and response fit budgets
-  - Implement offset and size tracking per chunk
-  - Register callbacks for OMRON identity match
-
-**Dependencies:** Phases D–F  
-**Accepts:** OMRON devices are supported via strategy isolation  
-
-**Exit Criteria:**
-- OMRON chunked reads work correctly
-- OMRON chunked writes work correctly
-- No shared-code branching for OMRON-specific behavior
-
----
-
-### Phase J: ENIP+PCCC Strategy Implementation (1 file)
-Implement manufacturer-specific path for PCCC variants (PLC5, SLC, Logix-over-PCCC, DH+).
-
-**Tasks:**
-- [J.1] Create src/libplctag/protocols/enip/enip_mfg_pccc.c:
-  - Implement PLC5 direct read/write (service 0x01/0x00 with byte offset)
-  - Implement SLC/MicroLogix direct read/write
-  - Implement Logix-over-PCCC read/write
-  - Implement DH+ bridged PLC5/SLC variants (add routing header)
-  - Implement manual chunking per PLC-type field rules (reference docs/enip-pccc-*.md)
-  - Register callbacks for PCCC identity match
-  - **Bit Write:** Implement PLC5, SLC, and DH+ masked bit-write operations
-  - **Logix-over-PCCC Bit Write:** Document fallback to element write (no dedicated masked path)
-
-**Dependencies:** Phases D–F  
-**Accepts:** All PCCC variants supported via strategy isolation; manual chunking for large operations  
-
-**Exit Criteria:**
-- PLC5 direct reads/writes work
-- SLC/MicroLogix direct reads/writes work
-- Logix-over-PCCC reads/writes work
-- DH+ bridged operations work with routing header
-- Bit writes succeed for PLC5 and SLC (and DH+ variants)
-- Chunking respects PCCC field rules (word transfers for PLC5, byte transfers for SLC)
-- No shared-code branching for PCCC-specific behavior
-
----
-
-### Phase K: CIP Path Encoding & Normalization (1 file)
-Implement tag and route path encoding per contract rules.
-
-**Tasks:**
-- [K.1] Create src/libplctag/protocols/enip/enip_name.c:
-  - Implement canonical name handling (case-sensitive, program-scope namespace)
-  - Enforce array index rules (no partial indexes)
-  - Implement tag path encode/decode (symbolic 0x91, array indexes 0x28/0x29/0x2A)
-  - Implement route token normalization (A→18, B→19)
-  - Implement extended IP route encoding ([port][ascii_len][ascii_ip][pad])
-  - Provide round-trip encode/decode verification
-
-**Dependencies:** Phases A–H  
-**Accepts:** Tag and route names are correctly encoded for ENIP transport  
-
-**Exit Criteria:**
-- Tag path encoding matches contract worked examples
-- Route aliasing works correctly
-- Canonical rules prevent invalid operations
-
----
-
-### Phase L: Integration & Testing (2–3 files)
-Wire ENIP into test harnesses and validate end-to-end behavior.
-
-**Tasks:**
-- [L.1] Edit src/tests/scripts/run_simulator_tests.sh: Add ENIP protocol coverage
-- [L.2] Edit src/tests/scripts/run_hardware_tests.sh: Add ENIP protocol coverage
-- [L.3] Document expected test exclusions (if any) with justification
-- [L.4] Run simulator regression suite and capture results
-- [L.5] Run hardware regression suite and capture results (if hardware available)
-
-**Dependencies:** All prior phases  
-**Accepts:** Feature parity with existing AB-EIP for test coverage  
-
-**Exit Criteria:**
-- Simulator tests pass with ENIP protocol (or documented exclusions are explicit)
-- Hardware tests pass with ENIP protocol (or documented exclusions are explicit)
-- No performance regression vs. existing AB-EIP path
-
----
-
-## 2. Cross-Phase Dependencies & Ordering
+The system is layered. Each layer knows only about the layer directly beneath it. The
+"blast radius" of a change is one layer.
 
 ```
-Phase A (Utils) → Phase B (Registration)
-                     ↓
-Phase B → Phase C (Tag/Conn Types)
-             ↓
-Phase C → Phase D (Mfg Strategy Interface)
-             ↓
-       Phase D → Phase E (Connection Loop)
-       Phase D → Phase F (Packetizer)
-       Phase E → Phase F (Packetizer calls mfg_ops)
-            ↓
-Phase F → Phase G (Metadata & Cache)
-Phase F → Phase H (AB Strategy)
-Phase F → Phase I (OMRON Strategy)
-Phase F → Phase J (PCCC Strategy)
-
-Phase H, I, J → Phase K (Path Encoding)
-Phase K → Phase L (Integration & Testing)
+   Application (libplctag public API in src/libplctag/lib/lib.c)
+        │  reads/writes tag->data, tag->size, tag->status  (generic, protocol-agnostic)
+        ▼
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Tag layer        enip_tag.c                                       │
+   │   - the generic vtable (read/write/status/abort/tickler/wake)     │
+   │   - owns the tag allocation: app data + metadata + operation      │
+   └─────────────────────────────────────────────────────────────────┘
+        ▼ enqueues an Operation; reads back results
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Engine layer     enip_conn.c                                      │
+   │   - the connection thread (linear flow)                           │
+   │   - the intrusive active-tag queue                                │
+   │   - scheduling: pick due tags, build, send, recv, dispatch        │
+   │   - SHARED 0x0A multi-service packing (generic CIP)               │
+   └─────────────────────────────────────────────────────────────────┘
+        ▼ asks the strategy to encode/parse; calls transact()
+   ┌──────────────────────────────┐   ┌──────────────────────────────┐
+   │ Strategy layer  enip_mfg_*.c │   │ Transaction seam  enip_txn.c │
+   │   - per-device CIP encode/    │   │   - CIP bytes in / out       │
+   │     decode + STATUS meaning   │   │   - owns CPF + EIP framing   │
+   │     behind one vtable         │   │   - owns send + recv + parse  │
+   └──────────────────────────────┘   └──────────────────────────────┘
+        ▼ produces/consumes CIP bytes
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Framing layer    enip_eip.c / enip_cpf.c / enip_cip.c            │
+   │   - pure byte packers/parsers; no socket, no state               │
+   └─────────────────────────────────────────────────────────────────┘
+        ▼
+   Platform socket + utils (rc.h, arena.h, bytes.h, hashtable.h, vector.h)
 ```
 
-**Critical Path:** A → B → C → D → E → F → G → H
+**Rules that keep the layers honest:**
+
+- The **framing layer** never touches a socket and never holds state. It converts
+  structs ↔ bytes using `bytes_pack`/`bytes_unpack`. It is trivially unit-testable.
+- The **transaction seam** (`enip_txn.c`) is the *only* place that knows the order
+  EIP-wraps-CPF-wraps-CIP and the only place that calls `socket_write_wait` /
+  `enip_recv_frame`. Identity, ForwardOpen, metadata, and tag I/O all go through it.
+  Change framing once, here.
+- The **strategy layer** is the *only* place that knows a device's CIP dialect **and the
+  meaning of a CIP status code** (see §9.1). Adding a device = add one `enip_mfg_*.c`
+  file + one line in the selector. No other file changes.
+- The **engine** never branches on manufacturer and never interprets a per-operation CIP
+  status. It calls vtable hooks and `transact()`. It *does* own the generic CIP `0x0A`
+  multi-service packing, because that service is identical on every device that supports
+  it (§9.2, §15).
+- The **tag layer** owns the allocation and the generic vtable. It never does I/O.
 
 ---
 
-## 3. Compilation Checkpoints (Per Phase)
+## 2. CAVEAT: keeping the old code and the generic API working
 
-After each phase, all code must compile without errors:
-- **After B:** plctag_dyn, plctag_static compile (no implementations yet)
-- **After C:** Tags can be created/destroyed; vtables wired
-- **After E:** Connection thread can start and process events
-- **After F:** Multi-request packing logic compiles and hooks to mfg_ops
-- **After H, I, J:** Manufacturer-specific modules compile and register
-- **After K:** Path encoding compiles and is available to all manufacturers
-- **After L:** All tests compile and execution begins
+The generic public API in `src/libplctag/lib/lib.c` operates on the fields in
+`TAG_BASE_STRUCT` (defined in `src/libplctag/lib/tag.h`). Investigation of `lib.c`
+confirms it accesses only:
 
----
+- `tag->data` and `tag->size` — every typed getter/setter bound-checks against
+  `tag->size` (e.g. `lib.c:2485`, `lib.c:3088`) and reads/writes `tag->data`.
+- `tag->byte_order`, `tag->bit`, `tag->is_bit` — for decoding.
+- the status and event bitfields.
 
-## 4. Testing Strategy
+The generic API does **not** read `elem_size`, `elem_count`, or `data_type` directly.
+Those values are exposed to the application **only** through the protocol's own vtable
+hook:
 
-### Simulator Tests (Run After Each Phase)
-- **After E:** Connect/disconnect cycles, basic tag state transitions
-- **After F:** Packet budget enforcement, request packing decisions
-- **After H/I/J:** Full read/write cycles for each device type
-- **After K:** Path encoding validation, route normalization
-- **After L:** Regression suite (existing tests + ENIP variants)
+```
+plc_tag_get_int_attribute(id, "elem_size"/"elem_count", default)
+    -> tag->vtable->get_int_attrib(tag, attrib_name, default)   (lib.c:2104)
+```
 
-### Hardware Tests (Run After L)
-- Validate feature parity with existing AB-EIP path
-- Capture performance metrics
-- Document any expected platform-specific exclusions
+AB implements this in `ab_get_int_attrib` (`ab_common.c:989`). **ENIP must implement the
+same hook** and read the values from their new home (the metadata sub-struct, §3.3).
 
-### Key Test Areas
-1. **Metadata:** Phase-1 inventory, phase-2 deep metadata, negative cache
-2. **Packing:** Single-request, multi-request (0x0A), budget enforcement
-3. **Chunking:** Large reads/writes, PCCC field-specific rules, continuation logic
-4. **Error Handling:** Socket errors, protocol errors, timeouts, retry behavior
-5. **Reconnect:** Pending tag rearm, session re-establishment
-6. **Bit Writes:** Per-PLC-type masked operations
-7. **Callbacks:** Connection state transitions, latency <100ms target
+### 2.1 The consequence for our design
 
----
+`size` and `data` **cannot move** into the metadata object — they live in
+`TAG_BASE_STRUCT` and the generic API depends on them. Therefore:
 
-## 5. Critical Guardrails & Review Points
+> The metadata object is the **source of truth for type** (element size, count, CIP data
+> type, dimensions). When metadata is resolved, the tag layer **writes through** the
+> derived total size into `tag->size` and (re)allocates `tag->data` to match. The generic
+> getters then keep working with no knowledge that ENIP changed anything.
 
-### Lock & Lifetime Rules (Per Contract 3.3)
-- [ ] No mutex held across I/O waits
-- [ ] rc_inc/rc_dec hand-offs around vector operations
-- [ ] Restart state discarded on reconnect
+`elem_size`/`elem_count`/`data_type` for AB/Modbus/OMRON remain top-level fields of
+*their own* tag structs (`ab_tag_t`, etc.). We are **not** changing those structs. We are
+only defining `enip_tag_t`. So the only code that must read ENIP's metadata from the new
+location is ENIP's own `get_int_attrib`. Nothing else in the tree is affected, and the
+other protocols keep running unchanged.
 
-### Manufacturer Isolation (Per Contract 3.11)
-- [ ] Shared ENIP code contains zero PLC-type branching (if/else AB vs. OMRON)
-- [ ] All CIP service, path, and chunk logic behind mfg_ops callbacks
-- [ ] New PLC types added by implementing new strategy module, not extending shared code
+### 2.2 Registration touch-points (already present — verify, do not duplicate)
 
-### Packet Budgets (Per Contract 3.5)
-- [ ] Request aggregate = 2 (count) + N*2 (offset entries) + Sum(request bytes)
-- [ ] Response aggregate = 2 (count) + N*2 (offset entries) + Sum(response bytes)
-- [ ] Writes trimmed if needed; reads trimmed for response space
-- [ ] Response estimates account for success (4 bytes), failure (6–8 bytes), large reads (full buffer)
-
-### Metadata (Per Contract 3.8)
-- [ ] Phase-1 required before general read/write packing
-- [ ] Phase-2 blocks specific tag read/write until available
-- [ ] Negative cache invalidated on reconnect, not reset on transient errors
-- [ ] Metadata fetch is scheduler-managed, not blocking
+- `src/libplctag/lib/tag.h`: `TAG_PROTOCOL_ENIP = 8`, `TAG_PROTOCOL_ENIP_CONNECTION = 9`
+  already exist in `tag_protocol_t`. Do not renumber.
+- `src/libplctag/lib/lib.c`: the create dispatcher must route `enip-tcp`/`enip_tcp` to
+  `enip_tag_create`. Confirm it is wired; if not, add it. This is the only edit to shared
+  library files.
 
 ---
 
-## 6. Acceptance Criteria (Final)
+## 3. The tag allocation: one block, three regions
 
-### Feature Completeness
-1. ENIP-TCP/ENIP_TCP protocol variant is registered and selectable
-2. All four manufacturer paths (AB, OMRON, PCCC, PCCC-DH+) are implemented
-3. Single-request and multi-request packing works
-4. Metadata phase-1 and phase-2 are enforced
-5. Chunking handles oversized reads/writes correctly per PLC type
-6. Bit writes work for AB-capable, PLC5, SLC, and DH+ variants
+A tag is a single `rc_alloc` block. Conceptually it has three regions with three
+different lifetimes and three different owners. They are separate **types** for clarity,
+but physically contiguous so there is exactly one allocation per tag for its whole life.
 
-### Testing
-1. Simulator regression suite passes with ENIP protocol (or exclusions are documented)
-2. Hardware regression suite passes with ENIP protocol (or exclusions are documented)
-3. No performance regression vs. existing AB-EIP path
-4. Key test areas (above) all pass
+```
+  ┌──────────────────────────── enip_tag_t (one rc_alloc) ───────────────────────────┐
+  │ TAG_BASE_STRUCT          generic, owned by lib.c (data, size, status, byte_order) │
+  │ enip_tag_meta_t  meta;   type info, owned by the metadata code, read by getters   │
+  │ enip_operation_t op;     transient I/O state, owned by the engine thread          │
+  │ ── tail bytes ──         tag_name string; base encoded CIP path                   │
+  └──────────────────────────────────────────────────────────────────────────────────┘
+```
 
-### Code Quality
-1. Coding guidelines followed (src/libplctag/docs/coding_guidelines.md)
-2. Manufacturer isolation enforced (no branching in shared code)
-3. Lock ordering and lifetime rules verified
-4. All compiler warnings resolved
-5. Refcount hygiene verified (no leaks or double-frees)
+### 3.1 Region ownership and lifetime
+
+| Region        | Owner (who writes)             | Lifetime               | Read by             |
+|---------------|--------------------------------|------------------------|---------------------|
+| `TAG_BASE_*`  | lib.c + tag layer              | whole tag life         | app, engine         |
+| `meta`        | metadata code (engine thread)  | whole tag life; (re)resolved per connection generation | app getters, engine, strategy |
+| `op`          | engine thread (exclusively, during an operation) | per operation, reused | engine, strategy |
+| tail          | set once at create             | whole tag life, immutable | strategy (path), metadata code (name) |
+
+### 3.2 `enip_operation_t` — engine-owned transient state
+
+No heap pointers it owns. No byte buffer. The request is rebuilt from `chunk_offset` into
+the connection arena each cycle; write data is read straight from `tag->data`.
+
+```c
+/* enip_op.h — included only by engine + strategy code, NOT by the app path. */
+
+typedef enum {
+    ENIP_OP_IDLE     = 0,  /* nothing requested; tag not in the active queue        */
+    ENIP_OP_REQUEST  = 1,  /* read/write requested; waiting to be encoded + sent    */
+    ENIP_OP_INFLIGHT = 2,  /* request sent; awaiting (more) response                */
+    ENIP_OP_DONE     = 3,  /* terminal for this op; result written back to the tag  */
+} enip_op_state_t;
+
+typedef enum {
+    ENIP_OP_KIND_NONE  = 0,
+    ENIP_OP_KIND_READ  = 1,
+    ENIP_OP_KIND_WRITE = 2,
+} enip_op_kind_t;
+
+typedef struct enip_tag_t enip_tag_t;   /* forward decl */
+
+typedef struct enip_operation_t {
+    /* --- intrusive active-queue node (see §6.1). NULL when not queued. --- */
+    enip_tag_t *q_next;
+    enip_tag_t *q_prev;
+
+    /* --- scheduling --- */
+    int64_t  op_time;       /* time_ms() the op became due; queue is sorted by this  */
+
+    /* --- correlation --- */
+    uint64_t transaction_id;/* EIP sender_context used for this op; matches response */
+
+    /* --- fragmentation cursor --- */
+    uint32_t chunk_offset;  /* bytes of tag->data already transferred this op        */
+
+    /* --- pre-encoded base CIP path (points into the tag tail, immutable) --- */
+    const uint8_t *encoded_path;
+    uint16_t       encoded_path_len;
+
+    /* --- small scalars --- */
+    int32_t  op_state;      /* enip_op_state_t                                       */
+    int32_t  kind;          /* enip_op_kind_t                                        */
+} enip_operation_t;
+```
+
+Why the encoded path lives here: the application never sees it; it exists only to build
+requests. (For a fragmented AB read where `chunk_offset > 0`, the strategy re-encodes a
+path with an explicit start index into the *arena* — transient — so no extra storage is
+needed; see `enip_mfg_ab.c`.)
+
+### 3.3 `enip_tag_meta_t` — type info + the validity gate
+
+```c
+typedef enum {
+    ENIP_META_NONE     = 0,  /* never resolved on this connection                   */
+    ENIP_META_RESOLVING= 1,  /* a phase-2 fetch is in progress                      */
+    ENIP_META_READY    = 2,  /* type info valid for `generation`                    */
+} enip_meta_state_t;
+
+typedef struct enip_tag_meta_t {
+    uint32_t instance_id;    /* Symbol instance ID resolved from the name (phase-1)  */
+    uint32_t array_dims[3];  /* element counts per dimension; 0 = dimension unused   */
+    int32_t  elem_count;     /* total elements = product of active dims (>=1)        */
+    int32_t  elem_size;      /* bytes per element (from Symbol attr 7 / instance)    */
+    int32_t  generation;     /* conn->metadata_generation this was fetched under     */
+    uint16_t data_type;      /* CIP type code (Symbol attr 2)                        */
+    uint8_t  num_dims;       /* 0=scalar, 1..3                                       */
+    uint8_t  state;          /* enip_meta_state_t                                    */
+} enip_tag_meta_t;
+```
+
+**The validity rule (memorize this):**
+
+> A tag's metadata is **usable** iff `meta.state == ENIP_META_READY` **and**
+> `meta.generation == conn->metadata_generation`.
+
+`conn->metadata_generation` is bumped once per successful (re)connect (§5.6). Bumping that
+single integer instantly marks **every** tag stale without walking them. A stale tag must
+re-resolve its name → instance_id and re-fetch its type before its next operation — which
+is correct even if the PLC program changed while we were disconnected. This replaces
+brittle per-tag boolean flags that go wrong across reconnects.
+
+### 3.4 `enip_tag_t`
+
+```c
+typedef struct enip_tag_t {
+    TAG_BASE_STRUCT;                 /* generic; provides data, size, status, byte_order */
+
+    struct enip_connection_t *conn;  /* back-pointer; holds an rc_inc ref (see §7)        */
+
+    enip_tag_meta_t meta;            /* §3.3 */
+    enip_operation_t op;             /* §3.2 */
+
+    char    *tag_name;               /* points into the tail; root symbol name           */
+    /* tail: tag_name bytes (NUL-terminated), then base encoded CIP path bytes           */
+} enip_tag_t;
+```
+
+The `@connection` status tag keeps its own small struct (`enip_connection_tag_t`,
+unchanged from today's file) and is out of scope for the data-path rules above.
 
 ---
 
-## 7. File Inventory & Rough Size Estimates
+## 4. The connection: sub-structs grouped by concern
 
-| Phase | File | Lines | Notes |
-|-------|------|-------|-------|
-| A | src/utils/arena.h + .c | ~300 | Copied from poc |
-| A | src/utils/bytes.h + .c | ~400 | Copied from poc |
-| A | src/utils/enip_wait.h + .c | ~600 | New blocking-like wrappers |
-| B | Tag.h, init.c, lib.c edits | ~50 | Small registration changes |
-| B | enip/CMakeLists.txt | ~20 | Build wiring |
-| B | enip/enip.h | ~30 | Public API stub |
-| C | enip/tag.h | ~150 | ENIP tag struct |
-| C | enip/enip_tag.c | ~300 | Tag constructor + vtables |
-| C | enip/enip_connection_tag.c | ~200 | @connection support |
-| C | enip/enip_conn.h | ~150 | Connection struct |
-| D | enip/enip_mfg_ops.h | ~100 | Strategy interface |
-| E | enip/enip_conn.c | ~2000–2500 | Main loop (Phase A–J) |
-| E | enip/enip_metadata.c | ~500 | Phase-1, phase-2, cache |
-| F | enip/enip_packetizer.c | ~600 | Budget, packing, trimming |
-| H | enip/enip_mfg_ab.c | ~600 | AB request/response logic |
-| I | enip/enip_mfg_omron.c | ~400 | OMRON 0x80 segment logic |
-| J | enip/enip_mfg_pccc.c | ~1000 | PCCC + DH+ + bit write logic |
-| K | enip/enip_name.c | ~500 | Path encoding/decoding |
-| L | Test harness edits | ~100 | Script updates |
-| **Total** | | **~9,000–10,500** | Excluding tests |
+`enip_connection_t` is created once per (gateway, path) pair and shared by every tag that
+targets it (§7.1). Group the fields so each function takes the narrow piece it needs,
+not the whole object. This keeps signatures honest and shrinks blast radius.
+
+### 4.1 `enip_link_t` — transport
+
+```c
+typedef struct enip_link_t {
+    sock_p  socket;             /* created ONCE in create; close() keeps the wake pipe   */
+    socket_wait_state_t io;     /* restartable I/O state shared by send/recv wrappers    */
+    char    host[128];
+    uint16_t port;              /* default 44818                                         */
+
+    /* route to the CPU: parsed from the "path" attribute, e.g. "1,0".                   */
+    uint8_t  route_path[64];    /* raw CIP segment bytes                                 */
+    uint8_t  route_path_words;  /* size in 16-bit words; 0 = no routing                  */
+    int8_t   cpu_slot;          /* convenience: backplane slot, or -1 if none            */
+} enip_link_t;
+```
+
+### 4.2 `enip_session_t` — negotiated EIP + CIP session
+
+```c
+typedef struct enip_session_t {
+    /* EIP encapsulation session */
+    uint32_t session_handle;    /* from RegisterSession                                  */
+    uint64_t sender_context;    /* monotonically increasing; stamped into each request   */
+    bool     established;
+
+    /* CIP connected messaging (from ForwardOpen) */
+    uint32_t cip_targ_conn_id;  /* O->T id returned by the PLC; goes in the CAI          */
+    uint32_t cip_orig_conn_id;  /* T->O id we assigned                                   */
+    uint16_t cip_conn_serial;   /* connection serial used in ForwardOpen/Close          */
+    uint16_t cip_seq_num;       /* incremented before each connected send                */
+    bool     cip_connection_open;
+
+    /* Negotiated CIP packet sizes from ForwardOpen, PER DIRECTION (§5.6, §5.9).
+     * These are the raw connection sizes the PLC granted; the usable CIP-payload
+     * budget is derived from them in §5.9 (subtract the connected-layer overhead). */
+    uint32_t cip_size_o_to_t;   /* originator->target: bounds our REQUEST frames         */
+    uint32_t cip_size_t_to_o;   /* target->originator: bounds the RESPONSE frames        */
+
+    /* unconnected message cap (no ForwardOpen); device/route dependent, ~504 typical    */
+    uint32_t unconnected_cap;
+
+    /* capabilities */
+    bool     supports_multi_service;  /* generic CIP service 0x0A packing (§9.2)         */
+    bool     used_extended_forward_open;
+} enip_session_t;
+```
+
+### 4.3 `enip_connection_t`
+
+```c
+typedef struct enip_connection_t {
+    enip_link_t    link;
+    enip_session_t session;
+
+    enip_mfg_ops_t *mfg_ops;        /* selected after GetIdentity (§9)                   */
+
+    /* --- the only connection-level metadata: name -> instance_id --- */
+    hashtable_p root_symbol_cache;  /* hash(name) -> enip_root_symbol_entry_t*           */
+    mutex_p     root_symbol_mutex;
+    int32_t     symbol_count;       /* from class 0x6B attr 3; used to presize the table */
+    uint32_t    symbol_max_instance;/* from class 0x6B attr 2; iteration stop bound      */
+
+    /* --- the active-tag queue (intrusive; see §6) --- */
+    enip_tag_t *queue_head;         /* sorted ascending by op.op_time                    */
+    enip_tag_t *queue_tail;
+    mutex_p     queue_mutex;
+
+    /* --- per-direction scratch; reset each cycle, never freed until destroy --- */
+    Arena tx_arena;
+    Arena rx_arena;
+
+    /* --- reported status + reconnect bookkeeping --- */
+    int32_t state;                  /* PLCTAG_CONN_STATUS_*; reporting only              */
+    int32_t metadata_generation;    /* bumped per successful (re)connect (§3.3)          */
+    int64_t last_message_time_ms;   /* for idle disconnect                               */
+    int32_t connect_attempt_count;  /* for backoff                                       */
+
+    /* --- statistics (optional, for the @connection tag) --- */
+    uint64_t messages_sent;
+    uint64_t messages_received;
+
+    bool     shutdown_requested;
+    thread_p thread;
+} enip_connection_t;
+```
+
+### 4.4 `enip_root_symbol_entry_t` — one symbol-table row
+
+Stored in a **single contiguous block** of `symbol_count` rows (presized; §5.5) so there
+is one allocation for the whole table, freed as a unit on disconnect. No per-symbol
+`malloc`.
+
+```c
+typedef struct enip_root_symbol_entry_t {
+    char     name[128];     /* NUL-terminated root symbol name                          */
+    uint32_t instance_id;   /* Symbol instance ID                                       */
+} enip_root_symbol_entry_t;
+```
+
+(Phase-2 type info is **not** here — it lives in each tag's `meta`, §2.1.)
 
 ---
 
-## 8. Risk & Mitigation
+## 5. Packet definitions (every field; validated against the wire and the existing code)
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Mutex deadlock in refcount hand-offs | Medium | High | Debug assertions at lock boundaries; code review |
-| Manufacturer branching in shared code | Medium | High | Grep/lint for PLC-type conditionals in main loop |
-| Packet budget miscalculation | Medium | High | Detailed audit vs. contract; simulator tests |
-| Metadata blocking I/O in API threads | Medium | High | Verify metadata is scheduled, not ad hoc |
-| Large memory footprint from arena | Low | Medium | Monitor arena high-water; cap at 32KB |
-| Reconnect not reaming RESPONSE tags | Medium | Medium | Explicit refcount of rearm logic in tests |
-| Path encoding round-trip failures | Low | Medium | Comprehensive path encoding tests |
+All multi-byte integers are **little-endian**. Sizes are exact; an overrun causes a PLC
+error. Constants live in `enip_packetizer.h` (`ENIP_PKT_*`).
+
+### 5.1 EIP encapsulation header — 24 bytes (`enip_eip.c`)
+
+| Offset | Size | Field           | Notes                                              |
+|-------:|-----:|-----------------|----------------------------------------------------|
+| 0      | 2    | command         | 0x0065 RegisterSession, 0x0066 Unregister, 0x006F SendRRData (unconnected), 0x0070 SendUnitData (connected) |
+| 2      | 2    | length          | byte count of everything **after** this 24-byte header |
+| 4      | 4    | session_handle  | 0 until RegisterSession returns one                |
+| 8      | 4    | status          | 0 on request; PLC sets on reply                    |
+| 12     | 8    | sender_context  | correlation id; echoed back unchanged              |
+| 20     | 4    | options         | 0                                                  |
+
+### 5.2 CPF — unconnected, SendRRData (`enip_cpf.c`)
+
+Follows the EIP header in command 0x006F.
+
+| Size | Field            | Value                                            |
+|-----:|------------------|--------------------------------------------------|
+| 4    | interface_handle | 0 (CIP)                                           |
+| 2    | router_timeout   | 0                                                 |
+| 2    | item_count       | 2                                                 |
+| 2    | item0 type       | 0x0000 Null Address Item (NAI)                    |
+| 2    | item0 length     | 0                                                 |
+| 2    | item1 type       | 0x00B2 Unconnected Data Item (UDI)               |
+| 2    | item1 length     | length of the CIP payload that follows            |
+| N    | CIP payload      | the CIP request                                   |
+
+### 5.3 CPF — connected, SendUnitData (`enip_cpf.c`)
+
+Follows the EIP header in command 0x0070.
+
+| Size | Field            | Value                                            |
+|-----:|------------------|--------------------------------------------------|
+| 4    | interface_handle | 0                                                 |
+| 2    | router_timeout   | 0                                                 |
+| 2    | item_count       | 2                                                 |
+| 2    | item0 type       | 0x00A1 Connected Address Item (CAI)              |
+| 2    | item0 length     | 4                                                 |
+| 4    | connection_id    | `session.cip_targ_conn_id` (the O->T id)         |
+| 2    | item1 type       | 0x00B1 Connected Data Item (CDI)                 |
+| 2    | item1 length     | 2 + CIP payload length                            |
+| 2    | sequence_number  | `++session.cip_seq_num` before each send         |
+| N    | CIP payload      | the CIP request                                   |
+
+On receive, `enip_cpf_extract_cdi_payload` strips the 2-byte sequence number.
+
+### 5.4 CIP request bodies (`enip_cip.c`)
+
+A CIP request begins with `service(1) + path_size_words(1) + path(path_size_words*2)`.
+`path_size_words` counts **16-bit words**; the encoded path is byte-padded to even length.
+
+**Read Tag — service 0x4C:** `service(1) 0x4C`, `path_size_words(1)`, `path(2*w)`,
+`element_count(2)`.
+
+**Read Tag Fragmented — service 0x52:** as 0x4C plus a trailing `byte_offset(4)`.
+
+**Write Tag — service 0x4D:** `service(1) 0x4D`, `path_size_words(1)`, `path(2*w)`,
+`data_type(2)`, `element_count(2)`, `data(D)`.
+
+**Write Tag Fragmented — service 0x53:** as 0x4D with a `byte_offset(4)` inserted after
+`element_count`.
+
+**Encoded path segments** (`enip_cip_encode_tag_path`):
+- Symbolic: `0x91, len, name_bytes[, 0x00 pad if len odd]`.
+- Array index: `0x28, idx8` | `0x29, 0x00, idx16` | `0x2A, 0x00, idx32`.
+- Member after `.` is another `0x91` symbolic segment.
+
+### 5.5 CIP response header (`enip_cip_parse_response`)
+
+| Size | Field              | Notes                                            |
+|-----:|--------------------|--------------------------------------------------|
+| 1    | reply_service      | request service \| 0x80 (e.g. 0x4C → 0xCC)       |
+| 1    | reserved           | 0                                                |
+| 1    | general_status     | meaning is **manufacturer-specific** — see §9.1  |
+| 1    | ext_status_size    | count of 16-bit words that follow                |
+| 2*n  | ext_status         | skipped by shared code                           |
+| D    | data               | for a read: 2- or 4-byte type code, then values  |
+
+The shared parser returns `general_status` and the data slice. It does **not** decide what
+a status value *means* for fragmentation — that is the strategy's job (§9.1). The read
+type-code prefix is stripped by `enip_cip_strip_type_code` on the **first** read chunk.
+
+### 5.6 ForwardOpen — service 0x54 (standard) / 0x5B (extended) to Connection Manager
+
+Path to CM precedes the body: `0x20, 0x06, 0x24, 0x01` (Class 0x06 Instance 0x01).
+
+| Size | Field                         | Notes                                        |
+|-----:|-------------------------------|----------------------------------------------|
+| 1    | service (0x54 or 0x5B)        |                                              |
+| 1    | path_size_words = 2           |                                              |
+| 4    | path to CM = 20 06 24 01      |                                              |
+| 1    | priority / tick_time          | 0x0A                                         |
+| 1    | timeout_ticks                 | 0x0E                                         |
+| 4    | O->T connection id            | 0 (the PLC fills the value it assigns)       |
+| 4    | T->O connection id            | our `cip_orig_conn_id`                       |
+| 2    | connection serial             | `cip_conn_serial`                            |
+| 2    | originator vendor id          | a fixed nonzero id                           |
+| 4    | originator serial             | a fixed nonzero serial                       |
+| 1    | timeout multiplier            | 0x03                                         |
+| 3    | reserved                      | 0                                            |
+| 4    | O->T RPI                      | 1000000 (µs)                                 |
+| 2/4  | O->T network params           | **2 bytes** for 0x54, **4 bytes** for 0x5B   |
+| 4    | T->O RPI                      | 1000000                                      |
+| 2/4  | T->O network params           | 2 / 4 bytes as above                         |
+| 1    | transport class/trigger       | 0xA3                                         |
+| 1    | connection_path_size (words)  |                                              |
+| 2*w  | connection path               | route to CPU + CM (built by the strategy)    |
+
+The **network params** low bits carry the connection size. Standard FO encodes it in 9
+bits (≤ 511; practical 504); extended FO in 16 bits (practical ~4002). Request the large
+size with 0x5B first; on CIP error fall back to 0x54.
+
+**ForwardOpen reply (success) data:** `O->T conn id(4)`, `T->O conn id(4)`,
+`conn serial(2)`, `orig vendor(2)`, `orig serial(4)`, `O->T API(4)`, `T->O API(4)`,
+`app_reply_size(1)`, `reserved(1)`, `app_reply(...)`. Store the first field as
+`cip_targ_conn_id`. Store the granted connection sizes (the values we sent, or smaller if
+the device reduced them) as `session.cip_size_o_to_t` and `session.cip_size_t_to_o`.
+
+### 5.7 ForwardClose — service 0x4E
+
+Same CM path. Body: priority/reserved(1)=0, timeout_ticks(1)=0x0E, conn serial(2),
+orig vendor(2), orig serial(4), connection_path_size words(1), connection path(2*w).
+Failure is non-fatal (we are tearing down anyway).
+
+### 5.8 Symbol class queries (Class 0x6B)
+
+**Count query — once per connect, before the inventory walk.** GetAttributeList
+(service 0x03) to Class 0x6B, Instance 0 (the class itself):
+
+| Size | Field                | Value                                          |
+|-----:|----------------------|------------------------------------------------|
+| 1    | service = 0x03       | GetAttributeList                               |
+| 1    | path_size_words = 2  |                                                |
+| 4    | path = 20 6B 24 00   | Class 0x6B, Instance 0                          |
+| 2    | attr_count = 2       |                                                |
+| 2    | attr id = 0x0002     | **Max Instance** (highest instance id)         |
+| 2    | attr id = 0x0003     | **Number of Instances**                        |
+
+Reply data: `attr_count(2)`, then per attribute `id(2), status(2), value(...)`. Attr 2 →
+`symbol_max_instance` (UDINT), attr 3 → `symbol_count` (UDINT). These are the **standard
+CIP generic class attributes** (verified: attr 1 = Revision, attr 2 = Max Instance,
+attr 3 = Number of Instances). If a device returns a status for attr 3, fall back to using
+`symbol_max_instance` as a loose presize bound.
+
+> Pitfall corrected: instance attributes 7 and 8 of the Symbol object are element **size**
+> and **dimensions** (used in the per-tag phase-2 fetch). They are *not* the class counts.
+
+**Inventory walk — GetInstanceAttributeList (service 0x55)** to Class 0x6B from instance 0,
+requesting only attribute 1 (name): path `20 6B 25 <inst16>`, `attr_count=1`,
+`attr id=0x0001`. Reply entries repeat `instance_id(4), name_len(2), name_bytes`. The
+device signals "more fragments" via the generic-status convention; the shared walk treats
+"non-final → request from `last_instance_id + 1`; final → stop", but it does **not**
+hard-code `0x06` — see §9.1. Filter system tags (`__`-prefixed, contains `:`).
+
+**Per-tag phase-2 fetch — GetInstanceAttributeList (service 0x55)** to the specific
+instance, attrs 0x02 (data type), 0x07 (element size), 0x08 (dimensions). Reply data:
+`symbol_type(2), element_size(2), dims[3](12)`.
+
+### 5.9 Budget accounting (the part the old code got wrong)
+
+The device enforces the **CIP packet size**, not the socket frame size. The relevant
+budgets are derived from what ForwardOpen negotiated, per direction, by subtracting only
+the overhead that lives **inside** that negotiated size:
+
+```
+connected   req_budget  = session.cip_size_o_to_t − CDI_header(4) − seq_id(2)   (= size − 6)
+connected   resp_budget = session.cip_size_t_to_o − CDI_header(4) − seq_id(2)   (= size − 6)
+unconnected     budget  = session.unconnected_cap − UDI_header(4)               (= cap − 4; no seq id)
+```
+
+Rationale: the EIP header (24), CPF header (8), and the Connected Address Item (8) are
+pure transport that sits **below** the negotiated CIP size — the device's connection-size
+accounting does not include them. They bound only the **socket scratch arena** (kept at
+32 KB so it is never the limiting factor), never the CIP budget. Subtracting them from the
+CIP budget (as the legacy `max_buffer − 46` did) double-counts and is wrong.
+
+Constants in `enip_packetizer.h`:
+
+```c
+#define ENIP_PKT_CONNECTED_CIP_OVERHEAD   ((size_t)6)  /* CDI header(4) + seq id(2)     */
+#define ENIP_PKT_UNCONNECTED_CIP_OVERHEAD ((size_t)4)  /* UDI header(4)                 */
+
+/* 0x0A Multiple Service wrapper, INSIDE the CIP budget (generic CIP; §15) */
+#define ENIP_PKT_MULTI_REQ_FIXED     ((size_t)7)  /* svc+path(3)+reserved+count(2)      */
+#define ENIP_PKT_MULTI_RESP_FIXED    ((size_t)6)  /* svc+reserved+status+ext+count(2)   */
+#define ENIP_PKT_MULTI_SLOT_OVERHEAD ((size_t)2)  /* one uint16 offset entry per slot   */
+
+/* Static array bound ONLY — NOT a protocol limit. Packing is bounded by budget (§15). */
+#define ENIP_PKT_MAX_SLOTS ((uint32_t)512)
+```
 
 ---
 
-## 9. Notes for Reviewers & Future Maintainers
+## 6. The intrusive active-tag queue (no allocation)
 
-1. **Manufacturer Isolation is Non-Negotiable:** Any temptation to add `if (is_ab) { ... } else if (is_omron) { ... }` in shared code must be rejected. Add a new strategy module instead.
+### 6.1 Why intrusive
 
-2. **Lock Order:** Always PLC mutex before tag API mutex. If you need both, acquire in that order and document exceptions.
+A growable vector reallocates as tags are added. The intrusive list embeds the link
+pointers (`op.q_next`, `op.q_prev`) **inside the tag**, so linking/unlinking is pure
+pointer assignment — zero allocation, ever. A tag is linked only while it has a pending
+operation. The list is kept **sorted ascending by `op.op_time`**, so the head is the
+oldest-due tag and "what is due now / how long until due" is O(1) at the head.
 
-3. **Restart State is Ephemeral:** After any socket error, reconnect, or timeout, discard restart state and start fresh. Do not persist it across lifecycle boundaries.
+### 6.2 Queue API (all in `enip_conn.c`; the only code that touches the links)
 
-4. **Metadata Scheduling is Non-Blocking:** Never block API threads waiting for metadata I/O. The scheduler thread fetches metadata; API thread marks tag as needing metadata and returns to application.
-
-5. **Test-Driven Validation:** Use simulator regression tests as primary validation gate. Hardware tests are secondary confirmation. Document exclusions explicitly.
-
-6. **Performance Baseline:** Capture metrics for AB-EIP path before ENIP merge. Compare throughput, latency, and memory usage post-merge. No regressions acceptable.
-
----
-
-## 10. Success Metrics
-
-### Before Merge to Main
-- [ ] All code compiles without warnings
-- [ ] Simulator regression suite passes (with documented exclusions if any)
-- [ ] Hardware regression suite passes (if hardware available)
-- [ ] Performance parity or better vs. AB-EIP path
-- [ ] Code review confirms manufacturer isolation
-- [ ] Lock order review confirms no deadlock paths
-- [ ] Metadata lifecycle review confirms no blocking
-
-### Post-Merge Monitoring
-- [ ] User issues reported via GitHub tracked and resolved
-- [ ] Performance monitoring in CI/CD confirms no regression
-- [ ] Feature parity with AB-EIP path maintained and documented
+```c
+/* Insert keeping op_time ascending. Caller holds queue_mutex. No allocation. */
+static void enip_queue_link(enip_connection_t *conn, enip_tag_t *tag);
+/* Unlink (no-op if not linked). Caller holds queue_mutex. No allocation. */
+static void enip_queue_unlink(enip_connection_t *conn, enip_tag_t *tag);
+/* Head if its op_time <= now_ms, else NULL. Caller holds queue_mutex. No ref taken. */
+static enip_tag_t *enip_queue_peek_due(enip_connection_t *conn, int64_t now_ms);
+/* ms until head is due: 0 if due, ENIP_IDLE_WAIT if empty, else delta. Holds mutex. */
+static int64_t enip_queue_next_wait(enip_connection_t *conn, int64_t now_ms);
+```
 
 ---
 
-## 11. Next Steps
+## 7. Concurrency and the rc_inc safety rule (the part juniors get wrong)
 
-1. **Create Session Memory:** Save this plan and progress tracking to /memories/session/enip-execution-plan.md
-2. **Assign Phases:** Break into individual tasks and assign to team members or sequential milestones
-3. **Start Phase A:** Copy utilities and implement wait wrappers (no ENIP-specific code)
-4. **Weekly Checkpoints:** Review completed phases, validate compilation, run simulator tests
-5. **Document Decisions:** Any deviations from this plan require explicit decision note (date, author, reason)
+### 7.1 Threads in play
+
+- **API threads** (any number): the application calls `plc_tag_read`, `plc_tag_write`,
+  `plc_tag_get_*`, `plc_tag_destroy`. These run the tag vtable functions.
+- **One connection thread** per connection: runs the engine loop, does all socket I/O.
+
+They share two things: the **active-tag queue** and each **tag's `op`/`meta`**.
+
+### 7.2 The reference-count rule — why `rc_inc` exists
+
+Tags are reference-counted via `src/utils/rc.h`. `rc_alloc` returns an object with count
+1. `rc_inc(p)` adds a reference and returns `p` — **or returns NULL if the object is
+already being destroyed**. `rc_dec(p)` drops a reference; at zero the destructor runs.
+
+The danger: the engine finds a tag in the queue, then wants to work on it (`accept_chunk`,
+write results) **after releasing `queue_mutex`** (we must never hold a mutex across I/O).
+Between releasing the mutex and touching the tag, an API thread could `plc_tag_destroy`
+it, freeing the memory. The engine would then use freed memory.
+
+**The rule:**
+
+> Before the engine touches a tag outside `queue_mutex`, take a reference **while holding
+> the mutex** with `rc_inc`. If `rc_inc` returns NULL, the tag is being destroyed — skip
+> it. When done, `rc_dec`.
+
+Canonical pattern (use it everywhere the engine pulls a tag from the queue):
+
+```c
+enip_tag_t *tag = NULL;
+critical_block(conn->queue_mutex) {
+    enip_tag_t *cand = enip_queue_peek_due(conn, now_ms);
+    if(cand) {
+        tag = (enip_tag_t *)rc_inc(cand);   /* NULL if being destroyed */
+        /* still under the mutex: safe to read cand here */
+    }
+}                                            /* mutex released here */
+
+if(!tag) { return; }                         /* nothing due, or being destroyed */
+
+/* We hold a reference: the tag cannot be freed under us though the mutex is released. */
+int32_t rc = conn->mfg_ops->accept_chunk(tag, cip_response);
+/* ... handle rc ... */
+
+rc_dec(tag);                                 /* release our reference */
+```
+
+### 7.3 The tag destructor must cooperate
+
+`plc_tag_destroy` eventually drops the application's reference. `enip_tag_destructor` must,
+**while holding `queue_mutex`**, `enip_queue_unlink` the tag so the engine never peeks a
+half-freed tag. Because the engine `rc_inc`s under the same mutex, they cannot race: either
+the destructor unlinks first (engine never sees it) or the engine `rc_inc`s first
+(refcount > 0, so the destructor blocks until the engine `rc_dec`s).
+
+The tag holds an `rc_inc` ref on its **connection** (`tag->conn`), taken at create and
+released in the destructor, so the connection outlives its tags. The connection destructor
+sets `shutdown_requested`, wakes the socket, and **joins the thread before freeing the
+queue, arenas, symbol table, or socket** — so the thread is never mid-access during free.
+This join-before-free ordering is load-bearing; document it at the destructor.
+
+### 7.4 Who owns `op` and `meta`, and when
+
+One operation per tag means the API thread and the engine take turns; `op_state` is the
+baton:
+
+- **API thread** (`enip_tag_read`/`write`): only when `op.op_state == ENIP_OP_IDLE` does
+  it set `op.kind`, `op.op_time`, `ENIP_OP_REQUEST`, link to the queue, `socket_wake`.
+  After that it does not touch `op`.
+- **Engine thread**: owns `op` from REQUEST through send/recv/fragment until it writes the
+  result and sets DONE → IDLE, then unlinks. Only the engine writes `chunk_offset`,
+  `transaction_id`, `meta` (during phase-2), `tag->status`, `tag->data`, `tag->size`.
+
+All app-observable writes (`tag->status`, `tag->data`, `tag->size`, `meta`) happen under
+the tag's existing `api_mutex`, so the application never sees a torn update.
+
+### 7.5 Locking commandments
+
+1. **Never hold a mutex across socket I/O.** `rc_inc`, release the mutex, then do I/O.
+2. **Lock order:** `queue_mutex` then `api_mutex`. Never the reverse.
+3. **Framing and transaction layers take no locks** — they get plain `Bytes` and a
+   link/session by pointer.
 
 ---
 
-**End of ENIP Implementation Execution Plan**
+## 8. The transaction seam (`enip_txn.c`)
+
+One function owns "CIP request bytes in → CIP response bytes out", including CPF + EIP
+framing, send, receive, and unwrap, so framing changes touch one place.
+
+```c
+typedef enum { ENIP_MSG_UNCONNECTED, ENIP_MSG_CONNECTED } enip_msg_mode_t;
+
+/* Build CPF(mode)+EIP around cip_request, send it, receive one framed reply, strip
+ * EIP+CPF, return the CIP response slice (into rx_arena).
+ *  - Resets tx_arena, builds the frame, stamps session->sender_context and increments it
+ *    (records the used value in *out_context for correlation).
+ *  - CONNECTED: increments session->cip_seq_num and uses cip_targ_conn_id.
+ *  - Sends with do/while(PENDING) around socket_write_wait using link->io, so a wake
+ *    during I/O resumes instead of corrupting the frame.
+ *  - Receives via enip_recv_frame (24-byte header then length-driven body).
+ *  - Returns the CIP payload (UDI unconnected, CDI minus seq connected).
+ * OK + *out_cip_response on success; PLCTAG_ERR_* on socket/frame error. */
+int32_t enip_txn(enip_link_t *link, enip_session_t *session, Arena *tx_arena,
+                 Arena *rx_arena, enip_msg_mode_t mode, Bytes cip_request,
+                 uint64_t *out_context, Bytes *out_cip_response);
+```
+
+---
+
+## 9. The manufacturer strategy vtable (`enip_mfg_ops.h`)
+
+The only place device dialect **and CIP-status meaning** live. Grouped by what it acts on.
+
+```c
+typedef struct enip_mfg_ops_t {
+    const char *name;                 /* "AB/Logix", "OMRON", "PCCC" — logging only      */
+    enip_msg_mode_t messaging_mode;   /* connected (AB/OMRON) or unconnected (some PCCC) */
+
+    /* ---- connection lifecycle (act on a connection) ---- */
+    int32_t (*configure)(struct enip_connection_t *conn);        /* step 4: route, sizes */
+    int32_t (*open_connection)(struct enip_connection_t *conn);  /* step 5: FO / no-op   */
+    int32_t (*close_connection)(struct enip_connection_t *conn); /* ForwardClose / no-op */
+    int32_t (*fetch_phase1)(struct enip_connection_t *conn);     /* step 6: inventory    */
+
+    /* ---- per-tag operations (act on a tag) ---- */
+    int32_t (*fetch_tag_metadata)(struct enip_tag_t *tag);       /* lazy phase-2         */
+
+    /* Build the next CIP request chunk for tag->op given the per-slot REQUEST and
+     * RESPONSE budgets. Subtract the device-fixed header sizes (req_fixed / resp_fixed),
+     * call enip_chunk_split() for element-aligned dual-budget sizing (§15), emit CIP
+     * bytes into arena. Return bytes_null() when the op is complete or one element does
+     * not fit. Must also report resp_fixed via *out_resp_fixed so the engine can size
+     * the response side of a packed frame (§15). */
+    Bytes (*encode_chunk)(struct enip_tag_t *tag, Arena *arena,
+                          size_t req_budget, size_t resp_budget, size_t *out_resp_fixed);
+
+    /* Parse one CIP response chunk: check the general status (whose MEANING this hook
+     * owns — see §9.1), strip the type code on the first read chunk, copy data into
+     * tag->data at op.chunk_offset, advance chunk_offset. Return OK when the op is
+     * complete, PLCTAG_ERR_PARTIAL when more chunks are needed, PLCTAG_ERR_* on failure. */
+    int32_t (*accept_chunk)(struct enip_tag_t *tag, Bytes cip_response);
+} enip_mfg_ops_t;
+
+extern enip_mfg_ops_t enip_mfg_ab;
+extern enip_mfg_ops_t enip_mfg_omron;
+extern enip_mfg_ops_t enip_mfg_pccc;
+
+/* Map a GetIdentity result to a strategy. Unknown CIP vendors fall back to AB with a
+ * warning; never NULL for a reachable device. */
+enip_mfg_ops_t *enip_select_mfg_ops(const enip_identity_t *identity);
+```
+
+### 9.1 CIP general status meaning is per-manufacturer (do not hard-code 0x06)
+
+The CIP general-status byte's interpretation for fragmentation differs by device, so the
+**continuation decision belongs only to `accept_chunk`.** Shared code (the engine, the
+metadata walk) must never special-case a status value to mean "more fragments."
+
+- **Rockwell:** `accept_chunk` continues while `status == 0x06` (PLC-side "partial")
+  **or** `chunk_offset < total`.
+- **OMRON:** never emits `0x06`; `accept_chunk` continues purely on `chunk_offset < total`
+  (the client knows the total size and tracks the cursor).
+- **PCCC:** its own status/STS/EXT-STS rules, entirely inside `accept_chunk`.
+
+The engine sees only the abstract `OK` / `PLCTAG_ERR_PARTIAL` / error result.
+
+### 9.2 0x0A multi-service packing is generic CIP and lives in shared code
+
+The CIP Multiple Service Packet (service `0x0A` to the Message Router) is identical on
+every device that supports it, so its assembly and its `0x8A` reply parsing stay in the
+**engine** (§15), not behind the vtable. The only per-device input is the boolean
+`session.supports_multi_service` (derived from identity). When false (e.g. PCCC), the
+engine sends one request per cycle, built entirely by `encode_chunk`. There is **no**
+per-manufacturer "assemble frame" hook.
+
+---
+
+## 10. Implementation phases
+
+Each phase ends with a clean compile and a stated acceptance test. Do them in order.
+
+### Phase 0 — Read and prep
+- Read §1–§9 and `src/utils/{rc,arena,bytes}.h`. Confirm the registration touch-points in
+  §2.2 and that every `enip_*.c` is in the CMake source list.
+- **Accept:** the tree builds today.
+
+### Phase 1 — Types and framing
+- Create/confirm the structs in §3–§4 in `tag.h`, `enip_op.h`, `enip_conn.h`.
+- Confirm the framing functions (`enip_eip.c`, `enip_cpf.c`, `enip_cip.c`) match §5.
+- Update `enip_packetizer.h` constants to §5.9. Write `enip_chunk_split()` (§15) with a
+  standalone unit test.
+- **Accept:** framing round-trips in a unit test; `enip_chunk_split` tests pass, including
+  the dual-budget and element-alignment cases.
+
+### Phase 2 — Transaction seam
+- Implement `enip_txn` (§8); re-express identity/ForwardOpen/metadata round trips in terms
+  of it; delete the duplicated send/recv blocks.
+- **Accept:** GetIdentity returns vendor/device/product.
+
+### Phase 3 — Connection lifecycle + registry
+- Global registry in `enip.c`: `enip_init` (registry mutex),
+  `enip_registry_find_or_create(attribs)` (shared connection per host/port/route, creates
+  thread on first use), `enip_teardown` (drain). Mirror Modbus `plcs`.
+- `enip_connection_create`/`_destructor` per §4 and §7.3 (socket once; join-before-free;
+  one symbol-table block freed as a unit).
+- `enip_tag_create` calls the registry, `tag->conn = rc_inc(conn)`, queues nothing yet.
+- **Accept:** two tags to one gateway share one connection/socket/ForwardOpen; destroying
+  all tags joins the thread with no leak (leak checker).
+
+### Phase 4 — Bootstrap sequence
+- Linear bootstrap: TCP connect → RegisterSession → GetIdentity → `select_mfg_ops` →
+  `configure` → `open_connection` (store `cip_size_o_to_t`/`_t_to_o` from the FO reply,
+  §5.6/§5.9) → class-0x6B count query → `fetch_phase1` → bump `metadata_generation` →
+  status UP.
+- Symbol count query (§5.8); presize and **create** `root_symbol_cache` (today's code
+  never creates it — fix it); inventory walk into the single-block table.
+- **Accept:** after connect, the cache holds the PLC's tags; count matches attr 3.
+
+### Phase 5 — Engine loop + queue
+- Intrusive queue API (§6) and the serve loop: `enip_queue_next_wait` →
+  `socket_wait_event` → resolve due-tag metadata → build → `enip_txn` → dispatch/fragment
+  → idle disconnect → backoff. All tag access uses the `rc_inc` pattern (§7.2).
+- `enip_tag_read`/`write` (set `op`, link, wake); `enip_tag_abort` (unlink, IDLE,
+  aborted); `enip_tag_wake_plc`.
+- **Accept:** a single AB DINT read completes end to end; abort cancels a pending read.
+
+### Phase 6 — Metadata validity gate + app API
+- `enip_ensure_due_tags_metadata`: name → instance_id; `fetch_tag_metadata`; write-through
+  `tag->size` + one-time allocate `tag->data`; set `meta.generation`/`state=READY`.
+- `enip_tag_status` and `enip_tag_get_int_attrib` honor the **usable** predicate (§3.3):
+  PENDING (and refuse to expose `elem_size`/`elem_count`) until usable; expose from `meta`
+  once ready (§2.1).
+- **Accept:** reading before metadata resolves returns PENDING, never garbage; a forced
+  reconnect re-resolves before the next read; `plc_tag_get_int_attribute("elem_size")`
+  matches the PLC.
+
+### Phase 7 — Budgets + multi-service packing (§9.2, §15)
+- Wire `enip_packetizer_plan`/`fits_single` into `enip_connection_build_requests`. Pack
+  due tags into a shared `0x0A` frame **when `supports_multi_service`** and both the
+  request and response aggregates fit (budget-bound, not count-bound). Single tag → plain
+  CIP. Use `encode_chunk`'s reported `resp_fixed` for the real response budget.
+- **Accept:** several small reads coalesce into one `0x0A` frame; an oversized read chunks
+  across cycles; both budgets respected; a `supports_multi_service=false` device sends one
+  request per cycle.
+
+### Phase 8 — Strategies
+- **AB** (`enip_mfg_ab.c`): `configure` (backplane route, request large FO), FO_Ex→FO,
+  `fetch_phase1` (inventory walk), `fetch_tag_metadata` (phase-2 into `meta`),
+  `encode_chunk`/`accept_chunk` (0x4C/0x4D, 0x52/0x53 chunking, `0x06`-or-cursor §9.1).
+- **OMRON** (`enip_mfg_omron.c`): connected, no phase-1, `0x80` data-segment chunking,
+  cursor-only continuation (no `0x06`).
+- **PCCC** (`enip_mfg_pccc.c`): PLC5/SLC/Logix-over-PCCC/DH+; routing in `configure`;
+  Execute-PCCC (0x4B)+DF1 in `encode_chunk`; `supports_multi_service=false`; masked
+  bit-writes.
+- **Accept:** read/write parity with AB-EIP on the simulator for each family.
+
+### Phase 9 — Tests
+- ENIP coverage in `run_simulator_tests.sh`/`run_hardware_tests.sh`; document exclusions.
+- **Accept:** simulator regression passes; no leak/UAF under sanitizer; no regression vs
+  AB-EIP.
+
+---
+
+## 11. Function inventory (stubs with behavior)
+
+### 11.1 Framing — `enip_eip.c`, `enip_cpf.c`, `enip_cip.c` (no socket, no locks)
+
+- `enip_eip_build_request(arena, command, session_handle, *sender_context, cpf) -> Bytes`
+  — pack the 24-byte header (§5.1), stamp `*sender_context`, then increment it.
+- `enip_eip_extract_cpf_payload(response) -> Bytes` — slice off the 24-byte header.
+- `enip_cpf_build_unconnected/_connected(...)` — §5.2/§5.3.
+- `enip_cpf_extract_udi_payload/_cdi_payload(...)` — return the CIP slice (CDI strips seq).
+- `enip_cip_encode_tag_path(name, buf, sz) -> size_t` — §5.4; 0 on invalid/small buffer.
+- `enip_cip_read_tag_request` / `_read_tag_fragmented_request` / `_write_tag_request` /
+  `_write_tag_fragmented_request` — §5.4 bodies.
+- `enip_cip_parse_response(resp, *status, *ext_sz, *data_out) -> Bytes` — §5.5; returns the
+  data slice; does **not** interpret the status (§9.1).
+- `enip_cip_strip_type_code(data) -> Bytes` — drop the 2/4-byte read type prefix.
+
+### 11.2 Packetizer — `enip_packetizer.c`
+
+- `enip_packetizer_cip_budget(cip_size, mode) -> size_t` — subtract the §5.9 overhead:
+  `cip_size − 6` connected, `cip_size − 4` unconnected. Returns 0 if too small.
+- `enip_packetizer_fits_single(req_size, resp_size, req_budget, resp_budget) -> bool`.
+- `enip_packetizer_plan(plan) -> int32_t` — verify N slots fit both the request and
+  response budgets including the `0x0A` wrapper + offset table (§15.2).
+- `enip_chunk_split(req_avail, resp_avail, remaining, elem_size, req_fixed, resp_fixed)
+  -> {data_bytes, req_body, resp_body} | NONE` — dual-budget, element-aligned (§15.4).
+
+### 11.3 Transaction — `enip_txn.c`
+- `enip_txn(...)` — §8. The only request/response socket I/O outside bootstrap-init.
+
+### 11.4 Engine — `enip_conn.c`
+- `enip_connection_create(attribs) -> *conn` — alloc (rc), init arenas/mutexes, create
+  socket once, parse gateway/path into `link`, start the thread.
+- `enip_connection_destructor(ptr)` — shutdown, wake, **join**, then free (§7.3).
+- `enip_queue_link/unlink/peek_due/next_wait` — §6.2.
+- `enip_connection_thread_entry(arg)` — the linear loop (§13).
+- `enip_ensure_due_tags_metadata(conn, now)` — bring every due tag to **usable**; may call
+  `enip_txn` via `fetch_tag_metadata`; `PLCTAG_ERR_BAD_CONNECTION` if the socket died.
+- `enip_connection_build_requests(conn, *out_frame)` — select due tags (`rc_inc` pattern),
+  call `encode_chunk` per slot under the §5.9 budgets, pack single or shared `0x0A` (§15),
+  set packed tags INFLIGHT with their `transaction_id`. A tag that encodes nothing stays
+  REQUEST (retried), never INFLIGHT.
+- `enip_recv_and_dispatch(conn)` — receive one frame; for `0x8A` map slots 1:1 to inflight
+  tags in queue order; otherwise match by `transaction_id`; call `accept_chunk`; on
+  PARTIAL encode+send the next chunk and loop; on terminal write `tag->status`, IDLE,
+  unlink, raise completion. All tag access uses `rc_inc`.
+- `enip_connection_graceful_close(conn)` — `close_connection` → UnregisterSession →
+  `socket_close` (data fd only) → reset session flags → requeue inflight ops as REQUEST.
+- `enip_backoff_with_jitter` / `enip_wait_for_work` — wake-interruptible waits (§13.3).
+
+### 11.5 Session bootstrap — `enip_session.c`
+- `enip_session_register(conn)` — 0x0065; parse handle/status.
+- `enip_session_unregister(conn)` — 0x0066; best-effort.
+- `enip_session_get_identity(conn, *identity_out)` — Identity GetAttributeAll via
+  `enip_txn`; fills `enip_identity_t` (including `supports_multi_service`).
+
+### 11.6 CIP connection + counts — `enip_cipconn.c`
+- `enip_cipconn_forward_open(conn)` — FO_Ex then FO (§5.6); store conn ids and
+  `cip_size_o_to_t`/`_t_to_o`. Called by AB/OMRON `open_connection`.
+- `enip_cipconn_forward_close(conn)` — §5.7.
+- `enip_symbol_query_counts(conn)` — class 0x6B instance 0 attrs 2,3 (§5.8).
+
+### 11.7 Metadata — `enip_metadata.c`
+- `enip_root_symbol_cache_init(conn, count)` — presize + allocate the single-block table;
+  must actually create `root_symbol_cache` (today's code never does — fix it).
+- `enip_metadata_fetch_root_symbols(conn)` — inventory walk (§5.8).
+- `enip_metadata_find_root_symbol(conn, name) -> *entry` — lookup with name re-check.
+- `enip_metadata_fetch_tag_info(conn, instance_id, *type, *size, *dims)` — phase-2 (§5.8);
+  writes into the caller's `meta` (no connection-level cache).
+
+### 11.8 Tag layer — `enip_tag.c`
+- `enip_protocol_tag_create(...)` — encode base path + name into the tail, zero `meta`/`op`
+  (IDLE), find-or-create connection, `rc_inc` into `tag->conn`. Does **not** queue.
+- `enip_tag_read`/`write` — if IDLE: set kind, `op_time`, REQUEST; link; `socket_wake`;
+  return PENDING.
+- `enip_tag_status` — error if set; PENDING while `op` active or metadata not usable; else
+  OK.
+- `enip_tag_abort` — under `queue_mutex` unlink + IDLE; raise aborted.
+- `enip_tag_get_int_attrib` — expose `elem_size`/`elem_count` from `meta` **only when
+  usable** (§2.1).
+- `enip_tag_destructor` — under `queue_mutex` unlink; free `tag->data`; `rc_dec(tag->conn)`.
+
+---
+
+## 12–15. Reference detail
+
+### 12. Socket-wake threading model
+The connection thread waits **only** on the socket via `socket_wait_event`. The socket is
+created once in `enip_connection_create` and lives until `socket_destroy` in the
+destructor; `socket_close` shuts only the data fd and keeps the wake channel alive, so the
+thread can wait while disconnected. `socket_wake` (from `enip_tag_read/write` and on queue
+insert) interrupts the wait. No condition variables.
+
+### 13. Linear connection handler
+`conn->state` is set only at visible transitions (CONNECTING, UP, DOWN, ERR_WAIT,
+DISCONNECTING) and never selects code. Two wait modes:
+- **Idle/backoff/waiting-for-work:** `socket_wait_event(DEFAULT_MASK, timeout)` with the
+  timeout from `enip_queue_next_wait`. New work and shutdown land here.
+- **Mid send/recv:** wrap each `socket_write_wait`/`enip_recv_frame` in
+  `do{…}while(rc==PENDING && !shutdown)` using `link->io`, so a wake resumes the same I/O
+  instead of derailing it.
+
+### 14. One strategy vtable, not per-tag
+Behavior varies by manufacturer (a connection property), not by tag; data varies by tag.
+One `mfg_ops` on the connection, the generic vtable on the tag, per-tag data in
+`meta`/`op`. Do not add a per-tag behavior vtable.
+
+### 15. Packed frame sizing and chunk splitting
+
+**Packing is budget-bound, not count-bound.** The packer keeps admitting slots until the
+request **or** response budget (§5.9) is exhausted. `ENIP_PKT_MAX_SLOTS` is only a static
+array bound, never a protocol limit.
+
+A `0x0A` frame has, on each side, a fixed wrapper + a 2-byte offset entry per slot + the
+packed bodies, all **inside** the CIP budget. The wrapper is generic CIP, so the engine
+builds it (§9.2). **Every candidate is sized against the request budget AND the response
+budget; the tighter governs.**
+
+- Aggregate sizes (CIP-budget terms):
+  `request  = MULTI_REQ_FIXED  + Σ(SLOT_OVERHEAD + req_body[i])  ≤ req_budget`
+  `response = MULTI_RESP_FIXED + Σ(SLOT_OVERHEAD + resp_body[i]) ≤ resp_budget`
+  where `req_budget`/`resp_budget` come from §5.9 (FO sizes minus the connected overhead).
+- Per-tag body: `req_body = req_fixed + (write ? data : 0)`,
+  `resp_body = resp_fixed + (read ? data : 0)`. The strategy reports `req_fixed`
+  (implicit in the bytes it emits) and `resp_fixed` (via `out_resp_fixed`, §9).
+- `enip_chunk_split` (shared, manufacturer-neutral):
+  1. `req_data = req_avail − req_fixed`; `resp_data = resp_avail − resp_fixed`. If either
+     ≤ 0 → does not fit.
+  2. `usable = min(req_data, resp_data, remaining)`.
+  3. `unit = min(elem_size, 8)` — never split inside an atomic element; aggregates split on
+     8-byte boundaries.
+  4. `chunk_bytes = (usable / unit) * unit`. If `< unit` → does not fit.
+- Packing loop walks due tags oldest-first, admitting slots until a tag does not fit. If
+  the first slot cannot fit even one element in an empty frame, fail that tag with
+  `PLCTAG_ERR_TOO_LARGE`. Feed the chosen sizes to `enip_packetizer_plan` as a final
+  assert before transmit.
+- A single-slot transfer skips the `0x0A` wrapper entirely (plain CIP request/response);
+  use `enip_packetizer_fits_single` for that decision.
+
+Continuation across chunks is decided by `accept_chunk` (§9.1), never by shared code
+reading a CIP status.
+
+---
+
+**End of plan.**
