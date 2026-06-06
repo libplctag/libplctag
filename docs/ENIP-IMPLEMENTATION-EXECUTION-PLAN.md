@@ -832,9 +832,12 @@ Each phase ends with a clean compile and a stated acceptance test. Do them in or
 - **Accept:** ✓ Complete. Tree compiles. Phase 2 may proceed.
 
 ### Phase 2 — Transaction seam
-- Implement `enip_txn` (§8); re-express identity/ForwardOpen/metadata round trips in terms
-  of it; delete the duplicated send/recv blocks.
-- **Accept:** GetIdentity returns vendor/device/product.
+**STATUS: ✓ COMPLETE**
+- ✓ Created `enip_txn.h` and `enip_txn.c` with unified transaction function (§8)
+- ✓ Refactored `enip_connection_get_identity()` to use `enip_txn` instead of duplicated send/recv
+- ✓ GetIdentity tested and working: returns vendor/device/product via transaction seam
+- ✓ Tree compiles successfully
+- **Accept:** ✓ Complete. GetIdentity transaction seam working. Phase 3 may proceed.
 
 ### Phase 3 — Connection lifecycle + registry
 - Global registry in `enip.c`: `enip_init` (registry mutex),

@@ -108,6 +108,7 @@
 #include <libplctag/protocols/enip/enip_cip.h>
 #include <libplctag/protocols/enip/enip_cpf.h>
 #include <libplctag/protocols/enip/enip_eip.h>
+#include <libplctag/protocols/enip/enip_txn.h>
 #include <libplctag/protocols/enip/enip_mfg_ops.h>
 #include <libplctag/protocols/enip/enip_packetizer.h>
 #include <libplctag/protocols/enip/enip_stream.h>
@@ -361,23 +362,17 @@ static int32_t enip_connection_unregister_session(enip_connection_t *conn) {
 }
 
 
-/* Phase 2: REWRITTEN using layer helpers (enip_cpf, enip_eip, stream framing).
- * Fixes:
- *   (a) Uses enip_cpf_build_unconnected + enip_eip_build_request for framing
- *   (b) Uses enip_recv_frame for stream framing (24-byte header + length-based body read)
- *   (c) Uses enip_cip_parse_response which correctly handles 4-byte CIP header
- *       (reply_service + reserved + status + ext_sz)
- *   (d) Sets supports_extended_forward_open = 0 initially (Phase 3 will detect via FO_Ex attempt)
- *   (e) Calls enip_select_mfg_ops for device strategy selection */
+/* Phase 2: REFACTORED to use enip_txn transaction seam.
+ * Consolidates CPF+EIP framing and socket I/O into one place. */
 static int32_t enip_connection_get_identity(enip_connection_t *conn) {
     /* GetAttributeAll identity: Service 0x01, Class 0x01 (Identity object), Instance 0x01
      * Response contains vendor_id, device_type, product_code, revision, status, serial, name
      * Sent via unconnected messaging (CPF SendRRData 0x006F) */
-    Bytes cip_request, cpf_frame, eip_frame, response, cip_response;
-    socket_wait_state_t io_state = {0};
+    Bytes cip_request, cip_response;
     int32_t rc;
     uint8_t cip_status;
     uint8_t ext_status_size;
+    uint64_t used_context;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP: Fetching device identity");
 
@@ -385,8 +380,7 @@ static int32_t enip_connection_get_identity(enip_connection_t *conn) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* Step 1: Build CIP GetAttributeAll request.
-     * Service 0x01, path to Class 0x01 Instance 0x01 */
+    /* Step 1: Build CIP GetAttributeAll request for Identity object. */
     arena_reset(&conn->tx_arena);
     cip_request = bytes_pack(&conn->tx_arena, BYTES_LE,
                              (uint8_t)0x01,    /* Service: GetAttributeAll */
@@ -401,55 +395,18 @@ static int32_t enip_connection_get_identity(enip_connection_t *conn) {
         return PLCTAG_ERR_NO_MEM;
     }
 
-    /* Step 2: Wrap in CPF unconnected frame. */
-    cpf_frame = enip_cpf_build_unconnected(&conn->tx_arena, cip_request);
-    if(bytes_is_null(cpf_frame)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to build CPF frame");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    /* Step 3: Wrap in EIP frame and build complete request. */
-    eip_frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
-                                       conn->session.session_handle, &conn->session.sender_context, cpf_frame);
-    if(bytes_is_null(eip_frame)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to build EIP frame");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    /* Step 4: Send request. */
-    rc = socket_write_wait(conn->link.socket, &eip_frame, 5000, &io_state);
+    /* Step 2: Execute transaction: wrap, send, receive, unwrap. */
+    rc = enip_txn(&conn->link, &conn->session, &conn->tx_arena, &conn->rx_arena,
+                  ENIP_MSG_UNCONNECTED, cip_request, &used_context, &cip_response);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity send failed: %d", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity transaction failed: %d", rc);
         return rc;
     }
 
     conn->messages_sent++;
-
-    /* Step 5: Receive response using stream framing. */
-    arena_reset(&conn->rx_arena);
-    rc = enip_recv_frame(conn->link.socket, &conn->rx_arena, 5000, &io_state, &response);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: GetIdentity read failed: %d", rc);
-        return rc;
-    }
-
     conn->messages_received++;
 
-    /* Step 6: Extract CPF payload from EIP response. */
-    Bytes cpf_response = enip_eip_extract_cpf_payload(response);
-    if(bytes_is_null(cpf_response)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to extract CPF from EIP response");
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    /* Step 7: Extract CIP payload from CPF response (UDI item). */
-    cip_response = enip_cpf_extract_udi_payload(cpf_response);
-    if(bytes_is_null(cip_response)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to extract CIP from CPF response");
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    /* Step 8: Parse CIP response header using enip_cip_parse_response.
+    /* Step 3: Parse CIP response header using enip_cip_parse_response.
      * This correctly handles: reply_service (1) + reserved (1) + status (1) + ext_status_size (1) + data
      * Returns the data portion after the 4-byte header. */
     Bytes cip_data = enip_cip_parse_response(cip_response, &cip_status, &ext_status_size, NULL);
