@@ -52,6 +52,7 @@
 #include <libplctag/protocols/enip/enip_conn.h>
 #include <libplctag/protocols/enip/enip_cpf.h>
 #include <libplctag/protocols/enip/enip_eip.h>
+#include <libplctag/protocols/enip/enip_txn.h>
 #include <inttypes.h>
 #include <platform.h>
 #include <utils/arena.h>
@@ -150,6 +151,17 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "ENIP: fetching root symbol inventory (service 0x55 on class 0x6B)");
 
+    /* The name->instance_id cache is created lazily here on each (re)connect.  A fresh
+     * walk replaces any stale contents, so clear an existing table before refilling. */
+    if(conn->root_symbol_cache) {
+        enip_root_symbol_cache_clear(conn);
+    }
+    conn->root_symbol_cache = hashtable_create(64);
+    if(!conn->root_symbol_cache) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "ENIP: failed to create root symbol cache");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
     uint32_t instance_id = 0;
     int32_t  total       = 0;
     int32_t  fragment    = 0;
@@ -171,40 +183,20 @@ int32_t enip_metadata_fetch_root_symbols(enip_connection_t *conn) {
 
         if(bytes_is_null(cip)) { return PLCTAG_ERR_NO_MEM; }
 
-        Bytes cpf = enip_cpf_build_unconnected(&conn->tx_arena, cip);
-        if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
-
-        Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
-                                             conn->session.session_handle,
-                                             &conn->session.sender_context, cpf);
-        if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
-
-        socket_wait_state_t io_state = {0};
-        int32_t rc = socket_write_wait(conn->link.socket, &frame, 5000, &io_state);
+        /* Use the transaction seam: it owns CPF+EIP framing, restartable send, and
+         * length-driven frame reception (a fixed-size socket read would block until the
+         * timeout because the reply is smaller than the buffer). */
+        uint64_t used_ctx = 0;
+        Bytes cip_payload;
+        int32_t rc = enip_txn(&conn->link, &conn->session, &conn->tx_arena, &conn->rx_arena,
+                              ENIP_MSG_UNCONNECTED, cip, &used_ctx, &cip_payload);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-                   "ENIP: root symbol send failed (fragment %d): %d", fragment, rc);
+                   "ENIP: root symbol transaction failed (fragment %d): %d", fragment, rc);
             return rc;
         }
         conn->messages_sent++;
-
-        arena_reset(&conn->rx_arena);
-        Bytes response = bytes_alloc(&conn->rx_arena, 4096);
-        if(bytes_is_null(response)) { return PLCTAG_ERR_NO_MEM; }
-
-        rc = socket_read_wait(conn->link.socket, &response, 5000, &io_state);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-                   "ENIP: root symbol read failed (fragment %d): %d", fragment, rc);
-            return rc;
-        }
         conn->messages_received++;
-
-        Bytes cpf_payload = enip_eip_extract_cpf_payload(response);
-        if(bytes_is_null(cpf_payload)) { return PLCTAG_ERR_REMOTE_ERR; }
-
-        Bytes cip_payload = enip_cpf_extract_udi_payload(cpf_payload);
-        if(bytes_is_null(cip_payload)) { return PLCTAG_ERR_REMOTE_ERR; }
 
         uint8_t cip_status = 0;
         uint8_t ext_sz = 0;
@@ -302,54 +294,45 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
 
     if(bytes_is_null(cip)) { return PLCTAG_ERR_NO_MEM; }
 
-    Bytes cpf = enip_cpf_build_unconnected(&conn->tx_arena, cip);
-    if(bytes_is_null(cpf)) { return PLCTAG_ERR_NO_MEM; }
-
-    Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
-                                         conn->session.session_handle,
-                                         &conn->session.sender_context, cpf);
-    if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
-
-    socket_wait_state_t io_state = {0};
-    int32_t rc = socket_write_wait(conn->link.socket, &frame, 5000, &io_state);
+    /* Use the transaction seam (owns framing + length-driven receive). */
+    uint64_t used_ctx = 0;
+    Bytes cip_payload;
+    int32_t rc = enip_txn(&conn->link, &conn->session, &conn->tx_arena, &conn->rx_arena,
+                          ENIP_MSG_UNCONNECTED, cip, &used_ctx, &cip_payload);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: Phase-2 send failed for instance %" PRIu32 ": %d", tag_instance_id, rc);
+               "ENIP: Phase-2 transaction failed for instance %" PRIu32 ": %d", tag_instance_id, rc);
         return rc;
     }
     conn->messages_sent++;
-
-    arena_reset(&conn->rx_arena);
-    Bytes response = bytes_alloc(&conn->rx_arena, 512);
-    if(bytes_is_null(response)) { return PLCTAG_ERR_NO_MEM; }
-
-    rc = socket_read_wait(conn->link.socket, &response, 5000, &io_state);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: Phase-2 read failed for instance %" PRIu32 ": %d", tag_instance_id, rc);
-        return rc;
-    }
     conn->messages_received++;
 
-    Bytes cpf_payload = enip_eip_extract_cpf_payload(response);
-    if(bytes_is_null(cpf_payload)) { return PLCTAG_ERR_REMOTE_ERR; }
-
-    Bytes cip_payload = enip_cpf_extract_udi_payload(cpf_payload);
-    if(bytes_is_null(cip_payload)) { return PLCTAG_ERR_REMOTE_ERR; }
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Phase-2 raw CIP reply (%d bytes):", (int)cip_payload.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, cip_payload.data, (int)cip_payload.len);
 
     uint8_t cip_status = 0;
     uint8_t ext_sz = 0;
     Bytes data;
     Bytes parsed = enip_cip_parse_response(cip_payload, &cip_status, &ext_sz, &data);
 
-    if(bytes_is_null(parsed) || cip_status != CIP_STATUS_SUCCESS) {
+    /* 0x06 = "partial transfer / more data" is expected when GetInstanceAttributeList
+     * (0x55) is used on a single instance; the requested instance's data is still present. */
+    if(bytes_is_null(parsed)
+       || (cip_status != CIP_STATUS_SUCCESS && cip_status != CIP_STATUS_PARTIAL)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                "ENIP: Phase-2 CIP status 0x%02" PRIx8 " for instance %" PRIu32,
                cip_status, tag_instance_id);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    if(data.len < 16) {
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: Phase-2 data after CIP header (%d bytes):", (int)data.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, data.data, (int)data.len);
+
+    /* GetInstanceAttributeList (0x55) returns a list of instance entries; we only need
+     * the first (the instance we asked to start from).  Each entry is:
+     *   instance_id(4) + attr2 symbol_type(2) + attr7 element_size(2) + attr8 dims(3*4=12)
+     * = 20 bytes.  The leading instance_id must be skipped before the attribute values. */
+    if(data.len < 20) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                "ENIP: Phase-2 response too short (%zu bytes) for instance %" PRIu32,
                data.len, tag_instance_id);
@@ -360,7 +343,7 @@ int32_t enip_metadata_fetch_tag_info(enip_connection_t *conn, uint32_t tag_insta
     uint16_t elem_sz  = 0;
     uint32_t dims[3]  = {0, 0, 0};
 
-    bytes_unpack(data, BYTES_LE, &sym_type, &elem_sz, &dims[0], &dims[1], &dims[2]);
+    bytes_unpack(data, BYTES_LE, BYTES_SKIP(4), &sym_type, &elem_sz, &dims[0], &dims[1], &dims[2]);
 
     *symbol_type_out  = sym_type;
     *element_size_out = elem_sz;

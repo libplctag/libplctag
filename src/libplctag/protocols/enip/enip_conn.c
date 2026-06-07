@@ -115,6 +115,7 @@
 #include <libplctag/protocols/enip/tag.h>
 #include <inttypes.h>
 #include <platform.h>
+#include <utils/random_utils.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -502,18 +503,6 @@ static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uin
 
     arena_reset(&conn->tx_arena);
 
-    /* Build CIP payload with appropriate parameters for service code. */
-    uint32_t orig_to_targ_params, targ_to_orig_params;
-    if(service_code == 0x5B) {
-        /* FO Extended: 32-bit conn params with 12-bit size field. */
-        orig_to_targ_params = 0x0FA3u; /* ~4002 bytes with high priority and class 3 bits */
-        targ_to_orig_params = 0x0FA3u;
-    } else {
-        /* Standard FO: 16-bit conn params with 9-bit size field. */
-        orig_to_targ_params = 0x43F8u; /* 504 bytes with high priority */
-        targ_to_orig_params = 0x43F8u;
-    }
-
     /* Build connection path (reuse from main forward_open) */
     uint8_t conn_path[8];
     uint8_t conn_path_words;
@@ -534,15 +523,26 @@ static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uin
         conn_path_words = 2;
     }
 
-    /* Assign connection ID if needed */
-    if(conn->session.cip_conn_serial == 0) {
-        conn->session.cip_conn_serial = 1;
-    }
-    uint32_t our_conn_id = (uint32_t)(uintptr_t)conn ^ (uint32_t)conn->session.cip_conn_serial;
+    /* Assign a UNIQUE connection serial and T->O connection ID for every attempt.
+     * The PLC keys an open connection on (connection_serial, vendor_id, originator_serial);
+     * reusing a fixed serial makes a new ForwardOpen look like a duplicate of a connection
+     * that is still open (e.g. left over from a previous run that did not ForwardClose),
+     * which the PLC rejects with extended status 0x0100 ("connection in use / duplicate FO").
+     * Randomizing the serial each attempt avoids that collision. */
+    conn->session.cip_conn_serial = (uint16_t)(random_u64(0xFFFE) + 1); /* 1..0xFFFF, never 0 */
+    uint32_t our_conn_id = (uint32_t)random_u64(0xFFFFFFFFu);
     if(our_conn_id == 0) { our_conn_id = 0x12345678u; }
 
-    /* Build FO CIP payload */
-    Bytes fo_fixed = bytes_pack(&conn->tx_arena, BYTES_LE,
+    /* Build FO CIP payload.  The network connection parameters differ in WIDTH and
+     * LAYOUT between the two services, so the RPI/params block is packed separately:
+     *   - Standard FO (0x54): 16-bit params.  0x43F8 = point-to-point, variable, 504 bytes.
+     *   - Extended FO (0x5B): 32-bit "large" params.  Connection-type lives in bits 30-29
+     *     and the variable-size flag in bit 25, so point-to-point+variable = 0x42000000;
+     *     OR in the 16-bit size.  (Sending 0x00000FA3 leaves connection-type = Null, which
+     *     the PLC rejects with extended status 0x0108.)
+     * Packing 32-bit params for the standard service shifts the transport-class/path fields
+     * and yields extended status 0x0103, so the width must match the service. */
+    Bytes fo_prefix = bytes_pack(&conn->tx_arena, BYTES_LE,
                                 service_code,
                                 (uint8_t)0x02,        /* path_size: 2 words to CM */
                                 (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24, (uint8_t)0x01,
@@ -552,15 +552,31 @@ static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uin
                                 (uint16_t)conn->session.cip_conn_serial,
                                 (uint16_t)0xF33D,     /* vendor ID */
                                 (uint32_t)0x21504345u,/* serial number */
-                                (uint8_t)0x03, (uint8_t)0x00, (uint8_t)0x00, (uint8_t)0x00,
-                                (uint32_t)1000000u,   /* O->T RPI */
-                                orig_to_targ_params,
-                                (uint32_t)1000000u,   /* T->O RPI */
-                                targ_to_orig_params,
-                                (uint8_t)0xA3,        /* transport_class */
-                                conn_path_words);
+                                (uint8_t)0x03, (uint8_t)0x00, (uint8_t)0x00, (uint8_t)0x00);
+    if(bytes_is_null(fo_prefix)) { return PLCTAG_ERR_NO_MEM; }
 
-    if(bytes_is_null(fo_fixed)) { return PLCTAG_ERR_NO_MEM; }
+    Bytes fo_params;
+    if(service_code == 0x5B) {
+        /* 32-bit large params: point-to-point + variable + size 4002 bytes. */
+        fo_params = bytes_pack(&conn->tx_arena, BYTES_LE,
+                               (uint32_t)1000000u,        /* O->T RPI */
+                               (uint32_t)(0x42000000u | 4002u),
+                               (uint32_t)1000000u,        /* T->O RPI */
+                               (uint32_t)(0x42000000u | 4002u));
+    } else {
+        /* 16-bit params: point-to-point + variable + size 504 bytes. */
+        fo_params = bytes_pack(&conn->tx_arena, BYTES_LE,
+                               (uint32_t)1000000u,        /* O->T RPI */
+                               (uint16_t)0x43F8u,
+                               (uint32_t)1000000u,        /* T->O RPI */
+                               (uint16_t)0x43F8u);
+    }
+    if(bytes_is_null(fo_params)) { return PLCTAG_ERR_NO_MEM; }
+
+    Bytes fo_suffix = bytes_pack(&conn->tx_arena, BYTES_LE,
+                                 (uint8_t)0xA3,       /* transport_class/trigger */
+                                 conn_path_words);
+    if(bytes_is_null(fo_suffix)) { return PLCTAG_ERR_NO_MEM; }
 
     /* Append connection path */
     size_t path_bytes = (size_t)conn_path_words * 2u;
@@ -568,8 +584,12 @@ static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uin
     if(!path_buf) { return PLCTAG_ERR_NO_MEM; }
     memcpy(path_buf, conn_path, path_bytes);
 
-    Bytes cip_payload = bytes_concat(&conn->tx_arena, fo_fixed,
-                                     (Bytes){path_buf, path_bytes});
+    /* NOTE: must be named variables, not inline (Bytes){...} compound literals.
+     * bytes_concat() counts its args by counting commas in the preprocessor, and the
+     * comma inside a brace-initializer is NOT hidden from the macro — it would inflate
+     * the count and make bytes_concat_impl va_arg one Bytes too many (stack underflow). */
+    Bytes path_seg = (Bytes){path_buf, path_bytes};
+    Bytes cip_payload = bytes_concat(&conn->tx_arena, fo_prefix, fo_params, fo_suffix, path_seg);
     if(bytes_is_null(cip_payload)) { return PLCTAG_ERR_NO_MEM; }
 
     /* Wrap in CPF+EIP and send */
@@ -579,6 +599,10 @@ static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uin
     Bytes frame = enip_eip_build_request(&conn->tx_arena, ENIP_CMD_UNCONNECTED_SEND,
                                          conn->session.session_handle, &conn->session.sender_context, cpf);
     if(bytes_is_null(frame)) { return PLCTAG_ERR_NO_MEM; }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: ForwardOpen (0x%02" PRIx8 ") outgoing frame (%d bytes):",
+           service_code, (int)frame.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, frame.data, (int)frame.len);
 
     socket_wait_state_t io_state = {0};
     int32_t rc = socket_write_wait(conn->link.socket, &frame, 5000, &io_state);
@@ -605,14 +629,28 @@ static int32_t enip_connection_forward_open_attempt(enip_connection_t *conn, uin
     Bytes cip_response = enip_cpf_extract_udi_payload(cpf_response);
     if(bytes_is_null(cip_response)) { return PLCTAG_ERR_REMOTE_ERR; }
 
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP: ForwardOpen (0x%02" PRIx8 ") raw CIP reply (%d bytes):",
+           service_code, (int)cip_response.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, cip_response.data, (int)cip_response.len);
+
     /* Parse CIP header */
     uint8_t cip_status, ext_sz;
     Bytes cip_data = enip_cip_parse_response(cip_response, &cip_status, &ext_sz, NULL);
     if(bytes_is_null(cip_data)) { return PLCTAG_ERR_REMOTE_ERR; }
 
     if(cip_status != 0x00) {
+        /* On failure the extended status word(s) say WHY (e.g. 0x0100 conn-in-use,
+         * 0x0103 bad transport, 0x0113 no buffer, 0x0315 invalid segment in path).
+         * The CIP reply layout is: service(1) reserved(1) status(1) ext_sz(1) then the
+         * ext-status words, so read directly from cip_response at offset 4. */
+        uint16_t ext_status = 0;
+        if(ext_sz > 0 && cip_response.len >= 6) {
+            ext_status = (uint16_t)(cip_response.data[4] | ((uint16_t)cip_response.data[5] << 8));
+        }
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-               "ENIP: ForwardOpen (0x%02" PRIx8 ") CIP status 0x%02" PRIx8, service_code, cip_status);
+               "ENIP: ForwardOpen (0x%02" PRIx8 ") CIP status 0x%02" PRIx8
+               " ext_sz=%" PRIu8 " ext_status=0x%04" PRIx16,
+               service_code, cip_status, ext_sz, ext_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -734,7 +772,10 @@ static Bytes enip_cip_unconnected_send_request(Arena *arena, Bytes inner_cip,
     }
     memcpy(path_buf, route_path, (size_t)route_path_words * 2u);
 
-    Bytes complete = bytes_concat(arena, uc_with_cip, (Bytes){path_buf, (size_t)route_path_words * 2u});
+    /* Named variable, not an inline (Bytes){...}: the comma inside the brace-initializer
+     * would be counted by the bytes_concat() arg-counting macro and over-count the args. */
+    Bytes route_seg = (Bytes){path_buf, (size_t)route_path_words * 2u};
+    Bytes complete = bytes_concat(arena, uc_with_cip, route_seg);
     return complete;
 }
 
@@ -932,8 +973,10 @@ static int32_t enip_connection_forward_close(enip_connection_t *conn) {
     if(!path_buf) { return PLCTAG_ERR_NO_MEM; }
     memcpy(path_buf, conn_path, path_bytes);
 
-    Bytes cip_payload = bytes_concat(&conn->tx_arena, fc_fixed,
-                                     (Bytes){path_buf, path_bytes});
+    /* Named variable, not an inline (Bytes){...}: the comma inside the brace-initializer
+     * would inflate bytes_concat()'s preprocessor arg count and over-read (stack underflow). */
+    Bytes path_seg = (Bytes){path_buf, path_bytes};
+    Bytes cip_payload = bytes_concat(&conn->tx_arena, fc_fixed, path_seg);
     if(bytes_is_null(cip_payload)) { return PLCTAG_ERR_NO_MEM; }
 
     /* Wrap in CPF+EIP and send */
@@ -999,15 +1042,33 @@ static void enip_set_conn_status(enip_connection_t *conn, int32_t status) {
  * until it is due, or ENIP_WORK_WAIT_MS if active_tags is empty. */
 #define ENIP_WORK_WAIT_MS ((int64_t)1000)
 
+/* How long the engine should block before the next unit of work.
+ * A tag has "work" if it has a pending read/write (op_state == REQUEST) or if its
+ * metadata is stale for this connection generation (needs first-time/after-reconnect
+ * resolution).  Returns 0 if work is due now, the soonest future due time, or
+ * ENIP_WORK_WAIT_MS when nothing is pending (so the loop parks on the socket instead
+ * of busy-spinning). */
 static int64_t enip_next_due_wait(enip_connection_t *conn, int64_t now_ms) {
     int64_t wait_ms = ENIP_WORK_WAIT_MS;
 
     critical_block(conn->active_tags_mutex) {
-        if(vector_length(conn->active_tags) == 0) { break; }
-        enip_tag_t *front = (enip_tag_t *)vector_get(conn->active_tags, 0);
-        if(!front) { break; }
-        int64_t until_due = front->op.op_time - now_ms;
-        wait_ms = (until_due <= 0) ? 0 : until_due;
+        int n = vector_length(conn->active_tags);
+        for(int i = 0; i < n; i++) {
+            enip_tag_t *tag = (enip_tag_t *)vector_get(conn->active_tags, i);
+            if(!tag) { continue; }
+
+            /* Metadata is usable only when READY for THIS generation; a fresh tag
+             * (state NONE) is not usable even though generation 0 == 0 before the
+             * first connect, so test state explicitly. */
+            bool needs_meta = (tag->meta.state != ENIP_META_READY
+                               || tag->meta.generation != conn->metadata_generation);
+            bool has_op     = (tag->op.op_state == ENIP_OP_REQUEST);
+            if(!needs_meta && !has_op) { continue; } /* nothing to do for this tag */
+
+            int64_t until_due = tag->op.op_time - now_ms;
+            if(until_due <= 0) { wait_ms = 0; break; }       /* due now */
+            if(until_due < wait_ms) { wait_ms = until_due; } /* soonest future */
+        }
     }
 
     return wait_ms;
@@ -1059,7 +1120,27 @@ static void enip_reset_inflight_tags(enip_connection_t *conn) {
  *         transaction_id matches sender_context; on PLCTAG_ERR_PARTIAL encode
  *         + send the next chunk and loop.
  *
- * Returns PLCTAG_STATUS_OK, or an error code that should trigger err_backoff. */
+/* Mark an operation complete and wake any API thread blocked in plc_tag_create/read/write.
+ * The ENIP connection thread (not the global tickler) owns completion signaling for its
+ * tags, which is why they set skip_tickler.  Mirrors the Modbus PLC thread:
+ * set the matching complete flag, raise the completion event, dispatch callbacks, wake. */
+static void enip_tag_signal_complete(enip_tag_t *tag, int32_t status) {
+    if(!tag) { return; }
+
+    if(tag->op.kind == ENIP_OP_KIND_WRITE) {
+        tag->write_complete = 1;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)status);
+    } else {
+        tag->read_complete = 1;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)status);
+    }
+
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+    plc_tag_generic_wake_tag((plc_tag_p)tag);
+}
+
+
+/* Returns PLCTAG_STATUS_OK, or an error code that should trigger err_backoff. */
 static int32_t enip_recv_dispatch(enip_connection_t *conn) {
     int32_t rc;
 
@@ -1132,9 +1213,8 @@ static int32_t enip_recv_dispatch(enip_connection_t *conn) {
                                                       (size_t)(next_off - slot_off));
                         int32_t rc_accept = conn->mfg_ops->accept_chunk(tag, slot_resp);
                         tag->status = (int8_t)(rc_accept == PLCTAG_STATUS_OK ? 0 : rc_accept);
-                        
-                        
                         tag->op.op_state = ENIP_OP_IDLE;
+                        enip_tag_signal_complete(tag, rc_accept == PLCTAG_STATUS_OK ? PLCTAG_STATUS_OK : rc_accept);
                         if(rc_accept != PLCTAG_STATUS_OK) {
                             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                                    "ENIP: Batch slot %u accept_chunk error: %d",
@@ -1148,27 +1228,37 @@ static int32_t enip_recv_dispatch(enip_connection_t *conn) {
 
         } else {
             /* ── Single-tag response ─────────────────────────────────────────
-             * Find the RESPONSE-state tag matching sender_context; on PARTIAL
-             * encode + send the next chunk and loop to receive again.         */
+             * Match by EIP sender_context (echoed for unconnected SendRRData).  For
+             * connected SendUnitData the device returns context 0, so fall back to the
+             * single in-flight tag — the engine is synchronous (one send then one recv
+             * per cycle), so a non-0x8A reply belongs to the lone INFLIGHT tag.
+             * On PARTIAL we encode + send the next chunk and loop to receive again. */
             uint64_t ctx = enip_connection_extract_sender_context(response.data);
             enip_tag_t *tag = NULL;
 
             critical_block(conn->active_tags_mutex) {
                 int n = vector_length(conn->active_tags);
+                enip_tag_t *only_inflight = NULL;
+                int inflight_count = 0;
                 for(int i = 0; i < n; i++) {
                     enip_tag_t *candidate = (enip_tag_t *)vector_get(conn->active_tags, i);
-                    if(candidate && candidate->op.op_state == ENIP_OP_INFLIGHT
-                       && candidate->op.transaction_id == ctx) {
-                        /* rc_inc returns NULL if the tag is already being destroyed */
-                        tag = (enip_tag_t *)rc_inc(candidate);
+                    if(!candidate || candidate->op.op_state != ENIP_OP_INFLIGHT) { continue; }
+                    inflight_count++;
+                    only_inflight = candidate;
+                    if(candidate->op.transaction_id == ctx) {
+                        tag = (enip_tag_t *)rc_inc(candidate); /* NULL if being destroyed */
                         break;
                     }
+                }
+                /* Fallback: exactly one outstanding request (connected msg, ctx==0). */
+                if(!tag && only_inflight && inflight_count == 1) {
+                    tag = (enip_tag_t *)rc_inc(only_inflight);
                 }
             }
 
             if(!tag) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
-                       "ENIP: No RESPONSE-state tag for context=0x%016" PRIx64 " (stale?)", ctx);
+                       "ENIP: No INFLIGHT tag for context=0x%016" PRIx64 " (stale?)", ctx);
                 return PLCTAG_STATUS_OK;
             }
 
@@ -1184,10 +1274,9 @@ static int32_t enip_recv_dispatch(enip_connection_t *conn) {
                 if(bytes_is_null(next_req)) {
                     critical_block(conn->active_tags_mutex) {
                         tag->status = PLCTAG_ERR_REMOTE_ERR;
-                        
-                        
                         tag->op.op_state = ENIP_OP_IDLE;
                     }
+                    enip_tag_signal_complete(tag, PLCTAG_ERR_REMOTE_ERR);
                     rc_dec(tag);
                     return PLCTAG_ERR_REMOTE_ERR;
                 }
@@ -1216,10 +1305,9 @@ static int32_t enip_recv_dispatch(enip_connection_t *conn) {
             /* Done — OK or terminal error */
             critical_block(conn->active_tags_mutex) {
                 tag->status = (int8_t)(rc_accept == PLCTAG_STATUS_OK ? 0 : rc_accept);
-                
-                
                 tag->op.op_state = ENIP_OP_IDLE;
             }
+            enip_tag_signal_complete(tag, rc_accept == PLCTAG_STATUS_OK ? PLCTAG_STATUS_OK : rc_accept);
             rc_dec(tag); /* release the ref acquired before the mutex gap */
             if(rc_accept != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: accept_chunk failed: %d", rc_accept);
@@ -1534,9 +1622,14 @@ static int32_t enip_ensure_due_tags_metadata(enip_connection_t *conn, int64_t no
             int n = vector_length(conn->active_tags);
             if(i >= n) { done = true; break; }
             enip_tag_t *c = (enip_tag_t *)vector_get(conn->active_tags, i);
-            if(c && c->op.op_state == ENIP_OP_REQUEST
-               && c->op.op_time <= now_ms
-               && c->meta.generation != conn->metadata_generation) {
+            /* Resolve any tag whose metadata is not usable for this connection
+             * generation, regardless of whether a read/write is pending.  This lets tag
+             * creation complete (status leaves PENDING once metadata is READY) without
+             * requiring an explicit first read, and re-resolves every tag after a
+             * reconnect.  A fresh tag has state NONE (generation 0 == 0 is not enough). */
+            if(c && c->op.op_time <= now_ms
+               && (c->meta.state != ENIP_META_READY
+                   || c->meta.generation != conn->metadata_generation)) {
                 tag = (enip_tag_t *)rc_inc(c); /* NULL if tag is being destroyed */
             }
         }
@@ -1550,10 +1643,9 @@ static int32_t enip_ensure_due_tags_metadata(enip_connection_t *conn, int64_t no
             critical_block(conn->active_tags_mutex) {
                 tag->status = PLCTAG_ERR_NOT_FOUND;
                 tag->op.op_state = ENIP_OP_IDLE;
-                
-                
             }
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: tag '%s' not in root symbol cache", tag->tag_name);
+            enip_tag_signal_complete(tag, PLCTAG_ERR_NOT_FOUND);
             rc_dec(tag);
             continue;
         }
@@ -1570,11 +1662,10 @@ static int32_t enip_ensure_due_tags_metadata(enip_connection_t *conn, int64_t no
                 critical_block(conn->active_tags_mutex) {
                     tag->status = (int8_t)rc2;
                     tag->op.op_state = ENIP_OP_IDLE;
-                    
-                    
                 }
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                        "ENIP: fetch_tag_metadata failed for '%s': %d", tag->tag_name, rc2);
+                enip_tag_signal_complete(tag, rc2);
                 rc_dec(tag);
                 continue;
             }
@@ -1592,9 +1683,12 @@ static int32_t enip_ensure_due_tags_metadata(enip_connection_t *conn, int64_t no
             } else if(!tag->data) {
                 tag->status = PLCTAG_ERR_NO_MEM;
                 tag->op.op_state = ENIP_OP_IDLE;
-
-
             }
+        }
+
+        if(tag->meta.state != ENIP_META_READY) {
+            /* allocation failed above — wake the waiter with the error */
+            enip_tag_signal_complete(tag, PLCTAG_ERR_NO_MEM);
         }
 
         rc_dec(tag);

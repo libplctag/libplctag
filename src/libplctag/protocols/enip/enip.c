@@ -101,7 +101,6 @@ enip_connection_t *enip_registry_find_or_create(attr attribs) {
     }
 
     enip_connection_t *conn = NULL;
-    int is_new = 0;
 
     critical_block(enip_registry_mutex) {
         /* Search the list for a matching connection */
@@ -114,7 +113,6 @@ enip_connection_t *enip_registry_find_or_create(attr attribs) {
                rc_inc(*walker)) {
                 /* Found a match */
                 conn = *walker;
-                is_new = 0;
                 break;
             }
             walker = &((*walker)->next);
@@ -127,10 +125,16 @@ enip_connection_t *enip_registry_find_or_create(attr attribs) {
 
             conn = enip_connection_create(attribs);
             if(conn) {
-                /* Add to the front of the list */
+                /* enip_connection_create returns refcount 1.  That ref belongs to
+                 * the registry list (released in enip_teardown).  The caller (tag)
+                 * needs its OWN ref, matching the found-connection path above and
+                 * the "already rc_inc'd by registry" contract in enip_tag.c.
+                 * Without this rc_inc the tag and the list share one ref; dropping
+                 * the last tag frees the connection while it is still linked, and
+                 * enip_teardown then walks a dangling pointer (heap-use-after-free). */
                 conn->next = enip_connections;
                 enip_connections = conn;
-                is_new = 1;
+                rc_inc(conn);
             }
         }
     }

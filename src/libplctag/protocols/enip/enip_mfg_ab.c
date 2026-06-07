@@ -231,22 +231,25 @@ static int32_t enip_mfg_ab_accept_chunk(struct enip_tag_t *tag, Bytes cip_respon
  * Also fix signature: return type must be int32_t, not int (plan §0). */
 static int enip_mfg_ab_fetch_phase1_metadata(struct enip_connection_t *conn, Arena *arena) {
     /*
-     * Phase-1 metadata for AB devices: GetInstanceAttributeList on Class 0x6B (Symbol)
-     * Handles fragmentation by iterating through instance IDs.
-     *
-     * Fragment iteration pattern:
-     *   1. Request GetInstanceAttributeList for instance ID N
-     *   2. Receive response with symbol instances (fits in EIP packet)
-     *   3. Extract last instance ID from response
-     *   4. If more instances likely exist, request with ID = lastID + 1
-     *   5. Repeat until response indicates end-of-list
-     *
-     * CIP path with 16-bit instance ID:
-     *   Service 0x55 (GetInstanceAttributeList)
-     *   Path size: 0x03 (words)
-     *   [0x20=class segment, 0x6B=Class 0x6B (Symbol), 0x25=16-bit instance segment, instanceID]
+     * Phase-1 metadata for AB devices: the full GetInstanceAttributeList walk on the
+     * Symbol class (0x6B) lives in enip_metadata_fetch_root_symbols(), which parses each
+     * entry (instance_id + name) into the connection's root symbol cache and handles
+     * fragmentation.  This strategy hook simply delegates to it, keeping all framing and
+     * I/O on the shared transaction seam.
      */
+    (void)arena;
 
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "ENIP/AB: Fetching phase-1 metadata (root symbol inventory)");
+
+    if(!conn) { return PLCTAG_ERR_NULL_PTR; }
+
+    return enip_metadata_fetch_root_symbols(conn);
+}
+
+
+/* Old hand-rolled fragment loop retained below (disabled) for reference during bring-up. */
+#if 0
+static int enip_mfg_ab_fetch_phase1_metadata_legacy(struct enip_connection_t *conn, Arena *arena) {
     uint16_t instance_id = 0x0000;
     uint16_t last_instance_id = 0xFFFF;
     Bytes request;
@@ -352,6 +355,7 @@ static int enip_mfg_ab_fetch_phase1_metadata(struct enip_connection_t *conn, Are
 
     return PLCTAG_STATUS_OK;
 }
+#endif /* disabled legacy phase-1 loop */
 
 
 /* Fetch per-tag type/size/dims from the lazy phase-2 metadata cache.

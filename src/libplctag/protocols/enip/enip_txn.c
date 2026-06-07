@@ -94,6 +94,12 @@ int32_t enip_txn(enip_link_t *link, enip_session_t *session,
     used_context = session->sender_context - 1;
     *out_context = used_context;
 
+    /* Encode stages: bare CIP request, then the complete EIP frame on the wire. */
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP txn: CIP request (%d bytes):", (int)cip_request.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, cip_request.data, (int)cip_request.len);
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP txn: outgoing EIP frame (%d bytes):", (int)eip_frame.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, eip_frame.data, (int)eip_frame.len);
+
     /* Step 3: Send request with restartable I/O (wake absorbed). */
     socket_wait_state_t io_state = {0};
     do {
@@ -117,12 +123,20 @@ int32_t enip_txn(enip_link_t *link, enip_session_t *session,
         return rc;
     }
 
+    /* Decode stage 1: complete EIP frame (24-byte header + body) as received. */
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP txn: raw EIP frame (%d bytes):", (int)response.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, response.data, (int)response.len);
+
     /* Step 5: Extract CPF payload from EIP response. */
     Bytes cpf_response = enip_eip_extract_cpf_payload(response);
     if(bytes_is_null(cpf_response)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to extract CPF from EIP response");
         return PLCTAG_ERR_REMOTE_ERR;
     }
+
+    /* Decode stage 2: CPF frame (interface handle + timeout + item list). */
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP txn: CPF payload (%d bytes):", (int)cpf_response.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, cpf_response.data, (int)cpf_response.len);
 
     /* Step 6: Extract CIP payload from CPF response (mode-specific). */
     Bytes cip_response;
@@ -133,9 +147,14 @@ int32_t enip_txn(enip_link_t *link, enip_session_t *session,
     }
 
     if(bytes_is_null(cip_response)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ENIP: Failed to extract CIP from CPF response");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
+               "ENIP: Failed to extract CIP from CPF response (mode=%d)", (int)mode);
         return PLCTAG_ERR_REMOTE_ERR;
     }
+
+    /* Decode stage 3: bare CIP reply handed back to the caller for parsing. */
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "ENIP txn: CIP response (%d bytes):", (int)cip_response.len);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, cip_response.data, (int)cip_response.len);
 
     /* Return the CIP response slice. The caller will parse status and data. */
     *out_cip_response = cip_response;

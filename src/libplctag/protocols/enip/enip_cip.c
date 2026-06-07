@@ -371,7 +371,9 @@ Bytes enip_cip_parse_response(Bytes response, uint8_t *general_status,
     if(general_status) { *general_status = 0xFF; }
     if(extended_status_size) { *extended_status_size = 0; }
 
-    if(bytes_is_null(response) || !general_status || !extended_status_size || !data_out) {
+    /* data_out is optional: the parsed data slice is also the return value, so callers
+     * that only need the return value pass NULL (e.g. GetIdentity, ForwardOpen). */
+    if(bytes_is_null(response) || !general_status || !extended_status_size) {
         return bytes_null();
     }
 
@@ -403,7 +405,7 @@ Bytes enip_cip_parse_response(Bytes response, uint8_t *general_status,
         if(bytes_is_null(remaining)) { return bytes_null(); }
     }
 
-    *data_out = remaining;
+    if(data_out) { *data_out = remaining; }
     return remaining;
 }
 
