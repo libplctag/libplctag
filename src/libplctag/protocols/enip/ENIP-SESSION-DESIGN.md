@@ -105,9 +105,19 @@ if(conn->in_flight == NULL && conn->sched_head && conn->sched_head->op_time <= n
     pop sched_head -> in_flight;          /* dispatch exactly one */
 } else {
     wait_deadline = conn->sched_head ? conn->sched_head->op_time : FOREVER;
-    socket_wait_event(conn->sock, mask, wait_deadline - now);   /* head op_time IS the wait */
+    /* mask ALWAYS includes SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT so a freshly
+       linked tag (which calls socket_wake after linking) breaks the wait at once,
+       and so terminate is honored within one wait cycle. CAN_READ/CAN_WRITE are
+       added per state (§5). The head op_time IS the wait deadline. */
+    socket_wait_event(conn->sock, mask, wait_deadline - now);
 }
 ```
+
+This is the only blocking point in the whole IO thread. Every socket operation in
+every state funnels through this single `socket_wait_event`; nothing else ever
+blocks (see §5). That is what makes shutdown and wake responsive: the destructor
+sets `terminate`, calls `socket_wake`, and the thread returns from this wait within
+one cycle regardless of what transaction was in progress.
 
 This is the Modbus scheduling rule ("walk from the front until op_time is in the
 future, then wait on that op_time") reduced to its minimum: single-in-flight pops
@@ -160,10 +170,14 @@ struct enip_connection_t {
     enip_tag_p  sched_head, sched_tail;
     enip_tag_p  in_flight;            /* the single tag being serviced; rc-pinned */
 
-    /* fixed buffers — no per-request allocation */
-    Arena    arena;                   /* request build scratch; reset each send */
-    uint8_t  rx_buf[ENIP_CONN_MAX_PACKET];
-    size_t   rx_len;
+    /* one arena, reset twice per transaction (build, then receive). The tx and
+       rx buffers are NOT fixed arrays — they are temporary arena allocations
+       sized to the negotiated ForwardOpen capacity (§5.2). The arena BACKING
+       buffer is allocated once at connection create, large enough for the
+       largest packet we will ever request (the connection size we ask for in
+       ForwardOpen) plus EIP/CPF framing — that upper bound is known up front
+       because we choose the requested connection size. */
+    Arena    arena;
 
     /* lifecycle */
     enum { CONN_CONNECT, CONN_REGISTER, CONN_OPEN, CONN_READY,
@@ -172,9 +186,11 @@ struct enip_connection_t {
 };
 ```
 
-`arena`, `rx_buf`, and the scheduler nodes (which live inside the tags) are the
-*only* memory the request path touches. The arena is `arena_reset()` at the top of
-every send, so each transaction reuses the same bytes.
+The `arena` (which backs the temporary tx/rx buffers — §5.2) and the scheduler
+nodes (which live inside the tags) are the *only* memory the request path touches.
+The arena is `arena_reset()` **twice per transaction** — once before building the
+request and again before receiving the reply (§5.2) — so each transaction reuses
+the same backing bytes.
 
 ---
 
@@ -186,25 +202,119 @@ One thread per connection, created at registry-create time, looping until
 ```
 CONN_CONNECT  : if(!sock) socket_create(&sock);   /* create once; reuse across reconnects */
                 socket_connect_tcp_start/_check -> CONN_REGISTER
-CONN_REGISTER : send RegisterSession; on reply store session_handle -> CONN_OPEN
-CONN_OPEN     : (connected path) ForwardOpen; store cip_conn_id -> CONN_READY
+CONN_REGISTER : build RegisterSession into tx_buf; resume_state = CONN_REGISTER;
+                -> CONN_SENDING.  (reply handler stores session_handle -> CONN_OPEN)
+CONN_OPEN     : (connected path) build ForwardOpen into tx_buf;
+                resume_state = CONN_OPEN; -> CONN_SENDING.
+                (reply handler stores cip_conn_id + sizing -> CONN_READY)
+                (unconnected path: set sizing directly -> CONN_READY, no I/O)
 CONN_READY    : pick next due tag (section 3). If none, socket_wait_event on the
                 head's op_time. If one: rc_inc it, store in in_flight,
-                arena_reset, build request -> CONN_SENDING
-CONN_SENDING  : socket_write the request bytes -> CONN_WAITING
-CONN_WAITING  : socket_read into rx_buf; parse.
-                if(in_flight->abort_requested)  -> finish_aborted()
-                else if(partial)  set frag_offset; build ReadFrag -> CONN_SENDING
-                else  copy decoded bytes into in_flight->data; set status;
-                      raise READ/WRITE_COMPLETED
-                rc_dec(in_flight); in_flight = NULL; re-arm if auto-sync;
-                -> CONN_READY
+                arena_reset; tx_buf = arena_alloc(rx_cap); build request into tx_buf,
+                tx_off = 0; resume_state = CONN_READY -> CONN_SENDING
+CONN_SENDING  : ONE non-blocking socket_write of the remaining request bytes;
+                advance tx_off by the count written. If would-block (0/timeout),
+                stay in CONN_SENDING and return to the top loop's wait (mask adds
+                SOCK_EVENT_CAN_WRITE). When tx_off == tx_len:
+                  arena_reset;                       /* frees tx_buf            */
+                  rx_buf = arena_alloc(rx_cap); rx_len = 0;   /* §5.2           */
+                  -> CONN_WAITING.
+CONN_WAITING  : ONE non-blocking socket_read appending into rx_buf; advance rx_len.
+                Framing (§5.1): until rx_len >= 24 we are still reading the EIP
+                header; once we have it, total = 24 + eip_hdr.len; keep returning to
+                the wait (mask adds SOCK_EVENT_CAN_READ) until rx_len == total.
+                Only then parse. If would-block before complete, stay in
+                CONN_WAITING and return to the wait.
+                On a complete packet, dispatch on resume_state (§5.0):
+                - CONN_REGISTER/CONN_OPEN: parse the setup reply, advance the phase.
+                - CONN_READY (a tag transaction): parse zero-copy out of rx_buf,
+                  copy what we keep into in_flight->data BEFORE any arena_reset:
+                    if(in_flight->abort_requested)  -> finish_aborted()
+                    else if(partial/continuation)  copy returned elements into
+                          in_flight->data; set frag_offset/read_off; arena_reset;
+                          tx_buf = arena_alloc(rx_cap); build next request,
+                          tx_off = 0 -> CONN_SENDING
+                    else  copy decoded bytes into in_flight->data; set status;
+                          raise READ/WRITE_COMPLETED
+                    complete_tag() (§13.4): rc_dec(in_flight); in_flight = NULL;
+                    re-arm if auto-sync; -> CONN_READY
 CONN_CLOSING  : ForwardClose (if open) + UnregisterSession; socket_close(sock); exit
                 /* socket_destroy(&sock) happens later, in the destructor */
 ```
 
+**No state ever blocks in a socket call.** SENDING and WAITING each do at most one
+non-blocking socket op per loop iteration and otherwise return to the single
+`socket_wait_event` in §3. A multi-round-trip operation (ReadFrag continuation,
+OPEN_BULK windows) is expressed as `CONN_WAITING → build next → CONN_SENDING`
+transitions, **not** as an internal blocking loop — so `terminate`/`socket_wake`
+are still honored between every round trip.
+
 The response routes to `in_flight` by pointer; there is no id table. `conn_seq`
 is incremented and checked only as a sanity gate.
+
+### 5.0 Transport states are shared; `resume_state` says who to return to
+
+`CONN_SENDING` and `CONN_WAITING` are **generic transport sub-states** — they only
+move `tx_buf` out and a framed EIP packet in. They have no idea whether the bytes
+belong to RegisterSession, ForwardOpen, or a tag read. The initiating state
+(`CONN_REGISTER`, `CONN_OPEN`, or `CONN_READY`) records where to return by setting
+a single field before entering `CONN_SENDING`:
+
+```c
+uint8_t resume_state;   /* CONN_REGISTER | CONN_OPEN | CONN_READY: the phase whose
+                           reply handler runs when CONN_WAITING has a full packet */
+```
+
+On a complete packet, `CONN_WAITING` switches on `resume_state` and calls that
+phase's reply handler. Only `resume_state == CONN_READY` involves a tag
+(`in_flight`); the session-setup phases have no tag and just advance the
+handshake. This is what lets the session-setup packets and every tag transaction
+share one non-blocking send/receive path without duplicating it, and it resolves
+the apparent split between "phase states" and "transport states."
+
+### 5.1 Packet framing
+
+`rx_buf` accumulates across iterations via `rx_len` (Modbus does exactly this:
+modbus.c:2231–2277). Read the 24-byte EIP header first; its `len` field gives the
+payload size, so the full packet is `24 + len` bytes. Keep appending until
+`rx_len == 24 + len`, then parse once. A would-block read (`PLCTAG_ERR_TIMEOUT`
+from a non-blocking socket) is normal and just means "stay in CONN_WAITING and
+wait again." `rx_len` is reset to 0 when entering CONN_WAITING (§5.2). A
+`24 + len` larger than `rx_cap` is a framing error → `reset_connection` (it cannot
+happen for our own right-sized requests, since `rx_cap` is the negotiated packet
+size plus framing).
+
+### 5.2 Arena lifecycle: tx and rx are both arena allocations
+
+The arena is reset **twice per transaction**, and the tx/rx buffers are temporary
+allocations out of it — there are no fixed packet buffers in the connection struct:
+
+1. **Before build** (entering CONN_SENDING from CONN_READY, or building a
+   continuation): `arena_reset(&c->arena)`, then
+   `c->tx_buf = arena_alloc(&c->arena, c->rx_cap)` and encode the request into it.
+2. **After the send completes** (tx_off == tx_len, entering CONN_WAITING):
+   `arena_reset(&c->arena)` — this frees `tx_buf`, which is safe because the bytes
+   are already on the wire — then `c->rx_buf = arena_alloc(&c->arena, c->rx_cap)`
+   and `rx_len = 0`.
+
+So `tx_buf` and `rx_buf` are never live simultaneously, and the arena only ever
+holds one packet-sized buffer (plus build scratch) at a time. `rx_cap` is the
+whole-packet buffer size, `max_cip_packet_size + ENIP_FRAMING_OVERHEAD` (§14.3): it
+is derived once when `max_cip_packet_size` is set — from the ForwardOpen reply at
+`CONN_OPEN`, or from `ENIP_UNCONNECTED_CIP_MAX` on the unconnected path — **before**
+the first `CONN_READY`. The session-setup packets (RegisterSession, ForwardOpen
+itself) run before negotiation, so they use a bootstrap `rx_cap` = a small fixed
+`ENIP_BOOTSTRAP_PACKET` constant large enough for those replies; `rx_cap` is
+raised to the negotiated value once ForwardOpen succeeds. The arena backing buffer
+is allocated once (§4) for the largest `rx_cap` we will ever use — the connection
+size we *request* in ForwardOpen, plus framing — so neither `arena_alloc` ever
+fails or grows.
+
+The parse step reads zero-copy slices out of `rx_buf` (§14.4/§14.5 return `Bytes`
+into the input), so all bytes we intend to keep must be copied into
+`in_flight->data` *before* the next `arena_reset`. The state machine already does
+this: it copies into `tag->data` in CONN_WAITING, and only the subsequent build
+(CONN_READY or a continuation) resets the arena.
 
 ---
 
@@ -481,6 +591,14 @@ OPEN_BULK:   /* resume at element 1; loop until read_off == elem_count */
 probe, and round trips and bandwidth are both scarce, so we never re-read it. A
 scalar or any `elem_count == 1` tag skips `OPEN_BULK` and is ready after the probe.
 
+**Abort during open.** The probe→bulk sequence is several round trips, so
+`abort_requested` is checked at each `CONN_WAITING` boundary (§5), exactly as for a
+ReadFrag continuation — not only at the end. If an abort lands mid-open, the IO
+thread discards the in-flight reply, raises `ABORTED`, leaves `ready = 0`, and
+releases the connection; the half-filled `tag->data` is never exposed because the
+ready gate (§11.6) still blocks the API. The create call therefore fails rather
+than handing back a partially primed tag.
+
 ### 11.3 Window is computed, not discovered
 
 After the probe we know `elem_size` exactly and we know the negotiated capacity
@@ -556,8 +674,9 @@ creation read completes.
 | memory | lifetime | when allocated |
 |---|---|---|
 | connection struct | per PLC | registry create |
-| `arena` backing buffer | per PLC | registry create; `arena_reset` each send |
-| `rx_buf` | per PLC | inside connection struct (no separate alloc) |
+| `arena` backing buffer | per PLC | registry create, sized for the largest ForwardOpen connection size we request; reset twice per transaction (§5.2) |
+| tx buffer | — | **none separate** — arena alloc, freed by `arena_reset` after send |
+| rx buffer | — | **none separate** — arena alloc sized to negotiated `rx_cap` (§5.2) |
 | tag struct + path tail | per tag | tag create |
 | tag `data` buffer | per tag | sized once at open (section 11) from probed `elem_size * elem_count`; reallocated only if the type later changes |
 | scheduler list nodes | — | **none** — links live inside the tag struct |
@@ -698,10 +817,13 @@ itself from `sched_mutex`'s list (§6).
 `sched_mutex`, releases it, then calls `socket_wait_event`. A wake that lands in
 the gap between release and wait **must not be lost**. This requires
 `socket_wake` to be *latching* — it leaves the wake channel readable so the next
-`socket_wait_event` returns immediately even if the wake preceded it (the
-platform `socket_wake` writes to a self-pipe; verify, do not assume). The deadline
-is always recomputed under `sched_mutex` on the next loop, so a spurious early
-wake only costs one extra iteration.
+`socket_wait_event` returns immediately even if the wake preceded it. This is
+**confirmed**, not an assumption: the Modbus IO thread depends on exactly this
+behavior (it waits with `SOCK_EVENT_WAKE_UP` in the mask and drains the wake at
+modbus.c:1256/1346), so the platform `socket_wake`/`socket_wait_event` pair is
+already latching. The wait mask must therefore always include
+`SOCK_EVENT_WAKE_UP` (§3). The deadline is always recomputed under `sched_mutex`
+on the next loop, so a spurious early wake only costs one extra iteration.
 
 ### 13.9 Invariant summary
 
@@ -736,7 +858,7 @@ Lift only small helpers, re-checked against this spec.
 
 ### 14.0 File list
 
-```
+```text
 enip/
   CMakeLists.txt        builds the new sources into the libplctag target
   enip.h                protocol entry points (declared extern) + opaque types
@@ -757,7 +879,7 @@ platform header and spawns a thread.
 ### 14.1 `enip.h` / `enip.c` — protocol entry and registry
 
 Entry points the library already calls (keep these exact names — `init.c`
-references them, §0 of original task):
+references them):
 
 ```c
 /* enip.h */
@@ -808,8 +930,12 @@ extern size_t enip_session_max_cip(enip_connection_t *c); /* negotiated cap, for
 
 ### 14.3 `enip_session.c` — connection, IO thread, scheduler
 
-Owns `struct enip_connection_t` (full definition in §4 plus the fields below) and
-`ENIP_CONN_MAX_PACKET`, `CONN_*` state enum.
+Owns `struct enip_connection_t` (full definition in §4 plus the fields below), the
+`CONN_*` state enum, and the packet-sizing constants `ENIP_BOOTSTRAP_PACKET`
+(session-setup replies, §5.2), `ENIP_UNCONNECTED_CIP_MAX` (unconnected CIP cap),
+and `ENIP_FRAMING_OVERHEAD` (EIP header + CPF/CIP item bytes added to a CIP
+payload to get the whole-packet `rx_cap`). The connected-path `max_cip_packet_size`
+is set from the ForwardOpen reply, not a constant; `rx_cap` is derived from it.
 
 Connection-private fields beyond §4:
 
@@ -817,9 +943,38 @@ Connection-private fields beyond §4:
 char    *gateway, *path;          /* registry key (also in §4)             */
 int      tcp_port;                /* default 44818                          */
 uint8_t  is_connected_path : 1;   /* true ⇒ ForwardOpen + SendUnitData      */
-size_t   max_cip_packet_size;     /* set by EIP/ForwardOpen sizing          */
+size_t   max_cip_packet_size;     /* negotiated CIP payload cap; see note    */
 int64_t  reconnect_at_ms;         /* backoff deadline after an error        */
+
+/* current-request transmit/receive cursors (§5) — IO thread only, no lock  */
+uint8_t  resume_state;            /* §5.0: phase to return to after a reply  */
+uint8_t *tx_buf;                  /* arena alloc; the built request          */
+size_t   tx_len, tx_off;          /* total request bytes / bytes sent so far */
+uint8_t *rx_buf;                  /* arena alloc; full-packet buffer          */
+size_t   rx_cap, rx_len;          /* buffer size / bytes received so far     */
 ```
+
+`tx_buf` and `rx_buf` both point **into `arena`**. They are never alive at the
+same time: `tx_buf` is freed (by `arena_reset`) the moment the request is fully
+sent, immediately before `rx_buf` is allocated. See §5.2 for the reset/alloc
+lifecycle.
+
+**Two distinct sizes — keep them separate:**
+
+- `max_cip_packet_size` is the **CIP payload capacity** the device granted; it is
+  the `cap` the §11 window math divides by `elem_size`.
+- `rx_cap` is the **whole-packet buffer size** used for `arena_alloc` of `tx_buf`
+  and `rx_buf` and as the §5.1 framing bound. It is
+  `max_cip_packet_size + ENIP_FRAMING_OVERHEAD` (the 24-byte EIP header + CPF/CIP
+  item framing). `rx_cap` is (re)computed whenever `max_cip_packet_size` is set.
+
+`max_cip_packet_size` is set authoritatively by **ForwardOpen** on the connected
+path (the device returns the connection size it granted). On the unconnected path
+there is no negotiation, so it is fixed to a defined constant
+`ENIP_UNCONNECTED_CIP_MAX` (the EIP-level payload cap; conservative default for
+Logix is 504, configurable via attribs). Both paths must populate
+`max_cip_packet_size` (and therefore `rx_cap`) before the first `CONN_READY`;
+until then the handshake uses the bootstrap size (§5.2).
 
 Thread + main loop:
 
@@ -827,11 +982,14 @@ Thread + main loop:
 | --- | --- |
 | `static void io_thread_func(void *arg)` | the per-connection thread; `arg` is the connection (referenced via the task param, **not** rc'd inside — §6). Loops on `state` until `terminate`. |
 | `static void conn_destructor(void *arg)` | set `terminate`, `socket_wake`, `thread_join`, `thread_destroy`, then `socket_destroy`, free `gateway/path`, `arena_free`, unlink from registry under `registry_mutex` (§13.7). |
-| `static int32_t step_connect(enip_connection_t *c)` | `if(!c->sock) socket_create`; `socket_connect_tcp_start/_check`; on done → `CONN_REGISTER`. Honors `reconnect_at_ms` backoff. |
-| `static int32_t step_register(enip_connection_t *c)` | send RegisterSession, parse `session_handle`; → `CONN_OPEN`. |
-| `static int32_t step_open(enip_connection_t *c)` | connected path only: `enip_cip_forward_open` and store `cip_conn_id` + `max_cip_packet_size`; unconnected path computes `max_cip_packet_size` directly; → `CONN_READY`. |
+| `static int32_t step_connect(enip_connection_t *c)` | `if(!c->sock) socket_create`; `socket_connect_tcp_start/_check`; on done → `CONN_REGISTER`. During `reconnect_at_ms` backoff it does **not** sleep — it returns and lets the §3 `socket_wait_event(WAKE_UP\|TIMEOUT, …)` wait out the backoff so `terminate` stays responsive (modbus.c:1346). |
+| `static int32_t step_register(enip_connection_t *c)` | build RegisterSession into `tx_buf`; `resume_state = CONN_REGISTER`; → `CONN_SENDING` (§5.0). The reply is processed by `on_register_reply`. Does no socket I/O. |
+| `static int32_t step_open(enip_connection_t *c)` | connected path: build ForwardOpen into `tx_buf`, `resume_state = CONN_OPEN`, → `CONN_SENDING`; `on_open_reply` stores `cip_conn_id` + `max_cip_packet_size`/`rx_cap` and → `CONN_READY`. Unconnected path: set `max_cip_packet_size = ENIP_UNCONNECTED_CIP_MAX` (and `rx_cap`) directly, → `CONN_READY`, no I/O. |
+| `static void on_register_reply(enip_connection_t *c)` / `on_open_reply(...)` | session-setup reply handlers called from `step_waiting` when `resume_state` is `CONN_REGISTER`/`CONN_OPEN`; parse the EIP/CIP reply and advance the phase. No tag involved. |
 | `static enip_tag_p pick_due_tag(enip_connection_t *c, int64_t now, int64_t *wait_ms)` | §3/§13.4: under `sched_mutex`, if head due and `in_flight==NULL`, unlink head, clear its `abort_requested`, `rc_inc` into `in_flight`; else compute `*wait_ms` from head `op_time`. |
-| `static int32_t service_in_flight(enip_connection_t *c)` | drives one tag to completion: `try_lock(api_mutex)` (back off if busy), build request for `op` (read/write/open-probe/open-bulk/read-frag), `socket_write`, `socket_read`, parse, copy into `tag->data`, set status/flags, raise events, then §13.4 completion block. May loop internally for ReadFrag / OPEN_BULK continuations. |
+| `static int32_t build_request(enip_connection_t *c)` | tag transactions only: `try_lock(api_mutex)` on `in_flight` (back off and stay in CONN_READY if busy); `arena_reset`; encode the request for the tag's `op` (read/write/open-probe/open-bulk/read-frag) into `tx_buf`; set `tx_len`, `tx_off = 0`, `resume_state = CONN_READY`; → CONN_SENDING. **Does no socket I/O.** (RegisterSession/ForwardOpen are built by `step_register`/`step_open`, not here.) |
+| `static int32_t step_sending(enip_connection_t *c)` | ONE non-blocking `socket_write` of `tx_buf+tx_off .. tx_len`; advance `tx_off`. Would-block ⇒ stay in CONN_SENDING. Complete ⇒ `arena_reset`, alloc `rx_buf`, `rx_len = 0`, → CONN_WAITING. Never blocks. |
+| `static int32_t step_waiting(enip_connection_t *c)` | ONE non-blocking `socket_read` appending into `rx_buf`; advance `rx_len`. Apply §5.1 framing; if the packet is incomplete, stay in CONN_WAITING. On a full packet, dispatch on `resume_state` (§5.0): setup replies → `on_register_reply`/`on_open_reply`; a tag transaction → parse, handle abort/continuation/completion, and on a continuation rebuild the next request (→ CONN_SENDING). Never blocks. |
 | `static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status)` | §13.5/13.6: under `sched_mutex` reconcile `abort_requested`, set completion flags, re-arm auto-sync if `!scheduled`, clear `in_flight`, `rc_dec`. Raise `READ/WRITE_COMPLETED` or `ABORTED`, `plc_tag_generic_handle_event_callbacks`, `plc_tag_generic_wake_tag` (under `api_mutex`, before releasing it). |
 | `static void reset_connection(enip_connection_t *c)` | §10: under `sched_mutex` fail/disarm tags and clear `in_flight`; `socket_close` (never destroy); → `CONN_CONNECT`. |
 | `static void sched_insert_sorted(enip_connection_t *c, enip_tag_p t)` | insert by ascending `op_time`, after equal (§3); set `scheduled=1`. Caller holds `sched_mutex`. |
@@ -880,6 +1038,7 @@ extern bool  enip_cpf_unwrap(Bytes in, bool connected, uint16_t *seq_out, Bytes 
 #define CIP_FWD_OPEN    ((uint8_t)0x54)
 #define CIP_FWD_OPEN_LG ((uint8_t)0x5B)
 #define CIP_FWD_CLOSE   ((uint8_t)0x4E)
+#define CIP_UNCONN_SEND ((uint8_t)0x52)   /* Connection Manager, same code as ReadFrag */
 
 /* parsed CIP reply header (service reply byte, status, ext status) */
 typedef struct { uint8_t service; uint8_t status; uint16_t ext_status;
@@ -891,6 +1050,18 @@ extern bool   enip_cip_parse_reply(Bytes in, cip_reply_t *out);
 extern Bytes  enip_cip_encode_path(Arena *a, const char *name);
    /* "Foo.Bar[3]" → IOI: 0x91 symbolic segments + 0x28/0x29/0x2A index segments,
       word-aligned. Used once at create; the result is cached in the tag tail.     */
+
+extern Bytes  enip_cip_encode_route(Arena *a, const char *route);
+   /* gateway routing path to the CPU, e.g. "1,0" → port segment(s) 0x01 0x00 …,
+      word-aligned with a length prefix. Distinct from the symbolic tag IOI above.
+      Used by ForwardOpen (connected) and Unconnected_Send (unconnected).          */
+
+extern Bytes  enip_cip_unconnected_send(Arena *a, Bytes route, Bytes embedded);
+   /* CM Unconnected_Send (0x52) wrapper: service + CM path (0x20 0x06 0x24 0x01) +
+      priority/timeout + embedded-message-len + embedded CIP request + route path.
+      This is how an unconnected request reaches a routed Logix CPU (§MVP note).
+      The connected path does NOT use this — ForwardOpen carries the route, and
+      subsequent reads go out as bare CIP over SendUnitData.                        */
 
 extern Bytes  enip_cip_read(Arena *a, Bytes path, uint16_t count);            /* 0x4C */
 extern Bytes  enip_cip_read_frag(Arena *a, Bytes path, uint16_t count, uint32_t offset); /* 0x52 */
@@ -974,12 +1145,12 @@ The vtable is exactly §9. Functions:
 | `static int32_t enip_tag_data_written(plc_tag_p t)` | auto_sync_write: schedule `ENIP_OP_WRITE` at `now + auto_sync_write_ms` if not sooner. |
 | `get/set_int_attrib`, `get_byte_array_attrib` | `elem_size`, `elem_count`, `offset`, etc.; unknown attr → default. |
 
-Open-sequence helpers used by `service_in_flight` when `op` is an OPEN_* state
-live here (they touch `meta`, owned by `api_mutex`) or in `enip_session.c`; keep
-them next to the state they mutate and document the choice. They implement §11.2
-verbatim: `OPEN_PROBE` parses type via `enip_type_decode`, sizes `tag->data`,
-computes `window_elems`; `OPEN_BULK` loops windows from element 1; on completion
-set `ready`, raise `CREATED`.
+Open-sequence helpers invoked from `build_request` / `step_waiting` (§14.3) when
+`op` is an OPEN_* state live here (they touch `meta`, owned by `api_mutex`) or in
+`enip_session.c`; keep them next to the state they mutate and document the choice.
+They implement §11.2 verbatim: `OPEN_PROBE` parses type via `enip_type_decode`,
+sizes `tag->data`, computes `window_elems`; `OPEN_BULK` builds successive windows
+from element 1; on completion set `ready`, raise `CREATED`.
 
 ### 14.9 `CMakeLists.txt`
 
@@ -993,7 +1164,58 @@ list anything under `attic/`.
 1. `enip_type.c` + unit test (pure, no I/O).
 2. `enip_cip_encode_path` + unit test against `attic/enip_name.c` outputs.
 3. `enip_cpf.c`, EIP encode/decode (`enip_session.c` static helpers) + round-trip tests.
-4. `enip_session.c` connect → register → READY with a single hard-coded read.
-5. `enip_tag.c` create + vtable + the §11 open sequence.
-6. ForwardOpen/connected path, then auto-sync scheduling, then abort/teardown.
+4. `enip_session.c` connect → register → ForwardOpen → READY (the MVP path, §15)
+   with a single hard-coded connected read.
+5. `enip_tag.c` create + vtable + the §11 OPEN_PROBE (MVP stops here, §15.4).
+6. OPEN_BULK/ReadFrag, writes, auto-sync scheduling, then the unconnected path.
 7. Concurrency hardening pass against §13 (run with many tags + read/abort storms).
+
+---
+
+## 15. First end-to-end slice (MVP)
+
+The architecture supports a thin slice that compiles, links, and round-trips
+against a real ControlLogix without committing to the full feature set. The slice
+is chosen to exercise the load-bearing parts (IO step machine, scheduler, rc
+lifetime, ready gate) while deferring everything that only adds CIP surface.
+
+### 15.1 Path choice: connected (ForwardOpen) first
+
+The MVP uses the **connected path**. Rationale: a ControlLogix tag lives behind a
+route to the CPU (e.g. backplane `1,0`). On the connected path ForwardOpen carries
+that route once at session-open, and every subsequent read goes out as a bare CIP
+request over `SendUnitData` — no per-request routing wrapper. The unconnected path
+would instead require wrapping **every** request in CM `Unconnected_Send` (§14.5)
+with the route path inline, which is more code to reach the same first packet. So
+connected-first reaches a real PLC with less surface, not more.
+
+`enip_cip_unconnected_send` / the unconnected path stay specified (§14.5) but are
+**not** built in the MVP.
+
+### 15.2 In scope
+
+- IO thread + §5 non-blocking step machine (connect → register → ForwardOpen →
+  READY), the §3 single `socket_wait_event`, and §5.1 framing.
+- `enip_type`, `enip_cip_encode_path`, `enip_cip_encode_route`, EIP
+  encode/decode, CPF **connected** wrap/unwrap, ForwardOpen.
+- `enip_tag` create + read + status + abort + the §11 **OPEN_PROBE** only.
+  Require the whole tag to fit one negotiated packet; if not,
+  `PLCTAG_ERR_TOO_LARGE`.
+- §6 rc lifetime, §13 locking, §11.6 ready gate, clean teardown (§10).
+
+### 15.3 Deferred (gate out of the `op` switch)
+
+OPEN_BULK windowing, ReadFrag continuation, writes (`enip_tag_write`,
+`tag_data_written`), auto-sync, the unconnected path + Unconnected_Send, the
+Multi-Service batch, and the min-heap scheduler. Guard these behind a single
+`#define ENIP_MVP` so the deferred `op` cases are compiled out and the build stays
+honest about what is real.
+
+### 15.4 Definition of done for the MVP
+
+`plc_tag_create("protocol=enip-tcp&gateway=…&path=1,0&name=…&elem_count=1")`
+blocks on the create-time OPEN_PROBE, returns a ready tag, `plc_tag_read` +
+`plc_tag_get_*` return live values, `plc_tag_abort` cancels cleanly, and
+`plc_tag_destroy` / library shutdown join the IO thread within one wait cycle (no
+blocking-read stall). Everything after that is additive and does not touch the
+core.
