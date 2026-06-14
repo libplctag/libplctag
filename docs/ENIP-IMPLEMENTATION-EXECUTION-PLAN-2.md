@@ -1,3 +1,7 @@
+> **DEPRECATED.** This document predates the current EtherNet/IP design and is
+> retained for historical reference only. The authoritative design is
+> [ENIP-SESSION-DESIGN.md](../src/libplctag/protocols/enip/ENIP-SESSION-DESIGN.md). Do not use this document to guide new work.
+
 # ENIP Implementation Execution Plan — Part 2 (Full-Path Metadata, UDT Cache, Shared Storage, Auto-Sync)
 
 **Date:** 2026-06-07
@@ -33,6 +37,8 @@ Part 2 adds, in dependency order:
 - **Connection-level full-shape cache + recursive UDT cache** (Phase 11).
 - **Full-path resolution + path/elem_count validation** (Phase 12).
 - **Auto-sync read/write** (Phase 13).
+- **Special tags `@connection` / `@identity` / `@raw`** (Phase 14).
+- **Per-tag metadata as a JSON string attribute** (Phase 15).
 
 Each phase ends with a clean compile and a stated acceptance test, exactly like
 Part 1. Do them in order; later phases depend on earlier ones.
@@ -90,7 +96,8 @@ can be accumulated in an arena during resolution and then emitted as one
 
 /* A node within a block: one symbol level (root, member, or UDT field). */
 typedef struct enip_meta_node_t {
-    uint16_t data_type;        /* CIP type code (bare; dimension bits stripped)      */
+    uint16_t data_type;        /* NATIVE device type code (e.g. CIP 0x00C4); I/O only */
+    uint8_t  generic_type;     /* enip_generic_type_t — the PRESENTED type (§B.5)     */
     uint8_t  num_dims;         /* 0 = scalar, 1..3                                   */
     uint8_t  flags;            /* ENIP_META_F_IS_UDT, ENIP_META_F_IS_ARRAY, ...      */
     uint32_t array_dims[3];    /* element counts per active dimension                */
@@ -100,6 +107,7 @@ typedef struct enip_meta_node_t {
     uint32_t first_child_off;  /* block-relative offset to first child node, or 0   */
     uint32_t next_sibling_off; /* block-relative offset to next sibling node, or 0  */
     uint32_t name_off;         /* block-relative offset to this node's name bytes   */
+    uint32_t type_name_off;    /* offset to struct/UDT type name (informational), 0 */
 } enip_meta_node_t;
 
 typedef struct enip_meta_block_t {
@@ -210,6 +218,76 @@ selector already keys on vendor id **and** device type (Part 1 §9).
 The existing `fetch_tag_metadata` hook (Part 1 §9) is **retired/absorbed**: its
 single-instance fetch becomes the trivial `fetch_root_shape` for a bare-root tag.
 
+### B.5 Canonical generic type vocabulary
+
+Presented metadata must **never** use manufacturer/protocol/device type names
+(`DINT`, `REAL`, `BOOL`, PCCC `N`/`F`, OMRON-specific names). Every node carries a
+**generic** type drawn from one documented, protocol-neutral vocabulary. The
+native code is retained only in `data_type` for request encoding; it is **not**
+presented.
+
+**Translation is the strategy's responsibility.** The manufacturer layer is the
+only code that understands native type codes, so the `fetch_root_shape` /
+`fetch_udt` hooks set each node's `generic_type` as they build the block. Shared
+code (the serializer, the validity gate, the path walker) only ever reads
+`generic_type` and never sees a native name — this is the §A.1 isolation rule
+applied to type naming.
+
+```c
+/* enip_meta.h — the documented, stable vocabulary. Numeric values are part of
+ * the contract (exposed via get_int_attrib "type"); never renumber. */
+typedef enum {
+    ENIP_T_UNKNOWN = 0,  /* "unknown" — unmapped native type; data_type still set    */
+    ENIP_T_BOOL    = 1,  /* "bool"   — single boolean                                */
+    ENIP_T_I8      = 2,  /* "i8"                                                     */
+    ENIP_T_I16     = 3,  /* "i16"                                                    */
+    ENIP_T_I32     = 4,  /* "i32"                                                    */
+    ENIP_T_I64     = 5,  /* "i64"                                                    */
+    ENIP_T_U8      = 6,  /* "u8"                                                     */
+    ENIP_T_U16     = 7,  /* "u16"                                                    */
+    ENIP_T_U32     = 8,  /* "u32"                                                    */
+    ENIP_T_U64     = 9,  /* "u64"                                                    */
+    ENIP_T_F32     = 10, /* "f32"                                                    */
+    ENIP_T_F64     = 11, /* "f64"                                                    */
+    ENIP_T_STRING  = 12, /* "string" — character string (encoding in node flags)     */
+    ENIP_T_BYTES   = 13, /* "bytes"  — opaque/raw octet block                        */
+    ENIP_T_STRUCT  = 14, /* "struct" — composite; members are this node's children   */
+} enip_generic_type_t;
+```
+
+Token rules:
+- The serialized token is the lowercase string in the comment (`"i32"`, `"struct"`,
+  …). The numeric enum is the stable contract for `get_int_attrib("type")`.
+- **Arrays are not a type.** Dimensionality is `num_dims` / `array_dims`; an
+  `i32[10]` node is `generic_type = i32` with `num_dims = 1`. The presenter renders
+  the type plus its dims separately.
+- **Bit-string types** (AB `BYTE`/`WORD`/`DWORD`/`LWORD`) map to the unsigned int
+  of matching width (`u8`/`u16`/`u32`/`u64`) with the `ENIP_META_F_BITSTRING` flag
+  set, so width is exact and the bit-collection nature is still recoverable.
+- **`struct`** carries an optional `type_name` (the user/UDT name) purely as
+  informational text; the structural truth is its child nodes. Built-in predefined
+  structures are presented by their member layout the same way.
+- Timestamps and other width-defined scalars map to the matching integer/float
+  width (e.g. a 64-bit microsecond time → `i64`/`u64`).
+
+**Documented reference mapping (AB/Logix `fetch_*` implements this):**
+
+| Native (CIP) | code   | generic | Native (CIP) | code   | generic        |
+|--------------|--------|---------|--------------|--------|----------------|
+| BOOL         | 0x00C1 | bool    | UDINT        | 0x00C8 | u32            |
+| SINT         | 0x00C2 | i8      | ULINT        | 0x00C9 | u64            |
+| INT          | 0x00C3 | i16     | REAL         | 0x00CA | f32            |
+| DINT         | 0x00C4 | i32     | LREAL        | 0x00CB | f64            |
+| LINT         | 0x00C5 | i64     | BYTE         | 0x00D1 | u8 (bitstring) |
+| USINT        | 0x00C6 | u8      | WORD         | 0x00D2 | u16 (bitstring)|
+| UINT         | 0x00C7 | u16     | DWORD        | 0x00D3 | u32 (bitstring)|
+|              |        |         | LWORD        | 0x00D4 | u64 (bitstring)|
+| STRING / structured string | (struct/0x02xx) | string |  STRUCT / UDT | 0x02xx | struct |
+
+OMRON and PCCC strategies provide their **own** native→generic mapping tables in
+their respective files; the generic vocabulary above is the shared, documented
+target for all of them.
+
 ---
 
 ## Phase 10 — Shared metadata storage primitive
@@ -284,6 +362,10 @@ Tasks:
   `root_symbol_cache`), then Symbol instance attrs 2/7/8 for the root node; if the
   root is a structure, emit a UDT-typed node and let the shared walker lazy-load
   it (or descend here). Build nodes via the §B.1 builder; return the emitted block.
+- While building, **translate every native CIP type code into `generic_type`**
+  per the §B.5 mapping table (and set `ENIP_META_F_BITSTRING` for BYTE/WORD/…).
+  The native code stays in `data_type` for I/O; shared code only reads
+  `generic_type`. This translation is the AB strategy's job and lives only here.
 - Implement AB `fetch_udt` via the **Template object (Class 0x6C)**:
   GetAttributeList for member count / definition size / structure handle, then
   ReadTemplate to pull the member descriptor array + names; parse members into
@@ -376,6 +458,152 @@ Tasks:
 auto-write tag flushes a changed value within its interval; a write during a
 pending auto-read is not lost and the stale read does not overwrite it. ASan
 clean over a sustained auto-sync run.
+
+---
+
+## D. Special tags and the metadata attribute (design)
+
+Three special tags are supported; two legacy ones are not. All supported special
+tags are **manufacturer-neutral** and connection-scoped — they do not depend on
+device dialect (Identity object 0x01, connection statistics, and raw CIP are all
+generic), so they live in shared ENIP code, **not** behind the strategy vtable.
+
+### D.1 `@connection` — diagnostic/control handle
+
+Already routed in `enip.c` to `enip_connection_tag.c`
+(`TAG_PROTOCOL_ENIP_CONNECTION = 9`). Bound to the shared `enip_connection_t`; no
+data path, no metadata block. Surfaces connection state and statistics through
+`get_int_attrib`: `state`, `metadata_generation`, `messages_sent`/`_received`,
+queue depth, negotiated `cip_size_o_to_t`/`_t_to_o`, `session_handle`, reconnect
+count, last latency. Read/write are no-ops (or a control poke). It only needs the
+connection back-pointer wired (the TODO already noted in that file).
+
+### D.2 `@identity` — read-only device identity
+
+Formats the `enip_identity_t` already fetched during bootstrap (Part 1 §11.5) —
+**no new I/O**. Mirror legacy AB: place the raw Identity `GetAttributeAll` byte
+payload in `tag->data` (so `plc_tag_get_*` works), and expose fields through
+`get_int_attrib` (`vendor_id`, `device_type`, `product_code`, `revision_major`,
+`revision_minor`, `serial_number`, `status`). Product name string is available via
+the §D.4 string-attribute path once that exists.
+
+### D.3 `@raw` — CIP passthrough
+
+The app writes a raw CIP request into `tag->data`; on write/read the engine ships
+those exact bytes through the transaction seam (Part 1 §8) and copies the CIP
+response back into `tag->data`. **Bypasses** metadata resolution and
+`encode_chunk`/`accept_chunk`. Single frame, bounded by the negotiated cap (no
+fragmentation); messaging mode comes from `mfg_ops->messaging_mode`. The meaning
+of the response bytes is the application's responsibility.
+
+### D.4 Per-tag metadata as a JSON string attribute
+
+**Not** a special tag. Any normal ENIP data tag answers a string attribute
+(name TBD, e.g. `"metadata"`) with a JSON document describing its full resolved
+structure: the path, the addressed leaf, and the complete type tree — root shape
+plus nested UDT members with names, **generic types** (§B.5), dimensions, element
+sizes, and byte offsets. It serializes the **manufacturer-neutral**
+`enip_meta_block_t` tree (Phases 10–12) and the referenced UDT blocks, so the
+serializer is shared even though the shape was produced behind the vtable.
+
+The presented `type` is always a §B.5 token (`i32`, `f64`, `struct`, …) — **never**
+a native name like `DINT`. The native code is not exposed in the metadata; type
+translation already happened in the strategy when the block was built (§B.5).
+
+Two consequences:
+
+- **API gap (shared-library change).** There is no string-attribute API today;
+  the vtable has only `get_int_attrib` (`tag.h:68`) and the public header has no
+  `plc_tag_get_string_attribute`. This feature requires a generic
+  `get_str_attrib(tag, name, buf, buf_len)` vtable hook plus a public
+  `plc_tag_get_string_attribute(id, name, buf, len)` with **length-probe**
+  semantics (call with `len = 0` / NULL buffer to learn the required size, then
+  call again with a buffer), mirroring `plc_tag_get_string` /
+  `_get_string_length`. It is generic and benefits every protocol, but it touches
+  `lib.c`, `tag.h`, and `libplctag.h` — larger than Part 1's single
+  create-dispatch edit, so coordinate it.
+- **Forces a full fetch.** A leaf tag needs only its leaf type for I/O, but a
+  metadata request needs the whole root shape and every referenced UDT. So a
+  metadata request may trigger the full Phase 11 fetch if not already cached.
+
+The output can be **very large**. Build the JSON into a transient buffer on
+demand and free it after copy-out; never hold it resident. This keeps it off the
+steady-state path (it is an explicit out-of-band query, like resolution, not
+hot-path I/O).
+
+### D.5 Explicitly unsupported
+
+`@tags` (symbol enumeration) and `@udt/<id>` (UDT dump) from the legacy AB module
+are **not** implemented. Their use cases are served by the §D.4 metadata
+attribute on an ordinary tag.
+
+---
+
+## Phase 14 — Special tags: `@connection`, `@identity`, `@raw`
+
+**Goal:** finish `@connection` and add `@identity` and `@raw`, all in shared
+manufacturer-neutral ENIP code.
+
+**STATUS: ☐ PLANNED**
+
+Tasks:
+- **`@connection`:** wire the `enip_connection_t` back-pointer into
+  `enip_connection_tag_t`; implement the `get_int_attrib` set in §D.1; ensure the
+  tickler reads live connection stats.
+- **`@identity`:** add a small read-only tag type (or fold into the connection-tag
+  vtable family) that copies the cached raw Identity payload into `tag->data` at
+  create/first-read and answers the §D.2 `get_int_attrib` fields. No new socket
+  I/O — the identity is already fetched at bootstrap.
+- **`@raw`:** add a raw op path — an `ENIP_OP_KIND_RAW` (or a `raw` flag) whose
+  build step emits `tag->data[0..size)` as the CIP request verbatim and whose
+  accept step copies the CIP response slice back into `tag->data`, sets
+  `tag->size`, and completes. No metadata, no fragmentation; error
+  `PLCTAG_ERR_TOO_LARGE` if request or response exceeds the cap. Mode from
+  `mfg_ops->messaging_mode`.
+- Route all three in `enip_tag_create` alongside the existing `@connection`
+  branch; keep the data-tag path unchanged for normal names.
+
+**Accept:** `@connection` reports live state/stats; `@identity` returns the PLC's
+vendor/device/serial and raw identity bytes with no extra round trip; `@raw`
+round-trips a hand-built CIP request (e.g. a GetAttributeAll) and returns the
+device's response bytes. ASan clean.
+
+---
+
+## Phase 15 — Per-tag metadata JSON attribute
+
+**Goal:** expose the full resolved structure of any tag as JSON through a generic
+string-attribute API.
+
+**STATUS: ☐ PLANNED** — depends on Phases 10–12 (the shape/UDT blocks exist).
+
+Tasks:
+- **Shared-library API (generic, coordinate outside ENIP):** add
+  `get_str_attrib` to the tag vtable (`tag.h`); add
+  `plc_tag_get_string_attribute(id, name, buf, len)` to `libplctag.h` / `lib.c`
+  with length-probe semantics (§D.4); dispatch to the vtable like the int variant
+  (`lib.c:2104`).
+- **ENIP serializer (shared, manufacturer-neutral):** implement
+  `enip_tag_get_str_attrib(tag, "metadata", buf, len)` that walks the tag's
+  `meta.shape` block and referenced UDT blocks (§B.1) and emits the document —
+  node name, **generic type token (§B.5)**, dims, element size, byte offset,
+  optional struct `type_name`, children, and the addressed leaf / path summary.
+  It reads only `generic_type`; it must not emit native type names or codes.
+  Produce into a transient buffer; honor the length probe; free after copy-out.
+- Optionally expose the leaf's generic type as an integer via
+  `get_int_attrib("type")` returning the `enip_generic_type_t` value (§B.5), so
+  callers that don't parse the document still get a protocol-neutral type.
+- **On-demand full fetch:** if the tag resolved only its leaf, ensure the full
+  root shape + UDTs are loaded (call the Phase 11 getters) before serializing.
+  This may issue device queries (behind the vtable) — it is an explicit query,
+  not steady-state I/O.
+- Bound recursion/output with the same cycle guard and max-depth used in Phase 11.
+
+**Accept:** `plc_tag_get_string_attribute(tag, "metadata", …)` on a UDT/array tag
+returns well-formed JSON describing the complete nested structure; the length
+probe returns the exact size; a leaf-only tag triggers the full fetch on first
+request and is cached thereafter. No steady-state allocation; transient buffer
+freed. ASan clean.
 
 ---
 

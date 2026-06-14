@@ -1,3 +1,7 @@
+> **DEPRECATED.** This document predates the current EtherNet/IP design and is
+> retained for historical reference only. The authoritative design is
+> [ENIP-SESSION-DESIGN.md](../src/libplctag/protocols/enip/ENIP-SESSION-DESIGN.md). Do not use this document to guide new work.
+
 # ENIP Linear Vector-First Implementation Contract
 
 Date: 2026-05-25

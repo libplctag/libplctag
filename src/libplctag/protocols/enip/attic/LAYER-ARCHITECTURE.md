@@ -1,3 +1,7 @@
+> **DEPRECATED.** This document predates the current EtherNet/IP design and is
+> retained for historical reference only. The authoritative design is
+> [ENIP-SESSION-DESIGN.md](ENIP-SESSION-DESIGN.md). Do not use this document to guide new work.
+
 # ENIP Layered Protocol Architecture
 
 **Date:** 2026-05-29  
