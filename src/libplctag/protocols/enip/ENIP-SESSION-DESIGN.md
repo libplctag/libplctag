@@ -1034,7 +1034,7 @@ extern bool  enip_cpf_unwrap(Bytes in, bool connected, uint16_t *seq_out, Bytes 
 /* service codes */
 #define CIP_READ        ((uint8_t)0x4C)
 #define CIP_WRITE       ((uint8_t)0x4D)
-#define CIP_READ_FRAG   ((uint8_t)0x52)
+#define CIP_READ_FRAG   ((uint8_t)0x52) /* ROCKWELL ONLY! */
 #define CIP_FWD_OPEN    ((uint8_t)0x54)
 #define CIP_FWD_OPEN_LG ((uint8_t)0x5B)
 #define CIP_FWD_CLOSE   ((uint8_t)0x4E)
@@ -1219,3 +1219,789 @@ blocks on the create-time OPEN_PROBE, returns a ready tag, `plc_tag_read` +
 `plc_tag_destroy` / library shutdown join the IO thread within one wait cycle (no
 blocking-read stall). Everything after that is additive and does not touch the
 core.
+
+
+## Appendix A - Test Hardware and Tools
+
+### Hosts
+
+The following are host/port/path combinations for real hardware:
+
+| Host       | Port | Path    | Notes                         |
+| ---------- | ---- | ------- | ----------------------------- |
+| `10.206.1.39` | 44818 | `1,0`   | Older L61 ControlLogix   |
+| `10.206.1.40` | 44818 | `1,4`   | Newer L81 ControlLogix   |
+| `10.206.1.37` | 44818 | `1,5`   | Very old L55 ControlLogix   |
+
+### Tools
+
+#### scan_eip_network
+
+```text
+ ./build/bin_dist/scan_eip_network --delay-max-ms=2000 --network=10.206.1.0/24
+scan_eip_network(71397,0x1f4cf2240) malloc: nano zone abandoned due to inability to reserve vm space.
+IP_Address	Port	Vendor	Device_Type	Product_Code	Revision	Status	Serial	Product_Name	State
+10.206.1.39	4783	1	12	58	6.6	48	1916301	1756-ENBT/A	3
+10.206.1.37	4783	1	12	58	4.8	48	1906443	1756-ENBT/A	3
+10.206.1.36	4783	1	12	185	2.12	4	2627753215	1763-L16BWA B/12.00	0
+10.206.1.40	4783	1	14	164	31.11	12384	16112002	1756-L81E/B	3
+```
+
+Above, the host at IP address 10.206.1.36 is a MicroLogix 1100.
+
+The port is incorrect.
+
+#### get_identity
+
+```text
+./build/bin_dist/get_identity  --tag='protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=generic&name=@identity'
+
+get_identity(75495,0x1f4cf2240) malloc: nano zone abandoned due to inability to reserve vm space.
+Using tag string: protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=generic&name=@identity
+Tag created successfully (id=11)
+Read completed successfully
+Identity data size: 26 bytes
+
+=== CIP Identity Object ===
+
+Vendor ID: 1 (0x0001)
+Device Type: 14 (0x000E)
+Product Code: 164 (0x00A4)
+Revision: 31.11
+Status: 0x3060
+Serial Number: 16112002 (0x00F5D982)
+Product Name: 1756-L81E/B
+
+=== Raw Data ===
+01 00 0E 00 A4 00 1F 0B 60 30 82 D9 F5 00 0B 31 
+37 35 36 2D 4C 38 31 45 2F 42 
+
+SUCCESS!
+```
+
+#### list_tags_logix
+
+
+##### 10.206.1.40/1/4
+
+```text
+./build/bin_dist/list_tags_logix 10.206.1.40 1,4
+
+Starting with library version 2.7.0.
+Tag "Program:MainProgram.one_second_pulse" Instance 0x0003 Type ID 0x00c1 BOOL: Boolean value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=1&name=Program:MainProgram.one_second_pulse"
+Tag "Program:MainProgram.Count" Instance 0x0002 element type UDT (0x8f83) TIMER.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=12&elem_count=1&name=Program:MainProgram.Count"
+Tag "Program:MainProgram.Routine:MainRoutine" Instance 0x0001 element type SYSTEM (0x106d).  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=0&elem_count=1&name=Program:MainProgram.Routine:MainRoutine"
+Tag "TestArray2Dim[3,2]" Instance 0x0020 Type ID 0x40c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=6&name=TestArray2Dim"
+Tag "TestArray3Dim[4,3,2]" Instance 0x001f Type ID 0x60c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=24&name=TestArray3Dim"
+Tag "TestBigSINTArray[6000]" Instance 0x001e Type ID 0x20c2 SINT: Signed 8-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=6000&name=TestBigSINTArray"
+Tag "TestLargeBoolArray[512]" Instance 0x001d Type ID 0x20d3 32-bit bit string.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=512&name=TestLargeBoolArray"
+Tag "TestMESSAGEType" Instance 0x001c element type UDT (0x8fff) MESSAGE.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=240&elem_count=1&name=TestMESSAGEType"
+Tag "TestManyBOOLFields" Instance 0x001b element type UDT (0x89a5) ManyBOOLFieldsUDT.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=8&elem_count=1&name=TestManyBOOLFields"
+Tag "AnotherTestTag[20]" Instance 0x001a element type UDT (0xaac7) TestUDTMultiLevel2.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1128&elem_count=20&name=AnotherTestTag"
+Tag "AlarmLevelTest" Instance 0x0019 Type ID 0x00c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=1&name=AlarmLevelTest"
+Tag "TestUDTMultiLevel2[3]" Instance 0x0018 element type UDT (0xaac7) TestUDTMultiLevel2.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1128&elem_count=3&name=TestUDTMultiLevel2"
+Tag "TestUDTMultiLevel1[3]" Instance 0x0017 element type UDT (0xa314) TestUDTMultiLevel1.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=56&elem_count=3&name=TestUDTMultiLevel1"
+Tag "TestUDTMultiField[3]" Instance 0x0016 element type UDT (0xa685) TestUDTMultiField.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=16&elem_count=3&name=TestUDTMultiField"
+Tag "TestUDTBoolArray[3]" Instance 0x0015 element type UDT (0xa86a) TestUDTBoolArray.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=3&name=TestUDTBoolArray"
+Tag "TestLINTArray[10]" Instance 0x0014 Type ID 0x20c5 LINT: Signed 64-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=8&elem_count=10&name=TestLINTArray"
+Tag "TestMultiDimArray[10,10,10]" Instance 0x0013 Type ID 0x60c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=1000&name=TestMultiDimArray"
+Tag "stop_barcodes" Instance 0x0012 Type ID 0x00c1 BOOL: Boolean value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=1&name=stop_barcodes"
+Tag "one_second_timer" Instance 0x0011 element type UDT (0x8f83) TIMER.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=12&elem_count=1&name=one_second_timer"
+Tag "barcode_index" Instance 0x0010 element type UDT (0x8f82) COUNTER.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=12&elem_count=1&name=barcode_index"
+Tag "barcodes[11]" Instance 0x000f element type UDT (0xafce) STRING.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=11&name=barcodes"
+Tag "barcode" Instance 0x000e element type UDT (0x8fce) STRING.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=1&name=barcode"
+Tag "barcode_processed" Instance 0x000d Type ID 0x00c1 BOOL: Boolean value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=1&name=barcode_processed"
+Tag "new_barcode" Instance 0x000c Type ID 0x00c1 BOOL: Boolean value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=1&name=new_barcode"
+Tag "TestSINTArray[1000]" Instance 0x000b Type ID 0x20c2 SINT: Signed 8-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=1000&name=TestSINTArray"
+Tag "TestSSTRING" Instance 0x000a element type UDT (0x8fce) STRING.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=1&name=TestSSTRING"
+Tag "TestINTArray[1000]" Instance 0x0009 Type ID 0x20c3 INT: Signed 16-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=2&elem_count=1000&name=TestINTArray"
+Tag "TestBOOL" Instance 0x0008 Type ID 0x00c1 BOOL: Boolean value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=1&elem_count=1&name=TestBOOL"
+Tag "TestBOOLArray[4]" Instance 0x0007 Type ID 0x20d3 32-bit bit string.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=4&name=TestBOOLArray"
+Tag "TestBigArray[1000]" Instance 0x0006 Type ID 0x20c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=1000&name=TestBigArray"
+Tag "TestDINTArray[10]" Instance 0x0005 Type ID 0x20c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=10&name=TestDINTArray"
+Tag "Program:MainProgram" Instance 0x0004 element type SYSTEM (0x1068).  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=0&elem_count=1&name=Program:MainProgram"
+Tag "Task:MainTask" Instance 0x0003 element type SYSTEM (0x1070).  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=0&elem_count=1&name=Task:MainTask"
+Tag "__CONTAINER" Instance 0x0002 Type ID 0x00c4 DINT: Signed 32-bit integer value.  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=1&name=__CONTAINER"
+Tag "Map:Local" Instance 0x0001 element type SYSTEM (0x1069).  tag string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=0&elem_count=1&name=Map:Local"
+UDTs:
+ UDT TestUDTMultiLevel1 (ID 314, 56 bytes, struct handle 1aa1):
+    Field 0: is_valid, offset 0, array [1] of type Type ID 0x20d3 32-bit bit string.
+    Field 1: test_UDTMultiField, offset 8, array [3] of type element type UDT (0xa685) TestUDTMultiField.
+ UDT TestUDTMultiField (ID 685, 16 bytes, struct handle 4ec7):
+    Field 0: ZZZZZZZZZZTestUDTMul0, offset 0, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 1: field_BOOL, offset 0:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 2: field_INT, offset 2, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 3: field_DINT, offset 4, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 4: field_LINT, offset 8, type Type ID 0x00c5 LINT: Signed 64-bit integer value.
+ UDT TestUDTBoolArray (ID 86a, 4 bytes, struct handle 501e):
+    Field 0: field_BOOL_Array, offset 0, array [1] of type Type ID 0x20d3 32-bit bit string.
+ UDT ManyBOOLFieldsUDT (ID 9a5, 8 bytes, struct handle 2c1a):
+    Field 0: ZZZZZZZZZZManyBOOLFi0, offset 0, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 1: aLongBOOLFieldName1, offset 0:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 2: aLongBOOLFieldName2, offset 0:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 3: aLongBOOLFieldName3, offset 0:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 4: aLongBOOLFieldName4, offset 0:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 5: aLongBOOLFieldName5, offset 0:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 6: aLongBOOLFieldName6, offset 0:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 7: aLongBOOLFieldName7, offset 0:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 8: aLongBOOLFieldName8, offset 0:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 9: ZZZZZZZZZZManyBOOLFi9, offset 1, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 10: aLongBOOLFieldName9, offset 1:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 11: aLongBOOLFieldName10, offset 1:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 12: aLongBOOLFieldName11, offset 1:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 13: aLongBOOLFieldName12, offset 1:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 14: aLongBOOLFieldName13, offset 1:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 15: aLongBOOLFieldName14, offset 1:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 16: aLongBOOLFieldName15, offset 1:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 17: aLongBOOLFieldName16, offset 1:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 18: ZZZZZZZZZZManyBOOLFi18, offset 2, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 19: aLongBOOLFieldName17, offset 2:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 20: aLongBOOLFieldName18, offset 2:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 21: aLongBOOLFieldName19, offset 2:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 22: aLongBOOLFieldName20, offset 2:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 23: aLongBOOLFieldName21, offset 2:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 24: aLongBOOLFieldName22, offset 2:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 25: aLongBOOLFieldName23, offset 2:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 26: aLongBOOLFieldName24, offset 2:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 27: ZZZZZZZZZZManyBOOLFi27, offset 3, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 28: aLongBOOLFieldName25, offset 3:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 29: aLongBOOLFieldName26, offset 3:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 30: aLongBOOLFieldName27, offset 3:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 31: aLongBOOLFieldName28, offset 3:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 32: aLongBOOLFieldName29, offset 3:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 33: aLongBOOLFieldName30, offset 3:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 34: aLongBOOLFieldName31, offset 3:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 35: aLongBOOLFieldName32, offset 3:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 36: ZZZZZZZZZZManyBOOLFi36, offset 4, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 37: aLongBOOLFieldName33, offset 4:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 38: aLongBOOLFieldName34, offset 4:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 39: aLongBOOLFieldName35, offset 4:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 40: aLongBOOLFieldName36, offset 4:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 41: aLongBOOLFieldName37, offset 4:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 42: aLongBOOLFieldName38, offset 4:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 43: aLongBOOLFieldName39, offset 4:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 44: aLongBOOLFieldName40, offset 4:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 45: ZZZZZZZZZZManyBOOLFi45, offset 5, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 46: aLongBOOLFieldName41, offset 5:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 47: aLongBOOLFieldName42, offset 5:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 48: aLongBOOLFieldName43, offset 5:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 49: aLongBOOLFieldName44, offset 5:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 50: aLongBOOLFieldName45, offset 5:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 51: aLongBOOLFieldName46, offset 5:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 52: aLongBOOLFieldName47, offset 5:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 53: aLongBOOLFieldName48, offset 5:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 54: ZZZZZZZZZZManyBOOLFi54, offset 6, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 55: aLongBOOLFieldName49, offset 6:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 56: aLongBOOLFieldName50, offset 6:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 57: aLongBOOLFieldName51, offset 6:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 58: aLongBOOLFieldName52, offset 6:3, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 59: aLongBOOLFieldName53, offset 6:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 60: aLongBOOLFieldName54, offset 6:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 61: aLongBOOLFieldName55, offset 6:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 62: aLongBOOLFieldName56, offset 6:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 63: ZZZZZZZZZZManyBOOLFi63, offset 7, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 64: aLongBOOLFieldName57, offset 7:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 65: aLongBOOLFieldName58, offset 7:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 66: aLongBOOLFieldName59, offset 7:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 67: aLongBOOLFieldName60, offset 7:3, type Type ID 0x00c1 BOOL: Boolean value.
+ UDT TestUDTMultiLevel2 (ID ac7, 1128 bytes, struct handle d15b):
+    Field 0: field_UDTBoolArray, offset 0, array [10] of type element type UDT (0xa86a) TestUDTBoolArray.
+    Field 1: field_UDTMultLevel1, offset 40, array [10] of type element type UDT (0xa314) TestUDTMultiLevel1.
+    Field 2: field_AnotherOne, offset 600, array [6] of type element type UDT (0xafce) STRING.
+ UDT COUNTER (ID f82, 12 bytes, struct handle f82):
+    Field 0: Control, offset 0, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 1: PRE, offset 4, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 2: ACC, offset 8, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 3: CU, offset 3:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 4: CD, offset 3:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 5: DN, offset 3:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 6: OV, offset 3:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 7: UN, offset 3:3, type Type ID 0x00c1 BOOL: Boolean value.
+ UDT TIMER (ID f83, 12 bytes, struct handle f83):
+    Field 0: Control, offset 0, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 1: PRE, offset 4, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 2: ACC, offset 8, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 3: EN, offset 3:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 4: TT, offset 3:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 5: DN, offset 3:5, type Type ID 0x00c1 BOOL: Boolean value.
+ UDT STRING (ID fce, 88 bytes, struct handle fce):
+    Field 0: LEN, offset 0, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 1: DATA, offset 4, array [82] of type Type ID 0x20c2 SINT: Signed 8-bit integer value.
+ UDT MESSAGE (ID fff, 240 bytes, struct handle fff):
+    Field 0: offsettodata, offset 0, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 1: Flags, offset 4, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 2: EW, offset 4:2, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 3: ER, offset 4:4, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 4: DN, offset 4:5, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 5: ST, offset 4:6, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 6: EN, offset 4:7, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 7: TO, offset 5:0, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 8: EN_CC, offset 5:1, type Type ID 0x00c1 BOOL: Boolean value.
+    Field 9: ERR, offset 6, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 10: EXERR, offset 8, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 11: exerrlength, offset 12, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 12: ERR_SRC, offset 13, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 13: DN_LEN, offset 14, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 14: REQ_LEN, offset 16, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 15: DestinationLink, offset 18, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 16: DestinationNode, offset 20, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 17: SourceLink, offset 22, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 18: Class, offset 24, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 19: Attribute, offset 26, type Type ID 0x00c3 INT: Signed 16-bit integer value.
+    Field 20: Instance, offset 28, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 21: LocalIndex, offset 32, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 22: Channel, offset 36, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 23: Rack, offset 37, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 24: Group, offset 38, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 25: Slot, offset 39, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+    Field 26: Path, offset 40, type element type UDT (0x8fce) STRING.
+    Field 27: Reserved1, offset 128, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 28: RemoteIndex, offset 132, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 29: RemoteElement, offset 136, type element type UDT (0x8fce) STRING.
+    Field 30: Reserved2, offset 224, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 31: UnconnectedTimeout, offset 228, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 32: ConnectionRate, offset 232, type Type ID 0x00c4 DINT: Signed 32-bit integer value.
+    Field 33: TimeoutMultiplier, offset 236, type Type ID 0x00c2 SINT: Signed 8-bit integer value.
+SUCCESS!
+```
+
+#### tag_rw2
+
+```text
+build/bin_dist/tag_rw2 --type=uint32 '--protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=512&name=TestLargeBoolArray'
+
+Library version 2.7.0.
+Processing argument 1 "--type=uint32".
+Processing argument 2 "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=512&name=TestLargeBoolArray".
+data[0]=1 (0x00000001)
+data[1]=0 (0x00000000)
+data[2]=0 (0x00000000)
+data[3]=0 (0x00000000)
+data[4]=0 (0x00000000)
+data[5]=1 (0x00000001)
+data[6]=0 (0x00000000)
+data[7]=0 (0x00000000)
+data[8]=0 (0x00000000)
+data[9]=0 (0x00000000)
+data[10]=1 (0x00000001)
+data[11]=0 (0x00000000)
+data[12]=0 (0x00000000)
+data[13]=0 (0x00000000)
+data[14]=0 (0x00000000)
+data[15]=0 (0x00000000)
+data[16]=0 (0x00000000)
+data[17]=0 (0x00000000)
+data[18]=0 (0x00000000)
+data[19]=0 (0x00000000)
+data[20]=0 (0x00000000)
+data[21]=0 (0x00000000)
+data[22]=0 (0x00000000)
+data[23]=0 (0x00000000)
+data[24]=0 (0x00000000)
+data[25]=0 (0x00000000)
+data[26]=0 (0x00000000)
+data[27]=0 (0x00000000)
+data[28]=0 (0x00000000)
+data[29]=0 (0x00000000)
+data[30]=0 (0x00000000)
+data[31]=0 (0x00000000)
+data[32]=0 (0x00000000)
+data[33]=0 (0x00000000)
+data[34]=1 (0x00000001)
+data[35]=0 (0x00000000)
+data[36]=0 (0x00000000)
+data[37]=0 (0x00000000)
+data[38]=0 (0x00000000)
+data[39]=0 (0x00000000)
+data[40]=0 (0x00000000)
+data[41]=0 (0x00000000)
+data[42]=0 (0x00000000)
+data[43]=0 (0x00000000)
+data[44]=0 (0x00000000)
+data[45]=0 (0x00000000)
+data[46]=0 (0x00000000)
+data[47]=0 (0x00000000)
+data[48]=0 (0x00000000)
+data[49]=0 (0x00000000)
+data[50]=0 (0x00000000)
+data[51]=0 (0x00000000)
+data[52]=0 (0x00000000)
+data[53]=0 (0x00000000)
+data[54]=0 (0x00000000)
+data[55]=0 (0x00000000)
+data[56]=0 (0x00000000)
+data[57]=0 (0x00000000)
+data[58]=0 (0x00000000)
+data[59]=0 (0x00000000)
+data[60]=0 (0x00000000)
+data[61]=0 (0x00000000)
+data[62]=0 (0x00000000)
+data[63]=0 (0x00000000)
+data[64]=0 (0x00000000)
+data[65]=0 (0x00000000)
+data[66]=0 (0x00000000)
+data[67]=0 (0x00000000)
+data[68]=0 (0x00000000)
+data[69]=0 (0x00000000)
+data[70]=0 (0x00000000)
+data[71]=0 (0x00000000)
+data[72]=0 (0x00000000)
+data[73]=0 (0x00000000)
+data[74]=0 (0x00000000)
+data[75]=0 (0x00000000)
+data[76]=0 (0x00000000)
+data[77]=0 (0x00000000)
+data[78]=0 (0x00000000)
+data[79]=0 (0x00000000)
+data[80]=0 (0x00000000)
+data[81]=0 (0x00000000)
+data[82]=0 (0x00000000)
+data[83]=0 (0x00000000)
+data[84]=0 (0x00000000)
+data[85]=0 (0x00000000)
+data[86]=0 (0x00000000)
+data[87]=0 (0x00000000)
+data[88]=0 (0x00000000)
+data[89]=0 (0x00000000)
+data[90]=0 (0x00000000)
+data[91]=0 (0x00000000)
+data[92]=0 (0x00000000)
+data[93]=0 (0x00000000)
+data[94]=0 (0x00000000)
+data[95]=0 (0x00000000)
+data[96]=0 (0x00000000)
+data[97]=0 (0x00000000)
+data[98]=0 (0x00000000)
+data[99]=0 (0x00000000)
+data[100]=0 (0x00000000)
+data[101]=0 (0x00000000)
+data[102]=0 (0x00000000)
+data[103]=0 (0x00000000)
+data[104]=0 (0x00000000)
+data[105]=0 (0x00000000)
+data[106]=0 (0x00000000)
+data[107]=0 (0x00000000)
+data[108]=0 (0x00000000)
+data[109]=0 (0x00000000)
+data[110]=0 (0x00000000)
+data[111]=0 (0x00000000)
+data[112]=0 (0x00000000)
+data[113]=0 (0x00000000)
+data[114]=0 (0x00000000)
+data[115]=0 (0x00000000)
+data[116]=0 (0x00000000)
+data[117]=0 (0x00000000)
+data[118]=0 (0x00000000)
+data[119]=0 (0x00000000)
+data[120]=0 (0x00000000)
+data[121]=0 (0x00000000)
+data[122]=0 (0x00000000)
+data[123]=0 (0x00000000)
+data[124]=0 (0x00000000)
+data[125]=0 (0x00000000)
+data[126]=0 (0x00000000)
+data[127]=0 (0x00000000)
+data[128]=0 (0x00000000)
+data[129]=0 (0x00000000)
+data[130]=0 (0x00000000)
+data[131]=0 (0x00000000)
+data[132]=0 (0x00000000)
+data[133]=0 (0x00000000)
+data[134]=0 (0x00000000)
+data[135]=0 (0x00000000)
+data[136]=0 (0x00000000)
+data[137]=0 (0x00000000)
+data[138]=0 (0x00000000)
+data[139]=0 (0x00000000)
+data[140]=0 (0x00000000)
+data[141]=0 (0x00000000)
+data[142]=0 (0x00000000)
+data[143]=0 (0x00000000)
+data[144]=0 (0x00000000)
+data[145]=0 (0x00000000)
+data[146]=0 (0x00000000)
+data[147]=0 (0x00000000)
+data[148]=0 (0x00000000)
+data[149]=0 (0x00000000)
+data[150]=0 (0x00000000)
+data[151]=0 (0x00000000)
+data[152]=0 (0x00000000)
+data[153]=0 (0x00000000)
+data[154]=0 (0x00000000)
+data[155]=0 (0x00000000)
+data[156]=0 (0x00000000)
+data[157]=0 (0x00000000)
+data[158]=0 (0x00000000)
+data[159]=0 (0x00000000)
+data[160]=0 (0x00000000)
+data[161]=0 (0x00000000)
+data[162]=0 (0x00000000)
+data[163]=0 (0x00000000)
+data[164]=0 (0x00000000)
+data[165]=0 (0x00000000)
+data[166]=0 (0x00000000)
+data[167]=0 (0x00000000)
+data[168]=0 (0x00000000)
+data[169]=0 (0x00000000)
+data[170]=0 (0x00000000)
+data[171]=0 (0x00000000)
+data[172]=0 (0x00000000)
+data[173]=0 (0x00000000)
+data[174]=0 (0x00000000)
+data[175]=0 (0x00000000)
+data[176]=0 (0x00000000)
+data[177]=0 (0x00000000)
+data[178]=0 (0x00000000)
+data[179]=0 (0x00000000)
+data[180]=0 (0x00000000)
+data[181]=0 (0x00000000)
+data[182]=0 (0x00000000)
+data[183]=0 (0x00000000)
+data[184]=0 (0x00000000)
+data[185]=0 (0x00000000)
+data[186]=0 (0x00000000)
+data[187]=0 (0x00000000)
+data[188]=0 (0x00000000)
+data[189]=0 (0x00000000)
+data[190]=0 (0x00000000)
+data[191]=0 (0x00000000)
+data[192]=0 (0x00000000)
+data[193]=0 (0x00000000)
+data[194]=0 (0x00000000)
+data[195]=0 (0x00000000)
+data[196]=0 (0x00000000)
+data[197]=0 (0x00000000)
+data[198]=0 (0x00000000)
+data[199]=0 (0x00000000)
+data[200]=0 (0x00000000)
+data[201]=0 (0x00000000)
+data[202]=0 (0x00000000)
+data[203]=0 (0x00000000)
+data[204]=0 (0x00000000)
+data[205]=0 (0x00000000)
+data[206]=1 (0x00000001)
+data[207]=0 (0x00000000)
+data[208]=0 (0x00000000)
+data[209]=0 (0x00000000)
+data[210]=0 (0x00000000)
+data[211]=0 (0x00000000)
+data[212]=0 (0x00000000)
+data[213]=0 (0x00000000)
+data[214]=0 (0x00000000)
+data[215]=0 (0x00000000)
+data[216]=0 (0x00000000)
+data[217]=0 (0x00000000)
+data[218]=0 (0x00000000)
+data[219]=0 (0x00000000)
+data[220]=0 (0x00000000)
+data[221]=0 (0x00000000)
+data[222]=0 (0x00000000)
+data[223]=0 (0x00000000)
+data[224]=0 (0x00000000)
+data[225]=0 (0x00000000)
+data[226]=0 (0x00000000)
+data[227]=0 (0x00000000)
+data[228]=0 (0x00000000)
+data[229]=0 (0x00000000)
+data[230]=0 (0x00000000)
+data[231]=0 (0x00000000)
+data[232]=0 (0x00000000)
+data[233]=0 (0x00000000)
+data[234]=0 (0x00000000)
+data[235]=0 (0x00000000)
+data[236]=0 (0x00000000)
+data[237]=0 (0x00000000)
+data[238]=0 (0x00000000)
+data[239]=0 (0x00000000)
+data[240]=0 (0x00000000)
+data[241]=0 (0x00000000)
+data[242]=0 (0x00000000)
+data[243]=0 (0x00000000)
+data[244]=0 (0x00000000)
+data[245]=0 (0x00000000)
+data[246]=0 (0x00000000)
+data[247]=0 (0x00000000)
+data[248]=0 (0x00000000)
+data[249]=0 (0x00000000)
+data[250]=0 (0x00000000)
+data[251]=0 (0x00000000)
+data[252]=0 (0x00000000)
+data[253]=0 (0x00000000)
+data[254]=0 (0x00000000)
+data[255]=0 (0x00000000)
+data[256]=0 (0x00000000)
+data[257]=0 (0x00000000)
+data[258]=0 (0x00000000)
+data[259]=0 (0x00000000)
+data[260]=0 (0x00000000)
+data[261]=0 (0x00000000)
+data[262]=0 (0x00000000)
+data[263]=0 (0x00000000)
+data[264]=0 (0x00000000)
+data[265]=0 (0x00000000)
+data[266]=0 (0x00000000)
+data[267]=0 (0x00000000)
+data[268]=0 (0x00000000)
+data[269]=0 (0x00000000)
+data[270]=0 (0x00000000)
+data[271]=0 (0x00000000)
+data[272]=0 (0x00000000)
+data[273]=0 (0x00000000)
+data[274]=0 (0x00000000)
+data[275]=0 (0x00000000)
+data[276]=0 (0x00000000)
+data[277]=0 (0x00000000)
+data[278]=0 (0x00000000)
+data[279]=0 (0x00000000)
+data[280]=0 (0x00000000)
+data[281]=0 (0x00000000)
+data[282]=0 (0x00000000)
+data[283]=0 (0x00000000)
+data[284]=0 (0x00000000)
+data[285]=0 (0x00000000)
+data[286]=0 (0x00000000)
+data[287]=0 (0x00000000)
+data[288]=0 (0x00000000)
+data[289]=0 (0x00000000)
+data[290]=0 (0x00000000)
+data[291]=0 (0x00000000)
+data[292]=0 (0x00000000)
+data[293]=0 (0x00000000)
+data[294]=0 (0x00000000)
+data[295]=0 (0x00000000)
+data[296]=0 (0x00000000)
+data[297]=0 (0x00000000)
+data[298]=0 (0x00000000)
+data[299]=0 (0x00000000)
+data[300]=1 (0x00000001)
+data[301]=1 (0x00000001)
+data[302]=0 (0x00000000)
+data[303]=0 (0x00000000)
+data[304]=0 (0x00000000)
+data[305]=0 (0x00000000)
+data[306]=0 (0x00000000)
+data[307]=0 (0x00000000)
+data[308]=0 (0x00000000)
+data[309]=0 (0x00000000)
+data[310]=0 (0x00000000)
+data[311]=0 (0x00000000)
+data[312]=0 (0x00000000)
+data[313]=0 (0x00000000)
+data[314]=0 (0x00000000)
+data[315]=0 (0x00000000)
+data[316]=0 (0x00000000)
+data[317]=0 (0x00000000)
+data[318]=0 (0x00000000)
+data[319]=0 (0x00000000)
+data[320]=0 (0x00000000)
+data[321]=0 (0x00000000)
+data[322]=0 (0x00000000)
+data[323]=0 (0x00000000)
+data[324]=0 (0x00000000)
+data[325]=0 (0x00000000)
+data[326]=0 (0x00000000)
+data[327]=0 (0x00000000)
+data[328]=0 (0x00000000)
+data[329]=0 (0x00000000)
+data[330]=0 (0x00000000)
+data[331]=0 (0x00000000)
+data[332]=0 (0x00000000)
+data[333]=0 (0x00000000)
+data[334]=0 (0x00000000)
+data[335]=0 (0x00000000)
+data[336]=0 (0x00000000)
+data[337]=0 (0x00000000)
+data[338]=0 (0x00000000)
+data[339]=0 (0x00000000)
+data[340]=0 (0x00000000)
+data[341]=0 (0x00000000)
+data[342]=0 (0x00000000)
+data[343]=0 (0x00000000)
+data[344]=0 (0x00000000)
+data[345]=0 (0x00000000)
+data[346]=0 (0x00000000)
+data[347]=0 (0x00000000)
+data[348]=0 (0x00000000)
+data[349]=0 (0x00000000)
+data[350]=0 (0x00000000)
+data[351]=0 (0x00000000)
+data[352]=0 (0x00000000)
+data[353]=0 (0x00000000)
+data[354]=0 (0x00000000)
+data[355]=0 (0x00000000)
+data[356]=0 (0x00000000)
+data[357]=0 (0x00000000)
+data[358]=0 (0x00000000)
+data[359]=0 (0x00000000)
+data[360]=0 (0x00000000)
+data[361]=0 (0x00000000)
+data[362]=0 (0x00000000)
+data[363]=0 (0x00000000)
+data[364]=0 (0x00000000)
+data[365]=0 (0x00000000)
+data[366]=0 (0x00000000)
+data[367]=0 (0x00000000)
+data[368]=0 (0x00000000)
+data[369]=0 (0x00000000)
+data[370]=0 (0x00000000)
+data[371]=0 (0x00000000)
+data[372]=0 (0x00000000)
+data[373]=0 (0x00000000)
+data[374]=0 (0x00000000)
+data[375]=0 (0x00000000)
+data[376]=0 (0x00000000)
+data[377]=0 (0x00000000)
+data[378]=0 (0x00000000)
+data[379]=0 (0x00000000)
+data[380]=0 (0x00000000)
+data[381]=0 (0x00000000)
+data[382]=0 (0x00000000)
+data[383]=0 (0x00000000)
+data[384]=0 (0x00000000)
+data[385]=0 (0x00000000)
+data[386]=0 (0x00000000)
+data[387]=0 (0x00000000)
+data[388]=0 (0x00000000)
+data[389]=0 (0x00000000)
+data[390]=0 (0x00000000)
+data[391]=0 (0x00000000)
+data[392]=0 (0x00000000)
+data[393]=0 (0x00000000)
+data[394]=0 (0x00000000)
+data[395]=0 (0x00000000)
+data[396]=0 (0x00000000)
+data[397]=0 (0x00000000)
+data[398]=0 (0x00000000)
+data[399]=0 (0x00000000)
+data[400]=0 (0x00000000)
+data[401]=0 (0x00000000)
+data[402]=0 (0x00000000)
+data[403]=0 (0x00000000)
+data[404]=0 (0x00000000)
+data[405]=0 (0x00000000)
+data[406]=0 (0x00000000)
+data[407]=0 (0x00000000)
+data[408]=0 (0x00000000)
+data[409]=0 (0x00000000)
+data[410]=0 (0x00000000)
+data[411]=0 (0x00000000)
+data[412]=0 (0x00000000)
+data[413]=0 (0x00000000)
+data[414]=0 (0x00000000)
+data[415]=1 (0x00000001)
+data[416]=0 (0x00000000)
+data[417]=0 (0x00000000)
+data[418]=0 (0x00000000)
+data[419]=0 (0x00000000)
+data[420]=0 (0x00000000)
+data[421]=0 (0x00000000)
+data[422]=0 (0x00000000)
+data[423]=0 (0x00000000)
+data[424]=0 (0x00000000)
+data[425]=0 (0x00000000)
+data[426]=0 (0x00000000)
+data[427]=0 (0x00000000)
+data[428]=0 (0x00000000)
+data[429]=0 (0x00000000)
+data[430]=0 (0x00000000)
+data[431]=0 (0x00000000)
+data[432]=0 (0x00000000)
+data[433]=0 (0x00000000)
+data[434]=0 (0x00000000)
+data[435]=0 (0x00000000)
+data[436]=0 (0x00000000)
+data[437]=0 (0x00000000)
+data[438]=0 (0x00000000)
+data[439]=0 (0x00000000)
+data[440]=0 (0x00000000)
+data[441]=0 (0x00000000)
+data[442]=0 (0x00000000)
+data[443]=0 (0x00000000)
+data[444]=0 (0x00000000)
+data[445]=0 (0x00000000)
+data[446]=0 (0x00000000)
+data[447]=0 (0x00000000)
+data[448]=0 (0x00000000)
+data[449]=0 (0x00000000)
+data[450]=0 (0x00000000)
+data[451]=0 (0x00000000)
+data[452]=0 (0x00000000)
+data[453]=0 (0x00000000)
+data[454]=0 (0x00000000)
+data[455]=0 (0x00000000)
+data[456]=0 (0x00000000)
+data[457]=0 (0x00000000)
+data[458]=0 (0x00000000)
+data[459]=0 (0x00000000)
+data[460]=0 (0x00000000)
+data[461]=0 (0x00000000)
+data[462]=0 (0x00000000)
+data[463]=0 (0x00000000)
+data[464]=0 (0x00000000)
+data[465]=0 (0x00000000)
+data[466]=0 (0x00000000)
+data[467]=0 (0x00000000)
+data[468]=0 (0x00000000)
+data[469]=0 (0x00000000)
+data[470]=0 (0x00000000)
+data[471]=0 (0x00000000)
+data[472]=0 (0x00000000)
+data[473]=0 (0x00000000)
+data[474]=0 (0x00000000)
+data[475]=0 (0x00000000)
+data[476]=0 (0x00000000)
+data[477]=0 (0x00000000)
+data[478]=0 (0x00000000)
+data[479]=0 (0x00000000)
+data[480]=0 (0x00000000)
+data[481]=0 (0x00000000)
+data[482]=0 (0x00000000)
+data[483]=0 (0x00000000)
+data[484]=0 (0x00000000)
+data[485]=0 (0x00000000)
+data[486]=0 (0x00000000)
+data[487]=0 (0x00000000)
+data[488]=0 (0x00000000)
+data[489]=0 (0x00000000)
+data[490]=0 (0x00000000)
+data[491]=0 (0x00000000)
+data[492]=0 (0x00000000)
+data[493]=0 (0x00000000)
+data[494]=0 (0x00000000)
+data[495]=0 (0x00000000)
+data[496]=0 (0x00000000)
+data[497]=0 (0x00000000)
+data[498]=0 (0x00000000)
+data[499]=0 (0x00000000)
+data[500]=0 (0x00000000)
+data[501]=0 (0x00000000)
+data[502]=0 (0x00000000)
+data[503]=0 (0x00000000)
+data[504]=0 (0x00000000)
+data[505]=0 (0x00000000)
+data[506]=0 (0x00000000)
+data[507]=0 (0x00000000)
+data[508]=0 (0x00000000)
+data[509]=0 (0x00000000)
+data[510]=0 (0x00000000)
+data[511]=0 (0x00000000)
+```
+
+```text
+./build/bin_dist/tag_rw2 --type=uint32 '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=10&name=TestDINTArray'
+
+Library version 2.7.0.
+Processing argument 1 "--type=uint32".
+Processing argument 2 "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=4&elem_count=10&name=TestDINTArray".
+data[0]=3 (0x00000003)
+data[1]=5 (0x00000005)
+data[2]=5 (0x00000005)
+data[3]=7 (0x00000007)
+data[4]=5 (0x00000005)
+data[5]=5 (0x00000005)
+data[6]=5 (0x00000005)
+data[7]=5 (0x00000005)
+data[8]=5 (0x00000005)
+data[9]=5 (0x00000005)
+```
+

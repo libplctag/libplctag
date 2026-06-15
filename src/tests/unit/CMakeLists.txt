@@ -60,9 +60,64 @@ endif()
 # Register the unit test with CTest
 add_test(NAME unit_test_init COMMAND test_init)
 
+# test_enip_type: tests enip_type_decode() (pure, no I/O)
+add_executable(test_enip_type
+    test_enip_type.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_type.c
+)
+
+target_include_directories(test_enip_type PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${cmocka_SOURCE_DIR}/include
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_enip_type PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_enip_type COMMAND test_enip_type)
+
+# test_enip_cip_path: tests enip_cip_encode_path() (pure, no I/O)
+add_executable(test_enip_cip_path
+    test_enip_cip_path.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_cip.c
+)
+
+target_include_directories(test_enip_cip_path PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${cmocka_SOURCE_DIR}/include
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_enip_cip_path PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_enip_cip_path COMMAND test_enip_cip_path)
+
+# test_enip_eip_cpf: tests enip_eip_*/enip_cpf_* encode/decode round trips (pure, no I/O)
+add_executable(test_enip_eip_cpf
+    test_enip_eip_cpf.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_eip.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_cpf.c
+)
+
+target_include_directories(test_enip_eip_cpf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${cmocka_SOURCE_DIR}/include
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_enip_eip_cpf PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_enip_eip_cpf COMMAND test_enip_eip_cpf)
+
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init
+    DEPENDS test_init test_enip_type test_enip_cip_path test_enip_eip_cpf
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"
