@@ -58,6 +58,7 @@ static int32_t enip_tag_abort(plc_tag_p tag);
 static int32_t enip_tag_read(plc_tag_p tag);
 static int32_t enip_tag_write(plc_tag_p tag);
 static int32_t enip_tag_status(plc_tag_p tag);
+static int32_t enip_tag_data_written(plc_tag_p tag);
 static void enip_tag_destructor(void *tag_arg);
 
 /* CIP types are little-endian on the wire (design doc §9). */
@@ -89,7 +90,7 @@ struct tag_vtable_t enip_tag_vtable = {
     .write = enip_tag_write,
 
     .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .tag_data_written = enip_tag_data_written,
 
     .get_int_attrib = NULL,
     .set_int_attrib = NULL,
@@ -156,6 +157,21 @@ static int32_t enip_tag_status(plc_tag_p tag) {
     if(t->op != ENIP_OP_IDLE) { return PLCTAG_STATUS_PENDING; }
 
     return t->status;
+}
+
+/* Called under api_mutex from the data-setter functions when
+ * auto_sync_write_ms > 0 (design doc §9/§14.8). Arms auto_sync_next_write
+ * immediately so the generic tickler's next pass (within ~100ms) sees a
+ * due time already set, instead of needing one tick just to start the
+ * countdown. */
+static int32_t enip_tag_data_written(plc_tag_p tag) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    int64_t fire_at = time_ms() + t->auto_sync_write_ms;
+
+    if(t->auto_sync_next_write == 0 || t->auto_sync_next_write > fire_at) { t->auto_sync_next_write = fire_at; }
+
+    return PLCTAG_STATUS_OK;
 }
 
 /* ============================================================================

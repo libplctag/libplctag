@@ -1188,11 +1188,14 @@ static THREAD_FUNC(io_thread_func) {
                 wait_ms = 0;
                 break;
 
-            case CONN_WAITING:
-                step_waiting(c);
+            case CONN_WAITING: {
+                int32_t rc = step_waiting(c);
+
                 mask |= SOCK_EVENT_CAN_READ;
-                wait_ms = 0;
+                wait_ms = (rc == PLCTAG_STATUS_PENDING) ? ENIP_IDLE_WAIT_MS : 0;
+
                 break;
+            }
 
             case CONN_CLOSING:
             default: atomic_set_bool(&c->terminate, true); break;
