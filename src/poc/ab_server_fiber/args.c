@@ -125,9 +125,12 @@ static bool parse_value(args_value_t *val, const char *str,
             return true;
 
         case ARGS_TYPE_BOOL: {
-            // For bool, we require a value: true|false|yes|no|on|off|1|0
+            // A bare bool flag (e.g. --debug with no =value) is treated as true,
+            // matching conventional CLI behavior. An explicit value
+            // (true|false|yes|no|on|off|1|0) is still honored below.
             if (!str || strlen(str) == 0) {
-                return false;  // Bool now requires explicit value
+                val->value.bool_val = true;
+                return true;
             }
 
             // True variants
@@ -261,12 +264,11 @@ util_err_t args_parse(int argc, const char *argv[],
         // Find flag definition
         int flag_index = find_flag_index(flags, flags_count, flag_name);
         if (flag_index < 0) {
-            pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: unknown flag '%s'", flag_name);
-            result->error = UTIL_EARGS_UNKNOWN_FLAG;
-            result->error_detail = "flag not recognized";
-            result->error_debug_name = flag_name;
-            result->error_flag_index = -1;
-            return UTIL_EARGS_UNKNOWN_FLAG;
+            // Tolerate unknown/extra flags: warn and skip so injected extra
+            // arguments cannot abort startup. (Matches the monorepo's
+            // silent-ignore behavior.)
+            pdlog(LOG_MODULE_ARGS, LOG_LEVEL_WARN, "args_parse: ignoring unknown flag '%s'", flag_name);
+            continue;
         }
 
         const args_flag_def_t *flag_def = &flags[flag_index];
