@@ -194,7 +194,7 @@ void session_teardown(void) {
             for(int sess_index = 0; sess_index < remaining_sessions; sess_index++) {
                 ab_session_p session = vector_get(sessions, sess_index);
 
-                if(session) { session->terminating = 1; }
+                if(session) { atomic_set_int32(&session->terminating, 1); }
             }
         }
     }
@@ -1138,7 +1138,7 @@ void session_destroy(void *session_arg) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", session->packet_count);
 
     /* terminate the session thread first. */
-    session->terminating = 1;
+    atomic_set_int32(&session->terminating, 1);
 
     /* signal the condition variable in case it is waiting */
     if(session->session_wait_cond) { cond_signal(session->session_wait_cond); }
@@ -1166,9 +1166,9 @@ void session_destroy(void *session_arg) {
              * return, so set the flag like we are not terminating.
              * There is still a timeout that applies.
              */
-            session->terminating = 0;
+            atomic_set_int32(&session->terminating, 0);
             perform_forward_close(session);
-            session->terminating = 1;
+            atomic_set_int32(&session->terminating, 1);
         }
 
         /* try to be nice and un-register the session */
@@ -1352,7 +1352,7 @@ THREAD_FUNC(session_handler) {
     /* Increment the count of active session handlers */
     atomic_add_int32(&session_handlers_active, 1);
 
-    while(!session->terminating && atomic_get_bool(&lib_active)) {
+    while(!atomic_get_int32(&session->terminating) && atomic_get_bool(&lib_active)) {
         now = time_ms();
 
         /* how long should we wait if nothing wakes us? */
@@ -1726,7 +1726,7 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
         request = vector_get(session->requests, i);
 
         /* filter out the aborts. */
-        if(request && request->abort_request) {
+        if(request && atomic_get_int32(&request->abort_request)) {
             purge_count++;
 
             /* remove it from the queue. */
@@ -2491,9 +2491,10 @@ int send_eip_request(ab_session_p session, int timeout) {
         // if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
         //     sleep_ms(1);
         // }
-    } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size && timeout_time > time_ms());
+    } while(!atomic_get_int32(&session->terminating) && rc >= 0 && session->data_offset < session->data_size
+            && timeout_time > time_ms());
 
-    if(session->terminating) {
+    if(atomic_get_int32(&session->terminating)) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session is terminating.");
         final_rc = PLCTAG_ERR_ABORT;
         session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
@@ -2587,9 +2588,9 @@ int recv_eip_response(ab_session_p session, int timeout) {
                 return final_rc;
             }
         }
-    } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
+    } while(!atomic_get_int32(&session->terminating) && session->data_offset < data_needed && timeout_time > time_ms());
 
-    if(session->terminating) {
+    if(atomic_get_int32(&session->terminating)) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session is terminating, returning...");
         final_rc = PLCTAG_ERR_ABORT;
         session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
@@ -2661,9 +2662,11 @@ int send_forward_open_request(ab_session_p session) {
     max_payload = (uint16_t)(session->only_use_old_forward_open ? session->fo_conn_size : session->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
-    session->max_payload_guess =
-        ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload :
-                                                                                           session->max_payload_guess);
+    critical_block(session->session_mutex) {
+        session->max_payload_guess =
+            ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload :
+                                                                                               session->max_payload_guess);
+    }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Set Forward Open maximum payload size guess to %d bytes.",
            session->max_payload_guess);
@@ -2892,7 +2895,7 @@ int receive_forward_open_response(ab_session_p session) {
                     if(extended_status == 0x109) { /* MAGIC */
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                                "Error from forward open request, unsupported size, but size %d is supported.", supported_size);
-                        session->max_payload_guess = supported_size;
+                        critical_block(session->session_mutex) { session->max_payload_guess = supported_size; }
                         rc = PLCTAG_ERR_TOO_LARGE;
                     } else if(extended_status == 0x100) { /* MAGIC */
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
@@ -2915,7 +2918,7 @@ int receive_forward_open_response(ab_session_p session) {
         session->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
         session->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
 
-        session->max_payload_size = session->max_payload_guess;
+        critical_block(session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
                "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
@@ -3095,7 +3098,7 @@ void request_destroy(void *req_arg) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
 
-    req->abort_request = 1;
+    atomic_set_int32(&req->abort_request, 1);
 
     if(req->data) {
         mem_free(req->data);

@@ -521,7 +521,7 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
         critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(req) {
-            spin_block(&req->lock) { req->abort_request = 1; }
+            spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
 
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id,
                    "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
@@ -601,7 +601,7 @@ int omron_tag_abort(omron_tag_p tag) {
         critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(req) {
-            spin_block(&req->lock) { req->abort_request = 1; }
+            spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
 
             /* do a real abort */
             omron_tag_abort_request(tag);

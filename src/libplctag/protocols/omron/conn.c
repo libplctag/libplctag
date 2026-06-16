@@ -154,7 +154,7 @@ void conn_teardown(void) {
             for(int i = 0; i < n; i++) {
                 omron_conn_p conn = vector_get(conns, i);
                 if(conn) {
-                    conn->terminating = 1;
+                    atomic_set_int32(&conn->terminating, 1);
                     if(conn->wait_cond) { cond_signal(conn->wait_cond); }
                 }
             }
@@ -928,7 +928,7 @@ void conn_destroy(void *conn_arg) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Connection sent %" PRId64 " packets.", conn->packet_count);
 
     /* terminate the conn thread first. */
-    conn->terminating = 1;
+    atomic_set_int32(&conn->terminating, 1);
 
     /* signal the condition variable in case it is waiting */
     if(conn->wait_cond) { cond_signal(conn->wait_cond); }
@@ -955,9 +955,9 @@ void conn_destroy(void *conn_arg) {
              * return, so set the flag like we are not terminating.
              * There is still a timeout that applies.
              */
-            conn->terminating = 0;
+            atomic_set_int32(&conn->terminating, 0);
             perform_forward_close(conn);
-            conn->terminating = 1;
+            atomic_set_int32(&conn->terminating, 1);
         }
 
         /* try to be nice and un-register the conn */
@@ -1151,7 +1151,7 @@ THREAD_FUNC(conn_handler) {
     /* Increment the count of active handler threads */
     atomic_add_int32(&handler_threads_active, 1);
 
-    while(!conn->terminating && atomic_get_bool(&lib_active)) {
+    while(!atomic_get_int32(&conn->terminating) && atomic_get_bool(&lib_active)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + CONN_IDLE_WAIT_TIME;
 
@@ -1493,7 +1493,7 @@ int purge_aborted_requests_unsafe(omron_conn_p conn) {
         request = vector_get(conn->requests, i);
 
         /* filter out the aborts. */
-        if(request && request->abort_request) {
+        if(request && atomic_get_int32(&request->abort_request)) {
             purge_count++;
 
             /* remove it from the queue. */
@@ -2272,9 +2272,10 @@ int send_eip_request(omron_conn_p conn, int timeout) {
         // if(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size) {
         //     sleep_ms(1);
         // }
-    } while(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size && timeout_time > time_ms());
+    } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size
+            && timeout_time > time_ms());
 
-    if(conn->terminating) {
+    if(atomic_get_int32(&conn->terminating)) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Connection is terminating.");
         return PLCTAG_ERR_ABORT;
     }
@@ -2353,9 +2354,9 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
                 return rc;
             }
         }
-    } while(!conn->terminating && conn->data_offset < data_needed && timeout_time > time_ms());
+    } while(!atomic_get_int32(&conn->terminating) && conn->data_offset < data_needed && timeout_time > time_ms());
 
-    if(conn->terminating) {
+    if(atomic_get_int32(&conn->terminating)) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Connection is terminating, returning...");
         return PLCTAG_ERR_ABORT;
     }
@@ -2844,7 +2845,7 @@ void request_destroy(void *req_arg) {
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Starting.");
 
-    req->abort_request = 1;
+    atomic_set_int32(&req->abort_request, 1);
 
     if(req->data) {
         mem_free(req->data);
