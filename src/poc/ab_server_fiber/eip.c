@@ -227,9 +227,8 @@ static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
 
 /*
  * ListIdentity (0x0063): returns a hardcoded CIP Identity object for the
- * emulator, mirroring how the snap7 S7 server returns a fixed CPU identity.
- * Lets the Devs AB PLC service show a realistic controller identity
- * (vendor/product/revision/serial) against the demo server.  No registered
+ * emulator, so clients that query ListIdentity see a realistic-looking
+ * controller identity (vendor/product/revision/serial).  No registered
  * session is required.
  *
  * Returns only the CPF body; make_eip_response() wraps the 24-byte EIP header.
@@ -240,7 +239,7 @@ static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
  *   item length            u16  = 0x48 (72 bytes: encap-version through state)
  *   encap protocol version u16  = 1
  *   socket address         16 zero bytes (clients ignore it for ListIdentity)
- *   vendor id              u16  = 1      (Rockwell/Allen-Bradley)
+ *   vendor id              u16  = 0      (unspecified - this is an open emulator, not a real vendor device)
  *   device type            u16  = 0x000E (Programmable Logic Controller)
  *   product code           u16  = 0x0059
  *   revision major         u8   = 32
@@ -255,7 +254,7 @@ static Bytes handle_list_identity(Arena *a, eip_session_t *sess, plc_config_t *c
     (void)sess;
     (void)cfg;
 
-    static const char product_name[] = "Devs AB Server (ControlLogix Emulator)";
+    static const char product_name[] = "libplctag ab_server";
     const uint8_t name_len = (uint8_t)(sizeof(product_name) - 1);
 
     /* item length: encap-version(2) + sockaddr(16) + vendor(2) + device_type(2)
@@ -273,8 +272,8 @@ static Bytes handle_list_identity(Arena *a, eip_session_t *sess, plc_config_t *c
                       item_len,                   /* item length */
                       (uint16_t)1,                /* encap protocol version */
                       BYTES_SKIP(16),             /* socket address placeholder */
-                      (uint16_t)1,                /* vendor id */
-                      (uint16_t)0x000E,           /* device type */
+                      (uint16_t)0,                /* vendor id (0 = unspecified; not a real vendor) */
+                      (uint16_t)0x000E,           /* device type (generic ODVA PLC category) */
                       (uint16_t)0x0059,           /* product code */
                       (uint8_t)32,                /* revision major */
                       (uint8_t)11,                /* revision minor */

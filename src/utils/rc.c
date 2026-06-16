@@ -71,7 +71,7 @@ static mutex_p cleanup_mutex = NULL;
 static cond_p cleanup_cond = NULL;
 static vector_p cleanup_queue = NULL;
 static thread_p cleanup_thread = NULL;
-static volatile int cleanup_thread_running = 0;
+static atomic_int32_t cleanup_thread_running = ATOMIC_INT_STATIC_INIT;
 
 static void refcount_cleanup(refcount_p rc);
 
@@ -192,7 +192,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
          * Queue the cleanup instead of doing it immediately.
          * This ensures cleanup happens in a separate thread, not in the caller's thread.
          */
-        if(cleanup_thread_running && cleanup_mutex && cleanup_queue) {
+        if(atomic_get_int32(&cleanup_thread_running) && cleanup_mutex && cleanup_queue) {
             int vec_len = 0;
             critical_block(cleanup_mutex) {
                 vec_len = vector_length(cleanup_queue);
@@ -249,7 +249,7 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
     (void)arg; /* Unused parameter */
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Cleanup thread starting.");
 
-    while(cleanup_thread_running) {
+    while(atomic_get_int32(&cleanup_thread_running)) {
         refcount_p header = NULL;
 
         cond_wait(cleanup_cond, 100); /* 100 millisecond timeout */
@@ -307,11 +307,11 @@ int refcount_startup(void) {
     }
 
     /* Start the cleanup thread */
-    cleanup_thread_running = 1;
+    atomic_set_int32(&cleanup_thread_running, 1);
     rc = thread_create(&cleanup_thread, refcount_cleanup_thread_func, 32 * 1024, NULL);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to create cleanup thread!");
-        cleanup_thread_running = 0;
+        atomic_set_int32(&cleanup_thread_running, 0);
         vector_destroy(cleanup_queue);
         cleanup_queue = NULL;
         cond_destroy(&cleanup_cond);
@@ -340,7 +340,7 @@ int refcount_teardown(void) {
     if(cleanup_thread) {
         /* Signal the cleanup thread to exit */
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Signaling cleanup thread to exit.");
-        cleanup_thread_running = 0;
+        atomic_set_int32(&cleanup_thread_running, 0);
         if(cleanup_cond) { cond_signal(cleanup_cond); }
 
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Waiting for cleanup thread to exit.");
