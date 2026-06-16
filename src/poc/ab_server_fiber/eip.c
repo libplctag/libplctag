@@ -91,6 +91,7 @@ static bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr);
 static Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr);
 static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *sess);
 static Bytes handle_unregister_session(Arena *a, eip_session_t *sess);
+static Bytes handle_list_identity(Arena *a, eip_session_t *sess, plc_config_t *cfg);
 static Bytes make_eip_response(Arena *a, eip_hdr_t *req_hdr, eip_session_t *sess, Bytes body);
 static Bytes make_eip_error(Arena *a, eip_hdr_t *req_hdr);
 
@@ -121,6 +122,8 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
     pdlog(LOG_MODULE_EIP, LOG_LEVEL_DETAIL, "eip_dispatch: cmd=0x%04x payload len=%zu", req_hdr.cmd, payload.len);
 
     switch(req_hdr.cmd) {
+        case EIP_CMD_LIST_IDENTITY: response_body = handle_list_identity(a, sess, cfg); break;
+
         case EIP_CMD_REGISTER_SESSION: response_body = handle_register_session(a, payload, sess); break;
 
         case EIP_CMD_UNREGISTER_SESSION:
@@ -219,6 +222,66 @@ static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
     pdlog(LOG_MODULE_EIP, LOG_LEVEL_INFO, "UnregisterSession: handle 0x%08x", sess->session_handle);
     sess->session_handle = 0;
     return (Bytes){0};
+}
+
+
+/*
+ * ListIdentity (0x0063): returns a hardcoded CIP Identity object for the
+ * emulator, so clients that query ListIdentity see a realistic-looking
+ * controller identity (vendor/product/revision/serial).  No registered
+ * session is required.
+ *
+ * Returns only the CPF body; make_eip_response() wraps the 24-byte EIP header.
+ *
+ * CPF body layout (all little-endian):
+ *   item count             u16  = 1
+ *   item type              u16  = 0x000C (CIP Identity)
+ *   item length            u16  = 0x48 (72 bytes: encap-version through state)
+ *   encap protocol version u16  = 1
+ *   socket address         16 zero bytes (clients ignore it for ListIdentity)
+ *   vendor id              u16  = 0      (unspecified - this is an open emulator, not a real vendor device)
+ *   device type            u16  = 0x000E (Programmable Logic Controller)
+ *   product code           u16  = 0x0059
+ *   revision major         u8   = 32
+ *   revision minor         u8   = 11
+ *   status word            u16  = 0x0030
+ *   serial number          u32  = 0x00D5F123
+ *   product name length    u8   = strlen(product_name)
+ *   product name           ASCII bytes
+ *   state                  u8   = 0x03 (operational)
+ */
+static Bytes handle_list_identity(Arena *a, eip_session_t *sess, plc_config_t *cfg) {
+    (void)sess;
+    (void)cfg;
+
+    static const char product_name[] = "libplctag ab_server";
+    const uint8_t name_len = (uint8_t)(sizeof(product_name) - 1);
+
+    /* item length: encap-version(2) + sockaddr(16) + vendor(2) + device_type(2)
+     * + product_code(2) + rev_major(1) + rev_minor(1) + status(2) + serial(4)
+     * + name_len(1) + name(name_len) + state(1) */
+    const uint16_t item_len = (uint16_t)(2 + 16 + 2 + 2 + 2 + 1 + 1 + 2 + 4 + 1 + (size_t)name_len + 1);
+
+    Bytes name_bytes = bytes_from_buf((const uint8_t *)product_name, (size_t)name_len);
+
+    pdlog(LOG_MODULE_EIP, LOG_LEVEL_INFO, "ListIdentity: %s", product_name);
+
+    return bytes_pack(a, BYTES_LE,
+                      (uint16_t)1,                /* CPF item count */
+                      (uint16_t)0x000C,           /* item type: CIP Identity */
+                      item_len,                   /* item length */
+                      (uint16_t)1,                /* encap protocol version */
+                      BYTES_SKIP(16),             /* socket address placeholder */
+                      (uint16_t)0,                /* vendor id (0 = unspecified; not a real vendor) */
+                      (uint16_t)0x000E,           /* device type (generic ODVA PLC category) */
+                      (uint16_t)0x0059,           /* product code */
+                      (uint8_t)32,                /* revision major */
+                      (uint8_t)11,                /* revision minor */
+                      (uint16_t)0x0030,           /* status word */
+                      (uint32_t)0x00D5F123,       /* serial number */
+                      name_len,                   /* product name length */
+                      name_bytes,                 /* product name (ASCII) */
+                      (uint8_t)0x03);             /* state: operational */
 }
 
 

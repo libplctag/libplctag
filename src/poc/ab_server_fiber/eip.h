@@ -53,6 +53,7 @@
 
 #define EIP_HEADER_SIZE ((size_t)24)
 
+#define EIP_CMD_LIST_IDENTITY      ((uint16_t)0x0063)
 #define EIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
 #define EIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
 #define EIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F)
