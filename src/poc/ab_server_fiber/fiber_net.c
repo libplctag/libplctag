@@ -60,6 +60,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #ifdef _WIN32
 #    include <psapi.h>
@@ -119,7 +120,7 @@ struct fiber_net_s {
     size_t max_tasks;
     size_t stack_size;
     yafl_stack_flags_t stack_flags;
-    volatile bool stop_requested;
+    atomic_bool stop_requested; /* raised cross-thread by fiber_net_stop(), polled by the loop */
 
     fiber_socket_t wakeup_read;
     fiber_socket_t wakeup_write;
@@ -227,7 +228,7 @@ util_err_t fiber_net_create(fiber_net_t **out, size_t max_tasks, size_t stack_si
     net->max_tasks = max_tasks;
     net->stack_size = stack_size;
     net->stack_flags = flags;
-    net->stop_requested = false;
+    atomic_store(&net->stop_requested, false);
     net->wakeup_read = FIBER_INVALID_SOCKET;
     net->wakeup_write = FIBER_INVALID_SOCKET;
 
@@ -316,7 +317,7 @@ util_err_t fiber_net_run(fiber_net_t *net, uint32_t tick_ms) {
 
     pdlog(LOG_MODULE_FIBER_NET, LOG_LEVEL_INFO, "fiber_net event loop starting");
 
-    while(!net->stop_requested) {
+    while(!atomic_load(&net->stop_requested)) {
         net->stat_loop_iters++;
 
         /* ---- Step 1: Initial-resume any newly added fibers. ---- */
@@ -556,7 +557,7 @@ void fiber_net_get_loop_stats(const fiber_net_t *net, fiber_net_loop_stats_t *ou
 
 util_err_t fiber_net_stop(fiber_net_t *net) {
     if(!net) { return UTIL_EINVAL; }
-    net->stop_requested = true;
+    atomic_store(&net->stop_requested, true);
     wakeup_signal(net->wakeup_write);
     return UTIL_OK;
 }

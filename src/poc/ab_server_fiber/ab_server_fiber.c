@@ -133,16 +133,34 @@ static bool parse_path(const char *path_str, plc_config_t *cfg);
 static bool parse_pccc_tag(const char *tag_str, plc_config_t *cfg);
 static bool parse_cip_tag(const char *tag_str, plc_config_t *cfg);
 static void free_tags(tag_def_t *tags);
+#ifndef AB_SERVER_LIB
 static void print_statistics(server_ctx_t *server);
 static void signal_handler(void);
+#endif
 static void *listener_fiber(void *arg);
 static void *client_fiber(void *arg);
 
 /* ============================================================================
- * main()
+ * Entry point
+ *
+ * When built as a library (AB_SERVER_LIB), the program entry is
+ * ab_server_main(argc, argv) so a C++ host can embed and drive the server
+ * (callable via extern "C": this .c file is compiled as C, so symbols are
+ * unmangled).  ab_server_stop() requests a clean shutdown of the event loop
+ * from another thread/context (mirrors what signal_handler does in standalone
+ * mode), and a thin main() forwards to ab_server_main().  Otherwise main()
+ * is the standalone program entry directly.
  * ============================================================================ */
 
+#ifdef AB_SERVER_LIB
+void ab_server_stop(void) {
+    if(g_server && g_server->net) { fiber_net_stop(g_server->net); }
+}
+
+int ab_server_main(int argc, const char **argv) {
+#else
 int main(int argc, char *argv[]) {
+#endif
     server_ctx_t server = {0};
     plc_config_t cfg = {0};
     args_result_t args = {0};
@@ -316,7 +334,11 @@ int main(int argc, char *argv[]) {
     }
 
     /* ----- Signal handler ----- */
+#ifndef AB_SERVER_LIB
+    /* When embedded, the host (e.g. Poco::Util::ServerApplication) owns
+     * SIGINT/SIGTERM; the server must not hijack them. */
     util_set_interrupt_handler(signal_handler);
+#endif
 
     /* ----- Listener fiber ----- */
     {
@@ -348,7 +370,11 @@ int main(int argc, char *argv[]) {
 
     pdlog(LOG_MODULE_AB_SERVER, LOG_LEVEL_INFO, "ab_server_fiber shutting down");
 
+#ifndef AB_SERVER_LIB
+    /* print_statistics() writes non-ASCII box-drawing output to stderr, which
+     * is not wanted in embedded/logged mode. */
     print_statistics(&server);
+#endif
 
     fiber_net_destroy(&server.net);
     free_tags(cfg.tags);
@@ -356,13 +382,22 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
 }
 
+#ifdef AB_SERVER_LIB
+/* Standalone entry point for non-embedded builds. */
+int main(int argc, char *argv[]) {
+    return ab_server_main(argc, (const char **)argv);
+}
+#endif
+
 /* ============================================================================
  * Static functions
  * ============================================================================ */
 
+#ifndef AB_SERVER_LIB
 static void signal_handler(void) {
     if(g_server && g_server->net) { fiber_net_stop(g_server->net); }
 }
+#endif
 
 /* ---- listener_fiber ---- */
 
@@ -535,6 +570,7 @@ static void *client_fiber(void *arg) {
 
 /* ---- Statistics ---- */
 
+#ifndef AB_SERVER_LIB
 static void print_statistics(server_ctx_t *server) {
     if(!server) { return; }
 
@@ -635,6 +671,7 @@ static void print_statistics(server_ctx_t *server) {
     fprintf(stderr, "╚══════════════════════════════════════════════════════════════════╝\n");
     fflush(stderr);
 }
+#endif /* AB_SERVER_LIB */
 
 /* ---- Argument helpers ---- */
 
