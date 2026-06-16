@@ -153,11 +153,21 @@ static void *client_fiber(void *arg);
  * ============================================================================ */
 
 #ifdef AB_SERVER_LIB
-void ab_server_stop(void) {
+/* Export the embedding entry points even when the library is built with
+ * -fvisibility=hidden (as libplctag is); Windows exports via the build system. */
+#if defined(_WIN32)
+#    define AB_SERVER_LIB_API
+#elif defined(__GNUC__) || defined(__clang__)
+#    define AB_SERVER_LIB_API __attribute__((visibility("default")))
+#else
+#    define AB_SERVER_LIB_API
+#endif
+
+AB_SERVER_LIB_API void ab_server_stop(void) {
     if(g_server && g_server->net) { fiber_net_stop(g_server->net); }
 }
 
-int ab_server_main(int argc, const char **argv) {
+AB_SERVER_LIB_API int ab_server_main(int argc, const char **argv) {
 #else
 int main(int argc, char *argv[]) {
 #endif
