@@ -637,11 +637,6 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* create the tag data mutex */
     if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
-
-    /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
-
-
     /* try to match the three parts of a tag definition string. */
 
     /* first match the name. */
