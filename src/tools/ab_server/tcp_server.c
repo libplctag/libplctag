@@ -262,6 +262,7 @@ THREAD_FUNC(conn_handler) {
 
     /* see tcp_server_start() where these are malloc'ed for us */
     free(session->server_context);
+    thread_destroy(&(session->thread)); /* detached thread: free its handle (no join) */
     free(session);
 
     atomic_fetch_sub(&server->active_handlers, 1);
