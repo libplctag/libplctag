@@ -39,6 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #if defined(IS_WINDOWS)
 #    include <windows.h>
@@ -65,11 +66,11 @@ static void parse_cip_tag(const char *tag, plc_s *plc);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
 
+/* shutdown flag; set by the signal/console handler or ab_server_stop(), polled by tcp_server_start() */
+atomic_int done = 0;
+
+
 #ifdef IS_WINDOWS
-
-typedef volatile int sig_flag_t;
-
-sig_flag_t done = 0;
 
 /* straight from MS' web site :-) */
 int WINAPI CtrlHandler(DWORD fdwCtrlType) {
@@ -77,29 +78,29 @@ int WINAPI CtrlHandler(DWORD fdwCtrlType) {
             // Handle the CTRL-C signal.
         case CTRL_C_EVENT:
             log_info("^C event");
-            done = 1;
+            atomic_store(&done, 1);
             return TRUE;
 
             // CTRL-CLOSE: confirm that the user wants to exit.
         case CTRL_CLOSE_EVENT:
             log_info("Close event");
-            done = 1;
+            atomic_store(&done, 1);
             return TRUE;
 
             // Pass other signals to the next handler.
         case CTRL_BREAK_EVENT:
             log_info("^Break event");
-            done = 1;
+            atomic_store(&done, 1);
             return TRUE;
 
         case CTRL_LOGOFF_EVENT:
             log_info("Logoff event");
-            done = 1;
+            atomic_store(&done, 1);
             return TRUE;
 
         case CTRL_SHUTDOWN_EVENT:
             log_info("Shutdown event");
-            done = 1;
+            atomic_store(&done, 1);
             return TRUE;
 
         default: log_info("Default Event: %d", fdwCtrlType); return FALSE;
@@ -116,14 +117,10 @@ void setup_break_handler(void) {
 
 #else
 
-typedef volatile sig_atomic_t sig_flag_t;
-
-sig_flag_t done = 0;
-
 void SIGINT_handler(int not_used) {
     (void)not_used;
 
-    done = 1;
+    atomic_store(&done, 1);
 }
 
 void setup_break_handler(void) {
@@ -134,12 +131,38 @@ void setup_break_handler(void) {
     memset(&act, 0, sizeof(act));
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
+    sigaction(SIGTERM, &act, NULL);
+#ifdef SIGQUIT
+    sigaction(SIGQUIT, &act, NULL);
+#endif
 }
 
 #endif
 
 
-int main(int argc, const char **argv) {
+static void cleanup_tags(plc_s *plc);
+
+#ifdef AB_SERVER_LIB
+/* libab_server ships its own copies of utility functions (socket_*, mem_*, mutex_*,
+ * thread_*, ...) whose names also exist in libplctag. When both are loaded into one
+ * process (the same-process client+server case), the lib is built with hidden symbol
+ * visibility and exports only these two entry points, so neither lib's internal calls
+ * can be interposed by the other's. */
+#  if defined(__GNUC__) && !defined(_WIN32)
+#    define AB_SERVER_API __attribute__((visibility("default")))
+#  else
+#    define AB_SERVER_API
+#  endif
+
+/* In-process embedding entry points (see apps/demo/ABPLC). ab_server_stop() is callable
+ * from another thread to ask the blocking ab_server_main() loop to return. */
+AB_SERVER_API void ab_server_stop(void) { atomic_store(&done, 1); }
+
+AB_SERVER_API int ab_server_main(int argc, const char **argv)
+#else
+int main(int argc, const char **argv)
+#endif
+{
     tcp_server_p server = NULL;
     plc_s plc;
 
@@ -167,7 +190,25 @@ int main(int argc, const char **argv) {
 
     tcp_server_destroy(server);
 
+    /* Free the tag list. Harmless for the standalone exe (the OS reclaims it), but
+     * required for the embedded library so repeated start/stop cycles do not leak. */
+    cleanup_tags(&plc);
+
     return 0;
+}
+
+
+static void cleanup_tags(plc_s *plc) {
+    tag_def_s *tag = plc->tags;
+    while(tag) {
+        tag_def_s *next = tag->next_tag;
+        if(tag->name) { free(tag->name); }
+        if(tag->data) { free(tag->data); }
+        if(tag->data_mutex) { mutex_destroy(&(tag->data_mutex)); }
+        free(tag);
+        tag = next;
+    }
+    plc->tags = NULL;
 }
 
 

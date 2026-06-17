@@ -40,6 +40,7 @@
 #include "utils.h"
 #include "log.h"
 #include <limits.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -54,13 +55,14 @@ struct tcp_server {
     slice_s (*handler)(slice_s input, slice_s output, void *context);
     void *context;
     size_t context_size;
+    atomic_int active_handlers; /* count of running conn_handler threads, for drain-on-shutdown */
+    atomic_bool done;           /* shutdown flag; any thread may raise it, all monitor it */
 };
 
 struct client_session {
     SOCKET client_fd;
     tcp_server_p server;
     void *server_context;
-    bool *server_done;
     slice_s buffer;
     thread_p thread;
 };
@@ -86,15 +88,14 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
         server->handler = handler;
         server->context = context;
         server->context_size = context_size;
+        atomic_store(&server->active_handlers, 0);
+        atomic_store(&server->done, false);
     }
 
     return server;
 }
 
-void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
-    static bool done; /* static so it doesn't go out of scope, since it's passed to sub-threads. */
-    done = false;     /* initialised every invocation for logic sake, even though that's once. */
-
+void tcp_server_start(tcp_server_p server, atomic_int *terminate) {
     log_info("Waiting for new client connection.");
 
     do {
@@ -123,7 +124,6 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
             memcpy(session->server_context, server->context, server->context_size);
             session->client_fd = client_fd; /* copy of a temporary value - no thread safety concerns */
             session->server = server;       /* reference to a long-lived struct, which has values and the original context */
-            session->server_done = &done;   /* reference to a flag that any thread can raise (and all must monitor) */
 
             if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) != THREAD_STATUS_OK) {
                 log_error("ERROR: Unable to create connection handler thread!");
@@ -133,15 +133,20 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
             continue;
         } else {
             log_error("ERROR: Received error, %s, accepting new client connection!", err_to_string(accept_status));
-            done = true;
+            atomic_store(&server->done, true);
         }
 
         /* give back the CPU. */
         system_yield();
-    } while(!done && !*terminate);
+    } while(!atomic_load(&server->done) && !atomic_load(terminate));
 
     /* in case we were terminated by signal, raise the done flag for all the threads to exit */
-    done = true;
+    atomic_store(&server->done, true);
+
+    /* Wait for all in-flight connection handlers to finish before returning, so the caller
+     * (e.g. the embedded ab_server_main) can safely free the PLC tags/mutexes without a
+     * handler thread still touching them. */
+    while(atomic_load(&server->active_handlers) > 0) { system_yield(); }
 }
 
 
@@ -172,6 +177,9 @@ THREAD_FUNC(conn_handler) {
 
     /* no one will join this thread, so clean ourselves up. */
     thread_detach();
+
+    /* register with the server so tcp_server_start() can drain us on shutdown. */
+    atomic_fetch_add(&server->active_handlers, 1);
 
     accumulated_data = slice_make(input_buf, 0);            /* start with zero accumulated data */
     read_target = slice_make(input_buf, sizeof(input_buf)); /* read into entire buffer initially */
@@ -248,13 +256,15 @@ THREAD_FUNC(conn_handler) {
             }
         }
     } while((rc == ERR_TCP_INCOMPLETE || rc == ERR_TCP_PROCESSED)
-            && (*(session->server_done) != true)); /* make sure another thread hasn't killed the server */
+            && !atomic_load(&server->done)); /* make sure another thread hasn't killed the server */
 
     socket_close(session->client_fd);
 
     /* see tcp_server_start() where these are malloc'ed for us */
     free(session->server_context);
     free(session);
+
+    atomic_fetch_sub(&server->active_handlers, 1);
 
     THREAD_RETURN(0);
 }

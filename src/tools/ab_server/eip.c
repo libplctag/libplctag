@@ -45,6 +45,7 @@
 #define EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
 #define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
 #define EIP_CONNECTED_SEND ((uint16_t)0x0070)
+#define EIP_LIST_IDENTITY ((uint16_t)0x0063)
 
 /* supported EIP version */
 #define EIP_VERSION ((uint16_t)1)
@@ -62,6 +63,7 @@ typedef struct {
 
 static slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
 static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
+static slice_s list_identity(slice_s output, plc_s *plc, eip_header_s *header);
 
 
 slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
@@ -116,6 +118,8 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
                                             slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
+        case EIP_LIST_IDENTITY: response = list_identity(response, plc, &header); break;
+
         default: response = slice_make_err(ERR_TCP_UNSUPPORTED); break;
     }
 
@@ -146,6 +150,52 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
         return slice_from_slice(output, 0, EIP_HEADER_SIZE);
     }
+}
+
+
+slice_s list_identity(slice_s output, plc_s *plc, eip_header_s *header) {
+    (void)plc;
+    (void)header;
+
+    /* Hardcoded CIP Identity object for the emulator, so an EtherNet/IP ListIdentity (0x63)
+     * query returns a fixed, generic controller identity (vendor / device type / product
+     * code / revision / serial / product name). Vendor id is 0 (unspecified): this is an
+     * open emulator and must not present itself as a real vendor's device. */
+    static const char product_name[] = "libplctag ab_server";
+    const uint8_t name_len = (uint8_t)(sizeof(product_name) - 1);
+
+    size_t off = 0;
+
+    /* CPF item count */
+    slice_set_uint16_le(output, off, (uint16_t)1); off += 2;
+
+    /* item type (CIP Identity) + length placeholder (back-filled below) */
+    slice_set_uint16_le(output, off, (uint16_t)0x000C); off += 2;
+    const size_t len_off = off; off += 2;
+    const size_t data_start = off;
+
+    slice_set_uint16_le(output, off, (uint16_t)1); off += 2; /* encap protocol version */
+
+    /* socket address (16 bytes) - clients ignore it for ListIdentity */
+    for(size_t i = 0; i < 16; i++) { slice_set_uint8(output, off + i, (uint8_t)0); }
+    off += 16;
+
+    slice_set_uint16_le(output, off, (uint16_t)0);      off += 2; /* vendor id: 0 = unspecified (open emulator, not a real vendor device) */
+    slice_set_uint16_le(output, off, (uint16_t)0x000E); off += 2; /* device type: Programmable Logic Controller */
+    slice_set_uint16_le(output, off, (uint16_t)0x0059); off += 2; /* product code */
+    slice_set_uint8(output, off, (uint8_t)32); off += 1;          /* revision major */
+    slice_set_uint8(output, off, (uint8_t)11); off += 1;          /* revision minor */
+    slice_set_uint16_le(output, off, (uint16_t)0x0030); off += 2; /* status word */
+    slice_set_uint32_le(output, off, (uint32_t)0x00D5F123); off += 4; /* serial number */
+    slice_set_uint8(output, off, name_len); off += 1;             /* product name length */
+    for(uint8_t i = 0; i < name_len; i++) { slice_set_uint8(output, off + (size_t)i, (uint8_t)product_name[i]); }
+    off += name_len;
+    slice_set_uint8(output, off, (uint8_t)0x03); off += 1;        /* state: operational */
+
+    /* back-fill the CPF item length */
+    slice_set_uint16_le(output, len_off, (uint16_t)(off - data_start));
+
+    return slice_from_slice(output, 0, off);
 }
 
 
