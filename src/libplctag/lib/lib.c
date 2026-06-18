@@ -405,6 +405,11 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
             tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
             tag->event_creation_complete = 0;
             tag->event_creation_complete_status = PLCTAG_STATUS_OK;
+            /* The auto_sync tickler may have set read_in_flight before the tag was
+             * ready (vtable->read returned PENDING without dispatching).  CREATED
+             * marks the transition to operational, so clear the stale flag so that
+             * auto_sync resumes on the next scheduled interval. */
+            tag->read_in_flight = 0;
         }
 
         /* was there a read start? */

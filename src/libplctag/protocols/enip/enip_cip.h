@@ -53,6 +53,7 @@
 #define CIP_FWD_OPEN_LG ((uint8_t)0x5B)
 #define CIP_FWD_CLOSE   ((uint8_t)0x4E)
 #define CIP_UNCONN_SEND ((uint8_t)0x52) /* Connection Manager, same code as ReadFrag */
+#define CIP_MULTI_SVC   ((uint8_t)0x0A) /* Multiple Service Packet */
 
 /* service+reserved+status+ext_size, present in every CIP reply (§11.3) */
 #define CIP_READ_REPLY_OVERHEAD ((size_t)4)
@@ -70,6 +71,23 @@
  * Unlike a read reply, a write request also carries the path and type header
  * inline, so window calculations must add those separately. */
 #define CIP_WRITE_REQUEST_OVERHEAD ((size_t)4)
+
+/* Fixed overhead of the Multi-Service CIP request payload (before the per-tag
+ * offset table and sub-requests): service(1)+path_size_words(1)+MR path(4)+
+ * request_count(2) = 8 bytes. */
+#define ENIP_MS_REQ_FIXED ((size_t)8)
+
+/* Fixed overhead of the Multi-Service CIP reply payload (outer CIP reply
+ * header(4) + response_count(2) = 6 bytes, before the per-tag offset table
+ * and sub-replies). */
+#define ENIP_MS_RESP_FIXED ((size_t)6)
+
+/* Minimum possible CIP sub-request size (used to compute max batch count):
+ *   service(1) + path_size_words(1) + 0x91 segment type(1) + name_len(1)
+ *   + 1-byte name(1) + element_count(2) + offset_table_entry(2) = 9 bytes.
+ * Response minimum (4-byte CIP header + 2-byte offset) = 6 bytes; request
+ * minimum is the binding constraint. */
+#define ENIP_MS_MIN_SUB_REQ_SIZE ((size_t)9)
 
 /* Parsed CIP reply header. */
 typedef struct {
@@ -145,3 +163,29 @@ extern Bytes enip_cip_write(Arena *a, Bytes path, Bytes type_header, uint16_t co
  * than the declared extended-status block.
  */
 extern bool enip_cip_parse_reply(Bytes in, cip_reply_t *out);
+
+/*
+ * Build a CIP Multiple Service Packet (0x0A) request from N pre-built
+ * sub-requests.  sub_reqs[0..count-1] must each be a complete CIP service
+ * request (output of enip_cip_read / enip_cip_write).
+ *
+ * The offset table entries are relative to the start of the offset array
+ * per the CIP spec.  Caller must have already verified that the total fits
+ * within the negotiated CIP payload budget (ENIP_MS_REQ_FIXED + 2*count +
+ * sum(sub_reqs[i].len) <= max_cip - CIP_CONNECTED_ITEM_OVERHEAD).
+ *
+ * Returns bytes_null() on zero count or arena exhaustion.
+ */
+extern Bytes enip_cip_multi_service(Arena *a, Bytes *sub_reqs, uint16_t count);
+
+/*
+ * Parse the `data` slice from enip_cip_parse_reply when the outer service is
+ * CIP_MULTI_SVC | 0x80.  Fills sub_replies[0..*count_out-1] as zero-copy
+ * slices of `data`; each slice is a complete CIP sub-reply to be parsed with
+ * enip_cip_parse_reply.
+ *
+ * Returns false on a malformed packet or if the response count exceeds
+ * max_count.
+ */
+extern bool enip_cip_parse_multi_service_reply(Bytes data, uint16_t *count_out,
+                                               Bytes *sub_replies, uint16_t max_count);

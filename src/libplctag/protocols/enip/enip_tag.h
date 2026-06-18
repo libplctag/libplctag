@@ -70,6 +70,8 @@ struct enip_tag_t {
 
     uint32_t frag_offset; /* ReadFrag continuation cursor (post-MVP) */
 
+    struct enip_tag_t *batch_next; /* batch list linkage; IO-thread-only, no lock needed */
+
     Bytes path; /* encoded CIP IOI, into the tail */
     char *tag_name; /* into the tail */
     /* tail: tag_name (NUL), then the encoded CIP path bytes */

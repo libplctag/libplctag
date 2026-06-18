@@ -321,6 +321,99 @@ Bytes enip_cip_write(Arena *a, Bytes path, Bytes type_header, uint16_t count, By
  * CIP reply parsing
  * ============================================================================ */
 
+/* ============================================================================
+ * CIP Multiple Service Packet (0x0A) request builder
+ * ============================================================================ */
+
+Bytes enip_cip_multi_service(Arena *a, Bytes *sub_reqs, uint16_t count) {
+    if(!a || !sub_reqs || count == 0) { return bytes_null(); }
+
+    /* Compute total size: fixed header(8) + offset table(2*count) + sub-requests. */
+    size_t total = ENIP_MS_REQ_FIXED + (size_t)2 * count;
+    for(uint16_t i = 0; i < count; i++) {
+        if(bytes_is_null(sub_reqs[i])) { return bytes_null(); }
+        total += sub_reqs[i].len;
+    }
+
+    uint8_t *buf = (uint8_t *)arena_alloc(a, total);
+    if(!buf) { return bytes_null(); }
+
+    /* service + path */
+    buf[0] = CIP_MULTI_SVC;
+    buf[1] = (uint8_t)0x02; /* path_size_words = 2 words */
+    buf[2] = (uint8_t)0x20; /* class segment */
+    buf[3] = (uint8_t)0x02; /* Message Router class 0x02 */
+    buf[4] = (uint8_t)0x24; /* instance segment */
+    buf[5] = (uint8_t)0x01; /* instance 1 */
+
+    /* request_count LE16 */
+    buf[6] = (uint8_t)(count & 0xFFu);
+    buf[7] = (uint8_t)(count >> 8);
+
+    /* Offset table: each offset is relative to the start of the Number_of_Services
+     * field (CIP Vol 1 §3-5.5), i.e. it includes the 2-byte count itself.
+     * offset[0] = 2 (count) + 2*count (offset table). */
+    uint16_t off = (uint16_t)(2u + (uint16_t)2 * count);
+    for(uint16_t i = 0; i < count; i++) {
+        buf[8 + (size_t)2 * i]     = (uint8_t)(off & 0xFFu);
+        buf[8 + (size_t)2 * i + 1] = (uint8_t)(off >> 8);
+        off = (uint16_t)(off + (uint16_t)sub_reqs[i].len);
+    }
+
+    /* Sub-requests */
+    size_t pos = ENIP_MS_REQ_FIXED + (size_t)2 * count;
+    for(uint16_t i = 0; i < count; i++) {
+        memcpy(buf + pos, sub_reqs[i].data, sub_reqs[i].len);
+        pos += sub_reqs[i].len;
+    }
+
+    return bytes_from_buf(buf, total);
+}
+
+/* ============================================================================
+ * CIP Multiple Service Packet reply parser
+ * ============================================================================ */
+
+bool enip_cip_parse_multi_service_reply(Bytes data, uint16_t *count_out,
+                                        Bytes *sub_replies, uint16_t max_count) {
+    /* data = the `data` slice from enip_cip_parse_reply of the outer MS reply.
+     * Layout: [response_count:u16le][offset[0]:u16le]...[offset[N-1]:u16le][sub-replies...]
+     * Offsets are from the start of the offset array (data.data + 2). */
+    if(!count_out || !sub_replies || bytes_is_null(data) || data.len < 2) { return false; }
+
+    uint16_t count = (uint16_t)((uint16_t)data.data[0] | (uint16_t)((uint16_t)data.data[1] << 8));
+    if(count == 0 || count > max_count) { return false; }
+    if(data.len < (size_t)2 + (size_t)2 * count) { return false; }
+
+    *count_out = count;
+
+    for(uint16_t i = 0; i < count; i++) {
+        size_t tbl = (size_t)2 + (size_t)2 * i;
+        uint16_t start_off = (uint16_t)((uint16_t)data.data[tbl] | (uint16_t)((uint16_t)data.data[tbl + 1] << 8));
+        uint16_t end_off;
+
+        if(i + 1 < count) {
+            size_t tbl_next = (size_t)2 + (size_t)2 * (i + 1);
+            end_off = (uint16_t)((uint16_t)data.data[tbl_next] | (uint16_t)((uint16_t)data.data[tbl_next + 1] << 8));
+        } else {
+            /* Last sub-reply: extends to the end of data. */
+            end_off = (uint16_t)data.len;
+        }
+
+        if(start_off >= end_off) { return false; }
+        if((size_t)end_off > data.len) { return false; }
+
+        /* Offsets are from Number_of_Services start (= data.data[0]). */
+        sub_replies[i] = bytes_from_buf(data.data + start_off, (size_t)(end_off - start_off));
+    }
+
+    return true;
+}
+
+/* ============================================================================
+ * CIP reply parsing
+ * ============================================================================ */
+
 bool enip_cip_parse_reply(Bytes in, cip_reply_t *out) {
     if(!out) { return false; }
 
