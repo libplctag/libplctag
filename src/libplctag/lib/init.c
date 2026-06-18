@@ -290,19 +290,25 @@ int initialize_modules(void) {
     }
 
     /* hook the destructor */
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)
     /*
-     * POSIX only. atexit() handlers run while the process is still multithreaded,
-     * so plc_tag_shutdown() can cleanly join the tag-tickler and refcount-cleanup
-     * threads.
+     * Register the atexit() teardown for every build EXCEPT the Windows DLL.
      *
-     * NOT on Windows: there the atexit table is executed from the CRT's
-     * DLL_PROCESS_DETACH handler during LdrShutdownProcess, after the loader has
-     * already terminated every other thread. plc_tag_shutdown() would then spin
-     * forever in its tag-close / thread-join paths waiting on those now-dead
-     * worker threads, wedging the exiting process under the loader lock (it cannot
-     * even be force-killed). Windows callers must call plc_tag_shutdown()
-     * explicitly during orderly application shutdown, while the workers are alive.
+     * POSIX (shared or static) and the Windows STATIC library are linked into an
+     * executable, so atexit() runs during the executable's normal CRT exit while
+     * the process is still multithreaded — plc_tag_shutdown() can cleanly join
+     * the tag-tickler and refcount-cleanup threads. (Omitting it there leaves
+     * those threads running into CRT teardown and crashing, for programs that
+     * don't call plc_tag_shutdown() themselves.)
+     *
+     * NOT for the Windows DLL (LIBPLCTAG_STATIC undefined): there the atexit
+     * table is executed from the CRT's DLL_PROCESS_DETACH handler during
+     * LdrShutdownProcess, after the loader has already terminated every other
+     * thread. plc_tag_shutdown() would then spin forever in its tag-close /
+     * thread-join paths waiting on those now-dead workers, wedging the exiting
+     * process under the loader lock (it cannot even be force-killed). DLL callers
+     * must call plc_tag_shutdown() explicitly during orderly application
+     * shutdown, while the workers are alive; DllMain handles the FreeLibrary case.
      */
     atexit(plc_tag_shutdown);
 #endif
