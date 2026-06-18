@@ -1224,7 +1224,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     int done = 0;
     SOCKET fd;
     struct timeval timeout; /* used for timing out connections etc. */
-    struct linger so_linger;
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Starting.");
 
@@ -1258,16 +1257,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, (int)sizeof(timeout))) {
         closesocket(fd);
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket send timeout option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
-
-    /* abort the connection on close. */
-    so_linger.l_onoff = 1;
-    so_linger.l_linger = 0;
-
-    if(setsockopt(fd, SOL_SOCKET, SO_LINGER, (char *)&so_linger, (int)sizeof(so_linger))) {
-        closesocket(fd);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket close linger option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 

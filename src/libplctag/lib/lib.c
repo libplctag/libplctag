@@ -1139,12 +1139,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     /* get the tag status. */
-    if(tag->vtable && tag->vtable->status) { rc = tag->vtable->status(tag); }
+    if(tag->vtable && tag->vtable->status) {
+        critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+    }
 
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-        if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+        if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
 
         /* remove the tag from the hashtable. */
         critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1180,7 +1182,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1191,7 +1193,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
             /* get the tag status. */
             if(tag->vtable && tag->vtable->status) {
-                rc = tag->vtable->status(tag);
+                critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have a status function!");
             }
@@ -1200,7 +1202,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1211,11 +1213,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* clear up any remaining flags.  This should be refactored. */
-        tag->read_in_flight = 0;
-        tag->write_in_flight = 0;
+        critical_block(tag->api_mutex) {
+            tag->read_in_flight = 0;
+            tag->write_in_flight = 0;
 
-        /* raise create event. */
-        tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+            /* raise create event. */
+            tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+        }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "tag set up elapsed time %" PRId64 "ms", (time_ms() - start_time));
     }
