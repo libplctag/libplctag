@@ -290,7 +290,22 @@ int initialize_modules(void) {
     }
 
     /* hook the destructor */
+#ifndef _WIN32
+    /*
+     * POSIX only. atexit() handlers run while the process is still multithreaded,
+     * so plc_tag_shutdown() can cleanly join the tag-tickler and refcount-cleanup
+     * threads.
+     *
+     * NOT on Windows: there the atexit table is executed from the CRT's
+     * DLL_PROCESS_DETACH handler during LdrShutdownProcess, after the loader has
+     * already terminated every other thread. plc_tag_shutdown() would then spin
+     * forever in its tag-close / thread-join paths waiting on those now-dead
+     * worker threads, wedging the exiting process under the loader lock (it cannot
+     * even be force-killed). Windows callers must call plc_tag_shutdown()
+     * explicitly during orderly application shutdown, while the workers are alive.
+     */
     atexit(plc_tag_shutdown);
+#endif
 
     /* Transition to RUNNING - initialization complete */
     atomic_set_int32(&library_state, LIB_STATE_RUNNING);

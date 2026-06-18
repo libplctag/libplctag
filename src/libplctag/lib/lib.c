@@ -98,8 +98,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                                    void *userdata, int timeout, plc_tag_p src_tag);
 
 
-#ifdef LIPLCTAGDLL_EXPORTS
-#    if defined(_WIN32) || (defined(_WIN64)
+#ifdef LIBPLCTAGDLL_EXPORTS
+#    if defined(_WIN32) || defined(_WIN64)
 #        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
@@ -109,7 +109,16 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 
         case DLL_PROCESS_DETACH:
             // fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
-            plc_tag_shutdown();
+            /*
+             * Only tear down on an explicit FreeLibrary() (lpvReserved == NULL),
+             * where the process is still alive and our worker threads can be
+             * joined. When lpvReserved != NULL the process is terminating: the
+             * loader has already killed every other thread, so plc_tag_shutdown()
+             * would block forever waiting on them. Applications should still call
+             * plc_tag_shutdown() explicitly during orderly shutdown rather than
+             * rely on this path.
+             */
+            if(lpvReserved == NULL) { plc_tag_shutdown(); }
             break;
 
         case DLL_THREAD_ATTACH:
