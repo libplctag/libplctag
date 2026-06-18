@@ -408,6 +408,13 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
     if(!tag || !tag->callback) { return; }
 
     critical_block(tag->api_mutex) {
+        /* Re-check the callback under the API mutex.  plc_tag_destroy() clears the
+         * callback (and userdata) under this same mutex while tearing the tag down.
+         * The tag tickler thread holds its own reference and can call this function
+         * after plc_tag_destroy() has returned, so without this guard it could invoke
+         * a stale callback and dereference userdata the caller has already freed. */
+        if(!tag->callback) { break; }
+
         /* trigger this if there is any other event. Only once. */
         if(tag->event_creation_complete) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag creation complete with status %s.",
@@ -1683,6 +1690,15 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
     plc_tag_tickler_wake();
 
     plc_tag_generic_handle_event_callbacks(tag);
+
+    /* The tickler thread can still hold a reference and call
+     * plc_tag_generic_handle_event_callbacks() after this point,
+     * so clear the callback and userdata under the API mutex.
+     * This guarantees no stale callback fires after plc_tag_destroy(). */
+    critical_block(tag->api_mutex) {
+        tag->callback = NULL;
+        tag->userdata = NULL;
+    }
 
     /* release the reference outside the mutex. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 " and tag mutex not locked.",
