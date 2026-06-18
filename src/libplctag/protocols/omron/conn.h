@@ -113,7 +113,7 @@ struct omron_conn_t {
     uint64_t packet_count;
 
     thread_p handler_thread;
-    volatile int terminating;
+    atomic_int32_t terminating;
     mutex_p mutex;
     cond_p wait_cond;
 
@@ -141,7 +141,7 @@ struct omron_request_t {
 
     /* flags for communicating with background thread */
     int resp_received;
-    int abort_request;
+    atomic_int32_t abort_request;
 
     /* debugging info */
     int tag_id;
