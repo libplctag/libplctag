@@ -169,12 +169,15 @@ void destroy_modules(void) {
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
-    lib_teardown();
-
-    /* last so that we continue to process deferred destructors until the end. */
+    /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
+     * module: those destructors run tag teardown that touches the tag table, lookup
+     * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
+     * thread must be stopped and its queue drained while those are still alive. */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
     refcount_teardown();
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
+    lib_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
