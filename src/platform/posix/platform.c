@@ -1173,7 +1173,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     int done = 0;
     int fd;
     int flags;
-    struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
 
@@ -1212,16 +1211,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
      * 3. select() provides finer control over timeout behavior than SO_RCVTIMEO/SO_SNDTIMEO
      * Instead, timeout handling is done via select() in socket_wait_event() and socket_read()
      */
-
-    /* abort the connection immediately upon close. */
-    so_linger.l_onoff = 1;
-    so_linger.l_linger = 0;
-
-    if(setsockopt(fd, SOL_SOCKET, SO_LINGER, (char *)&so_linger, sizeof(so_linger))) {
-        close(fd);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting socket close linger option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
 
     /* make the socket non-blocking. */
     flags = fcntl(fd, F_GETFL, 0);
