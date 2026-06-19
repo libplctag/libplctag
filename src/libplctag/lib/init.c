@@ -169,12 +169,15 @@ void destroy_modules(void) {
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
-    lib_teardown();
-
-    /* last so that we continue to process deferred destructors until the end. */
+    /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
+     * module: those destructors run tag teardown that touches the tag table, lookup
+     * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
+     * thread must be stopped and its queue drained while those are still alive. */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
     refcount_teardown();
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
+    lib_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
@@ -290,7 +293,28 @@ int initialize_modules(void) {
     }
 
     /* hook the destructor */
+#if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)
+    /*
+     * Register the atexit() teardown for every build EXCEPT the Windows DLL.
+     *
+     * POSIX (shared or static) and the Windows STATIC library are linked into an
+     * executable, so atexit() runs during the executable's normal CRT exit while
+     * the process is still multithreaded — plc_tag_shutdown() can cleanly join
+     * the tag-tickler and refcount-cleanup threads. (Omitting it there leaves
+     * those threads running into CRT teardown and crashing, for programs that
+     * don't call plc_tag_shutdown() themselves.)
+     *
+     * NOT for the Windows DLL (LIBPLCTAG_STATIC undefined): there the atexit
+     * table is executed from the CRT's DLL_PROCESS_DETACH handler during
+     * LdrShutdownProcess, after the loader has already terminated every other
+     * thread. plc_tag_shutdown() would then spin forever in its tag-close /
+     * thread-join paths waiting on those now-dead workers, wedging the exiting
+     * process under the loader lock (it cannot even be force-killed). DLL callers
+     * must call plc_tag_shutdown() explicitly during orderly application
+     * shutdown, while the workers are alive; DllMain handles the FreeLibrary case.
+     */
     atexit(plc_tag_shutdown);
+#endif
 
     /* Transition to RUNNING - initialization complete */
     atomic_set_int32(&library_state, LIB_STATE_RUNNING);
