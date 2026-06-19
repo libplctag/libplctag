@@ -44,3 +44,9 @@
 
 
 extern slice_s eip_dispatch_request(slice_s input, slice_s output, plc_s *context);
+
+/* CIP Identity (ListIdentity) overrides; all default to 0 (unspecified). Set these
+ * before starting the server to advertise a specific vendor id / product code / serial. */
+extern uint16_t ab_server_identity_vendor_id;
+extern uint16_t ab_server_identity_product_code;
+extern uint32_t ab_server_identity_serial_number;

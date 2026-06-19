@@ -45,9 +45,25 @@
 #define EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
 #define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
 #define EIP_CONNECTED_SEND ((uint16_t)0x0070)
+#define EIP_LIST_IDENTITY ((uint16_t)0x0063)
 
 /* supported EIP version */
 #define EIP_VERSION ((uint16_t)1)
+
+/* Revision reported in the CIP Identity object is the libplctag version. The build
+ * passes the real values; the fallback only keeps this file self-contained. */
+#ifndef AB_SERVER_VERSION_MAJOR
+#    define AB_SERVER_VERSION_MAJOR (0)
+#endif
+#ifndef AB_SERVER_VERSION_MINOR
+#    define AB_SERVER_VERSION_MINOR (0)
+#endif
+
+/* CIP Identity fields callers may set before the server starts; all default to 0
+ * so the open emulator advertises no specific vendor, product, or serial number. */
+uint16_t ab_server_identity_vendor_id = 0;
+uint16_t ab_server_identity_product_code = 0;
+uint32_t ab_server_identity_serial_number = 0;
 
 
 typedef struct {
@@ -62,6 +78,7 @@ typedef struct {
 
 static slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
 static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
+static slice_s list_identity(slice_s output, plc_s *plc, eip_header_s *header);
 
 
 slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
@@ -116,6 +133,8 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
                                             slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
+        case EIP_LIST_IDENTITY: response = list_identity(response, plc, &header); break;
+
         default: response = slice_make_err(ERR_TCP_UNSUPPORTED); break;
     }
 
@@ -146,6 +165,58 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
         return slice_from_slice(output, 0, EIP_HEADER_SIZE);
     }
+}
+
+
+slice_s list_identity(slice_s output, plc_s *plc, eip_header_s *header) {
+    (void)plc;
+    (void)header;
+
+    /* CIP Identity object returned for an EtherNet/IP ListIdentity (0x63) query.
+     * Revision is the libplctag version; vendor id and serial come from the
+     * ab_server_identity_* globals (both default to 0 = unspecified, so by default the
+     * open emulator does not present itself as a real vendor's device). */
+    static const char product_name[] = "libplctag ab_server";
+    const uint8_t name_len = (uint8_t)(sizeof(product_name) - 1);
+
+    size_t off = 0;
+
+    /* CPF item count */
+    slice_set_uint16_le(output, off, (uint16_t)1); off += 2;
+
+    /* item type (CIP Identity) + length placeholder (back-filled below) */
+    slice_set_uint16_le(output, off, (uint16_t)0x000C); off += 2;
+    const size_t len_off = off; off += 2;
+    const size_t data_start = off;
+
+    slice_set_uint16_le(output, off, EIP_VERSION); off += 2; /* encap protocol version */
+
+    /* socket address (16 bytes) - clients ignore it for ListIdentity */
+    for(size_t i = 0; i < 16; i++) { slice_set_uint8(output, off + i, (uint8_t)0); }
+    off += 16;
+
+    slice_set_uint16_le(output, off, ab_server_identity_vendor_id); off += 2;     /* vendor id: 0 (unspecified) unless ab_server_identity_vendor_id is set */
+    slice_set_uint16_le(output, off, (uint16_t)0x000E); off += 2;                 /* device type: Programmable Logic Controller */
+    slice_set_uint16_le(output, off, ab_server_identity_product_code); off += 2;  /* product code: 0 unless ab_server_identity_product_code is set */
+    slice_set_uint8(output, off, (uint8_t)AB_SERVER_VERSION_MAJOR); off += 1;     /* revision major = libplctag version major */
+    slice_set_uint8(output, off, (uint8_t)AB_SERVER_VERSION_MINOR); off += 1;     /* revision minor = libplctag version minor */
+    /* CIP Identity status word = 0x0030. Its Extended Device Status field (bits 4-7) is
+     * 0x3, which reads as "no I/O connections established". That stays true no matter how
+     * many clients connect: this field counts only the implicit controller-to-I/O (Class 1)
+     * connections a real PLC runs to its I/O racks, and this emulator has none. Clients
+     * that read or write tags use ordinary (explicit) messaging, which does not touch this
+     * field. The Owned and Configured bits are 0, and no fault bits are set. */
+    slice_set_uint16_le(output, off, (uint16_t)0x0030); off += 2;
+    slice_set_uint32_le(output, off, ab_server_identity_serial_number); off += 4; /* serial: 0 unless ab_server_identity_serial_number is set */
+    slice_set_uint8(output, off, name_len); off += 1;                             /* product name length */
+    for(uint8_t i = 0; i < name_len; i++) { slice_set_uint8(output, off + (size_t)i, (uint8_t)product_name[i]); }
+    off += name_len;
+    slice_set_uint8(output, off, (uint8_t)0x03); off += 1;                        /* device state: operational (the emulator is operational whenever it answers) */
+
+    /* back-fill the CPF item length */
+    slice_set_uint16_le(output, len_off, (uint16_t)(off - data_start));
+
+    return slice_from_slice(output, 0, off);
 }
 
 

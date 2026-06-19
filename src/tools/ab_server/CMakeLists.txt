@@ -38,6 +38,11 @@ set(AB_SERVER_FILES
 add_executable(ab_server ${AB_SERVER_FILES})
 target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
 
+# Report the libplctag version as the CIP Identity revision in ListIdentity replies.
+target_compile_definitions(ab_server PRIVATE
+    AB_SERVER_VERSION_MAJOR=${libplctag_VERSION_MAJOR}
+    AB_SERVER_VERSION_MINOR=${libplctag_VERSION_MINOR})
+
 # Link math library for ab_server (fairness.c uses math.h)
 # Math functions are in libm on Unix but in the C runtime on Windows
 if(UNIX)
