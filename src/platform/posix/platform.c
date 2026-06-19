@@ -1117,11 +1117,18 @@ int cond_destroy(cond_p *c) {
 #    define INVALID_SOCKET (-1)
 #endif
 
+typedef enum {
+    SOCK_KIND_TCP_CLIENT = 0,
+    SOCK_KIND_TCP_LISTEN,
+    SOCK_KIND_UDP
+} sock_kind_t;
+
 struct sock_t {
     int fd;
     int wake_read_fd;
     int wake_write_fd;
     int port;
+    sock_kind_t kind;
 };
 
 
@@ -1291,7 +1298,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     memset((void *)&gw_addr, 0, sizeof(gw_addr));
 
     gw_addr.sin_family = AF_INET;
-    gw_addr.sin_port = htons((uint16_t)port);
+    gw_addr.sin_port = htons(port);
 
     do {
         /* try each IP until we run out or get a connection started. */
@@ -2220,6 +2227,386 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     } else {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "Done.");
     }
+
+    return rc;
+}
+
+
+/***************************************************************************
+ ********************* TCP server / UDP sockets ****************************
+ **************************************************************************/
+
+
+extern int32_t socket_listen_tcp(sock_p s, const char *bind_addr, uint16_t port, int32_t backlog) {
+    int fd;
+    int sock_opt = 1;
+    int flags;
+    struct sockaddr_in addr;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
+
+    if(!s) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if(fd < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "socket() failed, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt))) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "setsockopt(SO_REUSEADDR) failed, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+#ifdef BSD_OS_TYPE
+    if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "setsockopt(SO_NOSIGPIPE) failed, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+#endif
+
+    flags = fcntl(fd, F_GETFL, 0);
+    if(flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "fcntl() non-blocking failed, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    mem_set(&addr, 0, (int)sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if(bind_addr && bind_addr[0] != '\0') {
+        if(inet_pton(AF_INET, bind_addr, &addr.sin_addr) <= 0) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Invalid bind address: %s", bind_addr);
+            close(fd);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+    } else {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    }
+
+    if(bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "bind() failed on port %d, errno: %d", port, errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    if(listen(fd, backlog) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "listen() failed, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    s->fd = fd;
+    s->port = port;
+    s->kind = SOCK_KIND_TCP_LISTEN;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done: listening on port %d, fd=%d.", port, fd);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t socket_accept(sock_p listen_s, sock_p *client_s, int32_t timeout_ms) {
+    fd_set read_set;
+    struct timeval tv;
+    int max_fd;
+    int select_rc;
+    int client_fd;
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    sock_p client = NULL;
+    int32_t rc;
+    int flags;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
+
+    if(!listen_s || !client_s) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    *client_s = NULL;
+
+    /* select() directly on listen fd + wake fd.
+     * We cannot use socket_wait_event() here because it calls recv(MSG_PEEK)
+     * to distinguish CAN_READ from DISCONNECT, which is invalid on a listen socket. */
+    FD_ZERO(&read_set);
+    FD_SET(listen_s->fd, &read_set);
+    FD_SET(listen_s->wake_read_fd, &read_set);
+    max_fd = (listen_s->fd > listen_s->wake_read_fd) ? listen_s->fd : listen_s->wake_read_fd;
+
+    tv.tv_sec = (time_t)(timeout_ms / 1000);
+    tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)1000;
+
+    select_rc = select(max_fd + 1, &read_set, NULL, NULL, &tv);
+
+    if(select_rc == 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Timed out waiting for connection.");
+        return PLCTAG_ERR_TIMEOUT;
+    }
+
+    if(select_rc < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned error %d, errno: %d", select_rc, errno);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* check wake pipe first */
+    if(FD_ISSET(listen_s->wake_read_fd, &read_set)) {
+        char buf[32];
+        while(read(listen_s->wake_read_fd, buf, sizeof(buf)) > 0) {}
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Woken up, returning abort.");
+        return PLCTAG_ERR_ABORT;
+    }
+
+    if(!FD_ISSET(listen_s->fd, &read_set)) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned but listen fd is not ready!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    do {
+        client_fd = accept(listen_s->fd, (struct sockaddr *)&client_addr, &client_addr_len);
+    } while(client_fd < 0 && errno == EINTR);
+
+    if(client_fd < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            return PLCTAG_ERR_TIMEOUT;
+        }
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "accept() failed, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Accepted connection from %s:%d, fd=%d.",
+           inet_ntoa(client_addr.sin_addr), (int)ntohs(client_addr.sin_port), client_fd);
+
+    /* make client socket non-blocking */
+    flags = fcntl(client_fd, F_GETFL, 0);
+    if(flags < 0 || fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "fcntl() non-blocking failed for client fd, errno: %d", errno);
+        close(client_fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+#ifdef BSD_OS_TYPE
+    {
+        int sock_opt = 1;
+        if(setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "setsockopt(SO_NOSIGPIPE) failed for client fd, errno: %d", errno);
+            close(client_fd);
+            return PLCTAG_ERR_OPEN;
+        }
+    }
+#endif
+
+    client = (sock_p)mem_alloc((int)sizeof(struct sock_t));
+    if(!client) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Failed to allocate memory for client socket.");
+        close(client_fd);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    client->fd = client_fd;
+    client->wake_read_fd = INVALID_SOCKET;
+    client->wake_write_fd = INVALID_SOCKET;
+    client->port = (int)ntohs(client_addr.sin_port);
+    client->kind = SOCK_KIND_TCP_CLIENT;
+
+    rc = sock_create_event_wakeup_channel(client);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to create wake channel for client socket, error %s!",
+               plc_tag_decode_error(rc));
+        close(client_fd);
+        mem_free(client);
+        return rc;
+    }
+
+    *client_s = client;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done: client fd=%d.", client_fd);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t socket_open_udp(sock_p s, const char *bind_addr, uint16_t port, bool enable_broadcast) {
+    int fd;
+    int sock_opt = 1;
+    int flags;
+    struct sockaddr_in addr;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
+
+    if(!s) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if(fd < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "socket() failed, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt))) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "setsockopt(SO_REUSEADDR) failed, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    if(enable_broadcast) {
+        sock_opt = 1;
+        if(setsockopt(fd, SOL_SOCKET, SO_BROADCAST, (char *)&sock_opt, sizeof(sock_opt))) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "setsockopt(SO_BROADCAST) failed, errno: %d", errno);
+            close(fd);
+            return PLCTAG_ERR_OPEN;
+        }
+    }
+
+    flags = fcntl(fd, F_GETFL, 0);
+    if(flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "fcntl() non-blocking failed, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    mem_set(&addr, 0, (int)sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if(bind_addr && bind_addr[0] != '\0') {
+        if(inet_pton(AF_INET, bind_addr, &addr.sin_addr) <= 0) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Invalid bind address: %s", bind_addr);
+            close(fd);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+    } else {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    }
+
+    if(bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "bind() failed on port %d, errno: %d", port, errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    s->fd = fd;
+    s->port = port;
+    s->kind = SOCK_KIND_UDP;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done: UDP socket on port %d, fd=%d.", port, fd);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t socket_send_to(sock_p s, uint8_t *buf, int32_t size, const char *host, uint16_t port) {
+    struct sockaddr_in addr;
+    int32_t rc;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
+
+    if(!s || !buf || !host) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(s->fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket is not open!");
+        return PLCTAG_ERR_WRITE;
+    }
+
+    mem_set(&addr, 0, (int)sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if(inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Invalid destination address: %s", host);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    do {
+        rc = (int)sendto(s->fd, buf, (size_t)size, 0, (struct sockaddr *)&addr, sizeof(addr));
+    } while(rc < 0 && errno == EINTR);
+
+    if(rc < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "sendto() failed, errno: %d", errno);
+        return PLCTAG_ERR_WRITE;
+    }
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done: sent %d bytes to %s:%d.", rc, host, port);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t socket_recv_from(sock_p s, uint8_t *buf, int32_t size, char *src_host,
+                                int32_t src_host_len, uint16_t *src_port, int32_t timeout_ms) {
+    int32_t events;
+    struct sockaddr_in from_addr;
+    socklen_t from_addr_len = sizeof(from_addr);
+    int32_t rc;
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
+
+    if(!s || !buf) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(s->fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket is not open!");
+        return PLCTAG_ERR_READ;
+    }
+
+    events = socket_wait_event(s, SOCK_EVENT_CAN_READ | SOCK_EVENT_WAKE_UP, timeout_ms);
+    if(events < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "socket_wait_event() returned error %s!", plc_tag_decode_error(events));
+        return events;
+    }
+
+    if(events & SOCK_EVENT_WAKE_UP) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Woken up, returning abort.");
+        return PLCTAG_ERR_ABORT;
+    }
+
+    if(events & SOCK_EVENT_TIMEOUT) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Timed out.");
+        return PLCTAG_ERR_TIMEOUT;
+    }
+
+    if(!(events & SOCK_EVENT_CAN_READ)) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unexpected event 0x%x!", events);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    do {
+        rc = (int32_t)recvfrom(s->fd, buf, (size_t)size, 0, (struct sockaddr *)&from_addr, &from_addr_len);
+    } while(rc < 0 && errno == EINTR);
+
+    if(rc < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "No data available after select (EAGAIN).");
+            return PLCTAG_ERR_TIMEOUT;
+        }
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "recvfrom() failed, errno: %d", errno);
+        return PLCTAG_ERR_READ;
+    }
+
+    if(src_host && src_host_len > 0) {
+        if(!inet_ntop(AF_INET, &from_addr.sin_addr, src_host, (socklen_t)src_host_len)) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "inet_ntop() failed, errno: %d", errno);
+            src_host[0] = '\0';
+        }
+    }
+
+    if(src_port) {
+        *src_port = ntohs(from_addr.sin_port);
+    }
+
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done: received %d bytes.", rc);
 
     return rc;
 }

@@ -275,6 +275,19 @@ extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *s);
 
+/* TCP server */
+extern int32_t socket_listen_tcp(sock_p s, const char *bind_addr, uint16_t port, int32_t backlog);
+extern int32_t socket_accept(sock_p listen_s, sock_p *client_s, int32_t timeout_ms);
+    /* Returns PLCTAG_ERR_TIMEOUT on timeout, PLCTAG_ERR_ABORT on wake-up signal. */
+
+/* UDP (unicast + broadcast) */
+extern int32_t socket_open_udp(sock_p s, const char *bind_addr, uint16_t port, bool enable_broadcast);
+extern int32_t socket_send_to(sock_p s, uint8_t *buf, int32_t size, const char *host, uint16_t port);
+extern int32_t socket_recv_from(sock_p s, uint8_t *buf, int32_t size, char *src_host,
+                                int32_t src_host_len, uint16_t *src_port, int32_t timeout_ms);
+    /* Returns bytes received (>= 0) on success, PLCTAG_ERR_TIMEOUT on timeout,
+       PLCTAG_ERR_ABORT on wake-up signal, negative PLCTAG_ERR_* on error. */
+
 
 /* serial handling */
 typedef struct serial_port_t *serial_port_p;
