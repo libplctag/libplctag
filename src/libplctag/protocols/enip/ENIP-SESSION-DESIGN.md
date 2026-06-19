@@ -541,6 +541,13 @@ negotiated CIP capacity, and we treat any non-zero CIP status as a failure** —
 the same fit calculation and the same handling for every CIP PLC. No
 vendor-specific code paths.
 
+This "no vendor-specific code paths" claim is scoped to the right-sized common
+path described here. The deferred byte-fragmentation phase (§16a, §16.4) *does*
+use the vendor-specific encodings — Rockwell ReadFrag with its `0x06`
+partial-transfer status, OMRON Simple Data Segment — but only for single elements
+too large to fit a packet, and only behind the `enip_dialect_t` seam (§16a.4), so
+the common core still never branches on manufacturer.
+
 To size correctly we must know one element's size, which we don't know up front
 for a UDT. Hence: **probe one element, then bulk-read the rest in correctly sized
 windows.**
@@ -619,13 +626,13 @@ phase is therefore minimal and vendor-neutral:
 | --- | --- |
 | CIP status `0x00` | `returned = data/elem_size`; copy and advance |
 | any non-zero CIP status | **fail the open** with the decoded CIP error; do not retry, do not special-case any vendor |
-| one element exceeds `cap` (pre-send check) | `PLCTAG_ERR_TOO_LARGE` → fragmentation, a later phase |
+| one element exceeds `cap` (pre-send check) | `PLCTAG_ERR_TOO_LARGE` → byte fragmentation, a later phase (§16a.6, §16.4) |
 
 Because the window is sized to fit, a non-zero status means something genuinely
 wrong (bad path, privilege, a too-small overhead constant, an unsupported type),
 not a routine boundary condition — so failing fast is correct. A later phase adds
-fragmentation; until then, anything that cannot be made to fit one packet fails
-with `PLCTAG_ERR_TOO_LARGE`.
+byte-granular fragmentation (§16a.6); until then, anything that cannot be made to
+fit one packet fails with `PLCTAG_ERR_TOO_LARGE`.
 
 One caveat worth stating: this exactness assumes a **fixed** `elem_size` across
 the array, which holds for atomics and fixed UDTs. Element types whose size varies
@@ -1129,6 +1136,14 @@ typedef struct enip_tag_t {
 } enip_tag_t;
 ```
 
+This is the original MVP sketch. The **shipped** struct (see `enip_tag.h` and
+§16.1) also carries `write_window_elems`, `batch_next`, and a `path` Bytes view
+into the tail. The planned multi-dialect work (§16.4) adds
+`int32_t dimensions[3]; uint8_t num_dimensions;` (§16a.5) and
+`uint8_t frag_align;` (§16a.6, default 8), and repurposes `frag_offset` from a
+ReadFrag-only cursor into the live byte-fragment cursor shared by both dialects.
+The dialect pointer itself lives on `enip_connection_t`, not the tag.
+
 ### 14.8 `enip_tag.c` — vtable, create, accessors, open
 
 The vtable is exactly §9. Functions:
@@ -1267,8 +1282,192 @@ All of §15.2 (MVP scope) is shipped and working against real hardware:
 | item | notes |
 |---|---|
 | **Unconnected path** | `is_connected_path` is hard-wired `true` at create time (enip_session.c:212). The unconnected CPF wrap (`enip_cpf_wrap_unconnected`) is already called for the ForwardOpen request itself, but tag data reads/writes always use the connected `SendUnitData` path. Tags that need routing via `Unconnected_Send` (§14.5) are not yet supported. |
-| **ReadFrag (0x52) continuation** | Elements whose single-element response exceeds `max_cip_packet_size` return `PLCTAG_ERR_TOO_LARGE` at OPEN_PROBE. `frag_offset` is defined in the tag struct but no code generates or parses `CIP_READ_FRAG` requests. |
 | **Min-heap scheduler** | The scheduler remains an O(n)-insert sorted linked list as designed in §3. This is intentional: the fairness tests confirm the list is sufficient for current tag counts. A min-heap upgrade is available if profiling shows it matters. |
+
+The single-element-too-large case (ReadFrag) is now folded into the planned
+multi-dialect work below rather than tracked as a standalone item.
+
+### 16.4 Planned — multi-dialect (manufacturer) support
+
+The architecture for supporting Rockwell (Logix/Micro800) and OMRON (NJ/NX)
+without per-vendor `if/else` in the common core is specified in §16a and detailed
+in [ROCKWELL-SPECIFIC-DESIGN.md](ROCKWELL-SPECIFIC-DESIGN.md) and
+[OMRON-SPECIFIC-DESIGN.md](OMRON-SPECIFIC-DESIGN.md). None of it is built yet;
+the shipped code is the fits-the-buffer symbolic path (which already serves both
+vendors). Planned, in build order:
+
+| item | status | notes |
+|---|---|---|
+| **`enip_dialect_t` seam** | planned | §16a.4: per-connection `build`/`apply` function pointers + `requested_cip_size`/`max_batch_cap` numbers, selected once from `plc=`. Refactor the existing `build_tag_request`/`apply_tag_reply` into shared `enip_build_symbolic`/`enip_apply_symbolic` behind it — no behavior change. |
+| **Capability cleanups (no new features)** | planned | §16a.3: honor the ForwardOpen-granted size instead of the hardcoded 504 (`parse_forward_open_reply`); express Micro800's lack of `0x0A` as `max_batch_cap = 1` (no bool). |
+| **Large Forward Open + try/fallback** | planned | §16a.3 / vendor §2: always attempt Large FO (`0x5B`); on CIP status `0x08` fall back once to standard FO (`0x54`). Enables >504-byte buffers on newer Logix, Micro800, and OMRON. |
+| **Multi-dim linearization helpers** | planned | §16a.5: `enip_dims_to_linear`/`enip_linear_to_dims` (common, DINT dims), ported from `ab_server/cip.c`. Tag gains `int32_t dimensions[3]; uint8_t num_dimensions;`. |
+| **Byte-granular fragmentation** (single element > buffer) | planned, not MVP | §16a.6 + vendor §3: shared aligned fragment planner (`frag_align`, default 8); Rockwell `0x52`/`0x53` with `0x06` partial-transfer status; OMRON Simple Data Segment `0x80`. Replaces the current `PLCTAG_ERR_TOO_LARGE` at OPEN_PROBE for oversized elements. `frag_offset` (already in the tag struct) becomes the live byte cursor. |
+| **Tag / UDT enumeration** | planned, build last | vendor §5: per-dialect `list_tags`. OMRON instance-list (`0x5F`)/Variable (`0x6B`)/Variable Type (`0x6C`) walk; Rockwell Symbol (`0x6B`, svc `0x55`)/Template (`0x6C`) decode. Not needed for named read/write. |
+
+---
+
+## 16a. Common vs. dialect-specific (multi-manufacturer support)
+
+The architecture and machinery specified in §1–§14 is **common** — the IO thread,
+scheduler, lifetime, framing, and the right-sized state machine are shared,
+unconditionally, by every CIP device this client talks to. (A few service-builder
+helpers in §14.5, such as `enip_cip_read_frag`, live in the common `enip_cip.c`
+but are invoked by only one dialect — common *code*, dialect *use*.) The
+manufacturer differences (Rockwell Logix/Micro800, OMRON NJ/NX) are confined to a
+small `enip_dialect_t` selected
+once per connection from the `plc=` attribute, plus two self-contained
+enumeration modules. The full per-vendor detail, packet formats, and pseudocode
+live in:
+
+- [ROCKWELL-SPECIFIC-DESIGN.md](ROCKWELL-SPECIFIC-DESIGN.md)
+- [OMRON-SPECIFIC-DESIGN.md](OMRON-SPECIFIC-DESIGN.md)
+
+This section is the contract between the common core and those documents.
+
+### 16a.1 Why so little is dialect-specific
+
+The §11 right-sizing decision (probe one element, window every request to fit the
+negotiated buffer, treat any unexpected status as failure) is what makes the
+vendors converge. After it, the *fits-the-buffer* path is byte-for-byte identical
+across Logix, Micro800, and OMRON:
+
+- the symbol path (`0x91`/`0x28` segments) is the same;
+- Read Tag `0x4C` / Write Tag `0x4D` are the same services;
+- the on-wire reply header is the same (`Cx 00` atomic, `A0 02 <handle>`
+  structure — OMRON's handle is a CRC16, Logix's a template handle, but we
+  capture and replay it verbatim and never interpret it);
+- whole-element array windowing is the same.
+
+So an ordinary named tag that fits the buffer needs **no vendor code at all**
+beyond dialect selection. Only three concerns actually diverge.
+
+### 16a.2 What diverges, and where it lives
+
+| concern | common or dialect | why |
+|---|---|---|
+| socket / IO thread / scheduler / rc / locking / framing (§3–§13) | **common** | transport and lifetime, identical for all CIP |
+| EIP encap, CPF wrap, ForwardOpen/Close mechanics | **common** | same wire structure for all CIP |
+| symbol path encoding, multi-dim → linear index | **common** | identical segments; linearization ported from `ab_server/cip.c` |
+| OPEN_PROBE / OPEN_BULK / element-windowed READ/WRITE | **common** | the right-sizing state machine |
+| `0x0A` Multiple Service batch | **common** | Micro800's lack of it is a *number* (§16a.3), not a branch |
+| type code → element size, byte order, string layout | **common (data tables)** | `enip_type` table + `tag_byte_order_t`, not code |
+| **requested connection size** | dialect **number** | per-model buffer sizes |
+| **byte-granular fragmentation** (single element > buffer) | dialect `build`/`apply` | Rockwell `0x52`/`0x53` + `0x06` status vs OMRON Simple Data Segment `0x80` |
+| **tag / UDT enumeration** | dialect `list_tags` | different CIP services, classes, attribute layouts; not needed for named I/O |
+
+### 16a.3 How capabilities are expressed — never a vendor bool
+
+A boolean vendor flag in common code *is* the `if/else` we are eliminating.
+Every capability is expressed one of three ways, none of which branches on
+manufacturer in the common core:
+
+1. **A number feeding existing arithmetic.** `requested_cip_size` flows into the
+   ForwardOpen builder; `max_batch_cap` flows into the `min()` that sizes a
+   batch. Micro800 sets `max_batch_cap = 1`, and `pick_batch` already routes a
+   one-tag batch through the single-in-flight path (`count == 1`), so "no `0x0A`"
+   costs zero new branches.
+2. **A runtime try/fallback transition.** Large Forward Open is *always*
+   attempted; a CIP status `0x08` (Service Not Supported) triggers a one-time
+   fall back to standard ForwardOpen. No model needs to be known in advance, and
+   the granted size — not the requested size — sets `max_cip_packet_size`.
+3. **A function pointer.** `build` / `apply` / `list_tags`. Different behavior is
+   reached by pointer, not by `if(vendor)`.
+
+### 16a.4 The dialect interface
+
+```c
+typedef struct enip_dialect_t {
+    const char *name;
+
+    size_t   requested_cip_size;  /* number -> ForwardOpen builder            */
+    uint16_t max_batch_cap;       /* number -> min(); Micro800 = 1            */
+
+    /* Encode the CIP request for t's current op. Covers the shared symbolic
+       path AND the vendor byte-fragment path; the tag carries its mode and
+       frag cursor, so there is no vendor switch here -- the dialect picks the
+       encoding. Caller holds t->api_mutex. */
+    Bytes  (*build)(Arena *a, enip_connection_t *c, enip_tag_p t);
+
+    /* Consume ONE already-sliced CIP sub-reply. The common reply handler owns
+       all 0x0A iteration: it parses the outer reply, and for a Multiple Service
+       reply splits it into per-tag Bytes via the offset table; for a single
+       reply it passes the whole CIP reply. Either way the dialect receives a
+       raw CIP sub-reply Bytes and parses + interprets status itself (Rockwell
+       0x06 partial-transfer is meaningful only to the Rockwell dialect). It
+       copies into t->data and sets *more for another round trip. */
+    int32_t (*apply)(enip_connection_t *c, enip_tag_p t, Bytes reply, bool *more);
+
+    /* Tag/UDT enumeration; self-contained per vendor, built last. NULL until then. */
+    int32_t (*list_tags)(enip_connection_t *c /* ... */);
+} enip_dialect_t;
+```
+
+Two consequences worth stating:
+
+- **`apply` is handed the response, never fetches it.** Because the common
+  handler already iterates `0x0A` sub-replies into `Bytes` slices, the dialect
+  parses a value it was given. This unifies the single-reply and batched-reply
+  paths and removes the hardcoded `status != 0 → REMOTE_ERR` from common code
+  (status meaning is now the dialect's job).
+- **Byte-fragment mode is a generic test, not a vendor branch.** When
+  `elem_size > usable` the tag enters byte-fragment mode (cursor = `frag_offset`,
+  in bytes); when `elem_size <= usable` it stays in element-windowing mode. Both
+  dialects' `build`/`apply` consult that generic mode and call the shared
+  `enip_build_symbolic` / `enip_apply_symbolic` helpers for the common case,
+  diverging only inside fragment mode.
+
+### 16a.5 Shared multi-dimensional helpers
+
+Byte-granular fragmentation addresses a flat byte offset, but windowing a
+*multi-dimensional* array requires converting a linear element offset back into
+per-dimension indices to emit the right `0x28` segments. The helpers
+(`enip_dims_to_linear` / `enip_linear_to_dims`, ported from
+`src/tools/ab_server/cip.c:1217`, row-major) are **common**. Dimensions are CIP
+**DINT**: the tag carries `int32_t dimensions[3]; uint8_t num_dimensions;`.
+
+### 16a.6 Fragment boundaries must be element-aligned (common rule)
+
+Byte-granular fragmentation cannot cut a request at an arbitrary byte. The wire
+protocols (Rockwell `0x52`/`0x53`, OMRON Simple Data Segment) both require each
+fragment to end on a value boundary, so this is a **common** rule that the
+shared fragment-planning code enforces for both dialects:
+
+- **Atomic scalars are never fragmented.** An `INT`/`DINT`/`REAL`/`LINT`/`LREAL`
+  is sent whole. This never constrains us in practice — an atomic is ≤ 8 bytes
+  and always fits the buffer; an *array* of atomics is split by whole-element
+  windowing (§11), not by byte fragmentation. Byte fragmentation therefore only
+  ever applies to a single aggregate element (a structure/UDT or a string) that
+  exceeds the buffer.
+- **Aggregates fragment only on alignment boundaries.** A fragment offset must be
+  a multiple of the element's alignment `A`, where `A` is the size of the
+  **largest scalar member** of the structure (1, 2, 4, or 8 bytes). Strings
+  obey the same rule (their `LEN` is a `DINT`, so `A = 4`). This guarantees no
+  fragment ever splits a scalar member.
+
+Fragment-size computation (shared, used by both dialects' `build`):
+
+```text
+A     = t->frag_align          /* largest scalar member; default 8 (see below) */
+chunk = floor(usable / A) * A  /* round DOWN to an A-multiple                   */
+if chunk == 0:                 /* one aligned value will not fit the buffer     */
+    fail with PLCTAG_ERR_TOO_LARGE
+last fragment runs to `total` (the trailing remainder is naturally aligned
+because every prior offset was an A-multiple and `total` ends the element).
+```
+
+**Choosing `A` without enumeration.** Until member layout is known (it requires
+the UDT/template enumeration of §5 in the vendor docs), default
+`t->frag_align = 8`. Eight is always safe: every CIP scalar size (1/2/4/8)
+divides 8, and CIP packs members on natural alignment, so an 8-aligned boundary
+can never land inside a member. Enumeration may later lower `A` to the true
+largest-scalar size to allow slightly larger chunks, but a too-large `A` only
+costs a little payload efficiency — never correctness. The tag carries
+`uint8_t frag_align;` (bytes), defaulting to 8.
+
+This rule lives in the common fragment planner; the dialects only encode the
+`(offset, chunk)` pair they are handed (Rockwell into the `0x52`/`0x53` request
+fields, OMRON into the `0x80` path segment).
 
 ---
 
