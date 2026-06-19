@@ -1221,6 +1221,57 @@ blocking-read stall). Everything after that is additive and does not touch the
 core.
 
 
+## 16. Implementation Status (as of 2026-06-19)
+
+### 16.1 Completed
+
+All of §15.2 (MVP scope) is shipped and working against real hardware:
+
+- IO thread non-blocking state machine: CONN_CONNECT → CONN_REGISTER → CONN_OPEN →
+  CONN_READY → CONN_SENDING → CONN_WAITING (§5)
+- ForwardOpen / ForwardClose on the connected path (§15.1)
+- `ENIP_OP_OPEN_PROBE` — discovers `elem_size`, `type_header`, `window_elems`,
+  `write_window_elems`; raises `PLCTAG_EVENT_CREATED` (§11.2)
+- `ENIP_OP_OPEN_BULK` — windowed bulk read of remaining elements from element 1
+  onward (§11.2)
+- `ENIP_OP_READ` — windowed reads respecting `window_elems`; loops
+  CONN_WAITING → CONN_SENDING for multi-window tags
+- `ENIP_OP_WRITE` — windowed writes respecting `write_window_elems`; same
+  continuation pattern
+- auto-sync read and write re-scheduling (§3, `op_time += interval`)
+- Scheduler: sorted intrusive doubly-linked list, `pick_batch`, sched_mutex
+  discipline, abort, rc lifetime (§3, §6, §7, §8, §13)
+- **CIP Multiple Service Packet (0x0A) batching** — implemented beyond the
+  original §15.3 deferral list. `pick_batch` accumulates batch-eligible (single-
+  window READ or WRITE) tags up to the CIP payload budget; `build_batch_request`
+  wraps them in a 0x0A request; `handle_batch_reply` / `complete_batch` distribute
+  per-tag sub-replies. OPEN_PROBE/OPEN_BULK tags are never batch-eligible.
+- `lib.c` fairness fix: `tag->read_in_flight` is cleared in
+  `plc_tag_generic_handle_event_callbacks` when the `PLCTAG_EVENT_CREATED` handler
+  fires. Without this, auto-sync tags whose tickler fired before OPEN_PROBE
+  completed had `read_in_flight` permanently stuck set, starving them of all
+  subsequent reads.
+
+### 16.2 Verified by tests
+
+- `test_fairness` with 200 tags against the `ab_server` emulator (scheduler
+  correctness, no starvation).
+- `test_fairness` with 100 tags against real L81E ControlLogix at
+  `gateway=10.206.1.40:44818 path=1,4 auto_sync_read_ms=200`, 10-second run:
+  all 100 tags received 51–52 completions (spread ≤ 1), std dev 0.34,
+  min/max ratio 0.981.
+- `tag_rw2` read/write against real hardware for scalar DINTs and large arrays.
+
+### 16.3 Still deferred
+
+| item | notes |
+|---|---|
+| **Unconnected path** | `is_connected_path` is hard-wired `true` at create time (enip_session.c:212). The unconnected CPF wrap (`enip_cpf_wrap_unconnected`) is already called for the ForwardOpen request itself, but tag data reads/writes always use the connected `SendUnitData` path. Tags that need routing via `Unconnected_Send` (§14.5) are not yet supported. |
+| **ReadFrag (0x52) continuation** | Elements whose single-element response exceeds `max_cip_packet_size` return `PLCTAG_ERR_TOO_LARGE` at OPEN_PROBE. `frag_offset` is defined in the tag struct but no code generates or parses `CIP_READ_FRAG` requests. |
+| **Min-heap scheduler** | The scheduler remains an O(n)-insert sorted linked list as designed in §3. This is intentional: the fairness tests confirm the list is sufficient for current tag counts. A min-heap upgrade is available if profiling shows it matters. |
+
+---
+
 ## Appendix A - Test Hardware and Tools
 
 ### Hosts
