@@ -3,7 +3,7 @@
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -33,72 +33,44 @@
 
 #pragma once
 
-#include <stdbool.h>
+#include <signal.h>
 #include <stdint.h>
 
-/*
- * Atomic utility functions.
- *
- * All compare-and-set functions return the ORIGINAL value.
- * If the returned value equals the expected value, the swap succeeded.
- */
+#include "platform.h"
+#include "device.h"
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
+/* ============================================================================
+ * Global termination flag — defined in main.c, checked by server threads.
+ * ============================================================================ */
 
-/* Non-C11 atomics path (Windows and older compilers) */
+extern volatile sig_atomic_t g_terminate;
 
-#    ifdef _WIN32
-typedef volatile short atomic_bool;
-#    else
-typedef volatile bool atomic_bool;
-#    endif
-typedef volatile int32_t atomic_int32_t;
-typedef volatile int64_t atomic_int64_t;
-typedef volatile void *atomic_ptr_t;
+/* ============================================================================
+ * Live-socket registry — mutex-protected array of all active sockets.
+ * The signal handler sets g_terminate; main then calls registry_wake_all()
+ * with the mutex to unblock every blocking operation.
+ * ============================================================================ */
 
-#    define ATOMIC_INT_STATIC_INIT (0)
-#    define ATOMIC_BOOL_STATIC_INIT (false)
+#define REGISTRY_MAX 64
 
-#else
+typedef struct {
+    mutex_p mutex;
+    sock_p  socks[REGISTRY_MAX];
+} registry_t;
 
-/* C11 atomics path */
+extern registry_t *registry_create(void);
+extern void        registry_destroy(registry_t *reg);
+extern void        registry_add(registry_t *reg, sock_p sock);
+extern void        registry_remove(registry_t *reg, sock_p sock);
+extern void        registry_wake_all(registry_t *reg);
 
-#    include <stdatomic.h>
+/* ============================================================================
+ * Listener thread context and entry point.
+ * ============================================================================ */
 
-typedef _Atomic bool atomic_bool;
-typedef _Atomic int32_t atomic_int32_t;
-typedef _Atomic int64_t atomic_int64_t;
-typedef _Atomic(void *) atomic_ptr_t;
+typedef struct {
+    device_t   *device;
+    registry_t *registry;
+} listener_ctx_t;
 
-#    define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
-#    define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
-
-#endif
-
-/* Function declarations - implementations are in atomic_utils.c */
-
-/* bool */
-void atomic_init_bool(atomic_bool *a, bool new_val);
-bool atomic_get_bool(atomic_bool *a);
-bool atomic_set_bool(atomic_bool *a, bool new_val);
-bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
-
-/* int32 */
-void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_get_int32(atomic_int32_t *a);
-int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
-int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
-
-/* int64 */
-void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_get_int64(atomic_int64_t *a);
-int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
-int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
-
-/* pointer */
-void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_get_ptr(atomic_ptr_t *a);
-void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);
+extern THREAD_FUNC(server_listener);

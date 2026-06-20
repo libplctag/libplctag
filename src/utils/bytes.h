@@ -1,0 +1,219 @@
+/***************************************************************************
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *                                                                         *
+ * This software is available under either the Mozilla Public License      *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
+ * you choose.                                                             *
+ *                                                                         *
+ * MPL 2.0:                                                                *
+ *                                                                         *
+ *   This Source Code Form is subject to the terms of the Mozilla Public   *
+ *   License, v. 2.0. If a copy of the MPL was not distributed with this   *
+ *   file, You can obtain one at http://mozilla.org/MPL/2.0/.              *
+ *                                                                         *
+ *                                                                         *
+ * LGPL 2:                                                                 *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+/*
+ * Copied verbatim from src/poc/ab_server_fiber/bytes.h with one change:
+ * removed the #ifdef __cplusplus guards (pure C project).
+ */
+
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "arena.h"
+
+typedef struct {
+    uint8_t *data;
+    size_t   len;
+} Bytes;
+
+extern Bytes bytes_alloc(Arena *a, size_t len);
+extern void  bytes_zero(Bytes b);
+
+static inline bool  bytes_is_null(Bytes b)                  { return b.data == NULL; }
+static inline Bytes bytes_filled(Bytes original, Bytes rest) { return (Bytes){original.data, original.len - rest.len}; }
+
+extern Bytes bytes_concat_impl(Arena *a, int count, ...);
+
+#define BYTES_NARGS_(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,N,...) N
+#define BYTES_NARGS(...) BYTES_NARGS_(__VA_ARGS__,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define bytes_concat(a_, ...) bytes_concat_impl((a_),(int)BYTES_NARGS(__VA_ARGS__),__VA_ARGS__)
+
+typedef enum { BYTES_LE = 1, BYTES_BE = -1 } BytesEndian;
+
+typedef enum {
+    BYTES_TYPE_END   = 0,
+    BYTES_TYPE_U8,  BYTES_TYPE_U16, BYTES_TYPE_U32, BYTES_TYPE_U64,
+    BYTES_TYPE_I8,  BYTES_TYPE_I16, BYTES_TYPE_I32, BYTES_TYPE_I64,
+    BYTES_TYPE_F32, BYTES_TYPE_F64,
+    BYTES_TYPE_BYTES, BYTES_TYPE_ARRAY, BYTES_TYPE_SKIP,
+} BytesPackType;
+
+typedef struct { void *data; size_t count; BytesPackType elem_type; } BytesArray;
+typedef struct { size_t count; } BytesSkip;
+
+#define BYTES_TYPE_OF(x) _Generic((x),    \
+    uint8_t:     BYTES_TYPE_U8,           \
+    uint16_t:    BYTES_TYPE_U16,          \
+    uint32_t:    BYTES_TYPE_U32,          \
+    uint64_t:    BYTES_TYPE_U64,          \
+    int8_t:      BYTES_TYPE_I8,           \
+    int16_t:     BYTES_TYPE_I16,          \
+    int32_t:     BYTES_TYPE_I32,          \
+    int64_t:     BYTES_TYPE_I64,          \
+    float:       BYTES_TYPE_F32,          \
+    double:      BYTES_TYPE_F64,          \
+    Bytes:       BYTES_TYPE_BYTES,        \
+    BytesArray*: BYTES_TYPE_ARRAY,        \
+    BytesSkip*:  BYTES_TYPE_SKIP,         \
+    default:     BYTES_TYPE_BYTES         \
+)
+
+#define BYTES_WRAP(x)  (int)BYTES_TYPE_OF(x),(x)
+#define BYTES_SKIP(n_) (&(BytesSkip){(n_)})
+#define BYTES_ARRAY(ptr_,count_) \
+    (&(BytesArray){.data=(void*)(ptr_),.count=(count_),.elem_type=BYTES_TYPE_OF(*(ptr_))})
+
+#define BYTES_NARGS32_(_1,_2,_3,_4,_5,_6,_7,_8,          \
+                       _9,_10,_11,_12,_13,_14,_15,_16,    \
+                       _17,_18,_19,_20,_21,_22,_23,_24,   \
+                       _25,_26,_27,_28,_29,_30,_31,_32,N,...) N
+#define BYTES_NARGS32(...) \
+    BYTES_NARGS32_(__VA_ARGS__,                            \
+        32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,  \
+        16,15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+
+#define BYTES_FOREACH_1(_1)       BYTES_WRAP(_1)
+#define BYTES_FOREACH_2(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_1(__VA_ARGS__)
+#define BYTES_FOREACH_3(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_2(__VA_ARGS__)
+#define BYTES_FOREACH_4(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_3(__VA_ARGS__)
+#define BYTES_FOREACH_5(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_4(__VA_ARGS__)
+#define BYTES_FOREACH_6(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_5(__VA_ARGS__)
+#define BYTES_FOREACH_7(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_6(__VA_ARGS__)
+#define BYTES_FOREACH_8(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_7(__VA_ARGS__)
+#define BYTES_FOREACH_9(_1,...)   BYTES_WRAP(_1),BYTES_FOREACH_8(__VA_ARGS__)
+#define BYTES_FOREACH_10(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_9(__VA_ARGS__)
+#define BYTES_FOREACH_11(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_10(__VA_ARGS__)
+#define BYTES_FOREACH_12(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_11(__VA_ARGS__)
+#define BYTES_FOREACH_13(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_12(__VA_ARGS__)
+#define BYTES_FOREACH_14(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_13(__VA_ARGS__)
+#define BYTES_FOREACH_15(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_14(__VA_ARGS__)
+#define BYTES_FOREACH_16(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_15(__VA_ARGS__)
+#define BYTES_FOREACH_17(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_16(__VA_ARGS__)
+#define BYTES_FOREACH_18(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_17(__VA_ARGS__)
+#define BYTES_FOREACH_19(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_18(__VA_ARGS__)
+#define BYTES_FOREACH_20(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_19(__VA_ARGS__)
+#define BYTES_FOREACH_21(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_20(__VA_ARGS__)
+#define BYTES_FOREACH_22(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_21(__VA_ARGS__)
+#define BYTES_FOREACH_23(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_22(__VA_ARGS__)
+#define BYTES_FOREACH_24(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_23(__VA_ARGS__)
+#define BYTES_FOREACH_25(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_24(__VA_ARGS__)
+#define BYTES_FOREACH_26(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_25(__VA_ARGS__)
+#define BYTES_FOREACH_27(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_26(__VA_ARGS__)
+#define BYTES_FOREACH_28(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_27(__VA_ARGS__)
+#define BYTES_FOREACH_29(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_28(__VA_ARGS__)
+#define BYTES_FOREACH_30(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_29(__VA_ARGS__)
+#define BYTES_FOREACH_31(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_30(__VA_ARGS__)
+#define BYTES_FOREACH_32(_1,...)  BYTES_WRAP(_1),BYTES_FOREACH_31(__VA_ARGS__)
+
+#define BYTES_FOREACH_CAT_(a,b)  a##b
+#define BYTES_FOREACH_CAT(a,b)   BYTES_FOREACH_CAT_(a,b)
+#define BYTES_FOREACH(...)  BYTES_FOREACH_CAT(BYTES_FOREACH_,BYTES_NARGS32(__VA_ARGS__))(__VA_ARGS__)
+
+extern Bytes bytes_pack_impl(Arena *a, int endian, ...);
+extern Bytes bytes_pack_into_impl(Bytes buf, int endian, ...);
+#define bytes_pack(a_,endian_,...) \
+    bytes_pack_impl((a_),(int)(endian_),BYTES_FOREACH(__VA_ARGS__),(int)BYTES_TYPE_END)
+#define bytes_pack_into(buf_,endian_,...) \
+    bytes_pack_into_impl((buf_),(int)(endian_),BYTES_FOREACH(__VA_ARGS__),(int)BYTES_TYPE_END)
+
+#define BYTES_OUT_TYPE_OF(ptr_) _Generic((ptr_),  \
+    uint8_t*:    BYTES_TYPE_U8,                   \
+    uint16_t*:   BYTES_TYPE_U16,                  \
+    uint32_t*:   BYTES_TYPE_U32,                  \
+    uint64_t*:   BYTES_TYPE_U64,                  \
+    int8_t*:     BYTES_TYPE_I8,                   \
+    int16_t*:    BYTES_TYPE_I16,                  \
+    int32_t*:    BYTES_TYPE_I32,                  \
+    int64_t*:    BYTES_TYPE_I64,                  \
+    float*:      BYTES_TYPE_F32,                  \
+    double*:     BYTES_TYPE_F64,                  \
+    Bytes*:      BYTES_TYPE_BYTES,                \
+    BytesArray*: BYTES_TYPE_ARRAY,                \
+    BytesSkip*:  BYTES_TYPE_SKIP,                 \
+    default:     BYTES_TYPE_BYTES                 \
+)
+
+#define BYTES_UNWRAP(ptr_)  (int)BYTES_OUT_TYPE_OF(ptr_),(void*)(ptr_)
+
+#define BYTES_FOREACH_OUT_1(_1)       BYTES_UNWRAP(_1)
+#define BYTES_FOREACH_OUT_2(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_1(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_3(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_2(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_4(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_3(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_5(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_4(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_6(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_5(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_7(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_6(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_8(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_7(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_9(_1,...)   BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_8(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_10(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_9(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_11(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_10(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_12(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_11(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_13(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_12(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_14(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_13(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_15(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_14(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_16(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_15(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_17(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_16(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_18(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_17(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_19(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_18(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_20(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_19(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_21(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_20(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_22(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_21(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_23(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_22(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_24(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_23(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_25(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_24(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_26(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_25(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_27(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_26(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_28(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_27(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_29(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_28(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_30(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_29(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_31(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_30(__VA_ARGS__)
+#define BYTES_FOREACH_OUT_32(_1,...)  BYTES_UNWRAP(_1),BYTES_FOREACH_OUT_31(__VA_ARGS__)
+
+#define BYTES_FOREACH_OUT(...)  BYTES_FOREACH_CAT(BYTES_FOREACH_OUT_,BYTES_NARGS32(__VA_ARGS__))(__VA_ARGS__)
+
+extern Bytes bytes_unpack_impl(Bytes data, int endian, ...);
+#define bytes_unpack(data_,endian_,...) \
+    bytes_unpack_impl((data_),(int)(endian_),BYTES_FOREACH_OUT(__VA_ARGS__),(int)BYTES_TYPE_END)
+
+extern Bytes bytes_from_buf(const uint8_t *buf, size_t len);
+extern Bytes bytes_slice(Bytes b, size_t offset, size_t len);
+extern Bytes bytes_pad_even(Arena *a, Bytes b);
+
+static inline Bytes bytes_skip(Bytes b, size_t n) {
+    if(n > b.len) { return (Bytes){NULL, 0}; }
+    return bytes_slice(b, n, b.len - n);
+}
+
+extern void bytes_hexdump(Bytes b, const char *label);

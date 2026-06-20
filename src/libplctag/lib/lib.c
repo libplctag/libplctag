@@ -65,6 +65,7 @@
 
 /* these are only internal to the file */
 
+/* next_tag_id and tags are protected by the tag_lookup_mutex*/
 static volatile int32_t next_tag_id = 10; /* MAGIC */
 static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
@@ -1162,7 +1163,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-        if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
+        if(tag->vtable && tag->vtable->abort) {
+            critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+        }
 
         /* remove the tag from the hashtable. */
         critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1198,7 +1201,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
+                if(tag->vtable && tag->vtable->abort) {
+                    critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1218,7 +1223,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
+                if(tag->vtable && tag->vtable->abort) {
+                    critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }

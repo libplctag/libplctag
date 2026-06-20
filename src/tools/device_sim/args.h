@@ -3,7 +3,7 @@
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -33,72 +33,23 @@
 
 #pragma once
 
-#include <stdbool.h>
 #include <stdint.h>
+#include "device.h"
 
 /*
- * Atomic utility functions.
+ * Parse argv into *dev and *debug_level_out.
  *
- * All compare-and-set functions return the ORIGINAL value.
- * If the returned value equals the expected value, the swap succeeded.
+ * Returns PLCTAG_STATUS_OK on success.
+ * Returns 1 if --help was requested (caller should exit(0)).
+ * Returns a negative PLCTAG_ERR_* code on bad input.
+ *
+ * On success, dev->tags is a linked list of heap-allocated tag_def_t
+ * structs (including initialized data_mutex). Free with args_free_tags.
  */
+extern int32_t args_parse(int argc, char **argv, device_t *dev, int32_t *debug_level_out);
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
+/* Free the tag list produced by args_parse (destroys mutexes, frees memory). */
+extern void args_free_tags(tag_def_t *tags);
 
-/* Non-C11 atomics path (Windows and older compilers) */
-
-#    ifdef _WIN32
-typedef volatile short atomic_bool;
-#    else
-typedef volatile bool atomic_bool;
-#    endif
-typedef volatile int32_t atomic_int32_t;
-typedef volatile int64_t atomic_int64_t;
-typedef volatile void *atomic_ptr_t;
-
-#    define ATOMIC_INT_STATIC_INIT (0)
-#    define ATOMIC_BOOL_STATIC_INIT (false)
-
-#else
-
-/* C11 atomics path */
-
-#    include <stdatomic.h>
-
-typedef _Atomic bool atomic_bool;
-typedef _Atomic int32_t atomic_int32_t;
-typedef _Atomic int64_t atomic_int64_t;
-typedef _Atomic(void *) atomic_ptr_t;
-
-#    define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
-#    define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
-
-#endif
-
-/* Function declarations - implementations are in atomic_utils.c */
-
-/* bool */
-void atomic_init_bool(atomic_bool *a, bool new_val);
-bool atomic_get_bool(atomic_bool *a);
-bool atomic_set_bool(atomic_bool *a, bool new_val);
-bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
-
-/* int32 */
-void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_get_int32(atomic_int32_t *a);
-int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
-int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
-
-/* int64 */
-void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_get_int64(atomic_int64_t *a);
-int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
-int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
-
-/* pointer */
-void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_get_ptr(atomic_ptr_t *a);
-void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);
+/* Print usage to stderr. */
+extern void args_print_usage(const char *prog);

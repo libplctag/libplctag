@@ -1,9 +1,11 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -31,74 +33,34 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
-#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
+#include "utils/arena.h"
+#include "utils/bytes.h"
+#include "device.h"
+
+/* ============================================================================
+ * EIP command codes
+ * ============================================================================ */
+
+#define EIP_HEADER_SIZE            ((size_t)24)
+
+#define EIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
+#define EIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
+#define EIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F)
+#define EIP_CMD_CONNECTED_SEND     ((uint16_t)0x0070)
+
+/* ============================================================================
+ * Public API
+ * ============================================================================ */
+
 /*
- * Atomic utility functions.
- *
- * All compare-and-set functions return the ORIGINAL value.
- * If the returned value equals the expected value, the swap succeeded.
+ * Parse EIP header, dispatch command, return complete EIP response (header + payload).
+ * hdr must be exactly EIP_HEADER_SIZE bytes; payload may be empty.
+ * Returns {NULL,0} on UnregisterSession or fatal error — caller should close.
  */
+extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, device_t *dev);
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
-
-/* Non-C11 atomics path (Windows and older compilers) */
-
-#    ifdef _WIN32
-typedef volatile short atomic_bool;
-#    else
-typedef volatile bool atomic_bool;
-#    endif
-typedef volatile int32_t atomic_int32_t;
-typedef volatile int64_t atomic_int64_t;
-typedef volatile void *atomic_ptr_t;
-
-#    define ATOMIC_INT_STATIC_INIT (0)
-#    define ATOMIC_BOOL_STATIC_INIT (false)
-
-#else
-
-/* C11 atomics path */
-
-#    include <stdatomic.h>
-
-typedef _Atomic bool atomic_bool;
-typedef _Atomic int32_t atomic_int32_t;
-typedef _Atomic int64_t atomic_int64_t;
-typedef _Atomic(void *) atomic_ptr_t;
-
-#    define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
-#    define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
-
-#endif
-
-/* Function declarations - implementations are in atomic_utils.c */
-
-/* bool */
-void atomic_init_bool(atomic_bool *a, bool new_val);
-bool atomic_get_bool(atomic_bool *a);
-bool atomic_set_bool(atomic_bool *a, bool new_val);
-bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
-
-/* int32 */
-void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_get_int32(atomic_int32_t *a);
-int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
-int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
-
-/* int64 */
-void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_get_int64(atomic_int64_t *a);
-int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
-int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
-
-/* pointer */
-void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_get_ptr(atomic_ptr_t *a);
-void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);
+extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);

@@ -37,6 +37,11 @@ best of each:
    PCCC read/write data path is a later phase (port from `ab_server/pccc.c`).
 4. **New platform socket calls follow `platform.h` conventions:** `int` return
    of `PLCTAG_STATUS_*`, opaque `sock_p`, readiness via `socket_wait_event()`.
+5. **All new code follows** `src/external_docs/coding_guidelines.md`: `int32_t`
+   for all error-returning function return types, `extern` on public definitions,
+   `static` on file-internal definitions, `/* */` comments only, `#pragma once`
+   as the first line of every header, and `mem_set`/`mem_alloc`/`mem_free`
+   instead of raw `memset`/`malloc`/`free`.
 
 ## Hard requirement: clean shutdown through the wake pipe
 
@@ -58,7 +63,8 @@ important behavioral constraint and it drives the threading model below.
 src/tools/device_sim/
   DESIGN.md            this document
   CMakeLists.txt       links libplctag platform + src/utils objects
-  main.c               arg parsing, identity/tag table build, signal handler, run loop
+  main.c               CLI flag table, identity/tag table build, signal handler, run loop
+  args.c/.h            table-driven CLI argument parser (copy of fiber args.c/.h; see §1.1)
   device.h             plc_type_t, identity_t, tag_def_t, device_t (the shared context)
   server.c/.h          TCP listener thread + per-connection thread (linear flow)
   discovery.c/.h       UDP List Identity responder thread (+ ListServices/ListInterfaces)
@@ -69,6 +75,44 @@ src/tools/device_sim/
   tag.c/.h             tag store, mutexed data access, multi-dim indexing
   pccc.c/.h            PCCC data path (later phase; port of ab_server/pccc.c)
 ```
+
+### 1.1 args.c/.h — table-driven argument parser
+
+Copy `src/poc/ab_server_fiber/args.c` and `args.h` verbatim, then apply these
+mechanical changes (do not link or include the fiber files directly):
+
+- Remove `#include "err.h"` and `#include "log.h"`.
+- Add `#include "libplctag.h"` (for `PLCTAG_STATUS_*`) and
+  `#include <path/to/src/utils/debug.h>` (for `pdebug`).
+- Change `util_err_t` → `int` everywhere (return types, `args_result_t.error`,
+  `args_get_error`).
+- Replace error-code constants: `UTIL_OK` → `PLCTAG_STATUS_OK`;
+  `UTIL_EINVAL` / `UTIL_ERESOURCE` / `UTIL_EARGS_*` → `PLCTAG_ERR_BAD_PARAM`
+  (using a single generic bad-param code is fine; the detail string in
+  `args_result_t.error_detail` already carries the precise reason).
+- Replace `pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, ...)` →
+  `pdebug(DEBUG_ERROR, "args", ...)` and `LOG_LEVEL_DETAIL`/`LOG_LEVEL_INFO` →
+  `DEBUG_DETAIL`/`DEBUG_INFO`.
+
+Everything else — all types, constants (`ARGS_TYPE_*`, `ARGS_REQUIRED`,
+`ARGS_ONCE`, `ARGS_MULTIPLE`, `ARGS_MAX_FLAGS`, `ARGS_MAX_REPETITIONS`),
+and all accessor functions — stays identical.
+
+Flag table for `device_sim` (defined in `main.c`, passed to `args_parse`):
+
+| flag | type | req | repeat | default | description |
+|---|---|---|---|---|---|
+| `--plc` | STRING | required | once | — | `controllogix\|micro800\|omron\|plc5\|slc\|micrologix` |
+| `--model` | STRING | optional | once | `L81E` | sub-model: `L81E\|L61\|L55` (ControlLogix only) |
+| `--port` | INT | optional | once | `44818` | TCP + UDP listen port |
+| `--delay-ms` | INT | optional | once | `0` | per-response artificial delay |
+| `--debug` | INT | optional | once | `0` | debug verbosity level |
+| `--tag` | STRING | optional | **multiple** | — | `name:type:count[:d1[:d2[:d3]]]` |
+
+`--tag` strings are parsed into `tag_def_t[]` in `main.c` after `args_parse`
+returns, not inside `args.c`. Type tokens: `DINT`, `REAL`, `BOOL`, `INT`,
+`SINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `STRING`, `BYTE`, `WORD`,
+`DWORD`, `LWORD`.
 
 `device.h`'s `tag_def_t` keeps `ab_server/plc.h`'s shape (name, type, elem_size,
 elem_count, dimensions[3], `mutex_p data_mutex`) but the surrounding protocol
@@ -92,17 +136,17 @@ New API in `platform.h` (mirrored in posix + windows `platform.c`), all returnin
 
 ```c
 /* TCP server */
-extern int socket_listen_tcp(sock_p s, const char *bind_addr, int port, int backlog);
-extern int socket_accept(sock_p listen_s, sock_p *client_s, int timeout_ms);
+extern int32_t socket_listen_tcp(sock_p s, const char *bind_addr, uint16_t port, int32_t backlog);
+extern int32_t socket_accept(sock_p listen_s, sock_p *client_s, int32_t timeout_ms);
     /* internally: socket_wait_event(listen_s, SOCK_EVENT_CAN_READ|SOCK_EVENT_WAKE_UP,
        timeout_ms) then accept(); allocates *client_s with its own wake channel.
        Returns PLCTAG_ERR_TIMEOUT on timeout, PLCTAG_ERR_ABORT on wake. */
 
 /* UDP (unicast + broadcast) */
-extern int socket_open_udp(sock_p s, const char *bind_addr, int port, bool enable_broadcast);
-extern int socket_send_to(sock_p s, uint8_t *buf, int size, const char *host, int port);
-extern int socket_recv_from(sock_p s, uint8_t *buf, int size, char *src_host, int src_host_len,
-                            int *src_port, int timeout_ms);
+extern int32_t socket_open_udp(sock_p s, const char *bind_addr, uint16_t port, bool enable_broadcast);
+extern int32_t socket_send_to(sock_p s, uint8_t *buf, int32_t size, const char *host, uint16_t port);
+extern int32_t socket_recv_from(sock_p s, uint8_t *buf, int32_t size, char *src_host,
+                                int32_t src_host_len, uint16_t *src_port, int32_t timeout_ms);
     /* recv_from waits via socket_wait_event(... | SOCK_EVENT_WAKE_UP ...) first. */
 ```
 
@@ -393,6 +437,7 @@ new features.
 
 | Need | Copy / idea from |
 |------|------------------|
+| CLI argument parser (copy + adapt) | `ab_server_fiber/args.c`, `args.h` — see §1.1 for required changes |
 | Thread-per-connection + `thread_detach`, accept loop | `ab_server/tcp_server.c:94,159` |
 | Linear per-client request flow (header→len→payload→dispatch→send) | `ab_server_fiber.c:421-534` |
 | Listener structure | `ab_server_fiber.c:369-417` |

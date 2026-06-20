@@ -3,7 +3,7 @@
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -31,74 +31,47 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+/*
+ * Adapted from src/poc/ab_server_fiber/arena.h.
+ * Changes: util_err_t → int32_t; removed err.h dependency.
+ */
+
 #pragma once
 
-#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
- * Atomic utility functions.
- *
- * All compare-and-set functions return the ORIGINAL value.
- * If the returned value equals the expected value, the swap succeeded.
+ * Per-reset-cycle usage statistics.  Attach with arena_set_stats();
+ * pass NULL to disable.  arena_reset() samples arena.length before clearing.
  */
+typedef struct {
+    size_t reset_count;
+    size_t use_min;
+    size_t use_max;
+    size_t use_total;
+} ArenaStats;
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
+typedef struct {
+    uint8_t   *buffer;
+    size_t     length;
+    size_t     capacity;
+    size_t     high_water;
+    ArenaStats *stats;
+} Arena;
 
-/* Non-C11 atomics path (Windows and older compilers) */
+/* Returns PLCTAG_STATUS_OK or PLCTAG_ERR_NO_MEM. */
+extern int32_t arena_init(Arena *out, size_t size);
 
-#    ifdef _WIN32
-typedef volatile short atomic_bool;
-#    else
-typedef volatile bool atomic_bool;
-#    endif
-typedef volatile int32_t atomic_int32_t;
-typedef volatile int64_t atomic_int64_t;
-typedef volatile void *atomic_ptr_t;
+extern void arena_set_stats(Arena *a, ArenaStats *stats);
 
-#    define ATOMIC_INT_STATIC_INIT (0)
-#    define ATOMIC_BOOL_STATIC_INIT (false)
+/* Returns NULL on out-of-space; caller must check. */
+extern void *arena_alloc(Arena *a, size_t size);
 
-#else
-
-/* C11 atomics path */
-
-#    include <stdatomic.h>
-
-typedef _Atomic bool atomic_bool;
-typedef _Atomic int32_t atomic_int32_t;
-typedef _Atomic int64_t atomic_int64_t;
-typedef _Atomic(void *) atomic_ptr_t;
-
-#    define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
-#    define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
-
-#endif
-
-/* Function declarations - implementations are in atomic_utils.c */
-
-/* bool */
-void atomic_init_bool(atomic_bool *a, bool new_val);
-bool atomic_get_bool(atomic_bool *a);
-bool atomic_set_bool(atomic_bool *a, bool new_val);
-bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
-
-/* int32 */
-void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_get_int32(atomic_int32_t *a);
-int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
-int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
-int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
-
-/* int64 */
-void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_get_int64(atomic_int64_t *a);
-int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
-int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
-int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
-
-/* pointer */
-void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_get_ptr(atomic_ptr_t *a);
-void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
-void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);
+extern uint8_t *arena_current(Arena *a);
+extern size_t   arena_remaining(Arena *a);
+extern void     arena_commit(Arena *a, size_t n);
+extern void     arena_reset(Arena *a);
+extern size_t   arena_save(Arena *a);
+extern void     arena_restore(Arena *a, size_t saved);
+extern void     arena_free(Arena *a);
