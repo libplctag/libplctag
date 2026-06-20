@@ -1,5 +1,3 @@
-#pragma once
-
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -33,35 +31,42 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stddef.h>
-#include <stdint.h>
+#pragma once
 
+#include "platform.h"
 #include "utils/arena.h"
 #include "utils/bytes.h"
 #include "device.h"
+#include "server.h"
 
 /* ============================================================================
- * EIP command codes
+ * EIP discovery command codes (UDP 44818)
  * ============================================================================ */
 
-#define EIP_HEADER_SIZE            ((size_t)24)
-
-#define EIP_CMD_LIST_IDENTITY      ((uint16_t)0x0063)
-#define EIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
-#define EIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
-#define EIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F)
-#define EIP_CMD_CONNECTED_SEND     ((uint16_t)0x0070)
+#define EIP_CMD_LIST_SERVICES    ((uint16_t)0x0004)
+#define EIP_CMD_LIST_IDENTITY    ((uint16_t)0x0063)
+#define EIP_CMD_LIST_INTERFACES  ((uint16_t)0x0064)
 
 /* ============================================================================
- * Public API
+ * Discovery thread context
  * ============================================================================ */
+
+typedef struct {
+    device_t   *device;
+    registry_t *registry;
+} discovery_ctx_t;
+
+/* UDP listener thread — started from main.c, runs until g_terminate. */
+extern THREAD_FUNC(discovery_thread);
 
 /*
- * Parse EIP header, dispatch command, return complete EIP response (header + payload).
- * hdr must be exactly EIP_HEADER_SIZE bytes; payload may be empty.
- * Returns {NULL,0} on UnregisterSession or fatal error — caller should close.
+ * Build the CPF body for a List Identity reply.
+ * Called both from the UDP thread and from eip_dispatch() for TCP 0x0063.
  */
-extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, device_t *dev);
+extern Bytes discovery_list_identity_cpf(Arena *a, device_t *dev);
 
-extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
-extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+/* Build the CPF body for a List Services reply. */
+extern Bytes discovery_list_services_cpf(Arena *a);
+
+/* Build the CPF body for a List Interfaces reply (empty item list). */
+extern Bytes discovery_list_interfaces_cpf(Arena *a);

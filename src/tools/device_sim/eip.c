@@ -54,6 +54,7 @@
 #include "utils/debug.h"
 #include "cpf.h"
 #include "device.h"
+#include "discovery.h"
 #include "eip.h"
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS
@@ -124,6 +125,10 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
            "eip_dispatch: cmd=0x%04x payload len=%zu.", (unsigned)req_hdr.cmd, payload.len);
 
     switch(req_hdr.cmd) {
+        case EIP_CMD_LIST_IDENTITY:
+            response_body = discovery_list_identity_cpf(a, dev);
+            break;
+
         case EIP_CMD_REGISTER_SESSION:
             response_body = handle_register_session(a, payload, sess);
             break;

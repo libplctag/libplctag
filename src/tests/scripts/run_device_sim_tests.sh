@@ -49,7 +49,7 @@ if [[ ! -d $TEST_DIR ]]; then
     exit 1
 fi
 
-EXECUTABLES="device_sim tag_rw2 thread_stress test_connection_tag test_connection_tag_late_join test_idle_disconnect test_shutdown_cip test_shutdown_restart"
+EXECUTABLES="device_sim tag_rw2 thread_stress test_connection_tag test_connection_tag_late_join test_idle_disconnect test_shutdown_cip test_shutdown_restart get_identity scan_eip_network"
 for EXECUTABLE in $EXECUTABLES; do
     if [[ ! -e "$TEST_DIR/$EXECUTABLE" ]]; then
         echo "$TEST_DIR/$EXECUTABLE not found!"
@@ -95,6 +95,19 @@ echo -n "  Test $TEST: connected DINT read/write... "
 $VALGRIND$TEST_DIR/tag_rw2 --type=sint32 \
     "--tag=${DEVICE_SIM_TAG}&elem_count=1&name=TestDINT" \
     --write=42 --debug=4 > "$LOG_DIR/${TEST}_device_sim_connected_rw.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: CIP Identity object (GetAttributesAll)... "
+$VALGRIND$TEST_DIR/get_identity \
+    "--tag=protocol=ab-eip&gateway=127.0.0.1:${DEVICE_SIM_PORT}&plc=generic&name=@identity" \
+    > "$LOG_DIR/${TEST}_device_sim_identity.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -171,6 +184,20 @@ if [ $DEVICE_SIM_PID2 -le 0 ]; then
 fi
 
 sleep 1
+
+let TEST++
+echo -n "  Test $TEST: EIP UDP List Identity (scan_eip_network)... "
+$VALGRIND$TEST_DIR/scan_eip_network \
+    --delay-max-ms=500 \
+    "--target=127.0.0.1" \
+    > "$LOG_DIR/${TEST}_device_sim_scan_eip.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "  Test $TEST: hard library shutdown (test_shutdown_cip)... "

@@ -632,13 +632,21 @@ int main(int argc, char *argv[]) {
          {.has_default = false}},
         {"network",
          ARGS_TYPE_STRING,
-         ARGS_REQUIRED,
+         ARGS_OPTIONAL,
          ARGS_ONCE,
          "scan.network",
-         "Network in CIDR notation (e.g., 192.168.1.0/24)",
+         "Network in CIDR notation (e.g., 192.168.1.0/24); mutually exclusive with --target",
+         {.has_default = false}},
+        {"target",
+         ARGS_TYPE_STRING,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "scan.target",
+         "Unicast target IP (e.g., 127.0.0.1); mutually exclusive with --network",
          {.has_default = false}},
     };
     const char *network_str = NULL;
+    const char *target_str  = NULL;
     int64_t delay_ms_val = 0;
     uint32_t delay_ms = 0;
     cidr_net_t network = {0};
@@ -652,7 +660,7 @@ int main(int argc, char *argv[]) {
     buf_t request_buf = {0};
     uint8_t request_data[256];
     uint8_t recv_buf_data[4096];
-    socket_address_t broadcast_addr = {0};
+    socket_address_t dest_addr = {0};
     util_err_t err;
     int exit_code = EXIT_FAILURE;
 
@@ -663,17 +671,22 @@ int main(int argc, char *argv[]) {
     err = args_parse(argc, (const char **)argv, flags, sizeof(flags) / sizeof(flags[0]), &args_result);
     if(err != UTIL_OK) {
         fprintf(stderr, "ERROR: Argument parsing failed: %s\n", args_get_error_detail(&args_result));
-        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> --network=<w.x.y.z/p>\n", argv[0]);
+        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> (--network=<w.x.y.z/p> | --target=<ip>)\n", argv[0]);
         goto cleanup;
     }
 
     /* Extract parsed values */
     delay_ms_val = args_get_int(&args_result, "delay-max-ms");
-    network_str = args_get_string(&args_result, "network");
+    network_str  = args_get_string(&args_result, "network");
+    target_str   = args_get_string(&args_result, "target");
 
-    if(!network_str) {
-        fprintf(stderr, "ERROR: Missing required --network argument\n");
-        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> --network=<w.x.y.z/p>\n", argv[0]);
+    if(!network_str && !target_str) {
+        fprintf(stderr, "ERROR: One of --network or --target is required\n");
+        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> (--network=<w.x.y.z/p> | --target=<ip>)\n", argv[0]);
+        goto cleanup;
+    }
+    if(network_str && target_str) {
+        fprintf(stderr, "ERROR: --network and --target are mutually exclusive\n");
         goto cleanup;
     }
 
@@ -685,42 +698,58 @@ int main(int argc, char *argv[]) {
     }
 
     pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Starting scan_eip_network");
-    pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Delay: %u ms, Network: %s", delay_ms, network_str);
 
-    /* Parse CIDR network */
-    err = parse_cidr(network_str, &network);
-    if(err != UTIL_OK) { goto cleanup; }
+    if(target_str) {
+        /* Unicast mode: bind to INADDR_ANY, send directly to target */
+        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Delay: %u ms, Target: %s", delay_ms, target_str);
 
-    /* Find matching interface */
-    err = find_interface(&network, &local_addr);
-    if(err != UTIL_OK) { goto cleanup; }
+        err = setup_broadcast_socket(&broadcast_sock, &local_addr); /* local_addr={0} → 0.0.0.0 */
+        if(err != UTIL_OK) { goto cleanup; }
 
-    /* Setup broadcast socket */
-    err = setup_broadcast_socket(&broadcast_sock, &local_addr);
-    if(err != UTIL_OK) { goto cleanup; }
+        request_buf = buf_init(request_data, sizeof(request_data));
+        err = build_list_identity_request(&request_buf);
+        if(err != UTIL_OK) { goto cleanup; }
 
-    /* Initialize receive buffer */
-    request_buf = buf_init(request_data, sizeof(request_data));
+        socket_address_init(&dest_addr, target_str, EIP_BROADCAST_PORT);
 
-    /* Build and send List Identity request */
-    err = build_list_identity_request(&request_buf);
-    if(err != UTIL_OK) { goto cleanup; }
+        err = socket_sendto_buf(broadcast_sock, &dest_addr, &request_buf);
+        if(err != UTIL_OK) {
+            pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "Failed to send unicast: %s", util_err_str(err));
+            goto cleanup;
+        }
 
-    /* Setup broadcast address */
-    struct in_addr broadcast_in_addr;
-    broadcast_in_addr.s_addr = htonl(network.broadcast);
-    char broadcast_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &broadcast_in_addr, broadcast_str, sizeof(broadcast_str));
-    socket_address_init(&broadcast_addr, broadcast_str, EIP_BROADCAST_PORT);
+        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "List Identity request sent to %s", target_str);
+    } else {
+        /* Broadcast mode: find interface matching CIDR, send to subnet broadcast */
+        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Delay: %u ms, Network: %s", delay_ms, network_str);
 
-    /* Send request */
-    err = socket_sendto_buf(broadcast_sock, &broadcast_addr, &request_buf);
-    if(err != UTIL_OK) {
-        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "Failed to send broadcast: %s", util_err_str(err));
-        goto cleanup;
+        err = parse_cidr(network_str, &network);
+        if(err != UTIL_OK) { goto cleanup; }
+
+        err = find_interface(&network, &local_addr);
+        if(err != UTIL_OK) { goto cleanup; }
+
+        err = setup_broadcast_socket(&broadcast_sock, &local_addr);
+        if(err != UTIL_OK) { goto cleanup; }
+
+        request_buf = buf_init(request_data, sizeof(request_data));
+        err = build_list_identity_request(&request_buf);
+        if(err != UTIL_OK) { goto cleanup; }
+
+        struct in_addr broadcast_in_addr;
+        broadcast_in_addr.s_addr = htonl(network.broadcast);
+        char broadcast_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &broadcast_in_addr, broadcast_str, sizeof(broadcast_str));
+        socket_address_init(&dest_addr, broadcast_str, EIP_BROADCAST_PORT);
+
+        err = socket_sendto_buf(broadcast_sock, &dest_addr, &request_buf);
+        if(err != UTIL_OK) {
+            pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "Failed to send broadcast: %s", util_err_str(err));
+            goto cleanup;
+        }
+
+        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "List Identity request sent to broadcast");
     }
-
-    pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "List Identity request sent to broadcast");
 
     /* Create coro_net */
     err = coro_create(&coro_net, 10);
@@ -762,7 +791,7 @@ int main(int argc, char *argv[]) {
     /* Print results */
     printf("\nScan complete. Found %zu unique devices.\n", receiver_ctx.dedup.count);
 
-    exit_code = EXIT_SUCCESS;
+    exit_code = (receiver_ctx.dedup.count > 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
 cleanup:
     /* Cleanup tasks */

@@ -139,6 +139,22 @@ static bool parse_digits(const char **s, int32_t *out) {
  * Scalar argument parsers
  * ============================================================================ */
 
+/* Parse a dotted-decimal IPv4 string to host-order uint32_t. Returns 0 on error. */
+static uint32_t parse_ipv4(const char *s) {
+    if(!s || *s == '\0') { return 0; }
+    uint32_t ip = 0;
+    for(int32_t i = 0; i < 4; i++) {
+        int32_t octet = 0;
+        if(!parse_digits(&s, &octet) || octet < 0 || octet > 255) { return 0; }
+        ip = (ip << 8) | (uint32_t)octet;
+        if(i < 3) {
+            if(*s != '.') { return 0; }
+            s++;
+        }
+    }
+    return ip;
+}
+
 static uint16_t parse_uint16_val(const char *s, uint16_t def) {
     if(!s || *s == '\0') { return def; }
     int32_t v = 0;
@@ -417,6 +433,7 @@ extern int32_t args_parse(int argc, char **argv, device_t *dev, int32_t *debug_l
     dev->plc_type                    = PLC_CONTROL_LOGIX;
     dev->port                        = 44818;
     dev->bind_addr                   = NULL;
+    dev->local_ipv4                  = 0x7F000001u; /* 127.0.0.1 */
     dev->client_to_server_max_packet = 508;
     dev->server_to_client_max_packet = 508;
     dev->response_delay_ms           = 0;
@@ -434,6 +451,8 @@ extern int32_t args_parse(int argc, char **argv, device_t *dev, int32_t *debug_l
 
         } else if((val = find_prefix(arg, "--bind="))) {
             dev->bind_addr = val; /* points into argv — valid for process lifetime */
+            uint32_t ip = parse_ipv4(val);
+            if(ip != 0) { dev->local_ipv4 = ip; }
 
         } else if((val = find_prefix(arg, "--plc="))) {
             dev->plc_type = parse_plc_type(val);

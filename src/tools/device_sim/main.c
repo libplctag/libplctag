@@ -42,6 +42,7 @@
 #include "utils/debug.h"
 #include "args.h"
 #include "device.h"
+#include "discovery.h"
 #include "server.h"
 
 /* ============================================================================
@@ -96,7 +97,7 @@ int main(int argc, char **argv) {
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    /* Launch listener thread. */
+    /* Launch TCP listener thread. */
     listener_ctx_t lctx;
     lctx.device   = &device;
     lctx.registry = registry;
@@ -104,6 +105,22 @@ int main(int argc, char **argv) {
     thread_p listener_thread = NULL;
     if(thread_create(&listener_thread, server_listener, 131072, &lctx) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "device_sim: failed to start listener thread.\n");
+        registry_destroy(registry);
+        args_free_tags(device.tags);
+        return 1;
+    }
+
+    /* Launch UDP discovery thread. */
+    discovery_ctx_t dctx;
+    dctx.device   = &device;
+    dctx.registry = registry;
+
+    thread_p discovery_thread_handle = NULL;
+    if(thread_create(&discovery_thread_handle, discovery_thread, 65536, &dctx) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "device_sim: failed to start discovery thread.\n");
+        registry_wake_all(registry);
+        thread_join(listener_thread);
+        thread_destroy(&listener_thread);
         registry_destroy(registry);
         args_free_tags(device.tags);
         return 1;
@@ -121,6 +138,9 @@ int main(int argc, char **argv) {
 
     thread_join(listener_thread);
     thread_destroy(&listener_thread);
+
+    thread_join(discovery_thread_handle);
+    thread_destroy(&discovery_thread_handle);
 
     registry_destroy(registry);
     args_free_tags(device.tags);

@@ -133,6 +133,7 @@ typedef struct {
     plc_type_t  plc_type;
     uint16_t    port;
     const char *bind_addr;
+    uint32_t    local_ipv4;  /* host-byte-order; embedded in List Identity responses */
 
     uint32_t    client_to_server_max_packet;
     uint32_t    server_to_client_max_packet;

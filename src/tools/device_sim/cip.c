@@ -54,6 +54,7 @@
 #include "cip.h"
 #include "device.h"
 #include "eip.h"
+#include "identity.h"
 #include "pccc.h"
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS
@@ -62,7 +63,9 @@
  * CIP service codes
  * ============================================================================ */
 
-#define CIP_SRV_MULTI         ((uint8_t)0x0A)
+#define CIP_SRV_GET_ATTRS_ALL   ((uint8_t)0x01)
+#define CIP_SRV_GET_ATTR_SINGLE ((uint8_t)0x0E)
+#define CIP_SRV_MULTI           ((uint8_t)0x0A)
 #define CIP_SRV_PCCC_EXECUTE  ((uint8_t)0x4B)
 #define CIP_SRV_READ          ((uint8_t)0x4C)
 #define CIP_SRV_WRITE         ((uint8_t)0x4D)
@@ -127,6 +130,10 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
                           device_t *dev);
 static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
                           eip_session_t *sess, device_t *dev);
+static bool  parse_class_instance_path(Bytes path, uint8_t *class_id, uint8_t *instance_id,
+                                       uint8_t *attr_id);
+static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
+                              device_t *dev);
 
 /* ============================================================================
  * Public functions
@@ -147,6 +154,10 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "CIP unconnected service=0x%02x.", (unsigned)svc);
 
     switch(svc) {
+        case CIP_SRV_GET_ATTRS_ALL:
+        case CIP_SRV_GET_ATTR_SINGLE:
+            return handle_identity(a, svc, svc_path, svc_payload, dev);
+
         case CIP_SRV_FORWARD_OPEN:
         case CIP_SRV_FORWARD_OPEN_EX:
             return handle_forward_open(a, svc, svc_path, svc_payload, sess, dev);
@@ -213,6 +224,10 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "CIP connected service=0x%02x.", (unsigned)svc);
 
     switch(svc) {
+        case CIP_SRV_GET_ATTRS_ALL:
+        case CIP_SRV_GET_ATTR_SINGLE:
+            return handle_identity(a, svc, svc_path, svc_payload, dev);
+
         case CIP_SRV_MULTI:
             return handle_multi(a, svc, svc_payload, sess, dev);
 
@@ -758,6 +773,78 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "Write '%s': %zu bytes.", tag->name, write_len);
 
     return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+}
+
+
+static bool parse_class_instance_path(Bytes path, uint8_t *class_id, uint8_t *instance_id,
+                                       uint8_t *attr_id) {
+    *attr_id = 0;
+    if(path.len < 4) { return false; }
+    /* Logical class segment 8-bit: 0x20 + class_id */
+    if(path.data[0] != 0x20) { return false; }
+    *class_id = path.data[1];
+    /* Logical instance segment 8-bit: 0x24 + instance_id */
+    if(path.data[2] != 0x24) { return false; }
+    *instance_id = path.data[3];
+    /* Optional logical attribute segment 8-bit: 0x30 + attr_id */
+    if(path.len >= 6 && path.data[4] == 0x30) {
+        *attr_id = path.data[5];
+    }
+    return true;
+}
+
+
+static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
+                              device_t *dev) {
+    (void)svc_payload;
+    uint8_t class_id = 0, instance_id = 0, attr_id = 0;
+
+    if(!parse_class_instance_path(svc_path, &class_id, &instance_id, &attr_id)) {
+        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+               "handle_identity: malformed class/instance path (len=%zu).", svc_path.len);
+        return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
+    }
+
+    if(class_id != 0x01 || instance_id != 1) {
+        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+               "handle_identity: unsupported class=0x%02x instance=%u.",
+               (unsigned)class_id, (unsigned)instance_id);
+        return cip_error(a, svc, CIP_ERR_PATH_UNKNOWN, false, 0);
+    }
+
+    const identity_t *id = identity_for_plc_type(dev->plc_type);
+
+    if(svc == CIP_SRV_GET_ATTRS_ALL) {
+        Bytes obj = identity_encode_get_attrs_all(a, id);
+        if(bytes_is_null(obj)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+        Bytes hdr = bytes_pack(a, BYTES_LE,
+                               (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+        if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+        pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "Identity GetAttributesAll OK.");
+        return bytes_concat(a, hdr, obj);
+    }
+
+    if(svc == CIP_SRV_GET_ATTR_SINGLE) {
+        if(attr_id == 0) {
+            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                   "handle_identity: GetAttributeSingle — no attribute in path.");
+            return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
+        }
+        Bytes val = identity_encode_get_attr_single(a, (uint16_t)attr_id, id);
+        if(bytes_is_null(val)) {
+            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                   "handle_identity: unsupported attribute %u.", (unsigned)attr_id);
+            return cip_error(a, svc, CIP_ERR_PATH_UNKNOWN, false, 0);
+        }
+        Bytes hdr = bytes_pack(a, BYTES_LE,
+                               (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+        if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+        pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+               "Identity GetAttributeSingle attr=%u OK.", (unsigned)attr_id);
+        return bytes_concat(a, hdr, val);
+    }
+
+    return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
 }
 
 

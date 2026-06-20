@@ -1,5 +1,3 @@
-#pragma once
-
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -33,35 +31,52 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stddef.h>
-#include <stdint.h>
+#pragma once
 
+#include <stdint.h>
 #include "utils/arena.h"
 #include "utils/bytes.h"
 #include "device.h"
 
 /* ============================================================================
- * EIP command codes
+ * CIP Identity object (class 0x01, instance 1) model.
  * ============================================================================ */
 
-#define EIP_HEADER_SIZE            ((size_t)24)
+#define IDENTITY_MAX_NAME ((size_t)64)
 
-#define EIP_CMD_LIST_IDENTITY      ((uint16_t)0x0063)
-#define EIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
-#define EIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
-#define EIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F)
-#define EIP_CMD_CONNECTED_SEND     ((uint16_t)0x0070)
+typedef struct {
+    uint16_t vendor_id;
+    uint16_t device_type;
+    uint16_t product_code;
+    uint8_t  revision_major;
+    uint8_t  revision_minor;
+    uint16_t status;
+    uint32_t serial;
+    char     product_name[IDENTITY_MAX_NAME]; /* null-terminated */
+    uint8_t  state;
+} identity_t;
 
-/* ============================================================================
- * Public API
- * ============================================================================ */
+/* Return the built-in identity for a given PLC type. */
+extern const identity_t *identity_for_plc_type(plc_type_t pt);
 
 /*
- * Parse EIP header, dispatch command, return complete EIP response (header + payload).
- * hdr must be exactly EIP_HEADER_SIZE bytes; payload may be empty.
- * Returns {NULL,0} on UnregisterSession or fatal error — caller should close.
+ * Encode GetAttributesAll body (no CIP response header).
+ * Layout: vendor_id(u16LE) device_type(u16LE) product_code(u16LE)
+ *         revision_major(u8) revision_minor(u8) status(u16LE)
+ *         serial(u32LE) name_len(u8) name(bytes)
  */
-extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, device_t *dev);
+extern Bytes identity_encode_get_attrs_all(Arena *a, const identity_t *id);
 
-extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
-extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+/*
+ * Encode a single attribute value (no CIP response header).
+ * Returns null Bytes for unknown attribute numbers.
+ */
+extern Bytes identity_encode_get_attr_single(Arena *a, uint16_t attr, const identity_t *id);
+
+/*
+ * Encode a CPF List Identity item body (type 0x000C).
+ * Layout is the exact inverse of scan_eip_network.c:parse_list_identity_item.
+ * ipv4_host and port_host are host-byte-order; the function writes them BE.
+ */
+extern Bytes identity_encode_listid_item(Arena *a, const identity_t *id,
+                                         uint32_t ipv4_host, uint16_t port_host);
