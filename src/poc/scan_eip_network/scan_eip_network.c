@@ -55,6 +55,7 @@
 #include "tests/utils/utils.h"
 #include "tests/utils/coro_net.h"
 #include "tests/utils/err.h"
+#include "poc/utils/compat_utils.h"
 
 
 /* EtherNet/IP List Identity constants */
@@ -99,7 +100,7 @@ typedef struct {
 } timer_ctx_t;
 
 /* Global flag for running state */
-static volatile int g_running = 1;
+static compat_atomic_int32_t g_running = {true};
 
 /* ========================================================================== */
 /* CIDR Parsing and Network Utilities                                        */
@@ -560,7 +561,7 @@ static void receiver_handler(coro_task_handle_t handle, socket_t fd, void *conte
 
     pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Receiver task started");
 
-    while(g_running) {
+    while(compat_atomic_load_int32(&g_running)) {
         /* Yield until data arrives */
         while((err = socket_recvfrom_buf(fd, &ctx->src_addr, &ctx->recv_buf)) == UTIL_EAGAIN) {
             coro_yield(handle, CORO_EVENT_READ);
@@ -598,12 +599,12 @@ static void timer_handler(coro_task_handle_t handle, socket_t unused_fd, void *c
 
     pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Timer task started (timeout=%u ms)", ctx->timeout_ms);
 
-    while(g_running) {
+    while(compat_atomic_load_int32(&g_running)) {
         elapsed_ms = (util_time_us() - ctx->start_time_us) / 1000;
 
         if(elapsed_ms >= (int64_t)ctx->timeout_ms) {
             pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Timeout reached (%ld ms)", elapsed_ms);
-            g_running = 0;
+            compat_atomic_store_int32(&g_running, false);
             coro_stop(handle.coro_net);
             break;
         }

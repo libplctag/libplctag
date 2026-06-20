@@ -126,6 +126,26 @@ int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t
 #    endif
 }
 
+void atomic_init_ptr(atomic_ptr_t *a, void *new_val) { *a = new_val; }
+
+void *atomic_get_ptr(atomic_ptr_t *a) { return *a; }
+
+void *atomic_set_ptr(atomic_ptr_t *a, void *new_val) {
+    void *old = *a;
+    *a = new_val;
+    return old;
+}
+
+void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val) {
+#    ifdef _WIN32
+    return InterlockedCompareExchangePointer(a, new_val, old_val);
+#    else
+    void *expected = old_val;
+    __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return expected;
+#    endif
+}
+
 #else
 
 #    include <stdatomic.h>
@@ -166,6 +186,18 @@ int64_t atomic_add_int64(atomic_int64_t *a, int64_t other) { return atomic_fetch
 
 int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val) {
     int64_t expected = old_val;
+    atomic_compare_exchange_strong(a, &expected, new_val);
+    return expected;
+}
+
+void atomic_init_ptr(atomic_ptr_t *a, void *new_val) { atomic_init(a, new_val); }
+
+void *atomic_get_ptr(atomic_ptr_t *a) { return atomic_load(a); }
+
+void *atomic_set_ptr(atomic_ptr_t *a, void *new_val) { return atomic_exchange(a, new_val); }
+
+void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val) {
+    void *expected = old_val;
     atomic_compare_exchange_strong(a, &expected, new_val);
     return expected;
 }

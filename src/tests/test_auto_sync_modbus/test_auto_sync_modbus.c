@@ -53,10 +53,10 @@
 
 #define READ_PERIOD_MS (200)
 
-static volatile int read_start_count = 0;
-static volatile int read_complete_count = 0;
-static volatile int write_start_count = 0;
-static volatile int write_complete_count = 0;
+static compat_atomic_int32_t read_start_count = {0};
+static compat_atomic_int32_t read_complete_count = {0};
+static compat_atomic_int32_t write_start_count = {0};
+static compat_atomic_int32_t write_complete_count = {0};
 
 
 void *reader_function(void *tag_arg) {
@@ -123,25 +123,25 @@ void tag_callback(int32_t tag_id, int event, int status, void *user_data) {
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            read_complete_count++;
+            compat_atomic_add_int32(&read_complete_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            read_start_count++;
+            compat_atomic_add_int32(&read_start_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            write_complete_count++;
+            compat_atomic_add_int32(&write_complete_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic write operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            write_start_count++;
+            compat_atomic_add_int32(&write_start_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
 
@@ -222,20 +222,25 @@ int main(void) {
 
     /* check the results. */
     // NOLINTNEXTLINE
-    fprintf(stderr, "Total reads triggered %d, finished %d, and total expected %d.\n", read_start_count, read_complete_count,
+    fprintf(stderr, "Total reads triggered %" PRId32 ", finished %" PRId32 ", and total expected %d.\n",
+            compat_atomic_load_int32(&read_start_count), compat_atomic_load_int32(&read_complete_count),
             RUN_PERIOD / READ_PERIOD_MS);
     // NOLINTNEXTLINE
-    fprintf(stderr, "Total writes triggered %d, finished %d, and total expected %d.\n", write_start_count, write_complete_count,
+    fprintf(stderr, "Total writes triggered %" PRId32 ", finished %" PRId32 ", and total expected %d.\n",
+            compat_atomic_load_int32(&write_start_count), compat_atomic_load_int32(&write_complete_count),
             RUN_PERIOD / WRITE_SLEEP_MS);
 
     rc = 0;
 
     /* allow 10% margin*/
-    int read_success_expected = (read_start_count * 90) / read_start_count;
-    int read_success_actual = (read_complete_count * 100) / read_start_count;
+    int read_success_expected = (compat_atomic_load_int32(&read_start_count) * 90) / compat_atomic_load_int32(&read_start_count);
+    int read_success_actual =
+        (compat_atomic_load_int32(&read_complete_count) * 100) / compat_atomic_load_int32(&read_start_count);
 
-    int write_success_expected = (write_start_count * 90) / write_start_count;
-    int write_success_actual = (write_complete_count * 100) / write_start_count;
+    int write_success_expected =
+        (compat_atomic_load_int32(&write_start_count) * 90) / compat_atomic_load_int32(&write_start_count);
+    int write_success_actual =
+        (compat_atomic_load_int32(&write_complete_count) * 100) / compat_atomic_load_int32(&write_start_count);
 
     if(read_success_actual < read_success_expected) {
         // NOLINTNEXTLINE

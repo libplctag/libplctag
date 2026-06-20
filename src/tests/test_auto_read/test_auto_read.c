@@ -78,7 +78,7 @@
  * Callbacks suppress statistics accumulation until this flag is set so that
  * early-created tags do not accumulate more reads than late-created ones.
  */
-static volatile int recording = 0;
+static compat_atomic_int32_t g_recording = {0};
 
 
 /*--- Per-tag statistics ---*/
@@ -106,9 +106,9 @@ static double get_cpu_time_ms(void) {
     FILETIME creation, exitt, kernel, user;
     ULARGE_INTEGER k, u;
     if(!GetProcessTimes(GetCurrentProcess(), &creation, &exitt, &kernel, &user)) { return 0.0; }
-    k.LowPart  = kernel.dwLowDateTime;
+    k.LowPart = kernel.dwLowDateTime;
     k.HighPart = kernel.dwHighDateTime;
-    u.LowPart  = user.dwLowDateTime;
+    u.LowPart = user.dwLowDateTime;
     u.HighPart = user.dwHighDateTime;
     return (double)(k.QuadPart + u.QuadPart) / 10000.0;
 #else
@@ -124,17 +124,15 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
     tag_stats_t *s = (tag_stats_t *)userdata;
 
     switch(event) {
-        case PLCTAG_EVENT_CREATED:
-            compat_atomic_store_int64(&s->ready_time, compat_time_ms());
-            break;
+        case PLCTAG_EVENT_CREATED: compat_atomic_store_int64(&s->ready_time, compat_time_ms()); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            if(status == PLCTAG_STATUS_OK && recording) {
-                int64_t now  = compat_time_ms();
+            if(status == PLCTAG_STATUS_OK && compat_atomic_load_int32(&g_recording)) {
+                int64_t now = compat_time_ms();
                 int64_t last = compat_atomic_load_int64(&s->last_read_ms);
 
                 if(last > 0) {
-                    int64_t gap     = now - last;
+                    int64_t gap = now - last;
                     int64_t cur_max = compat_atomic_load_int64(&s->max_gap_ms);
                     int64_t cur_min = compat_atomic_load_int64(&s->min_gap_ms);
 
@@ -179,7 +177,7 @@ static void usage(const char *prog) {
 
 int main(int argc, char **argv) {
     const char *tag_string = NULL;
-    int num_tags   = 0;
+    int num_tags = 0;
     int duration_s = 0;
 
     /*--- Parse arguments ---*/
@@ -274,8 +272,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Warning: not all tags became ready within %d ms.\n", TAG_CREATE_TIMEOUT_MS);
         for(int i = 0; i < num_tags; i++) {
             if(compat_atomic_load_int64(&stats[i].ready_time) == 0) {
-                fprintf(stderr, "  Tag %d (id=%d): %s\n", i, tag_ids[i],
-                        plc_tag_decode_error(plc_tag_status(tag_ids[i])));
+                fprintf(stderr, "  Tag %d (id=%d): %s\n", i, tag_ids[i], plc_tag_decode_error(plc_tag_status(tag_ids[i])));
             }
         }
     } else {
@@ -284,21 +281,21 @@ int main(int argc, char **argv) {
 
     /*--- Enable recording and start measurement ---*/
     fprintf(stderr, "\nRunning test for %d seconds...\n", duration_s);
-    double  cpu_start  = get_cpu_time_ms();
+    double cpu_start = get_cpu_time_ms();
     int64_t wall_start = compat_time_ms();
 
-    recording = 1; /* callbacks begin accumulating stats */
+    compat_atomic_store_int32(&g_recording, 1);
 
     compat_sleep_ms((uint32_t)(duration_s * 1000), NULL);
 
-    recording = 0; /* stop accumulating before destroying tags */
+    compat_atomic_store_int32(&g_recording, 0); /* stop accumulating before destroying tags */
 
     int64_t wall_end = compat_time_ms();
-    double  cpu_end  = get_cpu_time_ms();
+    double cpu_end = get_cpu_time_ms();
 
-    int64_t duration_ms  = wall_end - wall_start;
-    double  cpu_time_ms  = cpu_end - cpu_start;
-    double  cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
+    int64_t duration_ms = wall_end - wall_start;
+    double cpu_time_ms = cpu_end - cpu_start;
+    double cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
 
     fprintf(stderr, "Test complete. Actual duration: %" PRId64 " ms\n\n", duration_ms);
     fflush(stderr);
@@ -323,11 +320,11 @@ int main(int argc, char **argv) {
     int64_t global_max_gap = 0;
 
     for(int i = 0; i < num_tags; i++) {
-        int32_t count     = compat_atomic_load_int32(&stats[i].read_count);
+        int32_t count = compat_atomic_load_int32(&stats[i].read_count);
         int64_t total_gap = compat_atomic_load_int64(&stats[i].total_gap_ms);
-        int64_t min_gap   = compat_atomic_load_int64(&stats[i].min_gap_ms);
-        int64_t max_gap   = compat_atomic_load_int64(&stats[i].max_gap_ms);
-        int64_t avg_gap   = (count > 1) ? (total_gap / (count - 1)) : 0;
+        int64_t min_gap = compat_atomic_load_int64(&stats[i].min_gap_ms);
+        int64_t max_gap = compat_atomic_load_int64(&stats[i].max_gap_ms);
+        int64_t avg_gap = (count > 1) ? (total_gap / (count - 1)) : 0;
 
         fprintf(stderr,
                 "Tag %3d (id=%d): reads=%d  avg_gap=%" PRId64 "ms"
@@ -344,17 +341,17 @@ int main(int argc, char **argv) {
     stats_summary_t summary;
     int stats_ok = (stats_calculate(read_counts, num_tags, &summary) == 0);
 
-    double fairness_cv      = stats_ok ? summary.cv            : 0.0;
+    double fairness_cv = stats_ok ? summary.cv : 0.0;
     double fairness_min_max = stats_ok ? summary.min_max_ratio : 0.0;
 
     /*--- Print summary ---*/
     fprintf(stderr, "\n--- Summary ---\n");
     fprintf(stderr, "Duration:          %" PRId64 " ms\n", duration_ms);
-    fprintf(stderr, "CPU load:          %.2f%%\n",          cpu_load_pct);
-    fprintf(stderr, "Global min gap:    %" PRId64 " ms\n",  global_min_gap);
-    fprintf(stderr, "Global max gap:    %" PRId64 " ms\n",  global_max_gap);
-    fprintf(stderr, "Fairness CV:       %.2f%%\n",          fairness_cv);
-    fprintf(stderr, "Fairness min/max:  %.4f\n",            fairness_min_max);
+    fprintf(stderr, "CPU load:          %.2f%%\n", cpu_load_pct);
+    fprintf(stderr, "Global min gap:    %" PRId64 " ms\n", global_min_gap);
+    fprintf(stderr, "Global max gap:    %" PRId64 " ms\n", global_max_gap);
+    fprintf(stderr, "Fairness CV:       %.2f%%\n", fairness_cv);
+    fprintf(stderr, "Fairness min/max:  %.4f\n", fairness_min_max);
 
     if(stats_ok) {
         stats_print_summary(stderr, &summary);

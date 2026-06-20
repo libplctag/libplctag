@@ -42,6 +42,7 @@
 #include <string.h>
 #include <time.h>
 #include <utils/debug.h>
+#include <utils/atomic_utils.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #    include <windows.h>
@@ -54,23 +55,22 @@
  * Debugging support.
  */
 
+typedef void (*log_func_t)(int32_t tag_id, int debug_level, const char *message);
 
-static volatile int global_debug_level = DEBUG_NONE;
-static lock_t thread_num_lock = LOCK_INIT;
-static volatile uint32_t thread_num = 1;
-static lock_t logger_callback_lock = LOCK_INIT;
-static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
+static atomic_int32_t global_debug_level = DEBUG_NONE;
+static atomic_int32_t thread_num = 1;
+static atomic_ptr_t log_callback_func = NULL;
 
 /* Buffering control for stderr logging performance */
-static volatile int stderr_buffering_initialized = 0;
-static lock_t stderr_init_lock = LOCK_INIT;
-static volatile int log_call_count = 0;
+static atomic_int32_t stderr_buffering_initialized = 0;
+// static lock_t stderr_init_lock = LOCK_INIT;
+static atomic_int32_t log_call_count = 0;
 
 
 /* Module name lookup table is now defined in debug_generated.h */
 
 /* Per-module debug levels - indexed directly by debug_module_t value. */
-static volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
+static atomic_int32_t debug_module_levels[DEBUG_MODULE_COUNT];
 
 
 bool debug_is_enabled(debug_module_t module, int level) {
@@ -88,11 +88,11 @@ static THREAD_LOCAL uint32_t this_thread_num = 0;
 int set_debug_level(int level) {
     int old_level = global_debug_level;
 
-    global_debug_level = level;
+    atomic_set_int32(&global_debug_level, level);
 
     /* Push the global level into every module slot so the inline
      * debug_is_enabled() check needs only a single array lookup. */
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { debug_module_levels[i] = (uint8_t)level; }
+    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 
     return old_level;
 }
@@ -101,30 +101,36 @@ int set_debug_level(int level) {
 int get_debug_level(void) { return global_debug_level; }
 
 
-
 void debug_module_set_level(debug_module_t module, int level) {
-    if((unsigned)module < DEBUG_MODULE_COUNT) { debug_module_levels[module] = (uint8_t)level; }
+    if(module >= 0 && (unsigned)module < DEBUG_MODULE_COUNT) { atomic_set_int32(&debug_module_levels[module], level); }
 }
 
 
 int debug_module_get_level(debug_module_t module) {
-    if((unsigned)module < DEBUG_MODULE_COUNT) { return debug_module_levels[module]; }
+    if(module >= 0 && (unsigned)module < DEBUG_MODULE_COUNT) { return atomic_get_int32(&debug_module_levels[module]); }
     return DEBUG_NONE;
 }
 
 
 void debug_set_all_modules(int level) {
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { debug_module_levels[i] = (uint8_t)level; }
+    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 }
 
 
-
 static uint32_t get_thread_id(void) {
-    if(!this_thread_num) {
-        spin_block(&thread_num_lock) {
-            this_thread_num = thread_num;
-            thread_num++;
+    if(this_thread_num == 0) {
+        /* is this UB? */
+        int32_t new_num = atomic_add_int32(&thread_num, 1);
+
+        /* clamp the range */
+        if(new_num < 1 || new_num > (INT32_MAX / 2)) {
+            /* only reset if someone else has not already done so */
+            atomic_compare_and_set_int32(&thread_num, new_num, 1); /* reset to 1 to avoid overflow and keep IDs positive. */
         }
+
+        this_thread_num = (uint32_t)new_num;
+
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, 0, "Assigned thread ID %" PRId32 " to new thread.", new_num);
     }
 
     return this_thread_num;
@@ -171,24 +177,28 @@ static int64_t time_us(void) {
 
 static void ensure_stderr_buffering(void) {
     /* Initialize stderr buffering once for better performance */
-    if(!stderr_buffering_initialized) {
-        spin_block(&stderr_init_lock) {
-            if(!stderr_buffering_initialized) {
-                /* Set stderr to full buffering with 8KB buffer for better performance */
-                setvbuf(stderr, NULL, _IOFBF, 8192);
-                stderr_buffering_initialized = 1;
-            }
-        }
+    if(!atomic_compare_and_set_int32(&stderr_buffering_initialized, 0, 1)) {
+        /* Set stderr to full buffering with 8KB buffer for better performance */
+        setvbuf(stderr, NULL, _IOFBF, 8192);
+        atomic_set_int32(&stderr_buffering_initialized, 1);
     }
 }
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
+extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
+                        ...) {
     va_list va;
     struct tm t;
     time_t epoch;
     int64_t epoch_us;
     int remainder_us;
     const char *module_name = format_module_name(module);
+
+    /* type punning is evil */
+    union {
+        void *as_ptr;
+        log_func_t as_func;
+    } log_func_union;
+
     char prefix[1000]; /* MAGIC */
     char output[1000];
 
@@ -219,8 +229,11 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     /* FIXME - check the output size */
     // NOLINTNEXTLINE
     /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
-    if(log_callback_func) {
-        log_callback_func(tag_id, debug_level, output);
+
+    /* output via the log function if available */
+    log_func_union.as_ptr = atomic_get_ptr(&log_callback_func);
+    if(log_func_union.as_func) {
+        log_func_union.as_func(tag_id, debug_level, output);
     } else {
         fputs(output, stderr);
 
@@ -238,8 +251,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 
 #define COLUMNS (16)
 
-void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
-                            uint8_t *data, int count) {
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, uint8_t *data,
+                            int count) {
     int max_row, row, column;
     char row_buf[(COLUMNS * 3) + 5 + 1];
 
@@ -269,16 +282,12 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
 }
 
 
-int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message)) {
+int debug_register_logger(log_func_t log_callback) {
     int rc = PLCTAG_STATUS_OK;
 
-    /* FIXME - make this a mutex */
-    spin_block(&logger_callback_lock) {
-        if(!log_callback_func) {
-            log_callback_func = log_callback_func_arg;
-        } else {
-            rc = PLCTAG_ERR_DUPLICATE;
-        }
+    if(atomic_compare_and_set_ptr(&log_callback_func, NULL, (void *)log_callback)) {
+        /* already set, do not overwrite */
+        rc = PLCTAG_ERR_DUPLICATE;
     }
 
     return rc;
@@ -288,13 +297,7 @@ int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debu
 int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    spin_block(&logger_callback_lock) {
-        if(log_callback_func) {
-            log_callback_func = NULL;
-        } else {
-            rc = PLCTAG_ERR_NOT_FOUND;
-        }
-    }
+    atomic_set_ptr(&log_callback_func, NULL);
 
     return rc;
 }
@@ -302,7 +305,5 @@ int debug_unregister_logger(void) {
 
 void debug_flush(void) {
     /* Flush stderr to ensure all buffered log output is written */
-    if(!log_callback_func) { fflush(stderr); }
+    if(!atomic_get_ptr(&log_callback_func)) { fflush(stderr); }
 }
-
-

@@ -53,30 +53,6 @@
 #include <utils/vector.h>
 
 
-/*
- * Externally visible global variables
- */
-
-// volatile omron_conn_p conns = NULL;
-// volatile mutex_p global_conn_mut = NULL;
-//
-// volatile vector_p read_group_tags = NULL;
-
-
-/* request/response handling thread */
-volatile thread_p omron_conn_handler_thread = NULL;
-
-volatile int omron_protocol_terminating = 0;
-
-
-/*
- * Generic Rockwell/Allen-Bradley protocol functions.
- *
- * These are the primary entry points into the AB protocol
- * stack.
- */
-
-
 #define DEFAULT_NUM_RETRIES (5)
 #define DEFAULT_RETRY_INTERVAL (300)
 
@@ -127,8 +103,6 @@ int omron_init(void) {
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Initializing Omron CIP protocol library.");
 
-    omron_protocol_terminating = 0;
-
     if((rc = conn_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_ERROR, 0, "Unable to initialize conn library!");
         return rc;
@@ -145,23 +119,9 @@ int omron_init(void) {
 void omron_teardown(void) {
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Releasing global Omron CIP protocol resources.");
 
-    if(omron_conn_handler_thread) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Terminating IO thread.");
-        /* signal the IO thread to quit first. */
-        omron_protocol_terminating = 1;
-
-        /* wait for the thread to die */
-        thread_join(omron_conn_handler_thread);
-        thread_destroy((thread_p *)&omron_conn_handler_thread);
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
-    }
-
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Freeing conn information.");
 
     conn_teardown();
-
-    omron_protocol_terminating = 0;
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Done.");
 }

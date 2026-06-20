@@ -102,3 +102,9 @@ void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
 void *atomic_get_ptr(atomic_ptr_t *a);
 void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
 void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);
+
+/* pointer */
+void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
+void *atomic_get_ptr(atomic_ptr_t *a);
+void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
+void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);

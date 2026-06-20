@@ -57,8 +57,11 @@
 
 
 /* global to cheat on passing it to threads. */
-volatile int32_t tag = 0;
-volatile int done = 0;
+static compat_atomic_int32_t g_tag = {0};
+static compat_atomic_int32_t done = {0};
+
+/* ^C handler */
+void handle_done(void) { compat_atomic_store_int32(&done, 1); }
 
 /*
  * Thread function.  Just read until killed.
@@ -68,8 +71,9 @@ void *thread_func(void *data) {
     int tid = (int)(intptr_t)data;
     int rc;
     float value;
+    int32_t tag = compat_atomic_load_int32(&g_tag);
 
-    while(!done) {
+    while(!compat_atomic_load_int32(&done)) {
         int64_t start;
         int64_t end;
 
@@ -123,6 +127,7 @@ int main(int argc, char **argv) {
     compat_thread_t thread[MAX_THREADS];
     int num_threads;
     int thread_id = 0;
+    int32_t tag;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -163,6 +168,9 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    /* store the tag in the global atomic variable */
+    compat_atomic_store_int32(&g_tag, tag);
+
     /* create the read threads */
 
     // NOLINTNEXTLINE
@@ -172,10 +180,11 @@ int main(int argc, char **argv) {
         compat_thread_create(&thread[thread_id], thread_func, (void *)(intptr_t)thread_id);
     }
 
-    /* FIXME - set up interrupt handler */
-    while(1) { compat_sleep_ms(100, NULL); }
+    /* set up interrupt handler */
+    compat_set_interrupt_handler(handle_done);
 
-    done = 1;
+    /* loop while not done */
+    while(!compat_atomic_load_int32(&done)) { compat_sleep_ms(100, NULL); }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
 
