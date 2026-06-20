@@ -58,7 +58,7 @@
 
 
 /* global to cheat on passing it to threads. */
-volatile int32_t tag;
+static compat_atomic_int32_t g_tag = {0};
 static compat_atomic_int32_t done = {0};
 
 
@@ -73,6 +73,7 @@ void *thread_func(void *data) {
     int tid = (int)(intptr_t)data;
     int rc;
     int value;
+    int32_t tag = compat_atomic_load_int32(&g_tag);
 
     while(!compat_atomic_load_int32(&done)) {
         int64_t start;
@@ -121,6 +122,7 @@ int main(int argc, char **argv) {
     compat_thread_t thread[MAX_THREADS];
     int num_threads;
     int thread_id = 0;
+    int32_t tag;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -163,6 +165,9 @@ int main(int argc, char **argv) {
         plc_tag_destroy(tag);
         return 0;
     }
+
+    /* store the tag in the global atomic variable */
+    compat_atomic_store_int32(&g_tag, tag);
 
     /* create the read threads */
     // NOLINTNEXTLINE

@@ -64,21 +64,6 @@ typedef struct ab_connection_tag_view_s {
     ab_session_p session;
 } ab_connection_tag_view_t;
 
-/*
- * Externally visible global variables
- */
-
-// volatile ab_session_p sessions = NULL;
-// volatile mutex_p global_session_mut = NULL;
-//
-// volatile vector_p read_group_tags = NULL;
-
-
-/* request/response handling thread */
-volatile thread_p io_handler_thread = NULL;
-
-volatile int ab_protocol_terminating = 0;
-
 
 /*
  * Generic Rockwell/Allen-Bradley protocol functions.
@@ -130,8 +115,6 @@ int ab_init(void) {
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Initializing AB protocol library.");
 
-    ab_protocol_terminating = 0;
-
     if((rc = session_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, 0, "Unable to initialize session library!");
         return rc;
@@ -148,23 +131,9 @@ int ab_init(void) {
 void ab_teardown(void) {
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Releasing global AB protocol resources.");
 
-    if(io_handler_thread) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Terminating IO thread.");
-        /* signal the IO thread to quit first. */
-        ab_protocol_terminating = 1;
-
-        /* wait for the thread to die */
-        thread_join(io_handler_thread);
-        thread_destroy((thread_p *)&io_handler_thread);
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
-    }
-
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Freeing session information.");
 
     session_teardown();
-
-    ab_protocol_terminating = 0;
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Done.");
 }

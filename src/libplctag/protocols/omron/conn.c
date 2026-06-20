@@ -118,10 +118,14 @@ static int send_extended_forward_open_request(omron_conn_p conn);
 static int receive_forward_open_response(omron_conn_p conn);
 static void request_destroy(void *req_arg);
 static int conn_request_increase_buffer(omron_request_p request, int new_capacity);
+static int32_t get_new_connection_id(void);
 
 
 static volatile mutex_p conn_mutex = NULL;
 static volatile vector_p conns = NULL;
+
+static atomic_int32_t connection_id = {0}; /* global connection ID counter for assigning unique IDs to connections. Initialized to
+                                              a random value on startup to reduce chances of collision across restarts. */
 
 /* Track active handler threads for proper shutdown synchronization */
 static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
@@ -138,6 +142,15 @@ int conn_startup(void) {
     if((conns = vector_create(25, 5)) == NULL) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_ERROR, 0, "Unable to create conn vector!");
         return PLCTAG_ERR_NO_MEM;
+    }
+
+    if(atomic_get_int32(&connection_id) == 0) {
+        int32_t new_id = (int32_t)(random_u64(UINT32_MAX) + 1);
+
+        if(new_id == 0) { new_id = 1; /* ensure we never set it to zero, as that is reserved/invalid. */ }
+        atomic_store_int32(&connection_id, new_id);
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
+               "Initialized global connection ID to random value %" PRId32 " to reduce chances of collision.", new_id);
     }
 
     return rc;
@@ -216,6 +229,22 @@ void conn_teardown(void) {
     }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
+}
+
+/*
+ * get_new_connection_id
+ *
+ * Get a new connection ID in a thread-safe way.  They cannot be zero.
+ */
+
+int32_t get_new_connection_id(void) {
+    int32_t new_id = atomic_inc_int32(&connection_id);
+
+    if(new_id == 0) { new_id = atomic_inc_int32(&connection_id); /* ensure we never return zero, as that is reserved/invalid. */ }
+
+    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Generated new connection ID %" PRId32 ".", new_id);
+
+    return new_id;
 }
 
 
@@ -544,8 +573,6 @@ omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *path, i
 
 omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
                                 plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
-    static volatile uint32_t connection_id = 0;
-
     int rc = PLCTAG_STATUS_OK;
     omron_conn_p conn = OMRON_CONN_NULL;
     int total_allocation_size = sizeof(*conn);
@@ -651,11 +678,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     }
 
 
-    /*
-        TO DO
-            remove mem_free from destructor for host, path, and conn_path.
-    */
-
     conn->requests = vector_create(CONN_MIN_REQUESTS, CONN_INC_REQUESTS);
     if(!conn->requests) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to allocate vector for requests!");
@@ -663,9 +685,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
         rc_dec(conn);
         return NULL;
     }
-
-    /* check for ID set up. This does not need to be thread safe since we just need a random value. */
-    if(connection_id == 0) { connection_id = (uint32_t)random_u64(UINT32_MAX) + 1; }
 
     /* fix up the rest of the fields */
     conn->plc_type = plc_type;
@@ -691,7 +710,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
      * FIXME - this could collide.  The probability is low, but it could happen
      * as there are only 32 bits.
      */
-    conn->orig_connection_id = ++connection_id;
+    conn->orig_connection_id = get_new_connection_id();
 
     /* add the new conn to the list. */
     add_conn_unsafe(conn);
@@ -2272,8 +2291,7 @@ int send_eip_request(omron_conn_p conn, int timeout) {
         // if(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size) {
         //     sleep_ms(1);
         // }
-    } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size
-            && timeout_time > time_ms());
+    } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size && timeout_time > time_ms());
 
     if(atomic_get_int32(&conn->terminating)) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Connection is terminating.");

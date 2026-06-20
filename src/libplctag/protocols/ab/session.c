@@ -146,11 +146,15 @@ static int receive_forward_open_response(ab_session_p session);
 static void request_destroy(void *req_arg);
 static int session_request_increase_buffer(ab_request_p request, int new_capacity);
 static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason);
+static int32_t get_new_connection_id(void);
 
-
-static volatile mutex_p session_mutex = NULL;
+/* sessions is protected by the session_mutex mutex */
 static volatile vector_p sessions = NULL;
+static volatile mutex_p session_mutex = NULL;
 
+
+/* atomic session connection ID */
+static atomic_int32_t connection_id = {0};
 
 int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
@@ -163,6 +167,15 @@ int session_startup(void) {
     if((sessions = vector_create(25, 5)) == NULL) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unable to create session vector!");
         return PLCTAG_ERR_NO_MEM;
+    }
+
+    if(atomic_get_int32(&connection_id) == 0) {
+        int32_t new_id = (int32_t)(random_u64(UINT32_MAX) + 1);
+
+        if(new_id == 0) { new_id = 1; /* ensure we never set it to zero, as that is reserved/invalid. */ }
+        atomic_store_int32(&connection_id, new_id);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
+               "Initialized global connection ID to random value %" PRId32 " to reduce chances of collision.", new_id);
     }
 
     return rc;
@@ -254,6 +267,22 @@ void session_teardown(void) {
     }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
+}
+
+/*
+ * get_new_connection_id
+ *
+ * Get a new connection ID in a thread-safe way.  They cannot be zero.
+ */
+
+int32_t get_new_connection_id(void) {
+    int32_t new_id = atomic_inc_int32(&connection_id);
+
+    if(new_id == 0) { new_id = atomic_inc_int32(&connection_id); /* ensure we never return zero, as that is reserved/invalid. */ }
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Generated new connection ID %" PRId32 ".", new_id);
+
+    return new_id;
 }
 
 
@@ -751,7 +780,6 @@ ab_session_p create_micro800_session_unsafe(const char *host, const char *path, 
 
 ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
                                    plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
-    static volatile uint32_t connection_id = 0;
 
     int rc = PLCTAG_STATUS_OK;
     ab_session_p session = AB_SESSION_NULL;
@@ -858,12 +886,6 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
         mem_copy(session->conn_path, tmp_conn_path, tmp_conn_path_size);
     }
 
-
-    /*
-        TO DO
-            remove mem_free from destructor for host, path, and conn_path.
-    */
-
     session->requests = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
     if(!session->requests) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to allocate vector for requests!");
@@ -872,10 +894,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
         return NULL;
     }
 
-    /* check for ID set up. This does not need to be thread safe since we just need a random value. */
-    if(connection_id == 0) { connection_id = (uint32_t)(random_u64(UINT32_MAX) + 1); }
-
-    /* fix up the rest of teh fields */
+    /* fix up the rest of the fields */
     session->plc_type = plc_type;
     session->use_connected_msg = *use_connected_msg;
     session->failed = 0;
@@ -900,7 +919,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
      * FIXME - this could collide.  The probability is low, but it could happen
      * as there are only 32 bits.
      */
-    session->orig_connection_id = ++connection_id;
+    session->orig_connection_id = get_new_connection_id();
 
     /* add the new session to the list. */
     add_session_unsafe(session);
