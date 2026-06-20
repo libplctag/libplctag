@@ -124,7 +124,7 @@ static int32_t get_new_connection_id(void);
 static volatile mutex_p conn_mutex = NULL;
 static volatile vector_p conns = NULL;
 
-static atomic_int32_t connection_id = {0}; /* global connection ID counter for assigning unique IDs to connections. Initialized to
+static atomic_int32_t connection_id = 0; /* global connection ID counter for assigning unique IDs to connections. Initialized to
                                               a random value on startup to reduce chances of collision across restarts. */
 
 /* Track active handler threads for proper shutdown synchronization */
@@ -148,7 +148,7 @@ int conn_startup(void) {
         int32_t new_id = (int32_t)(random_u64(UINT32_MAX) + 1);
 
         if(new_id == 0) { new_id = 1; /* ensure we never set it to zero, as that is reserved/invalid. */ }
-        atomic_store_int32(&connection_id, new_id);
+        atomic_set_int32(&connection_id, new_id);
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
                "Initialized global connection ID to random value %" PRId32 " to reduce chances of collision.", new_id);
     }
@@ -238,9 +238,15 @@ void conn_teardown(void) {
  */
 
 int32_t get_new_connection_id(void) {
-    int32_t new_id = atomic_inc_int32(&connection_id);
+    if(atomic_get_int32(&connection_id) > (INT32_MAX / 2)) {
+        atomic_set_int32(&connection_id, 1); /* reset to 1 to avoid overflow and keep IDs positive. */
+    }
 
-    if(new_id == 0) { new_id = atomic_inc_int32(&connection_id); /* ensure we never return zero, as that is reserved/invalid. */ }
+    int32_t new_id = atomic_add_int32(&connection_id, 1);
+
+    if(new_id == 0) {
+        new_id = atomic_add_int32(&connection_id, 1); /* ensure we never return zero, as that is reserved/invalid. */
+    }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Generated new connection ID %" PRId32 ".", new_id);
 
@@ -710,7 +716,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
      * FIXME - this could collide.  The probability is low, but it could happen
      * as there are only 32 bits.
      */
-    conn->orig_connection_id = get_new_connection_id();
+    conn->orig_connection_id = (uint32_t)get_new_connection_id();
 
     /* add the new conn to the list. */
     add_conn_unsafe(conn);

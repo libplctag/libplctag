@@ -45,9 +45,9 @@
 
 typedef int32_t DINT;
 
-static volatile DINT *TestDINTArray = NULL;
+void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
+    DINT *TestDINTArray = (DINT *)userdata;
 
-void tag_callback(int32_t tag_id, int event, int status) {
     /* handle the events. */
     switch(event) {
         case PLCTAG_EVENT_ABORTED: printf("Tag operation was aborted with status %s!\n", plc_tag_decode_error(status)); break;
@@ -110,6 +110,7 @@ int main(void) {
     int i;
     int elem_count = 0;
     int elem_size = 0;
+    DINT *TestDINTArray = NULL;
     int64_t start = 0;
     int64_t end = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
@@ -198,7 +199,7 @@ int main(void) {
     }
 
     /* test registering the callback  */
-    rc = plc_tag_register_callback(tag, tag_callback);
+    rc = plc_tag_register_callback_ex(tag, tag_callback, TestDINTArray);
     if(rc != PLCTAG_STATUS_OK) {
         printf("Got incorrect status when registering callback %s!\n", plc_tag_decode_error(rc));
         free((void *)TestDINTArray);
@@ -208,7 +209,7 @@ int main(void) {
     }
 
     /* test registering the callback again, should be an error */
-    rc = plc_tag_register_callback(tag, tag_callback);
+    rc = plc_tag_register_callback_ex(tag, tag_callback, TestDINTArray);
     if(rc != PLCTAG_ERR_DUPLICATE) {
         printf("Got incorrect status when registering callback twice %s!\n", plc_tag_decode_error(rc));
 

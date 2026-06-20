@@ -61,7 +61,7 @@ static compat_atomic_int32_t g_tag = {0};
 static compat_atomic_int32_t done = {0};
 
 /* ^C handler */
-void handle_done(int sig) { compat_atomic_store_int32(&done, 1); }
+void handle_done(void) { compat_atomic_store_int32(&done, 1); }
 
 /*
  * Thread function.  Just read until killed.

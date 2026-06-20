@@ -45,7 +45,7 @@
 #include <libplctag/lib/libplctag.h>
 
 /* Generated debug constants - parsed from libplctag.h at build time */
-#include "debug_generated.h"
+#include <utils/debug_generated.h>
 
 extern int set_debug_level(int debug_level);
 extern int get_debug_level(void);

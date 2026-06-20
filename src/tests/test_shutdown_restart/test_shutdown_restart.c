@@ -57,7 +57,7 @@
 static char *base_tag_path = NULL;
 
 /* Thread state flags */
-static volatile int terminate_threads = 0;
+static compat_atomic_int32_t g_terminate_threads = {0};
 
 /* Thread statistics */
 typedef struct {
@@ -122,6 +122,8 @@ int main(int argc, char **argv) {
     /* Set debug level to DETAIL (4) */
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
+    compat_atomic_store_int32(&g_terminate_threads, 0);
+
     /*
      * Step 1: Create worker threads
      */
@@ -132,7 +134,7 @@ int main(int argc, char **argv) {
         rc = compat_thread_create(&threads[i], worker_thread, &thread_stats[i]);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Could not create thread %d! Error: %s\n", i, plc_tag_decode_error(rc));
-            terminate_threads = 1;
+            compat_atomic_store_int32(&g_terminate_threads, 1);
             return 1;
         }
         fprintf(stderr, "Thread %d created.\n", i);
@@ -161,7 +163,7 @@ int main(int argc, char **argv) {
      * Step 5: Signal threads to terminate
      */
     fprintf(stderr, "\n=== Step 5: Signaling threads to terminate ===\n");
-    terminate_threads = 1;
+    compat_atomic_store_int32(&g_terminate_threads, 1);
 
     /*
      * Step 6: Wait for threads to finish
@@ -252,7 +254,7 @@ static void *worker_thread(void *arg) {
     /*
      * Main loop: read, increment, write, sleep
      */
-    while(!terminate_threads) {
+    while(!compat_atomic_load_int32(&g_terminate_threads)) {
         /* Check if we need to recreate the tag */
         if(need_recreate) {
             stats->recreate_attempted = 1;

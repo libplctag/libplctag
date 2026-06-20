@@ -21,9 +21,9 @@
 #define SLEEP_MS 100
 #define EXPECTED_VALUE 42
 
-static volatile int running = 1;
-static volatile int read_passed = 0;
-static volatile int write_passed = 0;
+static compat_atomic_int32_t g_running = {1};
+static compat_atomic_int32_t g_read_passed = {0};
+static compat_atomic_int32_t g_write_passed = {0};
 
 void *reader_thread(void *arg) {
     (void)arg;
@@ -32,19 +32,19 @@ void *reader_thread(void *arg) {
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Could not create tag for reading: %s\n", plc_tag_decode_error(tag));
-        read_passed = 0;
+        compat_atomic_store_int32(&g_read_passed, 0);
         return NULL;
     }
 
-    while(running) {
+    while(compat_atomic_load_int32(&g_running)) {
         int rc = plc_tag_read(tag, TIMEOUT_MS);
         if(rc == PLCTAG_STATUS_OK) {
             int val = plc_tag_get_int32(tag, 0);
             if(val == EXPECTED_VALUE) {
                 // NOLINTNEXTLINE
                 fprintf(stdout, "[INFO ] Value is %d.\n", EXPECTED_VALUE);
-                read_passed = 1;
-                running = 0;
+                compat_atomic_store_int32(&g_read_passed, 1);
+                compat_atomic_store_int32(&g_running, 0);
             } else {
                 // Failed
                 // NOLINTNEXTLINE
@@ -53,7 +53,7 @@ void *reader_thread(void *arg) {
         } else {
             // NOLINTNEXTLINE
             fprintf(stderr, "[ERROR] Read failed: %s\n", plc_tag_decode_error(rc));
-            read_passed = 0;
+            compat_atomic_store_int32(&g_read_passed, 0);
         }
         compat_sleep_ms(SLEEP_MS, NULL);
     }
@@ -69,7 +69,7 @@ void *writer_thread(void *arg) {
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Could not create tag for writing: %s\n", plc_tag_decode_error(tag));
-        write_passed = 0;
+        compat_atomic_store_int32(&g_write_passed, 0);
         return NULL;
     }
 
@@ -78,11 +78,11 @@ void *writer_thread(void *arg) {
     if(rc == PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE
         fprintf(stdout, "[WRITE] Value: %d\n", EXPECTED_VALUE);
-        write_passed = 1;
+        compat_atomic_store_int32(&g_write_passed, 1);
     } else {
         // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Write failed: %s\n", plc_tag_decode_error(rc));
-        write_passed = 0;
+        compat_atomic_store_int32(&g_write_passed, 0);
     }
 
     plc_tag_destroy(tag);
@@ -134,7 +134,7 @@ int main(void) {
     compat_thread_create(&reader, reader_thread, (void *)(intptr_t)tag);
 
     compat_sleep_ms(RUN_TIME_MS, NULL);
-    running = 0;
+    compat_atomic_store_int32(&g_running, 0);
 
     compat_thread_join(reader, NULL);
     compat_thread_join(writer, NULL);
@@ -145,7 +145,7 @@ int main(void) {
     // NOLINTNEXTLINE
     fprintf(stdout, "[DONE ] Test completed.\n");
 
-    if(!read_passed) {
+    if(!compat_atomic_load_int32(&g_read_passed)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "[FAIL ] Read operations failed.\n");
         return 1;
@@ -154,7 +154,7 @@ int main(void) {
         fprintf(stdout, "[PASS ] Read operations succeeded.\n");
     }
 
-    if(!write_passed) {
+    if(!compat_atomic_load_int32(&g_write_passed)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "[FAIL ] Write operation failed.\n");
         return 1;

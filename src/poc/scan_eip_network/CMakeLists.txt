@@ -7,6 +7,8 @@ set(SCAN_EIP_NETWORK_FILES
 add_executable(scan_eip_network ${SCAN_EIP_NETWORK_FILES}
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/socket.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/socket.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/buf.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/buf.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/args.c

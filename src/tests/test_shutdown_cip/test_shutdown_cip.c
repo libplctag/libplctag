@@ -50,11 +50,10 @@
 
 #define READ_PERIOD_MS (200)
 
-static volatile int read_start_count = 0;
-static volatile int read_complete_count = 0;
-static volatile int write_start_count = 0;
-static volatile int write_complete_count = 0;
-
+static compat_atomic_int32_t read_start_count = {0};
+static compat_atomic_int32_t read_complete_count = {0};
+static compat_atomic_int32_t write_start_count = {0};
+static compat_atomic_int32_t write_complete_count = {0};
 
 static void *reader_function(void *tag_arg);
 static void *writer_function(void *tag_arg);
@@ -259,28 +258,28 @@ void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            read_complete_count++;
+            compat_atomic_add_int32(&read_complete_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic read operation completed with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            read_start_count++;
+            compat_atomic_add_int32(&read_start_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic read operation started with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            write_complete_count++;
+            compat_atomic_add_int32(&write_complete_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic write operation completed with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            write_start_count++;
+            compat_atomic_add_int32(&write_start_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic write operation started with status %s.\n", tag_id,
                     plc_tag_decode_error(status));

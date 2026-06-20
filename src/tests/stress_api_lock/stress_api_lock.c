@@ -54,8 +54,8 @@
 
 
 /* global to cheat on passing it to threads. */
-volatile int done = 0;
-volatile int32_t tag = 0;
+static compat_atomic_int32_t done = {0};
+static compat_atomic_int32_t g_tag = {0};
 
 
 static int open_tag(const char *tag_str) {
@@ -86,8 +86,9 @@ static int open_tag(const char *tag_str) {
 void *test_tag(void *data) {
     int tid = (int)(intptr_t)data;
     int iteration = 1;
+    int32_t tag = compat_atomic_load_int32(&g_tag);
 
-    while(!done) {
+    while(!compat_atomic_load_int32(&done)) {
         int rc = PLCTAG_STATUS_OK;
         int32_t value = 0;
         int64_t start = 0;
@@ -104,7 +105,7 @@ void *test_tag(void *data) {
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Test %d, terminating test, read resulted in error %s\n", tid, plc_tag_decode_error(rc));
-            done = 1;
+            compat_atomic_store_int32(&done, 1);
         } else {
             value = plc_tag_get_int32(tag, 0);
 
@@ -120,7 +121,7 @@ void *test_tag(void *data) {
             if(rc != PLCTAG_STATUS_OK) {
                 // NOLINTNEXTLINE
                 fprintf(stderr, "Test %d, terminating test, write resulted in error %s\n", tid, plc_tag_decode_error(rc));
-                done = 1;
+                compat_atomic_store_int32(&done, 1);
             } else {
                 // NOLINTNEXTLINE
                 fprintf(stderr, "Test %d, iteration %d, got result %d with return code %s in %dms\n", tid, iteration, value,
@@ -146,6 +147,7 @@ int main(int argc, char **argv) {
     int64_t end_time;
     int64_t seconds = 30; /* default 30 seconds */
     int num_threads = 0;
+    int32_t tag;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -169,6 +171,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* store the tag for the threads to use */
+    compat_atomic_store_int32(&g_tag, tag);
+
     /* create the test threads */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         // NOLINTNEXTLINE
@@ -179,9 +184,9 @@ int main(int argc, char **argv) {
     start_time = compat_time_ms();
     end_time = start_time + (seconds * 1000);
 
-    while(!done && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
+    while(!compat_atomic_load_int32(&done) && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
 
-    if(done) {
+    if(compat_atomic_load_int32(&done)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Test FAILED!\n");
     } else {
@@ -189,7 +194,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Test SUCCEEDED!\n");
     }
 
-    done = 1;
+    compat_atomic_store_int32(&done, 1);
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(threads[tid], NULL); }
 
@@ -197,7 +202,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "All test threads terminated.\n");
 
     plc_tag_destroy(tag);
-
 
     return 0;
 }

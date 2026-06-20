@@ -61,7 +61,7 @@ compat_atomic_int32_t g_tag = {0};
 compat_atomic_int32_t done = {0};
 
 /* ^C handler */
-void handle_done(int sig) { compat_atomic_store_int32(&done, 1); }
+void handle_done(void) { compat_atomic_store_int32(&done, 1); }
 
 /*
  * Thread function.  Just read until killed.
@@ -71,9 +71,9 @@ void *thread_func(void *data) {
     int tid = (int)(intptr_t)data;
     int rc;
     float value;
-    int32_t tag = compat_atomic_load(&g_tag);
+    int32_t tag = compat_atomic_load_int32(&g_tag);
 
-    while(!compat_atomic_load(&done)) {
+    while(!compat_atomic_load_int32(&done)) {
         int64_t start;
         int64_t end;
 
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
     }
 
     /* FIXME - set up interrupt handler */
-    while(!compat_atomic_load(&done)) { compat_sleep_ms(100, NULL); }
+    while(!compat_atomic_load_int32(&done)) { compat_sleep_ms(100, NULL); }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
 

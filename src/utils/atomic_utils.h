@@ -54,6 +54,7 @@ typedef volatile bool atomic_bool;
 #    endif
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
+typedef volatile(void *) atomic_ptr_t;
 
 #    define ATOMIC_INT_STATIC_INIT (0)
 #    define ATOMIC_BOOL_STATIC_INIT (false)
@@ -67,6 +68,7 @@ typedef volatile int64_t atomic_int64_t;
 typedef _Atomic bool atomic_bool;
 typedef _Atomic int32_t atomic_int32_t;
 typedef _Atomic int64_t atomic_int64_t;
+typedef _Atomic(void *) atomic_ptr_t;
 
 #    define ATOMIC_INT_STATIC_INIT ATOMIC_VAR_INIT(0)
 #    define ATOMIC_BOOL_STATIC_INIT ATOMIC_VAR_INIT(false)
@@ -94,3 +96,9 @@ int64_t atomic_get_int64(atomic_int64_t *a);
 int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
 int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
 int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
+
+/* pointer */
+void atomic_init_ptr(atomic_ptr_t *a, void *new_val);
+void *atomic_get_ptr(atomic_ptr_t *a);
+void *atomic_set_ptr(atomic_ptr_t *a, void *new_val);
+void *atomic_compare_and_set_ptr(atomic_ptr_t *a, void *old_val, void *new_val);
