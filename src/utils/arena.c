@@ -3,7 +3,7 @@
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -32,63 +32,72 @@
  ***************************************************************************/
 
 /*
- * Adapted from src/poc/ab_server_fiber/arena.c.
- * Changes: util_err_t → int32_t; malloc/memset/free → mem_alloc/mem_set/mem_free.
+ * Fixed-size bump allocator implementation.
+ * Copied from ~/Projects/data_table and modified to return errors instead
+ * of calling exit().
  */
 
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include <libplctag/lib/libplctag.h>
-#include "platform.h"
 #include "arena.h"
 
-/* Portable max-align substitute for older MSVC. */
+/* Portable substitute for max_align_t: a union of all fundamental types whose
+ * alignment must be respected.  max_align_t from <stddef.h> is C11 but older
+ * MSVC toolchains may not provide it even with /std:c11. */
 typedef union {
-    char c; short s; int i; long l; long long ll;
-    float f; double d; long double ld; void *p;
+    char c;
+    short s;
+    int i;
+    long l;
+    long long ll;
+    float f;
+    double d;
+    long double ld;
+    void *p;
 } arena_max_align_t;
 
-
-extern void arena_set_stats(Arena *a, ArenaStats *stats) {
+void arena_set_stats(Arena *a, ArenaStats *stats) {
     if(!a) { return; }
     a->stats = stats;
     if(stats) {
-        mem_set(stats, 0, (int)sizeof(*stats));
-        stats->use_min = (size_t)-1;
+        memset(stats, 0, sizeof(*stats));
+        stats->use_min = SIZE_MAX;
     }
 }
 
 
-extern int32_t arena_init(Arena *out, size_t size) {
+int arena_init(Arena *out, size_t size) {
     if(!out) { return PLCTAG_ERR_BAD_PARAM; }
 
-    out->buffer = (uint8_t *)mem_alloc((int)size);
+    out->buffer = (uint8_t *)malloc(size);
     if(!out->buffer) {
-        out->length   = 0;
+        out->length = 0;
         out->capacity = 0;
         out->high_water = 0;
         return PLCTAG_ERR_NO_MEM;
     }
 
-    out->length     = 0;
-    out->capacity   = size;
+    out->length = 0;
+    out->capacity = size;
     out->high_water = 0;
-    out->stats      = NULL;
 
     return PLCTAG_STATUS_OK;
 }
 
 
-extern void *arena_alloc(Arena *a, size_t size) {
+void *arena_alloc(Arena *a, size_t size) {
     if(!a || !a->buffer) { return NULL; }
 
-    size_t align   = _Alignof(arena_max_align_t);
+    /* Align the cursor to the strictest fundamental alignment, matching malloc. */
+    size_t align = _Alignof(arena_max_align_t);
     size_t padding = (align - (a->length % align)) % align;
 
     if(a->length + padding + size > a->capacity) { return NULL; }
 
     a->length += padding;
-    void *ptr  = a->buffer + a->length;
+    void *ptr = a->buffer + a->length;
     a->length += size;
 
     if(a->length > a->high_water) { a->high_water = a->length; }
@@ -97,26 +106,7 @@ extern void *arena_alloc(Arena *a, size_t size) {
 }
 
 
-extern uint8_t *arena_current(Arena *a) {
-    if(!a || !a->buffer) { return NULL; }
-    return a->buffer + a->length;
-}
-
-
-extern size_t arena_remaining(Arena *a) {
-    if(!a || !a->buffer) { return 0; }
-    return a->capacity - a->length;
-}
-
-
-extern void arena_commit(Arena *a, size_t n) {
-    if(!a) { return; }
-    a->length += n;
-    if(a->length > a->high_water) { a->high_water = a->length; }
-}
-
-
-extern void arena_reset(Arena *a) {
+void arena_reset(Arena *a) {
     if(!a) { return; }
     if(a->stats && a->length > 0) {
         ArenaStats *s = a->stats;
@@ -129,19 +119,39 @@ extern void arena_reset(Arena *a) {
 }
 
 
-extern size_t arena_save(Arena *a) { return a ? a->length : 0; }
+uint8_t *arena_current(Arena *a) {
+    if(!a || !a->buffer) { return NULL; }
+    return a->buffer + a->length;
+}
 
 
-extern void arena_restore(Arena *a, size_t saved) {
+size_t arena_remaining(Arena *a) {
+    if(!a || !a->buffer) { return 0; }
+    return a->capacity - a->length;
+}
+
+
+void arena_commit(Arena *a, size_t n) {
+    if(!a) { return; }
+    a->length += n;
+    if(a->length > a->high_water) { a->high_water = a->length; }
+}
+
+
+size_t arena_save(Arena *a) { return a ? a->length : 0; }
+
+
+void arena_restore(Arena *a, size_t saved) {
     if(a && saved <= a->capacity) { a->length = saved; }
 }
 
 
-extern void arena_free(Arena *a) {
+void arena_free(Arena *a) {
     if(!a) { return; }
-    mem_free(a->buffer);
-    a->buffer     = NULL;
-    a->length     = 0;
-    a->capacity   = 0;
+
+    free(a->buffer);
+    a->buffer = NULL;
+    a->length = 0;
+    a->capacity = 0;
     a->high_water = 0;
 }

@@ -1,0 +1,17 @@
+set(ENIP_PROTOCOL_SOURCES
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_type.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_type.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_cip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_cip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_eip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_eip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_cpf.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_cpf.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_session.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_session.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/enip.c"
+                    PARENT_SCOPE
+)

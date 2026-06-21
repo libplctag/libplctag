@@ -48,9 +48,9 @@
 
 /* data definitions */
 
-#define PLC_SOCKET_ERR_MAX_DELAY (5000)
-#define PLC_SOCKET_ERR_START_DELAY (50)
-#define PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT (10)
+#define RETRY_WAIT_INITIAL_MS (50)
+#define RETRY_WAIT_MAX_MS (5000)
+#define MAX_RETRY_COUNT ((unsigned int)16U) /* cap to prevent overflow */
 #define MODBUS_DEFAULT_PORT (502)
 #define PLC_READ_DATA_LEN (300)
 #define PLC_WRITE_DATA_LEN (300)
@@ -70,12 +70,13 @@
 /* windows.h already included by platform.h */
 static inline int64_t time_us(void) {
     FILETIME ft;
+    uint64_t ticks_100ns;
     int64_t res;
     GetSystemTimeAsFileTime(&ft);
     /* FILETIME is in 100ns increments since Jan 1, 1601 */
-    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
+    ticks_100ns = ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime;
     /* Convert to microseconds. Magic offset is for Jan 1, 1970 Unix epoch. */
-    res = (res - 116444736000000000) / 10;
+    res = ((int64_t)ticks_100ns - INT64_C(116444736000000000)) / INT64_C(10);
     return res;
 }
 #else
@@ -322,6 +323,7 @@ static void modbus_plc_destructor(void *plc_arg);
 static THREAD_FUNC(modbus_plc_handler);
 static void wake_plc_thread(modbus_plc_p plc);
 static int connect_plc(modbus_plc_p plc);
+static int64_t calc_retry_time(int64_t now, unsigned int *retry_count);
 static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms);
 static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag, int64_t now, int64_t *min_wait_time);
 static int receive_response(modbus_plc_p plc);
@@ -980,19 +982,37 @@ static int reset_plc(modbus_plc_p plc) {
 }
 
 
-#define UPDATE_ERR_DELAY()                                                                 \
-    do {                                                                                   \
-        err_delay = err_delay * 2;                                                         \
-        if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; } \
-        err_delay_until = (int64_t)random_u64((uint64_t)err_delay) + time_ms();            \
-    } while(0)
+int64_t calc_retry_time(int64_t now, unsigned int *retry_count) {
+    int64_t retry_wait = 0;
+    int64_t jitter_base = 0;
+    int64_t jitter = 0;
+
+    /* clamp retry count to prevent overflow/UB */
+    if((++*retry_count) > MAX_RETRY_COUNT) { *retry_count = MAX_RETRY_COUNT; }
+
+    retry_wait = (int64_t)RETRY_WAIT_INITIAL_MS * (int64_t)(1ULL << (uint64_t)(*retry_count));
+
+    if(retry_wait > RETRY_WAIT_MAX_MS) { retry_wait = RETRY_WAIT_MAX_MS; }
+
+    jitter_base = retry_wait / 2;
+    if(jitter_base > 0) { jitter = (int64_t)random_u64((uint64_t)jitter_base) - (jitter_base / 2); }
+
+    retry_wait = now + retry_wait + jitter;
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Retry count %u for retry time delay of %" PRId64 "ms.", *retry_count,
+           retry_wait - now);
+
+    if(retry_wait < 0) { retry_wait = 0; }
+
+    return retry_wait;
+}
 
 
 THREAD_FUNC(modbus_plc_handler) {
     int rc = PLCTAG_STATUS_OK;
     modbus_plc_p plc = (modbus_plc_p)arg;
-    int64_t err_delay = PLC_SOCKET_ERR_START_DELAY;
-    int64_t err_delay_until = 0;
+    int64_t retry_wait_until = 0;
+    unsigned int retry_count = 0;
     int sock_events = SOCK_EVENT_NONE;
     int waitable_events = SOCK_EVENT_NONE;
     int32_t timeout_ms = 0;
@@ -1061,8 +1081,8 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Successfully connected to the PLC.  Going to PLC_READY state.");
 
-                    /* reset err_delay */
-                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    /* reset retry count */
+                    retry_count = 0;
 
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
@@ -1079,12 +1099,13 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while starting socket connection.",
                            plc_tag_decode_error(rc));
 
-                    /* exponential increase with jitter. */
-                    UPDATE_ERR_DELAY();
+                    /* Exponential retry with jitter. */
+                    int64_t now = time_ms();
+                    retry_wait_until = calc_retry_time(now, &retry_count);
 
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
-                           err_delay);
+                           (retry_wait_until - now));
 
                     plc->state = PLC_ERR_WAIT;
                 }
@@ -1107,8 +1128,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            " (connection established in PLC_CONNECT_WAIT).",
                            plc->last_packet_time_ms, plc->disconnect_at_time_ms);
 
-                    /* reset err_delay */
-                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    /* reset retry count */
+                    retry_count = 0;
 
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
@@ -1119,12 +1140,13 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while waiting for socket connection.",
                            plc_tag_decode_error(rc));
 
-                    /* exponential increase with jitter. */
-                    UPDATE_ERR_DELAY();
+                    /* Exponential retry with jitter. */
+                    int64_t now = time_ms();
+                    retry_wait_until = calc_retry_time(now, &retry_count);
 
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
-                           err_delay);
+                           (retry_wait_until - now));
 
                     plc->state = PLC_ERR_WAIT;
                 }
@@ -1318,10 +1340,10 @@ THREAD_FUNC(modbus_plc_handler) {
                 mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_ERR_WAIT);
 
                 /* wait until done. */
-                if(err_delay_until > time_ms()) {
+                if(retry_wait_until > time_ms()) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Waiting for at least %" PRId64 "ms.",
-                           (err_delay_until - time_ms()));
-                    socket_wait_event(plc->sock, SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT, (int)(err_delay_until - time_ms()));
+                           (retry_wait_until - time_ms()));
+                    socket_wait_event(plc->sock, SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT, (int)(retry_wait_until - time_ms()));
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Error wait is over, going to state PLC_CONNECT_START.");
                     plc->state = PLC_CONNECT_START;

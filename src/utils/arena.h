@@ -1,9 +1,11 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -32,46 +34,76 @@
  ***************************************************************************/
 
 /*
- * Adapted from src/poc/ab_server_fiber/arena.h.
- * Changes: util_err_t → int32_t; removed err.h dependency.
+ * Fixed-size bump allocator.  All allocations are sequential; the only
+ * "free" is arena_reset() which resets the cursor to zero.
+ *
+ * Copied from ~/Projects/data_table and modified:
+ *   - arena_init() returns util_err_t instead of panicking on malloc failure.
+ *   - arena_alloc() returns NULL on overflow instead of calling exit().
+ *   - arena_free() no longer performs direct stream output.
  */
 
-#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include <libplctag/lib/libplctag.h>
+
 /*
- * Per-reset-cycle usage statistics.  Attach with arena_set_stats();
- * pass NULL to disable.  arena_reset() samples arena.length before clearing.
+ * Per-reset-cycle usage statistics.  Attach to an arena with arena_set_stats();
+ * pass NULL to disable collection entirely.  arena_reset() samples arena.length
+ * just before clearing the cursor, so each sample equals the peak usage for
+ * that request cycle (bump allocators never free, so length == peak).
  */
 typedef struct {
-    size_t reset_count;
-    size_t use_min;
-    size_t use_max;
-    size_t use_total;
+    size_t reset_count; /* number of non-empty reset cycles measured */
+    size_t use_min;     /* minimum usage at reset time (bytes) */
+    size_t use_max;     /* maximum usage at reset time (bytes) */
+    size_t use_total;   /* sum of all samples (for average) */
 } ArenaStats;
 
 typedef struct {
-    uint8_t   *buffer;
-    size_t     length;
-    size_t     capacity;
-    size_t     high_water;
-    ArenaStats *stats;
+    uint8_t *buffer;
+    size_t length;
+    size_t capacity;
+    size_t high_water; /* peak usage across all resets */
+    ArenaStats *stats; /* optional; NULL disables stats gathering */
 } Arena;
 
-/* Returns PLCTAG_STATUS_OK or PLCTAG_ERR_NO_MEM. */
-extern int32_t arena_init(Arena *out, size_t size);
+/* Initialize arena with a fixed size. */
+extern int arena_init(Arena *out, size_t size);
 
+/* Attach (or detach with NULL) a stats collector.  Clears the stats struct on attach. */
 extern void arena_set_stats(Arena *a, ArenaStats *stats);
 
-/* Returns NULL on out-of-space; caller must check. */
+/* Allocate size bytes from arena.  Returns NULL if out of space; caller must check. */
 extern void *arena_alloc(Arena *a, size_t size);
 
+/* Pointer to next free byte (for single-pass pack-then-commit). */
 extern uint8_t *arena_current(Arena *a);
-extern size_t   arena_remaining(Arena *a);
-extern void     arena_commit(Arena *a, size_t n);
-extern void     arena_reset(Arena *a);
-extern size_t   arena_save(Arena *a);
-extern void     arena_restore(Arena *a, size_t saved);
-extern void     arena_free(Arena *a);
+
+/* Bytes remaining in arena. */
+extern size_t arena_remaining(Arena *a);
+
+/* Advance arena cursor by n bytes.  Caller must ensure n <= arena_remaining(). */
+extern void arena_commit(Arena *a, size_t n);
+
+/* Reset arena cursor to zero without freeing the backing buffer.
+ * If stats are attached, samples arena.length before clearing. */
+extern void arena_reset(Arena *a);
+
+/* Save current cursor position. */
+extern size_t arena_save(Arena *a);
+
+/* Restore arena cursor to a previously saved position. */
+extern void arena_restore(Arena *a, size_t saved);
+
+/* Free arena backing buffer. */
+extern void arena_free(Arena *a);
+
+#ifdef __cplusplus
+}
+#endif

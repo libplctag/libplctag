@@ -181,7 +181,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
 
-    while(isdigit(path[p_index])) {
+    while(isdigit((unsigned char)path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
@@ -234,7 +234,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* first part, the extended address marker*/
     val = 0;
-    while(isdigit(path[p_index])) {
+    while(isdigit((unsigned char)path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
@@ -278,7 +278,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* get the first IP address digit. */
     val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
+    while(isdigit((unsigned char)path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
         val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
@@ -315,7 +315,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* get the second part. */
     val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
+    while(isdigit((unsigned char)path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
         val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
@@ -352,7 +352,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* get the third part. */
     val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
+    while(isdigit((unsigned char)path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
         val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
@@ -389,7 +389,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* get the fourth part. */
     val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
+    while(isdigit((unsigned char)path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
         val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
@@ -479,7 +479,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* get the source node */
     val = 0;
-    while(isdigit(path[p_index])) {
+    while(isdigit((unsigned char)path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
@@ -510,7 +510,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* get the destination node */
     val = 0;
-    while(isdigit(path[p_index])) {
+    while(isdigit((unsigned char)path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
@@ -689,7 +689,7 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
            encoded_i);
 
     /* a symbolic segment must start with an alphabetic character or @, then can have digits or underscores. */
-    if(!isalpha(name[name_i]) && name[name_i] != ':' && name[name_i] != '_' && name[name_i] != '@') {
+    if(!isalpha((unsigned char)name[name_i]) && name[name_i] != ':' && name[name_i] != '_' && name[name_i] != '@') {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, tag->tag_id, "tag name at position %d is not the start of a symbolic segment.",
                name_i);
         return PLCTAG_ERR_NO_MATCH;
@@ -708,7 +708,8 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
     name_i++;
 
     /* get the rest of the name. */
-    while((isalnum(name[name_i]) || name[name_i] == ':' || name[name_i] == '_') && (encoded_i < (MAX_TAG_NAME - 1))) {
+    while((isalnum((unsigned char)name[name_i]) || name[name_i] == ':' || name[name_i] == '_')
+          && (encoded_i < (MAX_TAG_NAME - 1))) {
         tag->encoded_name[encoded_i] = (uint8_t)name[name_i];
         encoded_i++;
         tag->encoded_name[seg_len_index]++;

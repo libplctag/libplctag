@@ -93,10 +93,12 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
     switch(event) {
         case PLCTAG_EVENT_CREATED: compat_atomic_store_int64(&stats->ready_time, now); break;
-        case PLCTAG_EVENT_READ_STARTED: compat_atomic_inc_int32(&stats->read_started_count); break;
+        case PLCTAG_EVENT_READ_STARTED:
+            if(compat_atomic_load_int64(&stats->ready_time) != 0) { compat_atomic_inc_int32(&stats->read_started_count); }
+            break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            if(status == PLCTAG_STATUS_OK) {
+            if(status == PLCTAG_STATUS_OK && compat_atomic_load_int64(&stats->ready_time) != 0) {
                 compat_atomic_inc_int32(&stats->read_completed_count);
 
                 /* Calculate wait time since last read */

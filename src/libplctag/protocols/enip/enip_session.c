@@ -1,0 +1,1489 @@
+/***************************************************************************
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *                                                                         *
+ * This software is available under either the Mozilla Public License      *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * you choose.                                                             *
+ *                                                                         *
+ * MPL 2.0:                                                                *
+ *                                                                         *
+ *   This Source Code Form is subject to the terms of the Mozilla Public   *
+ *   License, v. 2.0. If a copy of the MPL was not distributed with this   *
+ *   file, You can obtain one at http://mozilla.org/MPL/2.0/.              *
+ *                                                                         *
+ *                                                                         *
+ * LGPL 2:                                                                 *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+/*
+ * Connection lifecycle and IO thread (design doc §3-5, §10, §13, §14.3).
+ *
+ * MVP scope (§15.2): connect -> RegisterSession -> ForwardOpen -> READY,
+ * then service a single in-flight tag op at a time (OPEN_PROBE / READ /
+ * OPEN_BULK). elem_count > 1 tags are primed by OPEN_PROBE (element 0) then
+ * OPEN_BULK (remaining elements, windowed per §11.3).
+ *
+ * Deviation from the literal §14.3 text: the tx frame is produced directly
+ * by enip_cip_read / enip_cpf_wrap_* / enip_eip_* (each an arena allocation),
+ * rather than being assembled byte-by-byte into a pre-sized tx_buf.  The
+ * arena is reset before building and the resulting Bytes is used in place
+ * as tx_buf/tx_len.
+ */
+
+#include <inttypes.h>
+#include <string.h>
+
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/protocols/enip/enip_cip.h>
+#include <libplctag/protocols/enip/enip_cpf.h>
+#include <libplctag/protocols/enip/enip_eip.h>
+#include <libplctag/protocols/enip/enip_session.h>
+#include <libplctag/protocols/enip/enip_tag.h>
+#include <libplctag/protocols/enip/enip_type.h>
+#include <platform.h>
+#include <utils/arena.h>
+#include <utils/atomic_utils.h>
+#include <utils/attr.h>
+#include <utils/bytes.h>
+#include <utils/debug.h>
+#include <utils/random_utils.h>
+#include <utils/rc.h>
+
+#define ENIP_DEFAULT_PORT ((int)44818)
+
+/* rx_cap before ForwardOpen succeeds (RegisterSession/ForwardOpen replies are small). */
+#define ENIP_BOOTSTRAP_PACKET ((size_t)256)
+
+/* Requested/negotiated CIP payload size for the standard ForwardOpen (0x43F8). */
+#define ENIP_FO_CIP_SIZE ((size_t)504)
+
+/* EIP header (24) + connected CPF overhead (22). */
+#define ENIP_FRAMING_OVERHEAD (ENIP_EIP_HEADER_SIZE + ENIP_CPF_CONNECTED_OVERHEAD)
+
+/* Backing store for the per-connection arena; covers rx_cap (504 + 46 = 550)
+ * and tx-side scratch. Building a write request concatenates the CIP payload
+ * (up to ~504 bytes), then the CPF wrap, then the EIP frame -- each step
+ * allocates a fresh buffer without freeing the last, so a single max-size
+ * write request can consume ~3x its wire size before arena_reset. */
+#define ENIP_ARENA_SIZE ((size_t)4096)
+
+/* Backoff after a connect/IO failure, and idle poll cadence. */
+#define ENIP_RECONNECT_DELAY_MS ((int64_t)1000)
+#define ENIP_IDLE_WAIT_MS ((int64_t)1000)
+/* Upper bound on batch array sizes (stack-allocated); the actual runtime limit
+ * c->max_batch is derived from the negotiated CIP payload after ForwardOpen
+ * and is always clamped to this value. */
+#define ENIP_BATCH_ARRAY_SIZE \
+    ((size_t)((ENIP_FO_CIP_SIZE - CIP_CONNECTED_ITEM_OVERHEAD - ENIP_MS_REQ_FIXED) / ENIP_MS_MIN_SUB_REQ_SIZE))
+
+/* originator vendor id / serial number used in ForwardOpen (arbitrary but fixed). */
+#define ENIP_VENDOR_ID ((uint16_t)0xF33D)
+#define ENIP_ORIGINATOR_SERIAL ((uint32_t)0x21504345)
+
+/* §4/§5: connection IO thread states. */
+enum {
+    CONN_CONNECT = 0,
+    CONN_REGISTER,
+    CONN_OPEN,
+    CONN_READY,
+    CONN_SENDING,
+    CONN_WAITING,
+    CONN_CLOSING
+};
+
+/* §4 + §14.3 connection structure. */
+struct enip_connection_t {
+    enip_connection_t *next; /* registry singly-linked list, under s_registry_mutex */
+
+    char *gateway;
+    char *path;
+    int tcp_port;
+    bool is_connected_path;
+
+    sock_p sock;
+    thread_p thread;
+    bool connect_started;
+
+    uint32_t session_handle;
+    uint32_t cip_conn_id;
+    uint16_t conn_seq;
+
+    uint32_t our_conn_id;
+    uint16_t conn_serial;
+
+    mutex_p sched_mutex;
+    enip_tag_p sched_head, sched_tail;
+    enip_tag_p in_flight;
+
+    enip_tag_p batch_head;
+    uint16_t batch_count;
+    uint16_t batch_complete_idx;
+
+    Arena arena;
+
+    size_t max_cip_packet_size;
+    size_t rx_cap;
+    uint16_t max_batch;
+
+    int64_t reconnect_at_ms;
+
+    uint8_t state;
+    uint8_t resume_state;
+
+    uint8_t *tx_buf;
+    size_t tx_len, tx_off;
+
+    uint8_t *rx_buf;
+    size_t rx_len;
+
+    atomic_bool terminate;
+};
+
+/* Connection registry (§13.7). Colocated here -- enip_session_create() does
+ * the find-or-create and link; conn_destructor() unlinks. */
+static enip_connection_t *s_conns = NULL;
+static mutex_p s_registry_mutex = NULL;
+
+static void sched_insert_sorted(enip_connection_t *c, enip_tag_p t);
+static void sched_unlink(enip_connection_t *c, enip_tag_p t);
+static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms);
+static int32_t build_request(enip_connection_t *c);
+static Bytes build_single_cip_request(Arena *a, enip_connection_t *c, enip_tag_p t);
+static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t);
+static int32_t build_batch_request(enip_connection_t *c);
+static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status);
+static void complete_batch(enip_connection_t *c, int8_t status);
+static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static void reset_connection(enip_connection_t *c);
+static void conn_destructor(void *arg);
+static THREAD_FUNC(io_thread_func);
+
+static int32_t step_connect(enip_connection_t *c);
+static int32_t step_register(enip_connection_t *c);
+static int32_t step_open(enip_connection_t *c);
+static int32_t step_sending(enip_connection_t *c);
+static int32_t step_waiting(enip_connection_t *c);
+
+static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr);
+static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data);
+
+static Bytes build_forward_open(enip_connection_t *c);
+static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes);
+
+/* ============================================================================
+ * Registry / lifecycle
+ * ============================================================================ */
+
+static bool conn_key_matches(enip_connection_t *c, const char *gateway, const char *path, int port) {
+    return c->tcp_port == port && str_cmp(c->gateway, gateway) == 0 && str_cmp(c->path, path) == 0;
+}
+
+static enip_connection_t *create_connection(const char *gateway, const char *path, int port) {
+    enip_connection_t *c = rc_alloc((int)sizeof(enip_connection_t), conn_destructor);
+    if(!c) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate connection!");
+        return NULL;
+    }
+
+    atomic_init_bool(&c->terminate, false);
+
+    c->gateway = str_dup(gateway);
+    c->path = str_dup(path);
+    c->tcp_port = port;
+    c->is_connected_path = true;
+
+    if(!c->gateway || !c->path) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to copy gateway/path strings!");
+        rc_dec(c);
+        return NULL;
+    }
+
+    c->our_conn_id = (uint32_t)random_u64(0xFFFFFFFFu);
+    if(c->our_conn_id == 0) { c->our_conn_id = 1; }
+
+    c->conn_serial = (uint16_t)(random_u64(0xFFFFu) + 1u);
+
+    if(arena_init(&c->arena, ENIP_ARENA_SIZE) != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate connection arena!");
+        rc_dec(c);
+        return NULL;
+    }
+
+    if(mutex_create(&c->sched_mutex) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create scheduler mutex!");
+        rc_dec(c);
+        return NULL;
+    }
+
+    c->state = CONN_CONNECT;
+    c->resume_state = CONN_CONNECT;
+    c->rx_cap = ENIP_BOOTSTRAP_PACKET;
+    c->max_cip_packet_size = ENIP_FO_CIP_SIZE;
+
+    if(thread_create(&c->thread, io_thread_func, 32768, (void *)c) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create IO thread!");
+        rc_dec(c);
+        return NULL;
+    }
+
+    c->next = s_conns;
+    s_conns = c;
+
+    return c;
+}
+
+enip_connection_t *enip_session_create(attr attribs) {
+    const char *gateway = attr_get_str(attribs, "gateway", NULL);
+    const char *path = attr_get_str(attribs, "path", NULL);
+    int port = attr_get_int(attribs, "port", ENIP_DEFAULT_PORT);
+
+    if(!gateway || str_length(gateway) == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"gateway\" attribute.");
+        return NULL;
+    }
+
+    if(!path || str_length(path) == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"path\" attribute.");
+        return NULL;
+    }
+
+    enip_connection_t *result = NULL;
+
+    critical_block(s_registry_mutex) {
+        enip_connection_t *c = s_conns;
+
+        while(c != NULL) {
+            if(conn_key_matches(c, gateway, path, port)) {
+                result = rc_inc(c);
+                break;
+            }
+            c = c->next;
+        }
+
+        if(!result) {
+            result = create_connection(gateway, path, port);
+        }
+    }
+
+    return result;
+}
+
+int32_t enip_session_module_init(void) {
+    if(mutex_create(&s_registry_mutex) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create registry mutex!");
+        return PLCTAG_ERR_CREATE;
+    }
+
+    s_conns = NULL;
+
+    return PLCTAG_STATUS_OK;
+}
+
+void enip_session_module_teardown(void) {
+    /* Connections are referenced by tags; by teardown time all tags should
+     * already have been destroyed, but walk defensively and drop our
+     * (nonexistent) extra refs is not needed -- just ensure the mutex is
+     * freed once the list is empty. */
+    if(s_registry_mutex) {
+        mutex_destroy(&s_registry_mutex);
+        s_registry_mutex = NULL;
+    }
+
+    s_conns = NULL;
+}
+
+static void conn_destructor(void *arg) {
+    enip_connection_t *c = (enip_connection_t *)arg;
+
+    if(!c) { return; }
+
+    atomic_set_bool(&c->terminate, true);
+
+    if(c->sock) { socket_wake(c->sock); }
+
+    if(c->thread) {
+        thread_join(c->thread);
+        thread_destroy(&c->thread);
+    }
+
+    if(c->sock) { socket_destroy(&c->sock); }
+
+    if(c->sched_mutex) { mutex_destroy(&c->sched_mutex); }
+
+    arena_free(&c->arena);
+
+    if(s_registry_mutex) {
+        critical_block(s_registry_mutex) {
+            enip_connection_t **walker = &s_conns;
+            while(*walker && *walker != c) { walker = &(*walker)->next; }
+            if(*walker) { *walker = c->next; }
+        }
+    }
+
+    if(c->gateway) { mem_free(c->gateway); }
+    if(c->path) { mem_free(c->path); }
+}
+
+/* ============================================================================
+ * Scheduler list (§3, §13.2-13.6)
+ * ============================================================================ */
+
+static void sched_insert_sorted(enip_connection_t *c, enip_tag_p t) {
+    enip_tag_p cur = c->sched_head;
+
+    while(cur != NULL && cur->op_time <= t->op_time) { cur = cur->sched_next; }
+
+    if(cur == NULL) {
+        t->sched_prev = c->sched_tail;
+        t->sched_next = NULL;
+
+        if(c->sched_tail) { c->sched_tail->sched_next = t; }
+        else { c->sched_head = t; }
+
+        c->sched_tail = t;
+    } else {
+        t->sched_next = cur;
+        t->sched_prev = cur->sched_prev;
+
+        if(cur->sched_prev) { cur->sched_prev->sched_next = t; }
+        else { c->sched_head = t; }
+
+        cur->sched_prev = t;
+    }
+
+    t->scheduled = 1;
+}
+
+static void sched_unlink(enip_connection_t *c, enip_tag_p t) {
+    if(t->sched_prev) { t->sched_prev->sched_next = t->sched_next; }
+    else { c->sched_head = t->sched_next; }
+
+    if(t->sched_next) { t->sched_next->sched_prev = t->sched_prev; }
+    else { c->sched_tail = t->sched_prev; }
+
+    t->sched_prev = NULL;
+    t->sched_next = NULL;
+    t->scheduled = 0;
+}
+
+static bool is_batch_eligible(enip_tag_p t) {
+    if(atomic_get_bool(&t->abort_requested)) { return false; }
+    if(!t->ready) { return false; }
+    if(t->op == ENIP_OP_READ) { return t->elem_count <= t->window_elems; }
+    if(t->op == ENIP_OP_WRITE) { return t->elem_count <= t->write_window_elems; }
+    return false;
+}
+
+static size_t batch_req_size(enip_tag_p t) {
+    size_t path_len = (size_t)t->path.len;
+    if(t->elem_count > 1) { path_len += 2; } /* index segment for [0] */
+    if(t->op == ENIP_OP_READ) { return (size_t)4 + path_len; }
+    /* WRITE: service(1)+path_size(1)+elem_count(2) + path + type_header + data */
+    return (size_t)4 + path_len + (size_t)t->type_header_len + (size_t)t->elem_size * (size_t)t->elem_count;
+}
+
+static size_t batch_resp_size(enip_tag_p t) {
+    if(t->op == ENIP_OP_WRITE) { return (size_t)CIP_READ_REPLY_OVERHEAD; }
+    /* READ: reply hdr(4) + type_header + element data */
+    return (size_t)CIP_READ_REPLY_OVERHEAD + (size_t)t->type_header_len + (size_t)t->elem_size * (size_t)t->elem_count;
+}
+
+static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms) {
+    *wait_ms = ENIP_IDLE_WAIT_MS;
+
+    critical_block(c->sched_mutex) {
+        if(c->in_flight != NULL || c->batch_head != NULL) { break; }
+
+        if(c->sched_head == NULL || c->sched_head->op_time > now) {
+            if(c->sched_head != NULL) {
+                int64_t remaining = c->sched_head->op_time - now;
+                *wait_ms = (remaining < 0) ? 0 : remaining;
+            }
+            break;
+        }
+
+        enip_tag_p head = c->sched_head;
+
+        if(!is_batch_eligible(head)) {
+            sched_unlink(c, head);
+            atomic_set_bool(&head->abort_requested, false);
+            c->in_flight = rc_inc(head);
+            break;
+        }
+
+        size_t req_budget = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - ENIP_MS_REQ_FIXED;
+        size_t resp_budget = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - ENIP_MS_RESP_FIXED;
+
+        enip_tag_p batch_tail = NULL;
+        uint16_t count = 0;
+        enip_tag_p cur = c->sched_head;
+
+        while(cur != NULL && count < c->max_batch && cur->op_time <= now && is_batch_eligible(cur)) {
+            size_t rs = (size_t)2 + batch_req_size(cur);
+            size_t ps = (size_t)2 + batch_resp_size(cur);
+
+            if(rs > req_budget || ps > resp_budget) { break; }
+
+            req_budget -= rs;
+            resp_budget -= ps;
+
+            enip_tag_p next_sched = cur->sched_next;
+            sched_unlink(c, cur);
+            atomic_set_bool(&cur->abort_requested, false);
+            rc_inc(cur);
+            cur->batch_next = NULL;
+
+            if(batch_tail == NULL) { c->batch_head = cur; }
+            else { batch_tail->batch_next = cur; }
+            batch_tail = cur;
+            count++;
+            cur = next_sched;
+        }
+
+        if(count == 0) {
+            /* First eligible tag exceeds batch budget; fall back to single in-flight. */
+            sched_unlink(c, head);
+            atomic_set_bool(&head->abort_requested, false);
+            c->in_flight = rc_inc(head);
+        } else if(count == 1) {
+            /* Not worth a Multi-Service wrapper for one tag; use in-flight path. */
+            c->in_flight = c->batch_head;
+            c->batch_head = NULL;
+            c->batch_count = 0;
+        } else {
+            c->batch_count = count;
+            c->batch_complete_idx = 0;
+        }
+    }
+}
+
+int32_t enip_session_schedule(enip_connection_t *c, enip_tag_p t, uint8_t op, int64_t op_time) {
+    critical_block(c->sched_mutex) {
+        t->op = op;
+        t->op_time = op_time;
+
+        if(!t->scheduled) { sched_insert_sorted(c, t); }
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, t->tag_id,
+           "schedule op=%d op_time=%" PRId64 " scheduled=%d sched_head=%p in_flight=%p", op, op_time,
+           (int)t->scheduled, (void *)c->sched_head, (void *)c->in_flight);
+
+    if(c->sock) { socket_wake(c->sock); }
+
+    return PLCTAG_STATUS_PENDING;
+}
+
+int32_t enip_session_unschedule(enip_connection_t *c, enip_tag_p t) {
+    critical_block(c->sched_mutex) {
+        if(t->scheduled && t != c->in_flight) {
+            sched_unlink(c, t);
+            t->op = ENIP_OP_IDLE;
+        } else if(t == c->in_flight) {
+            atomic_set_bool(&t->abort_requested, true);
+        }
+    }
+
+    if(c->sock) { socket_wake(c->sock); }
+
+    return PLCTAG_STATUS_OK;
+}
+
+void enip_session_tag_detach(enip_connection_t *c, enip_tag_p t) {
+    critical_block(c->sched_mutex) {
+        if(t->scheduled) { sched_unlink(c, t); }
+    }
+}
+
+size_t enip_session_max_cip(enip_connection_t *c) { return c->max_cip_packet_size; }
+
+/* ============================================================================
+ * IO thread state machine (§5)
+ * ============================================================================ */
+
+static int32_t step_connect(enip_connection_t *c) {
+    int rc;
+
+    if(time_ms() < c->reconnect_at_ms) { return PLCTAG_STATUS_PENDING; }
+
+    if(!c->sock) {
+        rc = socket_create(&c->sock);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "socket_create failed: %s.", plc_tag_decode_error(rc));
+            c->reconnect_at_ms = time_ms() + ENIP_RECONNECT_DELAY_MS;
+            return rc;
+        }
+
+        c->connect_started = false;
+    }
+
+    if(!c->connect_started) {
+        rc = socket_connect_tcp_start(c->sock, c->gateway, c->tcp_port);
+
+        if(rc == PLCTAG_STATUS_OK) {
+            c->state = CONN_REGISTER;
+            return PLCTAG_STATUS_OK;
+        } else if(rc == PLCTAG_STATUS_PENDING) {
+            c->connect_started = true;
+            return PLCTAG_STATUS_PENDING;
+        } else {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "socket_connect_tcp_start failed: %s.", plc_tag_decode_error(rc));
+            socket_close(c->sock);
+            c->reconnect_at_ms = time_ms() + ENIP_RECONNECT_DELAY_MS;
+            return rc;
+        }
+    }
+
+    rc = socket_connect_tcp_check(c->sock, 0);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        c->connect_started = false;
+        c->state = CONN_REGISTER;
+    } else if(rc == PLCTAG_ERR_TIMEOUT) {
+        return PLCTAG_STATUS_PENDING;
+    } else {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "socket_connect_tcp_check failed: %s.", plc_tag_decode_error(rc));
+        socket_close(c->sock);
+        c->connect_started = false;
+        c->reconnect_at_ms = time_ms() + ENIP_RECONNECT_DELAY_MS;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t step_register(enip_connection_t *c) {
+    arena_reset(&c->arena);
+
+    Bytes frame = enip_eip_register_session(&c->arena);
+    if(bytes_is_null(frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build RegisterSession request!");
+        reset_connection(c);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    c->tx_buf = frame.data;
+    c->tx_len = frame.len;
+    c->tx_off = 0;
+    c->resume_state = CONN_REGISTER;
+    c->state = CONN_SENDING;
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t step_open(enip_connection_t *c) {
+    arena_reset(&c->arena);
+
+    Bytes frame = build_forward_open(c);
+    if(bytes_is_null(frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build ForwardOpen request!");
+        reset_connection(c);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    c->tx_buf = frame.data;
+    c->tx_len = frame.len;
+    c->tx_off = 0;
+    c->resume_state = CONN_OPEN;
+    c->state = CONN_SENDING;
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t step_sending(enip_connection_t *c) {
+    int rc = socket_write(c->sock, c->tx_buf + c->tx_off, (int)(c->tx_len - c->tx_off), 0);
+
+    if(rc == PLCTAG_ERR_TIMEOUT) { return PLCTAG_STATUS_PENDING; }
+
+    if(rc < 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "socket_write failed: %s.", plc_tag_decode_error(rc));
+        reset_connection(c);
+        return rc;
+    }
+
+    c->tx_off += (size_t)rc;
+
+    if(c->tx_off < c->tx_len) { return PLCTAG_STATUS_PENDING; }
+
+    arena_reset(&c->arena);
+
+    c->rx_buf = arena_alloc(&c->arena, c->rx_cap);
+    if(!c->rx_buf) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate rx buffer!");
+        reset_connection(c);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    c->rx_len = 0;
+    c->tx_buf = NULL;
+    c->tx_len = c->tx_off = 0;
+    c->state = CONN_WAITING;
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t step_waiting(enip_connection_t *c) {
+    size_t needed = 0;
+
+    if(c->rx_len < ENIP_EIP_HEADER_SIZE) {
+        needed = ENIP_EIP_HEADER_SIZE - c->rx_len;
+    } else {
+        uint16_t plen = (uint16_t)((uint16_t)c->rx_buf[2] | (uint16_t)((uint16_t)c->rx_buf[3] << 8));
+        size_t total = ENIP_EIP_HEADER_SIZE + plen;
+
+        if(total > c->rx_cap) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Reply packet (%zu bytes) exceeds rx buffer (%zu bytes)!", total,
+                   c->rx_cap);
+            reset_connection(c);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        if(c->rx_len < total) { needed = total - c->rx_len; }
+    }
+
+    if(needed > 0) {
+        int rc = socket_read(c->sock, c->rx_buf + c->rx_len, (int)needed, 0);
+
+        if(rc == PLCTAG_ERR_TIMEOUT) { return PLCTAG_STATUS_PENDING; }
+
+        if(rc < 0) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "socket_read failed: %s.", plc_tag_decode_error(rc));
+            reset_connection(c);
+            return rc;
+        }
+
+        c->rx_len += (size_t)rc;
+
+        if(c->rx_len < ENIP_EIP_HEADER_SIZE) { return PLCTAG_STATUS_PENDING; }
+    }
+
+    uint16_t plen = (uint16_t)((uint16_t)c->rx_buf[2] | (uint16_t)((uint16_t)c->rx_buf[3] << 8));
+    size_t total = ENIP_EIP_HEADER_SIZE + plen;
+
+    if(c->rx_len < total) { return PLCTAG_STATUS_PENDING; }
+
+    enip_eip_hdr_t hdr;
+    Bytes payload;
+
+    if(!enip_eip_decode(bytes_from_buf(c->rx_buf, total), &hdr, &payload)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to decode EIP reply frame!");
+        reset_connection(c);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    switch(c->resume_state) {
+        case CONN_REGISTER: on_register_reply(c, &hdr); break;
+        case CONN_OPEN: on_open_reply(c, &hdr, payload); break;
+        case CONN_READY: handle_tag_reply(c, &hdr, payload); break;
+        default:
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unexpected resume_state %d in CONN_WAITING!", c->resume_state);
+            reset_connection(c);
+            break;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr) {
+    if(hdr->status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "RegisterSession failed, status 0x%08" PRIx32 ".", hdr->status);
+        reset_connection(c);
+        return;
+    }
+
+    c->session_handle = hdr->session_handle;
+    c->state = CONN_OPEN;
+}
+
+static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+    if(hdr->status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardOpen SendRRData failed, status 0x%08" PRIx32 ".", hdr->status);
+        reset_connection(c);
+        return;
+    }
+
+    uint16_t seq = 0;
+    Bytes cip;
+
+    if(!enip_cpf_unwrap(payload, false, &seq, &cip)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to unwrap ForwardOpen CPF reply!");
+        reset_connection(c);
+        return;
+    }
+
+    if(parse_forward_open_reply(c, cip) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardOpen rejected by target!");
+        reset_connection(c);
+        return;
+    }
+
+    c->state = CONN_READY;
+}
+
+static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+    if(c->batch_count >= 2) {
+        handle_batch_reply(c, hdr, payload);
+        return;
+    }
+
+    enip_tag_p t = c->in_flight;
+
+    if(!t) {
+        c->state = CONN_READY;
+        return;
+    }
+
+    if(mutex_try_lock(t->api_mutex) != PLCTAG_STATUS_OK) {
+        /* Stay in CONN_WAITING with the full reply already buffered; retry
+         * the lock next cycle without re-reading the socket. */
+        return;
+    }
+
+    int8_t status;
+    bool more_windows = false;
+
+    if(hdr->status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "SendUnitData failed, status 0x%08" PRIx32 ".", hdr->status);
+        status = (int8_t)PLCTAG_ERR_BAD_REPLY;
+    } else {
+        uint16_t seq = 0;
+        Bytes cip;
+
+        if(!enip_cpf_unwrap(payload, true, &seq, &cip)) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to unwrap connected CPF reply!");
+            status = (int8_t)PLCTAG_ERR_BAD_REPLY;
+        } else {
+            cip_reply_t reply;
+
+            if(!enip_cip_parse_reply(cip, &reply)) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse CIP reply!");
+                status = (int8_t)PLCTAG_ERR_BAD_REPLY;
+            } else if(reply.status != 0) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status,
+                       reply.ext_status);
+                status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
+            } else {
+                status = (int8_t)apply_tag_reply(c, t, reply.data);
+
+                if(status == (int8_t)PLCTAG_STATUS_OK
+                   && (t->op == ENIP_OP_OPEN_BULK || t->op == ENIP_OP_READ || t->op == ENIP_OP_WRITE)
+                   && t->read_off < t->elem_count) {
+                    more_windows = true;
+                }
+            }
+        }
+    }
+
+    /* §11.2 abort check at the CONN_WAITING boundary, before building the
+     * next OPEN_BULK window. */
+    if(more_windows && !atomic_get_bool(&t->abort_requested)) {
+        build_tag_request(c, t);
+
+        mutex_unlock(t->api_mutex);
+
+        return;
+    }
+
+    complete_tag(c, t, status);
+
+    mutex_unlock(t->api_mutex);
+
+    c->state = CONN_READY;
+}
+
+/* §11.5: number of elements in the current/next ENIP_OP_WRITE window, given
+ * t->read_off (the write cursor) and t->write_window_elems (computed once at
+ * OPEN_PROBE). Shared by build_tag_request (to size the outgoing request) and
+ * apply_tag_reply (to advance the cursor by the same amount on success). */
+static uint32_t write_window_count(enip_tag_p t) {
+    uint32_t n = t->elem_count - t->read_off;
+    if(n > t->write_window_elems) { n = t->write_window_elems; }
+    return n;
+}
+
+static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
+    if(t->op == ENIP_OP_OPEN_PROBE) {
+        uint8_t header_len = 0;
+        uint32_t elem_size_hint = 0;
+        tag_byte_order_t order;
+
+        if(!enip_type_decode(data, &header_len, &elem_size_hint, &order)) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to decode reply type header!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        (void)elem_size_hint;
+
+        if(data.len < (size_t)header_len) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        uint32_t elem_size = (uint32_t)(data.len - (size_t)header_len);
+
+        size_t per_elem_overhead = CIP_CONNECTED_ITEM_OVERHEAD + CIP_READ_REPLY_OVERHEAD + (size_t)header_len;
+        if(per_elem_overhead + (size_t)elem_size > c->max_cip_packet_size) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Element size %" PRIu32 " is too large for the connection!",
+                   elem_size);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        if(header_len > sizeof(t->type_header)) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Type header (%u bytes) is too large!", (unsigned int)header_len);
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        memcpy(t->type_header, data.data, header_len);
+        t->type_header_len = header_len;
+        t->elem_size = elem_size;
+
+        size_t total_size = (size_t)elem_size * (size_t)t->elem_count;
+
+        uint8_t *buf = mem_alloc((int)total_size);
+        if(!buf) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to allocate tag data buffer!");
+            return PLCTAG_ERR_NO_MEM;
+        }
+
+        if(t->data) { mem_free(t->data); }
+
+        t->data = buf;
+        t->size = (int32_t)total_size;
+
+        memcpy(t->data, data.data + header_len, elem_size);
+
+        /* §11.3: window = clamp((cap - overhead - header_len) / elem_size, 1, elem_count) */
+        uint32_t window = (uint32_t)((c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - CIP_READ_REPLY_OVERHEAD
+                                       - (size_t)header_len)
+                                      / elem_size);
+        if(window < 1) { window = 1; }
+        if(window > t->elem_count) { window = t->elem_count; }
+        t->window_elems = window;
+
+        /* §11.5: write window is symmetric, but a write request also carries
+         * the path inline (a read reply does not), so subtract the path
+         * length too. For elem_count > 1, each window appends an array-index
+         * segment to t->path; size that segment for the largest index
+         * (elem_count - 1) so the window never shrinks mid-transfer. */
+        size_t write_path_len = (size_t)t->path.len;
+        if(t->elem_count > 1) {
+            uint32_t max_index = t->elem_count - 1;
+            write_path_len += (max_index <= 0xFFu) ? 2 : (max_index <= 0xFFFFu) ? 4 : 6;
+        }
+
+        size_t write_overhead = CIP_CONNECTED_ITEM_OVERHEAD + CIP_WRITE_REQUEST_OVERHEAD + write_path_len + (size_t)header_len;
+
+        uint32_t write_window = 1;
+        if(write_overhead + (size_t)elem_size <= c->max_cip_packet_size) {
+            write_window = (uint32_t)((c->max_cip_packet_size - write_overhead) / elem_size);
+            if(write_window < 1) { write_window = 1; }
+        }
+        if(write_window > t->elem_count) { write_window = t->elem_count; }
+        t->write_window_elems = write_window;
+
+        t->read_off = 1;
+
+        if(t->elem_count <= 1) {
+            t->ready = 1;
+        } else {
+            t->op = ENIP_OP_OPEN_BULK;
+        }
+
+        return PLCTAG_STATUS_OK;
+    } else if(t->op == ENIP_OP_OPEN_BULK) {
+        if(data.len < (size_t)t->type_header_len) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        size_t data_len = data.len - (size_t)t->type_header_len;
+        size_t returned = data_len / (size_t)t->elem_size;
+
+        if(returned == 0) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "OPEN_BULK reply contained no complete elements!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        size_t remaining = (size_t)(t->elem_count - t->read_off);
+        if(returned > remaining) { returned = remaining; }
+
+        size_t copy_bytes = returned * (size_t)t->elem_size;
+        size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
+
+        memcpy(t->data + dest_off, data.data + t->type_header_len, copy_bytes);
+
+        t->read_off += (uint32_t)returned;
+
+        if(t->read_off >= t->elem_count) { t->ready = 1; }
+
+        return PLCTAG_STATUS_OK;
+    } else if(t->op == ENIP_OP_READ) {
+        if(data.len < (size_t)t->type_header_len) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        if(t->elem_count <= 1) {
+            size_t copy_len = data.len - (size_t)t->type_header_len;
+            if(copy_len > (size_t)t->size) { copy_len = (size_t)t->size; }
+
+            memcpy(t->data, data.data + t->type_header_len, copy_len);
+
+            return PLCTAG_STATUS_OK;
+        }
+
+        /* §11.3: windowed read, same accounting as OPEN_BULK. */
+        size_t data_len = data.len - (size_t)t->type_header_len;
+        size_t returned = data_len / (size_t)t->elem_size;
+
+        if(returned == 0) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Read reply contained no complete elements!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        size_t remaining = (size_t)(t->elem_count - t->read_off);
+        if(returned > remaining) { returned = remaining; }
+
+        size_t copy_bytes = returned * (size_t)t->elem_size;
+        size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
+
+        memcpy(t->data + dest_off, data.data + t->type_header_len, copy_bytes);
+
+        t->read_off += (uint32_t)returned;
+
+        return PLCTAG_STATUS_OK;
+    } else if(t->op == ENIP_OP_WRITE) {
+        /* CIP write replies carry no data; advance the cursor by however many
+         * elements the just-sent request covered (§11.5). */
+        if(t->elem_count > 1) { t->read_off += write_window_count(t); }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unexpected op %d while processing reply!", t->op);
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+/* Build one CIP sub-request for t's current op; does NOT reset the arena.
+ * Caller holds t->api_mutex. */
+static Bytes build_single_cip_request(Arena *a, enip_connection_t *c, enip_tag_p t) {
+    (void)c;
+    switch(t->op) {
+        case ENIP_OP_READ:
+            if(t->elem_count <= 1) {
+                return enip_cip_read(a, t->path, (uint16_t)t->elem_count);
+            } else {
+                uint32_t n = t->elem_count - t->read_off;
+                if(n > t->window_elems) { n = t->window_elems; }
+                Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
+                return enip_cip_read(a, path, (uint16_t)n);
+            }
+
+        case ENIP_OP_WRITE: {
+            Bytes type_header = bytes_from_buf(t->type_header, t->type_header_len);
+            if(t->elem_count <= 1) {
+                Bytes data = bytes_from_buf(t->data, (size_t)t->size);
+                return enip_cip_write(a, t->path, type_header, (uint16_t)t->elem_count, data);
+            } else {
+                uint32_t n = write_window_count(t);
+                Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
+                Bytes data = bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, (size_t)n * (size_t)t->elem_size);
+                return enip_cip_write(a, path, type_header, (uint16_t)n, data);
+            }
+        }
+
+        default: return bytes_null();
+    }
+}
+
+/* Build the tx frame for c->in_flight's current op and transition to
+ * CONN_SENDING (or, on a build error, complete_tag + CONN_READY).
+ * Caller holds t->api_mutex. */
+static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
+    arena_reset(&c->arena);
+
+    Bytes req = bytes_null();
+
+    switch(t->op) {
+        case ENIP_OP_OPEN_PROBE: req = enip_cip_read(&c->arena, t->path, 1); break;
+
+        case ENIP_OP_OPEN_BULK: {
+            uint32_t n = t->elem_count - t->read_off;
+            if(n > t->window_elems) { n = t->window_elems; }
+            Bytes path = enip_cip_encode_path_at(&c->arena, t->path, t->read_off);
+            req = enip_cip_read(&c->arena, path, (uint16_t)n);
+            break;
+        }
+
+        case ENIP_OP_READ:
+        case ENIP_OP_WRITE:
+            req = build_single_cip_request(&c->arena, c, t);
+            break;
+
+        default: break;
+    }
+
+    if(bytes_is_null(req)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to build request for op %d!", t->op);
+        complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
+        c->state = CONN_READY;
+        return PLCTAG_STATUS_OK;
+    }
+
+    Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, req);
+    Bytes frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
+
+    if(bytes_is_null(frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to wrap request for op %d!", t->op);
+        complete_tag(c, t, (int8_t)PLCTAG_ERR_NO_MEM);
+        c->state = CONN_READY;
+        return PLCTAG_STATUS_OK;
+    }
+
+    c->tx_buf = frame.data;
+    c->tx_len = frame.len;
+    c->tx_off = 0;
+    c->resume_state = CONN_READY;
+    c->state = CONN_SENDING;
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t build_request(enip_connection_t *c) {
+    if(c->batch_count >= 2) { return build_batch_request(c); }
+
+    enip_tag_p t = c->in_flight;
+    if(mutex_try_lock(t->api_mutex) != PLCTAG_STATUS_OK) { return PLCTAG_STATUS_PENDING; }
+    int32_t rc = build_tag_request(c, t);
+    mutex_unlock(t->api_mutex);
+    return rc;
+}
+
+static int32_t build_batch_request(enip_connection_t *c) {
+    arena_reset(&c->arena);
+
+    /* Try to lock all batch tags atomically; back off if any lock fails. */
+    enip_tag_p t = c->batch_head;
+    uint16_t locked = 0;
+    while(t != NULL && locked < c->batch_count) {
+        if(mutex_try_lock(t->api_mutex) != PLCTAG_STATUS_OK) {
+            enip_tag_p u = c->batch_head;
+            for(uint16_t i = 0; i < locked; i++) { mutex_unlock(u->api_mutex); u = u->batch_next; }
+            return PLCTAG_STATUS_PENDING;
+        }
+        locked++;
+        t = t->batch_next;
+    }
+
+    Bytes *sub_reqs = (Bytes *)arena_alloc(&c->arena, (size_t)c->batch_count * sizeof(Bytes));
+    if(!sub_reqs) {
+        complete_batch(c, (int8_t)PLCTAG_ERR_NO_MEM);
+        c->state = CONN_READY;
+        return PLCTAG_STATUS_OK;
+    }
+    bool build_ok = true;
+    t = c->batch_head;
+    for(uint16_t i = 0; i < c->batch_count; i++) {
+        sub_reqs[i] = build_single_cip_request(&c->arena, c, t);
+        if(bytes_is_null(sub_reqs[i])) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "build_batch_request: failed at sub-request %u!", (unsigned)i);
+            build_ok = false;
+            break;
+        }
+        t = t->batch_next;
+    }
+
+    Bytes frame = bytes_null();
+    if(build_ok) {
+        Bytes ms = enip_cip_multi_service(&c->arena, sub_reqs, c->batch_count);
+        if(!bytes_is_null(ms)) {
+            Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
+            frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
+        }
+    }
+
+    t = c->batch_head;
+    for(uint16_t i = 0; i < c->batch_count; i++) { mutex_unlock(t->api_mutex); t = t->batch_next; }
+
+    if(bytes_is_null(frame)) {
+        complete_batch(c, (int8_t)PLCTAG_ERR_NO_MEM);
+        c->state = CONN_READY;
+        return PLCTAG_STATUS_OK;
+    }
+
+    c->tx_buf = frame.data;
+    c->tx_len = frame.len;
+    c->tx_off = 0;
+    c->resume_state = CONN_READY;
+    c->state = CONN_SENDING;
+    c->batch_complete_idx = 0;
+
+    return PLCTAG_STATUS_OK;
+}
+
+static void complete_batch(enip_connection_t *c, int8_t status) {
+    enip_tag_p t = c->batch_head;
+    while(t != NULL) {
+        enip_tag_p next = t->batch_next;
+        t->batch_next = NULL;
+        if(mutex_try_lock(t->api_mutex) == PLCTAG_STATUS_OK) {
+            complete_tag(c, t, status);
+            mutex_unlock(t->api_mutex);
+        } else {
+            critical_block(c->sched_mutex) { rc_dec(t); }
+        }
+        t = next;
+    }
+    c->batch_head = NULL;
+    c->batch_count = 0;
+    c->batch_complete_idx = 0;
+}
+
+static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+    if(hdr->status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: SendUnitData status 0x%08" PRIx32 ".", hdr->status);
+        complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
+        c->state = CONN_READY;
+        return;
+    }
+
+    uint16_t seq = 0;
+    Bytes cip;
+    if(!enip_cpf_unwrap(payload, true, &seq, &cip)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: unable to unwrap CPF!");
+        complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
+        c->state = CONN_READY;
+        return;
+    }
+
+    cip_reply_t outer;
+    if(!enip_cip_parse_reply(cip, &outer)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: unable to parse outer CIP reply!");
+        complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
+        c->state = CONN_READY;
+        return;
+    }
+
+    if(outer.status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: outer CIP error 0x%02X ext 0x%04X.", outer.status,
+               outer.ext_status);
+        complete_batch(c, (int8_t)PLCTAG_ERR_REMOTE_ERR);
+        c->state = CONN_READY;
+        return;
+    }
+
+    Bytes *sub_replies = (Bytes *)arena_alloc(&c->arena, (size_t)c->batch_count * sizeof(Bytes));
+    if(!sub_replies) {
+        complete_batch(c, (int8_t)PLCTAG_ERR_NO_MEM);
+        c->state = CONN_READY;
+        return;
+    }
+    uint16_t count = 0;
+    if(!enip_cip_parse_multi_service_reply(outer.data, &count, sub_replies, c->batch_count)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: unable to parse MS reply!");
+        complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
+        c->state = CONN_READY;
+        return;
+    }
+
+    if(count != c->batch_count) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: MS reply count %u != batch count %u!", (unsigned)count,
+               (unsigned)c->batch_count);
+        complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
+        c->state = CONN_READY;
+        return;
+    }
+
+    /* Complete each tag from batch_complete_idx; batch_head tracks the next
+     * unprocessed tag.  On mutex_try_lock failure, save the index and return
+     * without changing state so CONN_WAITING retries with the same rx buffer. */
+    uint16_t i = c->batch_complete_idx;
+    enip_tag_p t = c->batch_head;
+
+    while(i < c->batch_count) {
+        if(mutex_try_lock(t->api_mutex) != PLCTAG_STATUS_OK) {
+            c->batch_complete_idx = i;
+            return;
+        }
+
+        cip_reply_t sub;
+        int8_t status;
+        if(!enip_cip_parse_reply(sub_replies[i], &sub)) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "handle_batch_reply: bad sub-reply %u!", (unsigned)i);
+            status = (int8_t)PLCTAG_ERR_BAD_REPLY;
+        } else if(sub.status != 0) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "handle_batch_reply: sub-reply %u CIP error 0x%02X ext 0x%04X.",
+                   (unsigned)i, sub.status, sub.ext_status);
+            status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
+        } else {
+            status = (int8_t)apply_tag_reply(c, t, sub.data);
+        }
+
+        /* Advance batch_head before complete_tag (which calls rc_dec). */
+        enip_tag_p next = t->batch_next;
+        t->batch_next = NULL;
+        c->batch_head = next;
+
+        complete_tag(c, t, status);
+        mutex_unlock(t->api_mutex);
+
+        i++;
+        c->batch_complete_idx = i;
+        t = next;
+    }
+
+    c->batch_count = 0;
+    c->batch_complete_idx = 0;
+    c->state = CONN_READY;
+}
+
+static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status) {
+    /* caller holds t->api_mutex */
+    bool aborted = false;
+
+    critical_block(c->sched_mutex) {
+        aborted = atomic_get_bool(&t->abort_requested);
+        atomic_set_bool(&t->abort_requested, false);
+
+        c->in_flight = rc_dec(t);
+    }
+
+    if(aborted) {
+        t->op = ENIP_OP_IDLE;
+        t->status = (int8_t)PLCTAG_ERR_ABORT;
+        tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_ABORTED, (int8_t)PLCTAG_ERR_ABORT);
+    } else {
+        t->status = status;
+
+        if(t->op == ENIP_OP_OPEN_PROBE || t->op == ENIP_OP_OPEN_BULK) {
+            tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_CREATED, status);
+        } else if(t->op == ENIP_OP_READ) {
+            t->read_complete = 1;
+            tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_READ_COMPLETED, status);
+        } else if(t->op == ENIP_OP_WRITE) {
+            t->write_complete = 1;
+            tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_WRITE_COMPLETED, status);
+        }
+
+        t->op = ENIP_OP_IDLE;
+    }
+
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)t);
+    plc_tag_generic_wake_tag((plc_tag_p)t);
+}
+
+static void reset_connection(enip_connection_t *c) {
+    if(c->batch_head != NULL) { complete_batch(c, (int8_t)PLCTAG_ERR_BAD_CONNECTION); }
+
+    if(c->in_flight != NULL) {
+        enip_tag_p t = c->in_flight;
+
+        if(mutex_try_lock(t->api_mutex) == PLCTAG_STATUS_OK) {
+            complete_tag(c, t, (int8_t)PLCTAG_ERR_BAD_CONNECTION);
+            mutex_unlock(t->api_mutex);
+        } else {
+            critical_block(c->sched_mutex) { c->in_flight = rc_dec(t); }
+        }
+    }
+
+    if(c->sock) { socket_close(c->sock); }
+
+    c->session_handle = 0;
+    c->cip_conn_id = 0;
+    c->resume_state = CONN_CONNECT;
+    c->rx_buf = NULL;
+    c->rx_len = 0;
+    c->tx_buf = NULL;
+    c->tx_len = c->tx_off = 0;
+    c->rx_cap = ENIP_BOOTSTRAP_PACKET;
+    c->connect_started = false;
+    c->reconnect_at_ms = time_ms() + ENIP_RECONNECT_DELAY_MS;
+    c->state = CONN_CONNECT;
+}
+
+/* ============================================================================
+ * ForwardOpen (§14.3 wire layout)
+ * ============================================================================ */
+
+static Bytes build_forward_open(enip_connection_t *c) {
+    Arena *a = &c->arena;
+
+    Bytes route = enip_cip_encode_route(a, c->path);
+    if(bytes_is_null(route)) { return bytes_null(); }
+
+    Bytes mr_suffix = bytes_pack(a, BYTES_LE, (uint8_t)0x20, (uint8_t)0x02, (uint8_t)0x24, (uint8_t)0x01);
+    if(bytes_is_null(mr_suffix)) { return bytes_null(); }
+
+    Bytes connection_path = bytes_concat(a, route, mr_suffix);
+    if(bytes_is_null(connection_path)) { return bytes_null(); }
+
+    uint8_t conn_path_words = (uint8_t)(connection_path.len / 2);
+
+    Bytes fo_prefix = bytes_pack(a, BYTES_LE, CIP_FWD_OPEN, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24,
+                                  (uint8_t)0x01, (uint8_t)0x0A, (uint8_t)0x0E, (uint32_t)0, c->our_conn_id, c->conn_serial,
+                                  ENIP_VENDOR_ID, ENIP_ORIGINATOR_SERIAL, (uint8_t)0x03, (uint8_t)0x00, (uint8_t)0x00,
+                                  (uint8_t)0x00);
+    if(bytes_is_null(fo_prefix)) { return bytes_null(); }
+
+    Bytes fo_params = bytes_pack(a, BYTES_LE, (uint32_t)1000000, (uint16_t)0x43F8, (uint32_t)1000000, (uint16_t)0x43F8);
+    if(bytes_is_null(fo_params)) { return bytes_null(); }
+
+    Bytes fo_suffix = bytes_pack(a, BYTES_LE, (uint8_t)0xA3, conn_path_words);
+    if(bytes_is_null(fo_suffix)) { return bytes_null(); }
+
+    Bytes cip_payload = bytes_concat(a, fo_prefix, fo_params, fo_suffix, connection_path);
+    if(bytes_is_null(cip_payload)) { return bytes_null(); }
+
+    Bytes cpf = enip_cpf_wrap_unconnected(a, cip_payload);
+    if(bytes_is_null(cpf)) { return bytes_null(); }
+
+    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+}
+
+static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes) {
+    cip_reply_t reply;
+
+    if(!enip_cip_parse_reply(cip_reply_bytes, &reply)) { return PLCTAG_ERR_BAD_REPLY; }
+
+    if(reply.status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardOpen failed, CIP status 0x%02X (ext 0x%04X).", reply.status,
+               reply.ext_status);
+        return PLCTAG_ERR_REMOTE_ERR;
+    }
+
+    uint32_t o_to_t_conn_id = 0, t_to_o_conn_id = 0;
+    uint32_t o_to_t_api = 0, t_to_o_api = 0;
+    uint8_t app_data_size = 0;
+
+    Bytes rest = bytes_unpack(reply.data, BYTES_LE, &o_to_t_conn_id, &t_to_o_conn_id, BYTES_SKIP(8), &o_to_t_api, &t_to_o_api,
+                               &app_data_size);
+    if(bytes_is_null(rest)) { return PLCTAG_ERR_BAD_REPLY; }
+
+    (void)o_to_t_api;
+    (void)t_to_o_api;
+    (void)app_data_size;
+
+    c->cip_conn_id = o_to_t_conn_id;
+    (void)t_to_o_conn_id;
+
+    c->max_cip_packet_size = ENIP_FO_CIP_SIZE;
+    c->rx_cap = c->max_cip_packet_size + ENIP_FRAMING_OVERHEAD;
+
+    size_t cip_payload = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
+    size_t sub_space = (cip_payload > ENIP_MS_REQ_FIXED) ? (cip_payload - ENIP_MS_REQ_FIXED) : 0;
+    size_t computed_max = sub_space / ENIP_MS_MIN_SUB_REQ_SIZE;
+    if(computed_max > ENIP_BATCH_ARRAY_SIZE) { computed_max = ENIP_BATCH_ARRAY_SIZE; }
+    c->max_batch = (uint16_t)computed_max;
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* ============================================================================
+ * Main loop
+ * ============================================================================ */
+
+static THREAD_FUNC(io_thread_func) {
+    enip_connection_t *c = (enip_connection_t *)arg;
+
+    while(!atomic_get_bool(&c->terminate)) {
+        int64_t now = time_ms();
+        int mask = SOCK_EVENT_DEFAULT_MASK;
+        int64_t wait_ms = ENIP_IDLE_WAIT_MS;
+
+        switch(c->state) {
+            case CONN_CONNECT: {
+                int32_t rc = step_connect(c);
+
+                if(c->state != CONN_CONNECT) {
+                    wait_ms = 0;
+                } else if(rc == PLCTAG_STATUS_PENDING && c->connect_started) {
+                    mask |= SOCK_EVENT_CONNECT;
+                    wait_ms = 100;
+                } else {
+                    int64_t remaining = c->reconnect_at_ms - now;
+                    wait_ms = (remaining > 0) ? remaining : 100;
+                }
+
+                break;
+            }
+
+            case CONN_REGISTER:
+                step_register(c);
+                wait_ms = 0;
+                break;
+
+            case CONN_OPEN:
+                step_open(c);
+                wait_ms = 0;
+                break;
+
+            case CONN_READY: {
+                if(c->in_flight == NULL && c->batch_head == NULL) {
+                    pick_batch(c, now, &wait_ms);
+                }
+
+                bool have_work = (c->in_flight != NULL || c->batch_head != NULL);
+
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0,
+                       "CONN_READY now=%" PRId64 " have_work=%d batch=%u sched_head=%p in_flight=%p wait_ms=%" PRId64,
+                       now, (int)have_work, (unsigned)c->batch_count, (void *)c->sched_head, (void *)c->in_flight, wait_ms);
+
+                if(have_work) {
+                    if(build_request(c) == PLCTAG_STATUS_PENDING) {
+                        wait_ms = 1;
+                    } else {
+                        wait_ms = 0;
+                    }
+                }
+
+                break;
+            }
+
+            case CONN_SENDING:
+                step_sending(c);
+                mask |= SOCK_EVENT_CAN_WRITE;
+                wait_ms = 0;
+                break;
+
+            case CONN_WAITING: {
+                int32_t rc = step_waiting(c);
+
+                mask |= SOCK_EVENT_CAN_READ;
+                wait_ms = (rc == PLCTAG_STATUS_PENDING) ? ENIP_IDLE_WAIT_MS : 0;
+
+                break;
+            }
+
+            case CONN_CLOSING:
+            default: atomic_set_bool(&c->terminate, true); break;
+        }
+
+        if(wait_ms != 0 && !atomic_get_bool(&c->terminate)) {
+            int timeout = (wait_ms > 1000) ? 1000 : (int)wait_ms;
+
+            if(c->sock) { socket_wait_event(c->sock, mask, timeout); }
+            else { sleep_ms(timeout); }
+        }
+    }
+
+    THREAD_RETURN(0);
+}

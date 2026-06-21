@@ -44,6 +44,7 @@
 #include <libplctag/lib/version.h>
 #if LIBPLCTAG_FEATURE_EIP
 #    include <libplctag/protocols/ab/ab.h>
+#    include <libplctag/protocols/enip/enip.h>
 #    include <libplctag/protocols/omron/omron.h>
 #endif
 #if LIBPLCTAG_FEATURE_MODBUS
@@ -109,9 +110,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 #        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
-        case DLL_PROCESS_ATTACH:
-            // fprintf(stderr, "DllMain called with DLL_PROCESS_ATTACH\n");
-            break;
+        case DLL_PROCESS_ATTACH: break;
 
         case DLL_PROCESS_DETACH:
             // fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
@@ -127,17 +126,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
             if(lpvReserved == NULL) { plc_tag_shutdown(); }
             break;
 
-        case DLL_THREAD_ATTACH:
-            // fprintf(stderr, "DllMain called with DLL_THREAD_ATTACH\n");
-            break;
+        case DLL_THREAD_ATTACH: break;
 
-        case DLL_THREAD_DETACH:
-            // fprintf(stderr, "DllMain called with DLL_THREAD_DETACH\n");
-            break;
+        case DLL_THREAD_DETACH: break;
 
-        default:
-            // fprintf(stderr, "DllMain called with unexpected code %d!\n", fdwReason);
-            break;
+        default: break;
     }
 
     return TRUE;
@@ -437,6 +430,11 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
             tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
             tag->event_creation_complete = 0;
             tag->event_creation_complete_status = PLCTAG_STATUS_OK;
+            /* The auto_sync tickler may have set read_in_flight before the tag was
+             * ready (vtable->read returned PENDING without dispatching).  CREATED
+             * marks the transition to operational, so clear the stale flag so that
+             * auto_sync resumes on the next scheduled interval. */
+            tag->read_in_flight = 0;
         }
 
         /* was there a read start? */
@@ -1052,6 +1050,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 #if LIBPLCTAG_FEATURE_EIP
             case TAG_PROTOCOL_AB:
             case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
+
+            case TAG_PROTOCOL_ENIP:
+            case TAG_PROTOCOL_ENIP_CONNECTION: tag_constructor = enip_tag_create; break;
 
             case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
             case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;
@@ -4477,7 +4478,7 @@ int check_byte_order_str(const char *byte_order, int length, int32_t tag_id) {
     for(int i = 0; i < byte_order_len; i++) {
         int val = 0;
 
-        if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
+        if(!isdigit((unsigned char)byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Byte order string, \"%s\", must be only characters from '0' to '7'!",
                    byte_order);
             return PLCTAG_ERR_BAD_DATA;
