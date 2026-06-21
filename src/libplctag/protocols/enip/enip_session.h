@@ -70,6 +70,11 @@ extern void enip_session_tag_detach(enip_connection_t *c, enip_tag_p tag);
 /* negotiated CIP payload capacity, for window math (§11.3). */
 extern size_t enip_session_max_cip(enip_connection_t *c);
 
+/* connection_status / connection_inactivity_timeout_ms tag attributes. */
+extern int enip_session_get_status(enip_connection_t *c);
+extern int enip_session_get_inactivity_timeout(enip_connection_t *c);
+extern int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_value);
+
 /* registry lifecycle (called once from enip_init()/enip_teardown()). */
 extern int32_t enip_session_module_init(void);
 extern void enip_session_module_teardown(void);

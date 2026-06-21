@@ -87,6 +87,11 @@
 /* Backoff after a connect/IO failure, and idle poll cadence. */
 #define ENIP_RECONNECT_DELAY_MS ((int64_t)1000)
 #define ENIP_IDLE_WAIT_MS ((int64_t)1000)
+
+/* Inactivity timeout bounds; default is the maximum. After this much idle time
+ * with no scheduled work, the session disconnects and waits for new work. */
+#define ENIP_MIN_INACTIVITY_MS ((int64_t)1000)
+#define ENIP_MAX_INACTIVITY_MS ((int64_t)30000)
 /* Upper bound on batch array sizes (stack-allocated); the actual runtime limit
  * c->max_batch is derived from the negotiated CIP payload after ForwardOpen
  * and is always clamped to this value. */
@@ -105,6 +110,8 @@ enum {
     CONN_READY,
     CONN_SENDING,
     CONN_WAITING,
+    CONN_CLOSE, /* sending a ForwardClose before an idle teardown */
+    CONN_IDLE,  /* disconnected after inactivity timeout; reconnects when work arrives */
     CONN_CLOSING
 };
 
@@ -144,6 +151,13 @@ struct enip_connection_t {
 
     int64_t reconnect_at_ms;
 
+    /* idle disconnect (§ test_idle_disconnect); plain scalars, best-effort
+     * cross-thread access -- the IO thread writes conn_status/last_activity_ms,
+     * the API thread reads status and reads/writes inactivity_timeout_ms. */
+    int64_t inactivity_timeout_ms;
+    int64_t last_activity_ms;
+    uint8_t conn_status; /* PLCTAG_CONN_STATUS_* */
+
     uint8_t state;
     uint8_t resume_state;
 
@@ -172,22 +186,26 @@ static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status);
 static void complete_batch(enip_connection_t *c, int8_t status);
 static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void reset_connection(enip_connection_t *c);
+static void idle_disconnect(enip_connection_t *c);
 static void conn_destructor(void *arg);
 static THREAD_FUNC(io_thread_func);
 
 static int32_t step_connect(enip_connection_t *c);
 static int32_t step_register(enip_connection_t *c);
 static int32_t step_open(enip_connection_t *c);
+static int32_t step_close(enip_connection_t *c);
 static int32_t step_sending(enip_connection_t *c);
 static int32_t step_waiting(enip_connection_t *c);
 
 static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr);
 static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data);
 
 static Bytes build_forward_open(enip_connection_t *c);
 static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes);
+static Bytes build_forward_close(enip_connection_t *c);
 
 /* ============================================================================
  * Registry / lifecycle
@@ -238,6 +256,9 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
     c->resume_state = CONN_CONNECT;
     c->rx_cap = ENIP_BOOTSTRAP_PACKET;
     c->max_cip_packet_size = ENIP_FO_CIP_SIZE;
+    c->inactivity_timeout_ms = ENIP_MAX_INACTIVITY_MS;
+    c->last_activity_ms = time_ms();
+    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_CONNECTING;
 
     if(thread_create(&c->thread, io_thread_func, 32768, (void *)c) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create IO thread!");
@@ -516,6 +537,29 @@ void enip_session_tag_detach(enip_connection_t *c, enip_tag_p t) {
 
 size_t enip_session_max_cip(enip_connection_t *c) { return c->max_cip_packet_size; }
 
+int enip_session_get_status(enip_connection_t *c) { return (int)c->conn_status; }
+
+int enip_session_get_inactivity_timeout(enip_connection_t *c) { return (int)c->inactivity_timeout_ms; }
+
+/* Clamp to [ENIP_MIN, ENIP_MAX]; returns PLCTAG_ERR_OUT_OF_BOUNDS (and still
+ * stores the clamped value) if the request was out of range. */
+int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_value) {
+    int64_t v = (int64_t)new_value;
+    int rc = PLCTAG_STATUS_OK;
+
+    if(v > ENIP_MAX_INACTIVITY_MS) {
+        v = ENIP_MAX_INACTIVITY_MS;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+    } else if(v < ENIP_MIN_INACTIVITY_MS) {
+        v = ENIP_MIN_INACTIVITY_MS;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    c->inactivity_timeout_ms = v;
+
+    return rc;
+}
+
 /* ============================================================================
  * IO thread state machine (§5)
  * ============================================================================ */
@@ -592,6 +636,16 @@ static int32_t step_register(enip_connection_t *c) {
 static int32_t step_open(enip_connection_t *c) {
     arena_reset(&c->arena);
 
+    /* Use a fresh connection serial and O->T connection ID on every ForwardOpen
+     * attempt. A reconnect after an idle/abrupt close would otherwise reuse the
+     * triad of the connection the PLC still holds, and the target rejects it as
+     * a duplicate (CIP status 0x01, ext 0x0100). */
+    c->conn_serial++;
+    if(c->conn_serial == 0) { c->conn_serial = 1; }
+
+    c->our_conn_id = (uint32_t)random_u64(0xFFFFFFFFu);
+    if(c->our_conn_id == 0) { c->our_conn_id = 1; }
+
     Bytes frame = build_forward_open(c);
     if(bytes_is_null(frame)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build ForwardOpen request!");
@@ -603,6 +657,27 @@ static int32_t step_open(enip_connection_t *c) {
     c->tx_len = frame.len;
     c->tx_off = 0;
     c->resume_state = CONN_OPEN;
+    c->state = CONN_SENDING;
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Send a ForwardClose for the active CIP connection ahead of an idle teardown.
+ * If the request cannot be built, fall back to dropping the socket directly. */
+static int32_t step_close(enip_connection_t *c) {
+    arena_reset(&c->arena);
+
+    Bytes frame = build_forward_close(c);
+    if(bytes_is_null(frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build ForwardClose request; dropping connection.");
+        idle_disconnect(c);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    c->tx_buf = frame.data;
+    c->tx_len = frame.len;
+    c->tx_off = 0;
+    c->resume_state = CONN_CLOSE;
     c->state = CONN_SENDING;
 
     return PLCTAG_STATUS_OK;
@@ -692,6 +767,7 @@ static int32_t step_waiting(enip_connection_t *c) {
     switch(c->resume_state) {
         case CONN_REGISTER: on_register_reply(c, &hdr); break;
         case CONN_OPEN: on_open_reply(c, &hdr, payload); break;
+        case CONN_CLOSE: on_close_reply(c, &hdr, payload); break;
         case CONN_READY: handle_tag_reply(c, &hdr, payload); break;
         default:
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unexpected resume_state %d in CONN_WAITING!", c->resume_state);
@@ -736,6 +812,28 @@ static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes paylo
     }
 
     c->state = CONN_READY;
+}
+
+/* ForwardClose reply during idle teardown: log any rejection but tear the
+ * socket down regardless -- we are going idle either way. */
+static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+    if(hdr->status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardClose SendRRData failed, status 0x%08" PRIx32 ".", hdr->status);
+    } else {
+        uint16_t seq = 0;
+        Bytes cip;
+
+        if(enip_cpf_unwrap(payload, false, &seq, &cip)) {
+            cip_reply_t reply;
+
+            if(enip_cip_parse_reply(cip, &reply) && reply.status != 0) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardClose rejected, CIP status 0x%02X (ext 0x%04X).", reply.status,
+                       reply.ext_status);
+            }
+        }
+    }
+
+    idle_disconnect(c);
 }
 
 static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
@@ -1317,7 +1415,30 @@ static void reset_connection(enip_connection_t *c) {
     c->rx_cap = ENIP_BOOTSTRAP_PACKET;
     c->connect_started = false;
     c->reconnect_at_ms = time_ms() + ENIP_RECONNECT_DELAY_MS;
+    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_ERR_WAIT;
     c->state = CONN_CONNECT;
+}
+
+/* Graceful idle teardown: like reset_connection but driven by the inactivity
+ * timer rather than an error, and it parks in CONN_IDLE (no reconnect timer) so
+ * the session stays down until a tag is scheduled. Only called when there is no
+ * in-flight or batched work, so nothing needs to be completed/aborted. */
+static void idle_disconnect(enip_connection_t *c) {
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Inactivity timeout reached; disconnecting session.");
+
+    if(c->sock) { socket_close(c->sock); }
+
+    c->session_handle = 0;
+    c->cip_conn_id = 0;
+    c->resume_state = CONN_CONNECT;
+    c->rx_buf = NULL;
+    c->rx_len = 0;
+    c->tx_buf = NULL;
+    c->tx_len = c->tx_off = 0;
+    c->rx_cap = ENIP_BOOTSTRAP_PACKET;
+    c->connect_started = false;
+    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_IDLE_WAIT;
+    c->state = CONN_IDLE;
 }
 
 /* ============================================================================
@@ -1397,6 +1518,40 @@ static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_by
     return PLCTAG_STATUS_OK;
 }
 
+/* ForwardClose for the active connection. Identifies the connection by the same
+ * serial / originator vendor / originator serial used in its ForwardOpen, and
+ * carries the same connection path. */
+static Bytes build_forward_close(enip_connection_t *c) {
+    Arena *a = &c->arena;
+
+    Bytes route = enip_cip_encode_route(a, c->path);
+    if(bytes_is_null(route)) { return bytes_null(); }
+
+    Bytes mr_suffix = bytes_pack(a, BYTES_LE, (uint8_t)0x20, (uint8_t)0x02, (uint8_t)0x24, (uint8_t)0x01);
+    if(bytes_is_null(mr_suffix)) { return bytes_null(); }
+
+    Bytes connection_path = bytes_concat(a, route, mr_suffix);
+    if(bytes_is_null(connection_path)) { return bytes_null(); }
+
+    uint8_t conn_path_words = (uint8_t)(connection_path.len / 2);
+
+    /* service, path size + Connection Manager path, priority/tick + timeout
+     * ticks, connection serial, originator vendor id + serial, path size word
+     * count, reserved pad. */
+    Bytes fc_prefix = bytes_pack(a, BYTES_LE, CIP_FWD_CLOSE, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24,
+                                  (uint8_t)0x01, (uint8_t)0x0A, (uint8_t)0x0E, c->conn_serial, ENIP_VENDOR_ID,
+                                  ENIP_ORIGINATOR_SERIAL, conn_path_words, (uint8_t)0x00);
+    if(bytes_is_null(fc_prefix)) { return bytes_null(); }
+
+    Bytes cip_payload = bytes_concat(a, fc_prefix, connection_path);
+    if(bytes_is_null(cip_payload)) { return bytes_null(); }
+
+    Bytes cpf = enip_cpf_wrap_unconnected(a, cip_payload);
+    if(bytes_is_null(cpf)) { return bytes_null(); }
+
+    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+}
+
 /* ============================================================================
  * Main loop
  * ============================================================================ */
@@ -1437,6 +1592,8 @@ static THREAD_FUNC(io_thread_func) {
                 break;
 
             case CONN_READY: {
+                c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_UP;
+
                 if(c->in_flight == NULL && c->batch_head == NULL) {
                     pick_batch(c, now, &wait_ms);
                 }
@@ -1448,11 +1605,44 @@ static THREAD_FUNC(io_thread_func) {
                        now, (int)have_work, (unsigned)c->batch_count, (void *)c->sched_head, (void *)c->in_flight, wait_ms);
 
                 if(have_work) {
+                    c->last_activity_ms = now;
+
                     if(build_request(c) == PLCTAG_STATUS_PENDING) {
                         wait_ms = 1;
                     } else {
                         wait_ms = 0;
                     }
+                } else if(now - c->last_activity_ms >= c->inactivity_timeout_ms) {
+                    /* gracefully ForwardClose the live connection before going
+                     * idle; if there is none, just drop straight to idle. */
+                    if(c->session_handle != 0 && c->cip_conn_id != 0) {
+                        c->state = CONN_CLOSE;
+                    } else {
+                        idle_disconnect(c);
+                    }
+                    wait_ms = 0;
+                }
+
+                break;
+            }
+
+            case CONN_CLOSE:
+                step_close(c);
+                wait_ms = 0;
+                break;
+
+            case CONN_IDLE: {
+                bool have_work = false;
+                critical_block(c->sched_mutex) { have_work = (c->sched_head != NULL); }
+
+                if(have_work) {
+                    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_CONNECTING;
+                    c->reconnect_at_ms = 0;
+                    c->last_activity_ms = time_ms();
+                    c->state = CONN_CONNECT;
+                    wait_ms = 0;
+                } else {
+                    wait_ms = ENIP_IDLE_WAIT_MS;
                 }
 
                 break;

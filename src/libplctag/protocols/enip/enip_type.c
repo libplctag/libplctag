@@ -64,6 +64,10 @@ static const enip_atomic_type_entry_t ENIP_ATOMIC_TYPES[] = {
     { CIP_TYPE_ULINT, 8 },
     { CIP_TYPE_REAL,  4 },
     { CIP_TYPE_LREAL, 8 },
+    { CIP_TYPE_BYTE,  1 },
+    { CIP_TYPE_WORD,  2 },
+    { CIP_TYPE_DWORD, 4 },
+    { CIP_TYPE_LWORD, 8 },
 };
 /* clang-format on */
 

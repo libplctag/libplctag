@@ -59,6 +59,12 @@
 #define CIP_TYPE_REAL  ((uint16_t)0x00CA)
 #define CIP_TYPE_LREAL ((uint16_t)0x00CB)
 
+/* Bit-string types: Logix uses 0xD3 (DWORD) for BOOL arrays; bits are packed. */
+#define CIP_TYPE_BYTE  ((uint16_t)0x00D1)
+#define CIP_TYPE_WORD  ((uint16_t)0x00D2)
+#define CIP_TYPE_DWORD ((uint16_t)0x00D3)
+#define CIP_TYPE_LWORD ((uint16_t)0x00D4)
+
 /* Abbreviated-structure header, as a 16-bit little-endian word (0xA0 0x02) */
 #define CIP_TYPE_STRUCT_HEADER ((uint16_t)0x02A0)
 

@@ -131,7 +131,7 @@ echo "=== Metadata and bit-level access (from run_hardware_tests.sh) ==="
 # ----- from run_hardware_tests.sh: metadata fetch -----
 run_test "get tag metadata" "metadata" \
     $VALGRIND$TEST_DIR/tag_rw2 --type=metadata \
-    "--tag=${BASE}&name=TestBOOLArray"
+    "--tag=${BASE}&name=TestBOOLArray&elem_count=2&debug=4"
 
 # ----- from run_hardware_tests.sh: INT/LINT bit get/set -----
 run_test "Get INT bit" "get_int_bit" \

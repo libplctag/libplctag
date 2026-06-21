@@ -40,6 +40,7 @@
  */
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <libplctag/lib/libplctag.h>
@@ -59,6 +60,9 @@ static int32_t enip_tag_read(plc_tag_p tag);
 static int32_t enip_tag_write(plc_tag_p tag);
 static int32_t enip_tag_status(plc_tag_p tag);
 static int32_t enip_tag_data_written(plc_tag_p tag);
+static int enip_tag_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static int enip_tag_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
+static int enip_tag_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 static void enip_tag_destructor(void *tag_arg);
 
 /* CIP types are little-endian on the wire (design doc §9). */
@@ -92,9 +96,9 @@ struct tag_vtable_t enip_tag_vtable = {
     .wake_plc = NULL,
     .tag_data_written = enip_tag_data_written,
 
-    .get_int_attrib = NULL,
-    .set_int_attrib = NULL,
-    .get_byte_array_attrib = NULL,
+    .get_int_attrib = enip_tag_get_int_attrib,
+    .set_int_attrib = enip_tag_set_int_attrib,
+    .get_byte_array_attrib = enip_tag_get_byte_array_attrib,
 };
 
 /* ============================================================================
@@ -164,6 +168,82 @@ static int32_t enip_tag_status(plc_tag_p tag) {
  * immediately so the generic tickler's next pass (within ~100ms) sees a
  * due time already set, instead of needing one tick just to start the
  * countdown. */
+/* Called by plc_tag_get_int_attribute under tag->api_mutex (the generic layer
+ * has already handled size/read_cache_ms/etc). */
+static int enip_tag_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+
+    if(str_cmp_i(attrib_name, "elem_size") == 0) { return (int)t->elem_size; }
+
+    if(str_cmp_i(attrib_name, "elem_count") == 0) { return (int)t->elem_count; }
+
+    if(str_cmp_i(attrib_name, "connection_status") == 0) {
+        return t->conn ? enip_session_get_status(t->conn) : (int)PLCTAG_CONN_STATUS_DOWN;
+    }
+
+    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        return t->conn ? enip_session_get_inactivity_timeout(t->conn) : default_value;
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unsupported attribute \"%s\"!", attrib_name);
+    tag->status = (int8_t)PLCTAG_ERR_UNSUPPORTED;
+
+    return default_value;
+}
+
+static int enip_tag_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        if(!t->conn) {
+            tag->status = (int8_t)PLCTAG_ERR_BAD_GATEWAY;
+            return PLCTAG_ERR_BAD_GATEWAY;
+        }
+
+        int rc = enip_session_set_inactivity_timeout(t->conn, new_value);
+        tag->status = (int8_t)rc;
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unsupported attribute \"%s\"!", attrib_name);
+    tag->status = (int8_t)PLCTAG_ERR_UNSUPPORTED;
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+/* Returns the raw CIP type-header bytes captured at OPEN_PROBE (atomic: the
+ * 2-byte type code; structure: the 4-byte abbreviated-struct header). Used by
+ * the "metadata" tag type to report the on-wire type. */
+static int enip_tag_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    if(str_cmp_i(attrib_name, "raw_tag_type_bytes") != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unsupported byte-array attribute \"%s\"!", attrib_name);
+        tag->status = (int8_t)PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(t->type_header_len == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Tag type info not yet available (tag not opened).");
+        tag->status = (int8_t)PLCTAG_ERR_NOT_FOUND;
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if((int)t->type_header_len > buffer_length) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Type info (%u bytes) larger than buffer (%d bytes).",
+               (unsigned int)t->type_header_len, buffer_length);
+        tag->status = (int8_t)PLCTAG_ERR_TOO_SMALL;
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    memcpy(buffer, t->type_header, t->type_header_len);
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+
+    return (int)t->type_header_len;
+}
+
 static int32_t enip_tag_data_written(plc_tag_p tag) {
     enip_tag_p t = (enip_tag_p)tag;
 
@@ -198,21 +278,58 @@ static void enip_tag_destructor(void *tag_arg) {
     if(t->tag_cond_wait) { cond_destroy(&t->tag_cond_wait); }
 }
 
+/* A trailing ".<digits>" on a tag name is a bit selector (e.g. "MyDint.5",
+ * "TestINTArray[0].13"), not a structure member -- Logix member names are
+ * never all-numeric. Returns the byte length of the name with the bit suffix
+ * removed and sets *bit_out to the parsed bit number; when there is no bit
+ * suffix returns the full length and sets *bit_out to -1. */
+static size_t enip_split_bit_suffix(const char *name, int *bit_out) {
+    *bit_out = -1;
+
+    size_t len = strlen(name);
+    const char *dot = strrchr(name, '.');
+    if(!dot || dot == name || dot[1] == '\0') { return len; }
+
+    for(const char *q = dot + 1; *q != '\0'; q++) {
+        if(*q < '0' || *q > '9') { return len; }
+    }
+
+    *bit_out = (int)strtol(dot + 1, NULL, 10);
+    return (size_t)(dot - name);
+}
+
 /* Allocate the tag with tag_name and the encoded CIP path packed into the
  * tail of the allocation (per enip_tag.h). */
 static enip_tag_p create_tag_object(attr attribs) {
-    const char *tag_name = attr_get_str(attribs, "name", NULL);
+    const char *raw_name = attr_get_str(attribs, "name", NULL);
 
-    if(!tag_name || str_length(tag_name) == 0) {
+    if(!raw_name || str_length(raw_name) == 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"name\" attribute.");
         return NULL;
     }
+
+    /* A trailing ".<bit>" is read as the whole underlying element; the generic
+     * lib layer extracts the bit using tag->is_bit/tag->bit, so it must not go
+     * into the encoded CIP symbolic path. */
+    int bit = -1;
+    size_t name_len = enip_split_bit_suffix(raw_name, &bit);
 
     Arena scratch;
     if(arena_init(&scratch, (size_t)1024) != 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate scratch arena!");
         return NULL;
     }
+
+    /* NUL-terminated copy of the base name (bit suffix stripped) for encoding. */
+    Bytes name_buf = bytes_alloc(&scratch, name_len + 1);
+    if(bytes_is_null(name_buf)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate name buffer!");
+        arena_free(&scratch);
+        return NULL;
+    }
+    memcpy(name_buf.data, raw_name, name_len);
+    name_buf.data[name_len] = '\0';
+    const char *tag_name = (const char *)name_buf.data;
 
     Bytes encoded = enip_cip_encode_path(&scratch, tag_name);
     if(bytes_is_null(encoded)) {
@@ -221,7 +338,6 @@ static enip_tag_p create_tag_object(attr attribs) {
         return NULL;
     }
 
-    size_t name_len = (size_t)str_length(tag_name);
     size_t tail_size = name_len + 1 + encoded.len;
 
     enip_tag_p tag = (enip_tag_p)rc_alloc((int)(sizeof(struct enip_tag_t) + tail_size), enip_tag_destructor);
@@ -244,6 +360,11 @@ static enip_tag_p create_tag_object(attr attribs) {
     tag->vtable = &enip_tag_vtable;
     tag->byte_order = &enip_tag_byte_order;
     tag->elem_count = (uint32_t)attr_get_int(attribs, "elem_count", 1);
+
+    if(bit >= 0) {
+        tag->is_bit = 1;
+        tag->bit = bit;
+    }
 
     return tag;
 }
