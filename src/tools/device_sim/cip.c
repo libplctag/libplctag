@@ -53,6 +53,7 @@
 #include "utils/debug.h"
 #include "cip.h"
 #include "device.h"
+#include "device_sim.h"
 #include "eip.h"
 #include "identity.h"
 #include "pccc.h"
@@ -113,6 +114,10 @@ static atomic_int32_t s_conn_seq_counter = 1;
  * Forward declarations
  * ============================================================================ */
 
+static bool  parse_class_instance_path_wide(Bytes path, uint32_t *class_id,
+                                             uint32_t *instance_id, uint32_t *attr_id);
+static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
+                             device_t *dev, size_t max_data);
 static bool  parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes *svc_payload);
 static bool  extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_path);
 static bool  parse_tag_path(Bytes tag_path, device_t *dev, tag_def_t **tag_out,
@@ -152,6 +157,11 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
     }
 
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "CIP unconnected service=0x%02x.", (unsigned)svc);
+
+    {
+        Bytes r = try_cip_object(a, svc, svc_path, svc_payload, dev, 504);
+        if(!bytes_is_null(r)) { return r; }
+    }
 
     switch(svc) {
         case CIP_SRV_GET_ATTRS_ALL:
@@ -222,6 +232,12 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
     }
 
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "CIP connected service=0x%02x.", (unsigned)svc);
+
+    {
+        size_t obj_max = (max_resp > 4) ? max_resp - 4 : 0;
+        Bytes r = try_cip_object(a, svc, svc_path, svc_payload, dev, obj_max);
+        if(!bytes_is_null(r)) { return r; }
+    }
 
     switch(svc) {
         case CIP_SRV_GET_ATTRS_ALL:
@@ -457,6 +473,133 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes,
     }
 
     return true;
+}
+
+
+/*
+ * Parse a CIP logical class/instance/(optional)attribute path that may use
+ * 8-bit (0x20/0x24/0x30), 16-bit (0x21/0x25/0x31), or 32-bit (0x22/0x26/0x32)
+ * segment widths.  Returns true when at least a class and instance were found.
+ */
+static bool parse_class_instance_path_wide(Bytes path, uint32_t *class_id,
+                                            uint32_t *instance_id, uint32_t *attr_id) {
+    *class_id = 0; *instance_id = 0; *attr_id = 0;
+
+    bool got_class    = false;
+    bool got_instance = false;
+    size_t off = 0;
+
+    while(off < path.len) {
+        uint8_t seg = path.data[off++];
+
+        /* 8-bit class */
+        if(seg == 0x20) {
+            if(off >= path.len) { return false; }
+            *class_id = path.data[off++];
+            got_class = true;
+        /* 16-bit class */
+        } else if(seg == 0x21) {
+            if(off + 3 > path.len) { return false; }
+            off++; /* pad */
+            *class_id = (uint32_t)path.data[off] | ((uint32_t)path.data[off + 1] << 8);
+            off += 2;
+            got_class = true;
+        /* 32-bit class */
+        } else if(seg == 0x22) {
+            if(off + 5 > path.len) { return false; }
+            off++; /* pad */
+            *class_id = (uint32_t)path.data[off]
+                      | ((uint32_t)path.data[off + 1] << 8)
+                      | ((uint32_t)path.data[off + 2] << 16)
+                      | ((uint32_t)path.data[off + 3] << 24);
+            off += 4;
+            got_class = true;
+        /* 8-bit instance */
+        } else if(seg == 0x24) {
+            if(off >= path.len) { return false; }
+            *instance_id = path.data[off++];
+            got_instance = true;
+        /* 16-bit instance */
+        } else if(seg == 0x25) {
+            if(off + 3 > path.len) { return false; }
+            off++; /* pad */
+            *instance_id = (uint32_t)path.data[off] | ((uint32_t)path.data[off + 1] << 8);
+            off += 2;
+            got_instance = true;
+        /* 32-bit instance */
+        } else if(seg == 0x26) {
+            if(off + 5 > path.len) { return false; }
+            off++; /* pad */
+            *instance_id = (uint32_t)path.data[off]
+                         | ((uint32_t)path.data[off + 1] << 8)
+                         | ((uint32_t)path.data[off + 2] << 16)
+                         | ((uint32_t)path.data[off + 3] << 24);
+            off += 4;
+            got_instance = true;
+        /* 8-bit attribute */
+        } else if(seg == 0x30) {
+            if(off >= path.len) { return false; }
+            *attr_id = path.data[off++];
+        /* 16-bit attribute */
+        } else if(seg == 0x31) {
+            if(off + 3 > path.len) { return false; }
+            off++; /* pad */
+            *attr_id = (uint32_t)path.data[off] | ((uint32_t)path.data[off + 1] << 8);
+            off += 2;
+        } else {
+            return false;
+        }
+    }
+
+    return got_class && got_instance;
+}
+
+
+/*
+ * Consult the generic CIP object registry.  Returns null Bytes if no entry
+ * matched or if the matching callback returned DEVICE_SIM_NOT_HANDLED; returns
+ * a CIP response otherwise.  max_data is the max bytes of callback response
+ * data (excluding the 4-byte CIP response header).
+ */
+static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
+                             device_t *dev, size_t max_data) {
+    if(!dev->cip_objects) { return ((Bytes){NULL, 0}); }
+
+    uint32_t class_id = 0, instance_id = 0, attr_id = 0;
+    if(!parse_class_instance_path_wide(svc_path, &class_id, &instance_id, &attr_id)) {
+        return ((Bytes){NULL, 0});
+    }
+
+    cip_obj_entry_t *entry = dev->cip_objects;
+    while(entry) {
+        if(entry->class_id == class_id && entry->instance_id == instance_id) { break; }
+        entry = entry->next;
+    }
+    if(!entry) { return ((Bytes){NULL, 0}); }
+
+    if(max_data == 0) { max_data = 504; }
+    Bytes resp_buf = bytes_alloc(a, max_data);
+    if(bytes_is_null(resp_buf)) {
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
+
+    uint32_t resp_len = 0;
+    int32_t rc = entry->cb(dev->sim, svc,
+                           svc_path.data, (uint32_t)svc_path.len,
+                           svc_payload.data, (uint32_t)svc_payload.len,
+                           resp_buf.data, (uint32_t)resp_buf.len, &resp_len,
+                           entry->user_data);
+
+    if(rc == DEVICE_SIM_NOT_HANDLED) { return ((Bytes){NULL, 0}); }
+    if(rc != PLCTAG_STATUS_OK) {
+        return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
+    }
+
+    Bytes hdr = bytes_pack(a, BYTES_LE,
+                           (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+    if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+
+    return bytes_concat(a, hdr, bytes_slice(resp_buf, 0, resp_len));
 }
 
 
@@ -700,11 +843,20 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
-    Bytes resp;
+    Bytes data_buf = bytes_alloc(a, copy_len);
+    if(bytes_is_null(data_buf)) {
+        return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
+    }
+
     mutex_lock(tag->data_mutex);
-    Bytes data = bytes_from_buf(tag->data + byte_start, copy_len);
-    resp = bytes_concat(a, hdr, data);
+    mem_copy(data_buf.data, tag->data + byte_start, (int)copy_len);
     mutex_unlock(tag->data_mutex);
+
+    if(tag->read_cb) {
+        tag->read_cb(dev->sim, tag->name, data_buf.data, (uint32_t)copy_len, tag->user_data);
+    }
+
+    Bytes resp = bytes_concat(a, hdr, data_buf);
 
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
            "Read '%s': %zu bytes%s.", tag->name, copy_len, fragmented ? " (fragmented)" : "");
@@ -770,6 +922,10 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     mem_copy(tag->data + byte_start, rest.data, (int)write_len);
     mutex_unlock(tag->data_mutex);
 
+    if(tag->write_cb) {
+        tag->write_cb(dev->sim, tag->name, (void *)rest.data, (uint32_t)write_len, tag->user_data);
+    }
+
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "Write '%s': %zu bytes.", tag->name, write_len);
 
     return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
@@ -812,7 +968,11 @@ static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pa
         return cip_error(a, svc, CIP_ERR_PATH_UNKNOWN, false, 0);
     }
 
-    const identity_t *id = identity_for_plc_type(dev->plc_type);
+    identity_t id_copy;
+    mutex_lock(dev->identity_mutex);
+    id_copy = dev->identity;
+    mutex_unlock(dev->identity_mutex);
+    const identity_t *id = &id_copy;
 
     if(svc == CIP_SRV_GET_ATTRS_ALL) {
         Bytes obj = identity_encode_get_attrs_all(a, id);

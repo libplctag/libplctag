@@ -118,6 +118,9 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
 # build the libplctag library, shared and static
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/libplctag")
 
+# build libdevsim (static) and the device_sim CLI tool — parallel top-level product
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/tools/device_sim")
+
 if(BUILD_EXAMPLES)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/examples")
 endif(BUILD_EXAMPLES)

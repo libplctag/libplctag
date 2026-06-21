@@ -40,26 +40,20 @@
 #include <libplctag/lib/libplctag.h>
 #include "platform.h"
 #include "utils/debug.h"
+#include "device_sim.h"
 #include "args.h"
-#include "device.h"
-#include "discovery.h"
-#include "server.h"
 
 /* ============================================================================
- * Globals — g_terminate defined here; declared extern in server.h.
+ * Signal flag — set by handler, consumed by the main loop.
+ * The handler only writes a flag; device_sim_stop (which takes a mutex) is
+ * called from the main loop, not from the handler itself.
  * ============================================================================ */
 
-volatile sig_atomic_t g_terminate = 0;
-
-#define DEBUG_MOD DEBUG_MODULE_UTILS
-
-/* ============================================================================
- * Signal handler — async-signal-safe: sets flag only, no mutex.
- * ============================================================================ */
+static volatile sig_atomic_t g_signal = 0;
 
 static void sigint_handler(int sig) {
     (void)sig;
-    g_terminate = 1;
+    g_signal = 1;
 }
 
 /* ============================================================================
@@ -67,10 +61,10 @@ static void sigint_handler(int sig) {
  * ============================================================================ */
 
 int main(int argc, char **argv) {
-    device_t device;
-    int32_t  dlvl = PLCTAG_DEBUG_WARN;
+    device_sim_t *sim    = NULL;
+    int32_t       dlvl   = PLCTAG_DEBUG_WARN;
 
-    int32_t rc = args_parse(argc, argv, &device, &dlvl);
+    int32_t rc = args_parse(argc, argv, &sim, &dlvl);
     if(rc == 1) { return 0; }          /* --help printed */
     if(rc != PLCTAG_STATUS_OK) {
         args_print_usage(argv[0]);
@@ -79,17 +73,6 @@ int main(int argc, char **argv) {
 
     set_debug_level((int)dlvl);
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
-           "device_sim starting on port %u.", (unsigned)device.port);
-
-    /* Build registry. */
-    registry_t *registry = registry_create();
-    if(!registry) {
-        fprintf(stderr, "device_sim: failed to create socket registry.\n");
-        args_free_tags(device.tags);
-        return 1;
-    }
-
     /* Install signal handlers. */
     struct sigaction sa;
     mem_set(&sa, 0, (int)sizeof(sa));
@@ -97,54 +80,19 @@ int main(int argc, char **argv) {
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    /* Launch TCP listener thread. */
-    listener_ctx_t lctx;
-    lctx.device   = &device;
-    lctx.registry = registry;
-
-    thread_p listener_thread = NULL;
-    if(thread_create(&listener_thread, server_listener, 131072, &lctx) != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "device_sim: failed to start listener thread.\n");
-        registry_destroy(registry);
-        args_free_tags(device.tags);
+    rc = device_sim_start(sim);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "device_sim: failed to start (%d).\n", (int)rc);
+        device_sim_destroy(sim);
         return 1;
     }
 
-    /* Launch UDP discovery thread. */
-    discovery_ctx_t dctx;
-    dctx.device   = &device;
-    dctx.registry = registry;
-
-    thread_p discovery_thread_handle = NULL;
-    if(thread_create(&discovery_thread_handle, discovery_thread, 65536, &dctx) != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "device_sim: failed to start discovery thread.\n");
-        registry_wake_all(registry);
-        thread_join(listener_thread);
-        thread_destroy(&listener_thread);
-        registry_destroy(registry);
-        args_free_tags(device.tags);
-        return 1;
-    }
-
-    /* Poll until signal. */
-    while(!g_terminate) {
+    /* Wait for signal. */
+    while(!g_signal) {
         sleep_ms(50);
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
-           "Shutdown signal received — waking all connections.");
-
-    registry_wake_all(registry);
-
-    thread_join(listener_thread);
-    thread_destroy(&listener_thread);
-
-    thread_join(discovery_thread_handle);
-    thread_destroy(&discovery_thread_handle);
-
-    registry_destroy(registry);
-    args_free_tags(device.tags);
-
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0, "device_sim stopped cleanly.");
+    device_sim_stop(sim);
+    device_sim_destroy(sim);
     return 0;
 }

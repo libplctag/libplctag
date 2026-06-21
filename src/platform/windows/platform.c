@@ -2583,6 +2583,79 @@ extern int32_t socket_recv_from(sock_p s, uint8_t *buf, int32_t size, char *src_
 }
 
 
+extern int32_t socket_local_ipv4(sock_p s, uint32_t *ipv4) {
+    struct sockaddr_in addr;
+    int addr_len = (int)sizeof(addr);
+
+    if(!s || !ipv4) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(s->fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket is not open!");
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(getsockname(s->fd, (struct sockaddr *)&addr, &addr_len) == SOCKET_ERROR) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "getsockname() failed, error: %d", WSAGetLastError());
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    *ipv4 = ntohl(addr.sin_addr.s_addr);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t socket_local_ipv4_to_peer(const char *peer_host, uint32_t *ipv4) {
+    SOCKET fd;
+    struct sockaddr_in peer;
+    struct sockaddr_in local;
+    int local_len = (int)sizeof(local);
+
+    if(!peer_host || !ipv4) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Null pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* ponytail: UDP connect() picks the egress interface for peer_host without
+     * sending a packet; getsockname then reveals the local address a reply from
+     * us would carry.  No routing-table walk needed. */
+    fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if(fd == INVALID_SOCKET) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "socket() failed, error: %d", WSAGetLastError());
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    memset(&peer, 0, sizeof(peer));
+    peer.sin_family = AF_INET;
+    peer.sin_port = htons(1);
+    if(inet_pton(AF_INET, peer_host, &peer.sin_addr) <= 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Invalid peer address: %s", peer_host);
+        closesocket(fd);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(connect(fd, (struct sockaddr *)&peer, (int)sizeof(peer)) == SOCKET_ERROR) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "connect() failed, error: %d", WSAGetLastError());
+        closesocket(fd);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(getsockname(fd, (struct sockaddr *)&local, &local_len) == SOCKET_ERROR) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "getsockname() failed, error: %d", WSAGetLastError());
+        closesocket(fd);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    *ipv4 = ntohl(local.sin_addr.s_addr);
+    closesocket(fd);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 /***************************************************************************
  ****************************** Serial Port ********************************
  **************************************************************************/

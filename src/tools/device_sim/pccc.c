@@ -214,12 +214,19 @@ static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *de
     if(data_bytes > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
 
     Bytes hdr = bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
-    Bytes resp;
+
+    Bytes data_buf = bytes_alloc(a, data_bytes);
+    if(bytes_is_null(data_buf)) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+
     mutex_lock(tag->data_mutex);
-    Bytes data = bytes_from_buf(tag->data + start, data_bytes);
-    resp = bytes_concat(a, hdr, data);
+    mem_copy(data_buf.data, tag->data + start, (int)data_bytes);
     mutex_unlock(tag->data_mutex);
-    return resp;
+
+    if(tag->read_cb) {
+        tag->read_cb(dev->sim, tag->name, data_buf.data, (uint32_t)data_bytes, tag->user_data);
+    }
+
+    return bytes_concat(a, hdr, data_buf);
 }
 
 
@@ -261,6 +268,10 @@ static Bytes handle_plc5_write(Arena *a, Bytes cmd, uint16_t seq_id, device_t *d
     mem_copy(tag->data + start, write_data.data, (int)data_bytes);
     mutex_unlock(tag->data_mutex);
 
+    if(tag->write_cb) {
+        tag->write_cb(dev->sim, tag->name, (void *)write_data.data, (uint32_t)data_bytes, tag->user_data);
+    }
+
     return bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }
 
@@ -290,13 +301,19 @@ static Bytes handle_plc5_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
     size_t mask_offset = 4;
     if(cmd.len < mask_offset + tag->elem_size * 2) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
 
+    uint8_t rmw_scratch[8];
     mutex_lock(tag->data_mutex);
     for(size_t i = 0; i < tag->elem_size; i++) {
         uint8_t and_mask = cmd.data[mask_offset + i];
         uint8_t or_mask  = cmd.data[mask_offset + tag->elem_size + i];
         tag->data[start + i] = (uint8_t)((tag->data[start + i] & and_mask) | or_mask);
     }
+    if(tag->write_cb) { mem_copy(rmw_scratch, tag->data + start, (int)tag->elem_size); }
     mutex_unlock(tag->data_mutex);
+
+    if(tag->write_cb) {
+        tag->write_cb(dev->sim, tag->name, rmw_scratch, (uint32_t)tag->elem_size, tag->user_data);
+    }
 
     return bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }
@@ -339,12 +356,19 @@ static Bytes handle_slc_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
     if(transfer_size > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
 
     Bytes hdr = bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
-    Bytes resp;
+
+    Bytes data_buf = bytes_alloc(a, transfer_size);
+    if(bytes_is_null(data_buf)) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+
     mutex_lock(tag->data_mutex);
-    Bytes data = bytes_from_buf(tag->data + start, transfer_size);
-    resp = bytes_concat(a, hdr, data);
+    mem_copy(data_buf.data, tag->data + start, (int)transfer_size);
     mutex_unlock(tag->data_mutex);
-    return resp;
+
+    if(tag->read_cb) {
+        tag->read_cb(dev->sim, tag->name, data_buf.data, (uint32_t)transfer_size, tag->user_data);
+    }
+
+    return bytes_concat(a, hdr, data_buf);
 }
 
 
@@ -386,6 +410,10 @@ static Bytes handle_slc_write(Arena *a, Bytes cmd, uint16_t seq_id, device_t *de
     mem_copy(tag->data + start, write_data.data, (int)transfer_size);
     mutex_unlock(tag->data_mutex);
 
+    if(tag->write_cb) {
+        tag->write_cb(dev->sim, tag->name, (void *)write_data.data, (uint32_t)transfer_size, tag->user_data);
+    }
+
     return bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }
 
@@ -420,13 +448,19 @@ static Bytes handle_slc_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev)
     start = (size_t)file_element * tag->elem_size;
     if(start + 2 > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
 
+    uint8_t slc_rmw_scratch[2];
     mutex_lock(tag->data_mutex);
     for(size_t i = 0; i < 2; i++) {
         uint8_t mask     = cmd.data[6 + i];
         uint8_t new_data = cmd.data[8 + i];
         tag->data[start + i] = (uint8_t)((tag->data[start + i] & (uint8_t)~mask) | (new_data & mask));
     }
+    if(tag->write_cb) { mem_copy(slc_rmw_scratch, tag->data + start, 2); }
     mutex_unlock(tag->data_mutex);
+
+    if(tag->write_cb) {
+        tag->write_cb(dev->sim, tag->name, slc_rmw_scratch, (uint32_t)2, tag->user_data);
+    }
 
     return bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
 }

@@ -288,6 +288,11 @@ extern int32_t socket_recv_from(sock_p s, uint8_t *buf, int32_t size, char *src_
     /* Returns bytes received (>= 0) on success, PLCTAG_ERR_TIMEOUT on timeout,
        PLCTAG_ERR_ABORT on wake-up signal, negative PLCTAG_ERR_* on error. */
 
+/* Host-byte-order local IPv4 of a connected socket (getsockname). */
+extern int32_t socket_local_ipv4(sock_p s, uint32_t *ipv4);
+/* Host-byte-order egress IPv4 that would be used to reach peer_host (UDP connect + getsockname; no packet sent). */
+extern int32_t socket_local_ipv4_to_peer(const char *peer_host, uint32_t *ipv4);
+
 
 /* serial handling */
 typedef struct serial_port_t *serial_port_p;

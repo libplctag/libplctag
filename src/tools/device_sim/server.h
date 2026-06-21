@@ -33,17 +33,10 @@
 
 #pragma once
 
-#include <signal.h>
 #include <stdint.h>
 
 #include "platform.h"
 #include "device.h"
-
-/* ============================================================================
- * Global termination flag — defined in main.c, checked by server threads.
- * ============================================================================ */
-
-extern volatile sig_atomic_t g_terminate;
 
 /* ============================================================================
  * Live-socket registry — mutex-protected array of all active sockets.

@@ -62,8 +62,10 @@ extern THREAD_FUNC(discovery_thread);
 /*
  * Build the CPF body for a List Identity reply.
  * Called both from the UDP thread and from eip_dispatch() for TCP 0x0063.
+ * local_ipv4 (host byte order) is the reply socket address the client should
+ * connect back to; the caller computes it from the request's arrival path.
  */
-extern Bytes discovery_list_identity_cpf(Arena *a, device_t *dev);
+extern Bytes discovery_list_identity_cpf(Arena *a, device_t *dev, uint32_t local_ipv4);
 
 /* Build the CPF body for a List Services reply. */
 extern Bytes discovery_list_services_cpf(Arena *a);

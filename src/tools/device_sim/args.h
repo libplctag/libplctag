@@ -34,22 +34,20 @@
 #pragma once
 
 #include <stdint.h>
-#include "device.h"
+#include "device_sim.h"
 
 /*
- * Parse argv into *dev and *debug_level_out.
+ * Parse argv into a new device_sim_t and an optional debug level.
  *
- * Returns PLCTAG_STATUS_OK on success.
+ * Returns PLCTAG_STATUS_OK on success (*sim_out is set, caller owns it).
  * Returns 1 if --help was requested (caller should exit(0)).
- * Returns a negative PLCTAG_ERR_* code on bad input.
+ * Returns a negative PLCTAG_ERR_* code on bad input (*sim_out is NULL).
  *
- * On success, dev->tags is a linked list of heap-allocated tag_def_t
- * structs (including initialized data_mutex). Free with args_free_tags.
+ * The returned device_sim_t must be freed with device_sim_destroy().
  */
-extern int32_t args_parse(int argc, char **argv, device_t *dev, int32_t *debug_level_out);
-
-/* Free the tag list produced by args_parse (destroys mutexes, frees memory). */
-extern void args_free_tags(tag_def_t *tags);
+extern int32_t args_parse(int argc, char **argv,
+                           device_sim_t **sim_out,
+                           int32_t *debug_level_out);
 
 /* Print usage to stderr. */
 extern void args_print_usage(const char *prog);

@@ -126,7 +126,7 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
 
     switch(req_hdr.cmd) {
         case EIP_CMD_LIST_IDENTITY:
-            response_body = discovery_list_identity_cpf(a, dev);
+            response_body = discovery_list_identity_cpf(a, dev, sess->local_ipv4);
             break;
 
         case EIP_CMD_REGISTER_SESSION:

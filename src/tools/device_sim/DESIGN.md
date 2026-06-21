@@ -388,7 +388,141 @@ test: once `device_sim` is running, a broadcast scan must list it.
 
 ---
 
-## 7. Tag and UDT listing (ControlLogix-class only)
+## 7. Library API and simulation callbacks
+
+The core of `device_sim` is split into a reusable static library so other
+programs can embed simulated devices. The `device_sim` executable becomes a thin
+CLI (`main.c` + `args.c`) layered on the same public API; **anything reachable
+from the command line is reachable from the API**, because `args.c` is rewritten
+to call it.
+
+### 7.1 Library structure
+
+- New static library target `device_sim_core` (CMake) built from
+  `device.c cip.c cpf.c eip.c identity.c pccc.c discovery.c server.c` plus
+  `arena.c`/`bytes.c`. Public header `device_sim.h` (opaque `device_sim_t *`).
+- `device_sim` executable = `main.c` + `args.c` linked against `device_sim_core`.
+- `device_t` becomes the internal struct behind the opaque handle. It gains: an
+  atomic `terminate` flag, the connect/disconnect callback + device `user_data`,
+  an embedded `identity_t` (copied at create from `identity_for_plc_type`), the
+  listener/discovery thread handles, the socket registry, and the CIP-object
+  registry (§7.6).
+
+### 7.2 De-globalize shutdown
+
+The process-global `volatile sig_atomic_t g_terminate` cannot be shared by two
+sims in one process. Replace it with a per-device atomic flag checked by
+`server.c`/`discovery.c`/`recv_exact`/`send_all` (all already hold a
+`device_t *`). The CLI keeps the `SIGINT`/`SIGTERM` handler; the handler calls
+`device_sim_stop(dev)`, which sets the flag, `registry_wake_all`s, and joins the
+threads. `device_sim_stop` is idempotent and safe to trigger from a handler.
+
+### 7.3 Lifecycle API
+
+```c
+typedef struct device_sim_s device_sim_t;   /* opaque */
+
+typedef struct {
+    plc_type_t  plc_type;
+    uint16_t    port;
+    const char *bind_addr;
+    int32_t     response_delay_ms;
+    uint32_t    client_to_server_max_packet;
+    uint32_t    server_to_client_max_packet;
+    void       *user_data;                   /* passed to the connect/disconnect cb */
+    device_sim_conn_cb conn_cb;
+} device_sim_config_t;
+
+extern device_sim_t *device_sim_create(const device_sim_config_t *cfg);
+extern int32_t       device_sim_start(device_sim_t *dev);   /* spawn listener + discovery threads */
+extern int32_t       device_sim_stop(device_sim_t *dev);    /* idempotent */
+extern void          device_sim_destroy(device_sim_t *dev);
+```
+
+### 7.4 Tags and read/write callbacks
+
+`tag_def_t` gains `read_cb`, `write_cb`, and a per-tag `user_data`; tag creation
+moves out of `args.c` into the library:
+
+```c
+typedef void (*device_sim_tag_cb)(device_sim_t *dev, const char *name,
+                                  void *data, size_t data_len, void *user_data);
+
+extern int32_t device_sim_add_tag(device_sim_t *dev, const char *name, tag_type_t type,
+                                  const size_t *dims, size_t num_dims,
+                                  device_sim_tag_cb read_cb, device_sim_tag_cb write_cb,
+                                  void *user_data);
+```
+
+Hook points in `cip.c` (and the PCCC paths):
+- `handle_read` fires `read_cb` **before** serializing the response, letting the
+  callback refresh the value the client is about to read.
+- `handle_write` fires `write_cb` **after** storing the new bytes, letting the
+  program react to what was written.
+
+### 7.5 Connect/disconnect callback and direct access
+
+```c
+typedef void (*device_sim_conn_cb)(device_sim_t *dev, const char *client_ip,
+                                   bool connected, void *user_data);
+```
+Fired at TCP granularity (matching the `@connection` tag semantics): at the top
+of `conn_handler` (connect) and at its cleanup (disconnect), using the socket
+peer address and the device `user_data`.
+
+Direct, self-locking access — the caller never takes a lock:
+```c
+extern int32_t device_sim_tag_get(device_sim_t *dev, const char *name, size_t offset, void *dst, size_t len);
+extern int32_t device_sim_tag_set(device_sim_t *dev, const char *name, size_t offset, const void *src, size_t len);
+extern int32_t device_sim_get_identity(device_sim_t *dev, identity_t *out);
+extern int32_t device_sim_set_identity(device_sim_t *dev, const identity_t *id);
+```
+Identity gets direct get/set (the status word is the one field a real PLC changes
+dynamically); it deliberately has **no** read callback — identity is read rarely
+and a callback there buys little.
+
+Two invariants keep this thread-safe without a recursive mutex or caller locking:
+1. The protocol handler invokes a tag's callback **without holding that tag's
+   `data_mutex`**, passing a mutable buffer (read: a snapshot to optionally
+   modify; write: the just-stored bytes). Inside a tag's own callback, mutate the
+   provided buffer directly; use `device_sim_tag_set/get` for *other* tags or
+   from outside. This is deadlock-free.
+2. Tags may only be added **before** `device_sim_start`, so the tag list is
+   immutable while threads run — name lookups need no list lock; only each tag's
+   `data_mutex` matters.
+
+### 7.6 Generic CIP object registry
+
+Beyond the built-in Identity object and the symbolic-tag path, a program can
+register a handler for an arbitrary `(class_id, instance_id)`. CIP logical
+segments encode 8/16/32-bit class (`0x20`/`0x21`/`0x22`) and instance
+(`0x24`/`0x25`/`0x26`) forms, so **IDs are 32-bit**:
+
+```c
+typedef int32_t (*device_sim_cip_cb)(device_sim_t *dev, uint8_t service,
+                                     const uint8_t *path, size_t path_len,
+                                     const uint8_t *req, size_t req_len,
+                                     uint8_t *resp, size_t resp_cap, size_t *resp_len,
+                                     void *user_data);   /* return NOT_HANDLED to fall through */
+
+extern int32_t device_sim_add_cip_object(device_sim_t *dev, uint32_t class_id, uint32_t instance_id,
+                                         device_sim_cip_cb cb, void *user_data);
+```
+
+- The registry is consulted in `cip_dispatch_*` before the built-in handlers (or
+  as the `default:` case). Supported services are **implicit**: the callback
+  handles what it knows and returns `NOT_HANDLED` for the rest, which the
+  dispatcher turns into the standard CIP "service unsupported" error.
+- The existing 8-bit-only `parse_class_instance_path` stays for the Identity path
+  (always class 1 / instance 1); a sibling parser decoding all three widths into
+  `uint32_t` class/instance/attribute feeds the registry lookup.
+
+This is the minimal raw hook — no typed class/instance/attribute framework — and
+it is also the mechanism for the remaining protocol phases (§8 and below).
+
+---
+
+## 8. Tag and UDT listing (ControlLogix-class only)
 
 Served from `cip.c` behind the existing service dispatch, populated from the
 in-memory tag table:
@@ -410,7 +544,7 @@ template replies.
 
 ---
 
-## 8. Build phases
+## 9. Build phases
 
 Each phase is independently runnable and testable against the real `libplctag`
 client and the L81E test PLC string
@@ -424,16 +558,21 @@ client and the L81E test PLC string
 | **3** | Per-tag `data_mutex` protection around tag data access. | `ab_server/plc.h` + `ab_server/cip.c` locking sites; `critical_block` from `platform.h`. |
 | **4** | Identity model + CIP Identity object (`@identity` reads reproduce the captures byte-for-byte). | new `identity.c`; field order from `scan_eip_network.c:parse_list_identity_item`. |
 | **5** | UDP discovery thread: List Identity (broadcast + TCP), List Services, List Interfaces. `scan_eip_network` finds the sim. | new `discovery.c`; `scan_eip_network.c` (inverse of its parser); new `socket_open_udp`/`recv_from`/`send_to`. |
-| **6** | Tag + UDT listing for ControlLogix-class (`0x6B`/`0x6C`). | `ROCKWELL-SPECIFIC-DESIGN.md §5`; `attic/` legacy encoder. |
-| **7** | OMRON dialect specifics for the sim (Simple Data Segment `0x80`, OMRON identity/enumeration classes) as needed. | `OMRON-SPECIFIC-DESIGN.md`; `~/Projects/aphytcomm`. |
-| **8** | PCCC data path (PLC/5, SLC, MicroLogix read/write). | `ab_server/pccc.c` (full), `ab_server_fiber/pccc.c` (Bytes-based partial). |
+| **6** | Library refactor: opaque `device_sim_t`, lifecycle API (`create`/`start`/`stop`/`destroy`), de-globalized per-device `terminate`, identity moved into `device_t`, `args.c` rewritten onto the API. Existing CLI behavior unchanged. | §7.1–7.3; current `main.c`/`args.c`/`device.h`. |
+| **7** | Tag read/write callbacks + self-locking direct access (`device_sim_tag_get/set`, `device_sim_get/set_identity`). | §7.4–7.5; `cip.c handle_read`/`handle_write`. |
+| **8** | Client connect/disconnect callback (TCP granularity, client IP + device `user_data`). | §7.5; `server.c conn_handler`; socket peer-address accessor. |
+| **9** | Generic CIP object registry (32-bit class/instance, `NOT_HANDLED` fall-through). | §7.6; `cip.c` dispatch; new wide class/instance path parser. |
+| **10** | Tag + UDT listing for ControlLogix-class (`0x6B`/`0x6C`). | `ROCKWELL-SPECIFIC-DESIGN.md §5`; `attic/` legacy encoder. |
+| **11** | OMRON dialect specifics for the sim (Simple Data Segment `0x80`, OMRON identity/enumeration classes) as needed. | `OMRON-SPECIFIC-DESIGN.md`; `~/Projects/aphytcomm`. |
+| **12** | PCCC data path (PLC/5, SLC, MicroLogix read/write). | `ab_server/pccc.c` (full), `ab_server_fiber/pccc.c` (Bytes-based partial). |
 
-Phases 0–4 reproduce and clean up current `ab_server` functionality; 5–8 are the
-new features.
+Phases 0–4 reproduce and clean up current `ab_server` functionality; 5 adds
+discovery; 6–9 turn the core into an embeddable library with simulation
+callbacks; 10–12 add the remaining protocol coverage.
 
 ---
 
-## 9. Code-pointer appendix
+## 10. Code-pointer appendix
 
 | Need | Copy / idea from |
 |------|------------------|

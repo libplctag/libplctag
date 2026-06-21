@@ -96,9 +96,12 @@ static Bytes build_eip_udp_reply(Arena *a, uint16_t cmd, uint64_t sender_ctx, By
  * Public CPF builders — also used by eip.c for TCP List Identity
  * ============================================================================ */
 
-extern Bytes discovery_list_identity_cpf(Arena *a, device_t *dev) {
-    const identity_t *id = identity_for_plc_type(dev->plc_type);
-    Bytes item_body = identity_encode_listid_item(a, id, dev->local_ipv4, dev->port);
+extern Bytes discovery_list_identity_cpf(Arena *a, device_t *dev, uint32_t local_ipv4) {
+    identity_t id;
+    mutex_lock(dev->identity_mutex);
+    id = dev->identity;
+    mutex_unlock(dev->identity_mutex);
+    Bytes item_body = identity_encode_listid_item(a, &id, local_ipv4, dev->port);
     if(bytes_is_null(item_body)) { return (Bytes){NULL, 0}; }
 
     Bytes cpf = bytes_pack(a, BYTES_LE,
@@ -180,7 +183,7 @@ extern THREAD_FUNC(discovery_thread) {
     uint8_t buf[UDP_BUF_SIZE];
     char    src_host[SRC_HOST_LEN];
 
-    while(!g_terminate) {
+    while(!atomic_get_bool(&dev->terminate)) {
         arena_reset(&arena);
 
         uint16_t src_port = 0;
@@ -216,9 +219,14 @@ extern THREAD_FUNC(discovery_thread) {
 
         Bytes cpf = {NULL, 0};
         switch(cmd) {
-            case EIP_CMD_LIST_IDENTITY:
-                cpf = discovery_list_identity_cpf(&arena, dev);
+            case EIP_CMD_LIST_IDENTITY: {
+                /* Report the egress IP that reaches this querier, so the reply's
+                 * embedded socket address is one the client can connect back to. */
+                uint32_t reply_ip = dev->local_ipv4;
+                socket_local_ipv4_to_peer(src_host, &reply_ip);
+                cpf = discovery_list_identity_cpf(&arena, dev, reply_ip);
                 break;
+            }
             case EIP_CMD_LIST_SERVICES:
                 cpf = discovery_list_services_cpf(&arena);
                 break;

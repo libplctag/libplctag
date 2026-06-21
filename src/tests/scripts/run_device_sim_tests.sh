@@ -49,7 +49,7 @@ if [[ ! -d $TEST_DIR ]]; then
     exit 1
 fi
 
-EXECUTABLES="device_sim tag_rw2 thread_stress test_connection_tag test_connection_tag_late_join test_idle_disconnect test_shutdown_cip test_shutdown_restart get_identity scan_eip_network"
+EXECUTABLES="device_sim tag_rw2 thread_stress test_connection_tag test_connection_tag_late_join test_idle_disconnect test_shutdown_cip test_shutdown_restart get_identity scan_eip_network devsim_with_plctag"
 for EXECUTABLE in $EXECUTABLES; do
     if [[ ! -e "$TEST_DIR/$EXECUTABLE" ]]; then
         echo "$TEST_DIR/$EXECUTABLE not found!"
@@ -227,6 +227,20 @@ fi
 echo "Killing device_sim (port 44818)."
 kill_process device_sim
 wait $DEVICE_SIM_PID2 2>/dev/null
+
+# devsim_with_plctag is self-contained: it starts its own embedded sim on 44818,
+# reads a tag back through libplctag, and exits.  Run it once 44818 is free.
+let TEST++
+echo -n "  Test $TEST: libdevsim + libplctag in one process (devsim_with_plctag)... "
+$VALGRIND$TEST_DIR/devsim_with_plctag \
+    > "$LOG_DIR/${TEST}_devsim_with_plctag.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 echo ""
 echo "Results:"

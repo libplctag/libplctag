@@ -23,7 +23,7 @@
  *   This program is distributed in the hope that it will be useful,       *
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
+ *   GNU Library General Public License for more details.                  *
  *                                                                         *
  *   You should have received a copy of the GNU Library General Public     *
  *   License along with this program; if not, write to the                 *
@@ -36,65 +36,44 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "platform.h"
+#include "utils/atomic_utils.h"
+#include "device_sim.h"   /* public POD types: device_sim_t, plc_type_t,
+                             tag_type_t, identity_t, the callback typedefs */
 
 /* ============================================================================
- * PLC type
+ * One registry entry — singly-linked, built before start, read-only after.
  * ============================================================================ */
 
-typedef enum {
-    PLC_CONTROL_LOGIX,
-    PLC_MICRO800,
-    PLC_OMRON,
-    PLC_PLC5,
-    PLC_SLC,
-    PLC_MICROLOGIX
-} plc_type_t;
+typedef struct cip_obj_entry_s {
+    struct cip_obj_entry_s *next;
+    uint32_t            class_id;
+    uint32_t            instance_id;
+    device_sim_cip_cb   cb;
+    void               *user_data;
+} cip_obj_entry_t;
 
 /* ============================================================================
- * CIP type codes
- * ============================================================================ */
-
-typedef uint16_t tag_type_t;
-
-#define TAG_CIP_TYPE_BOOL   ((tag_type_t)0x00C1)
-#define TAG_CIP_TYPE_SINT   ((tag_type_t)0x00C2)
-#define TAG_CIP_TYPE_INT    ((tag_type_t)0x00C3)
-#define TAG_CIP_TYPE_DINT   ((tag_type_t)0x00C4)
-#define TAG_CIP_TYPE_LINT   ((tag_type_t)0x00C5)
-#define TAG_CIP_TYPE_REAL   ((tag_type_t)0x00CA)
-#define TAG_CIP_TYPE_LREAL  ((tag_type_t)0x00CB)
-#define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0)
-
-/* ============================================================================
- * PCCC type codes
- * ============================================================================ */
-
-#define TAG_PCCC_TYPE_BIT    ((tag_type_t)0x0085)
-#define TAG_PCCC_TYPE_INT    ((tag_type_t)0x0089)
-#define TAG_PCCC_TYPE_DINT   ((tag_type_t)0x0091)
-#define TAG_PCCC_TYPE_REAL   ((tag_type_t)0x008A)
-#define TAG_PCCC_TYPE_STRING ((tag_type_t)0x008D)
-
-/* ============================================================================
- * tag_def_t — one per configured tag; ->data written by CIP/PCCC handlers.
+ * tag_def_t — one per configured tag
  * ============================================================================ */
 
 typedef struct tag_def_s {
-    struct tag_def_s *next_tag;
-    char             *name;
-    tag_type_t        tag_type;
-    size_t            elem_size;
-    size_t            elem_count;
-    size_t            data_file_num;   /* PCCC only; 0 for CIP */
-    size_t            num_dimensions;
-    size_t            dimensions[3];
-    uint8_t          *data;
-    mutex_p           data_mutex;      /* protects ->data for concurrent r/w */
+    struct tag_def_s  *next_tag;
+    char              *name;
+    tag_type_t         tag_type;
+    size_t             elem_size;
+    size_t             elem_count;
+    size_t             data_file_num;   /* PCCC only; 0 for CIP */
+    size_t             num_dimensions;
+    size_t             dimensions[3];
+    uint8_t           *data;
+    mutex_p            data_mutex;
+    device_sim_tag_cb  read_cb;
+    device_sim_tag_cb  write_cb;
+    void              *user_data;
 } tag_def_t;
 
 /* ============================================================================
- * eip_session_t — per-connection EIP/CIP state (lives on the thread stack).
- * Adapted from src/poc/ab_server_fiber/plc.h.
+ * eip_session_t — per-connection EIP/CIP state (lives on the thread stack)
  * ============================================================================ */
 
 typedef struct {
@@ -114,31 +93,55 @@ typedef struct {
     uint32_t client_to_server_max_packet;
     uint32_t server_to_client_max_packet;
 
-    /* Cached per-layer sizes recalculated on ForwardOpen/ForwardClose. */
     uint32_t raw_packet_size;
-    size_t   max_eip_packet_size;   /* 0 = no limit */
+    size_t   max_eip_packet_size;
     size_t   max_cpf_packet_size;
     size_t   max_cip_packet_size;
 
     uint16_t pccc_seq_id;
     int32_t  reject_fo_count;
+
+    uint32_t local_ipv4;   /* host-byte-order local address of this TCP socket; reported in TCP List Identity */
 } eip_session_t;
 
 /* ============================================================================
- * device_t — global server config; read-only after init; shared by all threads.
- * Replaces plc_config_t from ab_server_fiber/plc.h.
+ * device_t — shared runtime state; read-only after start except:
+ *   - terminate (atomic write by device_sim_stop)
+ *   - identity  (protected by identity_mutex)
+ *   - tag data  (each tag protected by its own data_mutex)
  * ============================================================================ */
 
 typedef struct {
-    plc_type_t  plc_type;
-    uint16_t    port;
-    const char *bind_addr;
-    uint32_t    local_ipv4;  /* host-byte-order; embedded in List Identity responses */
+    plc_type_t   plc_type;
+    uint16_t     port;
+    const char  *bind_addr;
+    uint32_t     local_ipv4;   /* host-byte-order; in List Identity replies */
 
-    uint32_t    client_to_server_max_packet;
-    uint32_t    server_to_client_max_packet;
+    uint32_t     client_to_server_max_packet;
+    uint32_t     server_to_client_max_packet;
 
-    int32_t     response_delay_ms;
+    int32_t      response_delay_ms;
 
-    tag_def_t  *tags;
+    tag_def_t   *tags;
+
+    /* Back-pointer to the owning device_sim_t — set once at create, never changes.
+     * Lets protocol handlers pass the public handle to tag callbacks without
+     * knowing the full struct layout. */
+    device_sim_t *sim;
+
+    /* Generic CIP object registry — built before start, read-only after. */
+    cip_obj_entry_t   *cip_objects;
+
+    /* Connect/disconnect callbacks — set before device_sim_start, no locking needed. */
+    device_sim_conn_cb connect_cb;
+    void              *connect_user_data;
+    device_sim_conn_cb disconnect_cb;
+    void              *disconnect_user_data;
+
+    /* Per-device shutdown flag; replaces process-global g_terminate. */
+    atomic_bool  terminate;
+
+    /* Identity object — mutable via device_sim_set_identity, mutex-protected. */
+    identity_t   identity;
+    mutex_p      identity_mutex;
 } device_t;

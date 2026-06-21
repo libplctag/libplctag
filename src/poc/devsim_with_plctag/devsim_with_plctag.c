@@ -23,7 +23,7 @@
  *   This program is distributed in the hope that it will be useful,       *
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
+ *   GNU Library General Public License for more details.                  *
  *                                                                         *
  *   You should have received a copy of the GNU Library General Public     *
  *   License along with this program; if not, write to the                 *
@@ -31,33 +31,68 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
-#include "utils/arena.h"
-#include "utils/bytes.h"
-#include "device.h"   /* provides identity_t, plc_type_t */
-
-/* Return the built-in default identity for a given PLC type (used at create time). */
-extern const identity_t *identity_for_plc_type(plc_type_t pt);
-
 /*
- * Encode GetAttributesAll body (no CIP response header).
- * Layout: vendor_id(u16LE) device_type(u16LE) product_code(u16LE)
- *         revision_major(u8) revision_minor(u8) status(u16LE)
- *         serial(u32LE) name_len(u8) name(bytes)
+ * devsim_with_plctag — proof that one executable can link BOTH libplctag and
+ * libdevsim.  libdevsim already bundles the static libplctag, so linking
+ * libdevsim is enough to reach the plc_tag_* public API too.
+ *
+ * It starts an in-process ControlLogix simulator with a single DINT tag, seeds
+ * the value through the device_sim API, then connects to it over loopback with
+ * the libplctag client API and reads the value back.
  */
-extern Bytes identity_encode_get_attrs_all(Arena *a, const identity_t *id);
 
-/*
- * Encode a single attribute value (no CIP response header).
- * Returns null Bytes for unknown attribute numbers.
- */
-extern Bytes identity_encode_get_attr_single(Arena *a, uint16_t attr, const identity_t *id);
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-/*
- * Encode a CPF List Identity item body (type 0x000C).
- * Layout is the exact inverse of scan_eip_network.c:parse_list_identity_item.
- * ipv4_host and port_host are host-byte-order; the function writes them BE.
- */
-extern Bytes identity_encode_listid_item(Arena *a, const identity_t *id,
-                                         uint32_t ipv4_host, uint16_t port_host);
+#include "libplctag.h"
+#include "device_sim.h"
+
+#define SIM_PORT ((uint16_t)44818)
+#define EXPECTED ((int32_t)1234567)
+
+int main(void) {
+    /* --- libdevsim: stand up an embedded simulator with one DINT tag --- */
+    device_sim_t *sim = device_sim_create(PLC_CONTROL_LOGIX, NULL, SIM_PORT);
+    if(!sim) {
+        printf("device_sim_create failed\n");
+        return 1;
+    }
+
+    uint32_t dims[1] = {1};
+    if(device_sim_add_tag(sim, "TestDINT", TAG_CIP_TYPE_DINT, dims, 1, NULL, NULL, NULL) != PLCTAG_STATUS_OK) {
+        printf("device_sim_add_tag failed\n");
+        device_sim_destroy(sim);
+        return 1;
+    }
+
+    int32_t seed = EXPECTED;
+    device_sim_tag_set(sim, "TestDINT", 0, &seed, sizeof(seed));
+
+    if(device_sim_start(sim) != PLCTAG_STATUS_OK) {
+        printf("device_sim_start failed\n");
+        device_sim_destroy(sim);
+        return 1;
+    }
+
+    /* --- libplctag: connect to that simulator and read the tag back --- */
+    int32_t tag = plc_tag_create(
+        "protocol=ab-eip&gateway=127.0.0.1:44818&path=1,0&plc=ControlLogix&elem_count=1&name=TestDINT",
+        5000);
+
+    int32_t rc = 1;
+    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
+        printf("plc_tag_create failed: %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+    } else if(plc_tag_read(tag, 5000) != PLCTAG_STATUS_OK) {
+        printf("plc_tag_read failed\n");
+    } else {
+        int32_t got = plc_tag_get_int32(tag, 0);
+        printf("read TestDINT = %d (expected %d): %s\n", got, EXPECTED, got == EXPECTED ? "OK" : "MISMATCH");
+        rc = (got == EXPECTED) ? 0 : 1;
+    }
+
+    plc_tag_destroy(tag);
+    device_sim_stop(sim);
+    device_sim_destroy(sim);
+    return rc;
+}

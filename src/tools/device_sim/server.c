@@ -39,6 +39,7 @@
 #include "utils/debug.h"
 #include "utils/arena.h"
 #include "utils/bytes.h"
+#include "device_sim.h"
 #include "eip.h"
 #include "server.h"
 
@@ -126,7 +127,7 @@ extern void registry_wake_all(registry_t *reg) {
  * wake-pipe integration.  Return PLCTAG_STATUS_OK or a negative error code.
  * ============================================================================ */
 
-static int32_t recv_exact(sock_p sock, uint8_t *buf, int32_t len) {
+static int32_t recv_exact(sock_p sock, device_t *dev, uint8_t *buf, int32_t len) {
     int32_t total = 0;
     while(total < len) {
         int32_t events = socket_wait_event(sock,
@@ -137,7 +138,7 @@ static int32_t recv_exact(sock_p sock, uint8_t *buf, int32_t len) {
         if(events & SOCK_EVENT_DISCONNECT) { return PLCTAG_ERR_BAD_CONNECTION; }
         if(events & SOCK_EVENT_ERROR)      { return PLCTAG_ERR_READ; }
         if(events & SOCK_EVENT_TIMEOUT) {
-            if(g_terminate) { return PLCTAG_ERR_ABORT; }
+            if(atomic_get_bool(&dev->terminate)) { return PLCTAG_ERR_ABORT; }
             continue;
         }
         if(!(events & SOCK_EVENT_CAN_READ)) { return PLCTAG_ERR_BAD_STATUS; }
@@ -152,7 +153,7 @@ static int32_t recv_exact(sock_p sock, uint8_t *buf, int32_t len) {
 }
 
 
-static int32_t send_all(sock_p sock, uint8_t *buf, int32_t len) {
+static int32_t send_all(sock_p sock, device_t *dev, uint8_t *buf, int32_t len) {
     int32_t total = 0;
     while(total < len) {
         int32_t events = socket_wait_event(sock,
@@ -163,7 +164,7 @@ static int32_t send_all(sock_p sock, uint8_t *buf, int32_t len) {
         if(events & SOCK_EVENT_DISCONNECT) { return PLCTAG_ERR_BAD_CONNECTION; }
         if(events & SOCK_EVENT_ERROR)      { return PLCTAG_ERR_WRITE; }
         if(events & SOCK_EVENT_TIMEOUT) {
-            if(g_terminate) { return PLCTAG_ERR_ABORT; }
+            if(atomic_get_bool(&dev->terminate)) { return PLCTAG_ERR_ABORT; }
             continue;
         }
         if(!(events & SOCK_EVENT_CAN_WRITE)) { return PLCTAG_ERR_BAD_STATUS; }
@@ -199,9 +200,18 @@ static THREAD_FUNC(conn_handler) {
     mem_set(&sess, 0, (int)sizeof(sess));
     eip_session_set_unconnected_sizes(&sess, c->device->server_to_client_max_packet);
 
+    /* Local address of this accepted socket — the IP the client reached us on,
+     * reported back in any TCP List Identity reply. */
+    sess.local_ipv4 = c->device->local_ipv4;
+    socket_local_ipv4(c->sock, &sess.local_ipv4);
+
     pdebug(DEBUG_MOD, DEBUG_DETAIL, 0, "Connection handler started.");
 
-    while(!g_terminate) {
+    if(c->device->connect_cb) {
+        c->device->connect_cb(c->device->sim, c->device->connect_user_data);
+    }
+
+    while(!atomic_get_bool(&c->device->terminate)) {
         arena_reset(&arena);
 
         /* Phase 1: read 24-byte EIP header. */
@@ -211,7 +221,7 @@ static THREAD_FUNC(conn_handler) {
             break;
         }
 
-        int32_t rc = recv_exact(c->sock, hdr.data, (int32_t)hdr.len);
+        int32_t rc = recv_exact(c->sock, c->device, hdr.data, (int32_t)hdr.len);
         if(rc != PLCTAG_STATUS_OK) {
             if(rc != PLCTAG_ERR_ABORT && rc != PLCTAG_ERR_BAD_CONNECTION) {
                 pdebug(DEBUG_MOD, DEBUG_WARN, 0, "EIP header recv error %d.", rc);
@@ -247,7 +257,7 @@ static THREAD_FUNC(conn_handler) {
                 pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "Arena OOM allocating payload buffer.");
                 break;
             }
-            rc = recv_exact(c->sock, payload.data, (int32_t)payload.len);
+            rc = recv_exact(c->sock, c->device, payload.data, (int32_t)payload.len);
             if(rc != PLCTAG_STATUS_OK) {
                 if(rc != PLCTAG_ERR_ABORT && rc != PLCTAG_ERR_BAD_CONNECTION) {
                     pdebug(DEBUG_MOD, DEBUG_WARN, 0, "EIP payload recv error %d.", rc);
@@ -271,7 +281,7 @@ static THREAD_FUNC(conn_handler) {
         if(bytes_is_null(resp)) { break; }
 
         /* Phase 5: send response. */
-        rc = send_all(c->sock, resp.data, (int32_t)resp.len);
+        rc = send_all(c->sock, c->device, resp.data, (int32_t)resp.len);
         if(rc != PLCTAG_STATUS_OK) {
             if(rc != PLCTAG_ERR_ABORT && rc != PLCTAG_ERR_BAD_CONNECTION) {
                 pdebug(DEBUG_MOD, DEBUG_WARN, 0, "EIP response send error %d.", rc);
@@ -281,6 +291,10 @@ static THREAD_FUNC(conn_handler) {
     }
 
     pdebug(DEBUG_MOD, DEBUG_DETAIL, 0, "Connection handler closing.");
+
+    if(c->device->disconnect_cb) {
+        c->device->disconnect_cb(c->device->sim, c->device->disconnect_user_data);
+    }
 
     registry_remove(c->registry, c->sock);
     socket_close(c->sock);
@@ -302,6 +316,8 @@ extern THREAD_FUNC(server_listener) {
     sock_p      listen_sock = NULL;
     int32_t     rc;
 
+    mem_free(lctx);   /* context only needed to pass arguments; free now */
+
     pdebug(DEBUG_MOD, DEBUG_INFO, 0,
            "Listener starting on %s:%u.",
            device->bind_addr ? device->bind_addr : "0.0.0.0",
@@ -322,7 +338,7 @@ extern THREAD_FUNC(server_listener) {
 
     registry_add(registry, listen_sock);
 
-    while(!g_terminate) {
+    while(!atomic_get_bool(&device->terminate)) {
         sock_p client = NULL;
         rc = socket_accept(listen_sock, &client, ACCEPT_TIMEOUT_MS);
 
