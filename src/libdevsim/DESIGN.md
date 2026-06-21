@@ -570,6 +570,28 @@ Phases 0–4 reproduce and clean up current `ab_server` functionality; 5 adds
 discovery; 6–9 turn the core into an embeddable library with simulation
 callbacks; 10–12 add the remaining protocol coverage.
 
+### 9.1 Status (current)
+
+| Phase | State |
+|-------|-------|
+| 0–9   | **Done.** Read/write (incl. tags larger than the comm buffer), Identity, UDP+TCP discovery, library refactor, callbacks, generic CIP registry — all passing the `run_device_sim_tests.sh` suite (11/11). |
+| 10    | Pending — Tag + UDT listing (`0x6B`/`0x6C`). |
+| 11    | Pending — OMRON dialect specifics. |
+| 12    | Pending — PCCC data path (PLC/5, SLC, MicroLogix). |
+
+Post-Phase-9 hardening (not in the original table, **done**):
+
+- `libdevsim` is a top-level static build product parallel to `libplctag`, with a
+  thin `device_sim` CLI on top; `src/poc/devsim_with_plctag` proves one executable
+  can link both APIs.
+- Public header (`device_sim.h`) made FFI-clean: fixed-width types only
+  (`uint32_t`, no `size_t`), no structs passed by value/pointer — scalar
+  `create()` args plus setters instead of a config struct.
+- List Identity reply IP is derived by the library per request from the request's
+  arrival path (`socket_local_ipv4` / `socket_local_ipv4_to_peer`, POSIX +
+  Windows), so the embedded socket address is always reachable by the querying
+  client; the caller-facing `set_local_ipv4` setter was removed.
+
 ---
 
 ## 10. Code-pointer appendix
