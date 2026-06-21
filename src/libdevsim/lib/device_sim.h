@@ -136,7 +136,14 @@ typedef void (*device_sim_conn_cb)(device_sim_t *sim, void *user_data);
  * resp_cap bytes into resp; set *resp_len to the byte count.  Return any other
  * negative PLCTAG_ERR_* to send a CIP "service unsupported" error response.
  */
+/* Sentinel instance_id for device_sim_add_cip_object: matches any instance. */
+#define DEVICE_SIM_ANY_INSTANCE ((uint32_t)0xFFFFFFFFu)
+
 #define DEVICE_SIM_NOT_HANDLED ((int32_t)1)
+
+/* Return from a device_sim_cip_cb to signal "partial response, more data follows"
+ * (CIP general status 0x06).  Write the partial data into resp as usual. */
+#define DEVICE_SIM_MORE_DATA ((int32_t)2)
 
 typedef int32_t (*device_sim_cip_cb)(device_sim_t *sim, uint8_t service, const uint8_t *path, uint32_t path_len, const uint8_t *req,
                                      uint32_t req_len, uint8_t *resp, uint32_t resp_cap, uint32_t *resp_len, void *user_data);

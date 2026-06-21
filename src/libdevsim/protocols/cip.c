@@ -570,11 +570,19 @@ static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pay
         return ((Bytes){NULL, 0});
     }
 
-    cip_obj_entry_t *entry = dev->cip_objects;
+    /* Exact match first; fall back to wildcard (DEVICE_SIM_ANY_INSTANCE) entry. */
+    cip_obj_entry_t *entry   = dev->cip_objects;
+    cip_obj_entry_t *wildcard = NULL;
     while(entry) {
-        if(entry->class_id == class_id && entry->instance_id == instance_id) { break; }
+        if(entry->class_id == class_id) {
+            if(entry->instance_id == instance_id) { break; }
+            if(entry->instance_id == DEVICE_SIM_ANY_INSTANCE && !wildcard) {
+                wildcard = entry;
+            }
+        }
         entry = entry->next;
     }
+    if(!entry) { entry = wildcard; }
     if(!entry) { return ((Bytes){NULL, 0}); }
 
     if(max_data == 0) { max_data = 504; }
@@ -591,12 +599,14 @@ static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pay
                            entry->user_data);
 
     if(rc == DEVICE_SIM_NOT_HANDLED) { return ((Bytes){NULL, 0}); }
-    if(rc != PLCTAG_STATUS_OK) {
+    if(rc != PLCTAG_STATUS_OK && rc != DEVICE_SIM_MORE_DATA) {
         return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
+    /* DEVICE_SIM_MORE_DATA → CIP general status 0x06 (partial transfer / more data). */
+    uint8_t cip_status = (rc == DEVICE_SIM_MORE_DATA) ? CIP_ERR_FRAG : CIP_OK;
     Bytes hdr = bytes_pack(a, BYTES_LE,
-                           (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+                           (uint8_t)(svc | CIP_DONE), (uint8_t)0, cip_status, (uint8_t)0);
     if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
 
     return bytes_concat(a, hdr, bytes_slice(resp_buf, 0, resp_len));

@@ -3,6 +3,9 @@ message("Building libplctag library.")
 # generate version file from CMake info.
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h" @ONLY)
 
+# generate the compile-time feature-gate header (LIBPLCTAG_FEATURE_*).
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h" @ONLY)
+
 # Parse libplctag.h to generate internal debug constants
 # This creates add_custom_command for debug_generated.h and debug_module_names.c
 # The .c file is included in libplctag_SRCS below, so CMake tracks the dependency automatically
@@ -28,8 +31,10 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
-message("Adding AB protocol sources to build.")
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab")
+if(LIBPLCTAG_FEATURE_EIP)
+    message("Adding AB protocol sources to build.")
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab")
+endif()
 
 # set up the library sources
 set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
@@ -39,23 +44,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_connection_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_connection_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/cip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/conn.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/conn.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/defs.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_raw_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_raw_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_standard_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_standard_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/system.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/system.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/tag.h"
@@ -81,7 +70,33 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
-list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")
+# EtherNet/IP: Allen-Bradley (AB_PROTOCOL_SOURCES from the ab/ subdirectory) + OMRON.
+if(LIBPLCTAG_FEATURE_EIP)
+    list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")
+    list(APPEND libplctag_SRCS
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_connection_tag.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_connection_tag.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/cip.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/cip.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/conn.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/conn.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/defs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_raw_tag.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_raw_tag.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_standard_tag.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_standard_tag.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/tag.h")
+endif()
+
+# Modbus/TCP.
+if(LIBPLCTAG_FEATURE_MODBUS)
+    list(APPEND libplctag_SRCS
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.h")
+endif()
 
 
 macro(print_all_ar_link_variables)

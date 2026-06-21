@@ -74,6 +74,16 @@ set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 set(MAX_DEBUG_LEVEL 4 CACHE STRING "Maximum debug level to include in the build (0-5)")
 set(LIBPLCTAG_ENABLE_COVERAGE 0 CACHE BOOL "Enable code coverage measurement")
 
+# Compile-time feature gates.  Default on for the protocols; SERVER turns on when
+# the server-tag sources are integrated (Phase A of REFACTOR_PLAN.md).
+set(LIBPLCTAG_FEATURE_EIP 1 CACHE BOOL "Build EtherNet/IP support (Allen-Bradley + OMRON)")
+set(LIBPLCTAG_FEATURE_MODBUS 1 CACHE BOOL "Build Modbus/TCP support")
+set(LIBPLCTAG_FEATURE_SERVER 0 CACHE BOOL "Build server tag (device simulator) support")
+
+if(LIBPLCTAG_FEATURE_SERVER AND NOT (LIBPLCTAG_FEATURE_EIP OR LIBPLCTAG_FEATURE_MODBUS))
+    message(FATAL_ERROR "LIBPLCTAG_FEATURE_SERVER requires LIBPLCTAG_FEATURE_EIP and/or LIBPLCTAG_FEATURE_MODBUS.")
+endif()
+
 # message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 
 # we need threads

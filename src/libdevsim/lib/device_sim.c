@@ -42,6 +42,7 @@
 #include "identity.h"
 #include "server.h"
 #include "discovery.h"
+#include "dialects/ab_listing.h"
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS
 
@@ -191,6 +192,14 @@ extern device_sim_t *device_sim_create(plc_type_t plc_type, const char *bind_add
         mutex_destroy(&sim->dev.identity_mutex);
         mem_free(sim);
         return NULL;
+    }
+
+    /* Register manufacturer-specific CIP dialect handlers. */
+    if(plc_type == PLC_CONTROL_LOGIX || plc_type == PLC_MICRO800) {
+        if(ab_listing_register(sim, &sim->dev) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                   "device_sim_create: ab_listing_register failed (tag listing will not work).");
+        }
     }
 
     pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,

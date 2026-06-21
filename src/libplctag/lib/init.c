@@ -33,10 +33,15 @@
 
 #include <libplctag/lib/init.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/plctag_features.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/protocols/ab/ab.h>
-#include <libplctag/protocols/mb/modbus.h>
-#include <libplctag/protocols/omron/omron.h>
+#if LIBPLCTAG_FEATURE_EIP
+#    include <libplctag/protocols/ab/ab.h>
+#    include <libplctag/protocols/omron/omron.h>
+#endif
+#if LIBPLCTAG_FEATURE_MODBUS
+#    include <libplctag/protocols/mb/modbus.h>
+#endif
 #include <libplctag/protocols/system/system.h>
 #include <utils/rc.h>
 #include <platform.h>
@@ -60,11 +65,16 @@ struct {
 } tag_type_map[] = {
     /* System tags */
     {.protocol = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
+#if LIBPLCTAG_FEATURE_EIP
     /* Allen-Bradley PLCs */
     {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
     {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+#endif
+#if LIBPLCTAG_FEATURE_MODBUS
     {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
-    {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
+    {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}
+#endif
+};
 
 /* Library state machine */
 #define LIB_STATE_UNINITIALIZED ((int32_t)0)
@@ -160,14 +170,20 @@ void destroy_modules(void) {
         return;
     }
 
+#if LIBPLCTAG_FEATURE_EIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
     ab_teardown();
+#endif
 
+#if LIBPLCTAG_FEATURE_MODBUS
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
+#endif
 
+#if LIBPLCTAG_FEATURE_EIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
+#endif
 
     /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
      * module: those destructors run tag teardown that touches the tag table, lookup
@@ -268,6 +284,7 @@ int initialize_modules(void) {
         return rc;
     }
 
+#if LIBPLCTAG_FEATURE_EIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing AB module.");
     rc = ab_init();
     if(rc != PLCTAG_STATUS_OK) {
@@ -275,7 +292,9 @@ int initialize_modules(void) {
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
+#endif
 
+#if LIBPLCTAG_FEATURE_MODBUS
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Modbus module.");
     rc = mb_init();
     if(rc != PLCTAG_STATUS_OK) {
@@ -283,7 +302,9 @@ int initialize_modules(void) {
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
+#endif
 
+#if LIBPLCTAG_FEATURE_EIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Omron module.");
     rc = omron_init();
     if(rc != PLCTAG_STATUS_OK) {
@@ -291,6 +312,7 @@ int initialize_modules(void) {
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
+#endif
 
     /* hook the destructor */
 #if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)

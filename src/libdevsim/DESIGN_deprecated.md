@@ -59,22 +59,47 @@ important behavioral constraint and it drives the threading model below.
 
 ## 1. File layout
 
+The library lives in `src/libdevsim`, a top-level build product whose directory
+structure parallels `src/libplctag` (`lib/` = public API + shared context,
+`protocols/` = the wire implementation).  The CLI is a thin separate tool.
+
 ```
-src/tools/device_sim/
+src/libdevsim/                  the library (static; links plctag_static)
   DESIGN.md            this document
-  CMakeLists.txt       links libplctag platform + src/utils objects
+  CMakeLists.txt       builds the devsim static lib from lib/ + protocols/ + src/utils
+  lib/
+    device_sim.h         PUBLIC, FFI-clean API (the only installed header)
+    device_sim.c         device_sim_t lifecycle + tag/identity/registry API impl
+    device.h             plc_type_t, identity_t, tag_def_t, device_t (shared context)
+  protocols/             === vendor-NEUTRAL core (CIP/EIP common to every PLC) ===
+    server.c/.h            TCP listener thread + per-connection thread (linear flow)
+    discovery.c/.h        UDP List Identity responder (+ ListServices/ListInterfaces)
+    identity.c/.h         per-model identity table + CIP Identity object encoder
+    eip.c/.h              EIP encapsulation dispatch        (fork of fiber eip.c)
+    cpf.c/.h              CPF / connected + unconnected      (fork of fiber cpf.c)
+    cip.c/.h              core CIP services: FO/FC, read/write 0x4C/0x4D, multi 0x0A,
+                          fragmented 0x52/0x53, and the generic class/instance registry
+    pccc.c/.h             PCCC encapsulation framing (data path is a dialect; see below)
+  protocols/dialects/    === MANUFACTURER-SPECIFIC, one module per vendor family ===
+    ab_listing.c/.h       Rockwell tag + UDT/template listing (class 0x6B/0x6C)
+    omron_listing.c/.h    OMRON variable + structure enumeration (its own classes/services)
+    pccc_data.c/.h        AB legacy data path (PLC/5, SLC, MicroLogix)
+
+src/tools/device_sim/           the CLI tool (links the devsim library)
+  CMakeLists.txt       builds the device_sim executable
   main.c               CLI flag table, identity/tag table build, signal handler, run loop
   args.c/.h            table-driven CLI argument parser (copy of fiber args.c/.h; see §1.1)
-  device.h             plc_type_t, identity_t, tag_def_t, device_t (the shared context)
-  server.c/.h          TCP listener thread + per-connection thread (linear flow)
-  discovery.c/.h       UDP List Identity responder thread (+ ListServices/ListInterfaces)
-  identity.c/.h        per-model identity table + CIP Identity object encoder
-  eip.c/.h             EIP encapsulation dispatch        (fork of fiber eip.c)
-  cpf.c/.h             CPF / connected + unconnected      (fork of fiber cpf.c)
-  cip.c/.h             CIP services: FO/FC, read/write, multi, listing (fork of fiber cip.c)
-  tag.c/.h             tag store, mutexed data access, multi-dim indexing
-  pccc.c/.h            PCCC data path (later phase; port of ab_server/pccc.c)
 ```
+
+**Core vs. dialect boundary (load-bearing).** `protocols/` is vendor-neutral:
+encapsulation, connection management, the Identity object, and the *generic*
+CIP read/write/multi services that every Logix-class and OMRON PLC answers
+identically.  Anything where vendors diverge — above all **tag enumeration and
+UDT/structure introspection** — lives under `protocols/dialects/`, one module
+per manufacturer family, plugged in through the generic CIP object registry
+(§7.6) rather than by editing core `cip.c`.  AB and OMRON do *not* share a tag-
+or UDT-listing mechanism (different CIP classes, services, and reply encodings),
+so they are separate dialect modules, not flags inside one code path.  See §8.
 
 ### 1.1 args.c/.h — table-driven argument parser
 
@@ -522,10 +547,24 @@ it is also the mechanism for the remaining protocol phases (§8 and below).
 
 ---
 
-## 8. Tag and UDT listing (ControlLogix-class only)
+## 8. Manufacturer-specific dialects: tag and UDT listing
 
-Served from `cip.c` behind the existing service dispatch, populated from the
-in-memory tag table:
+Tag enumeration and UDT/structure introspection are **not** core CIP — each
+manufacturer family does it with different classes, services, and reply
+encodings. They therefore live as separate modules under `protocols/dialects/`,
+each registering handlers through the generic CIP object registry (§7.6). Core
+`cip.c` is never edited to add a dialect: it routes the dialect's classes to the
+registered handler and otherwise returns "service not supported". A model only
+advertises a listing dialect if its `plc_type` selects it; everything else gets
+"service not supported".
+
+The shared infrastructure that core provides to every dialect:
+
+- the generic class/instance registry (§7.6) as the plug-in point,
+- the connection size and the general-status `0x06` "partial transfer"
+  continuation convention, so any dialect can page a reply that overflows.
+
+### 8.1 Rockwell / ControlLogix-class (`ab_listing.c`)
 
 - **Symbol listing** — class `0x6B`, service `0x55` (GetInstanceAttributeList),
   attributes 1 (name) + 2 (type). Reply is the paged
@@ -535,12 +574,25 @@ in-memory tag table:
   size/member-count/handle, then Read Template (`0x4C`) for the member-info array
   + name blob, itself fragmented.
 
-Reference: this is the server side of the client format documented in
-`ENIP-SESSION-DESIGN.md` / `ROCKWELL-SPECIFIC-DESIGN.md §5`, and the legacy
-encoder lives in `attic/`. Only ControlLogix-class models advertise listing;
-Micro800/PCCC models return "service not supported". UDT-bearing tags in the
-table need a small member-layout descriptor added to `tag_def_t` to synthesize
+Reference: server side of the client format in `ENIP-SESSION-DESIGN.md` /
+`ROCKWELL-SPECIFIC-DESIGN.md §5`; legacy encoder in `attic/`. UDT-bearing tags in
+the table need a small member-layout descriptor on `tag_def_t` to synthesize
 template replies.
+
+### 8.2 OMRON (`omron_listing.c`)
+
+OMRON NJ/NX controllers expose variables and data-type (structure) details
+through a **different** path than Rockwell — its own enumeration classes/services
+and reply layout, plus the Simple Data Segment (`0x80`) addressing used on reads.
+It shares none of `0x6B`/`0x6C`'s record format, so it is a distinct module, not a
+branch inside `ab_listing.c`. Reference: `OMRON-SPECIFIC-DESIGN.md`,
+`~/Projects/aphytcomm`.
+
+### 8.3 AB legacy PCCC (`pccc_data.c`)
+
+PLC/5, SLC, and MicroLogix have no symbolic tag list at all — addressing is by
+data-table file/element. The PCCC data path is therefore its own dialect module;
+`protocols/pccc.c` keeps only the vendor-neutral encapsulation framing.
 
 ---
 
@@ -562,22 +614,29 @@ client and the L81E test PLC string
 | **7** | Tag read/write callbacks + self-locking direct access (`device_sim_tag_get/set`, `device_sim_get/set_identity`). | §7.4–7.5; `cip.c handle_read`/`handle_write`. |
 | **8** | Client connect/disconnect callback (TCP granularity, client IP + device `user_data`). | §7.5; `server.c conn_handler`; socket peer-address accessor. |
 | **9** | Generic CIP object registry (32-bit class/instance, `NOT_HANDLED` fall-through). | §7.6; `cip.c` dispatch; new wide class/instance path parser. |
-| **10** | Tag + UDT listing for ControlLogix-class (`0x6B`/`0x6C`). | `ROCKWELL-SPECIFIC-DESIGN.md §5`; `attic/` legacy encoder. |
-| **11** | OMRON dialect specifics for the sim (Simple Data Segment `0x80`, OMRON identity/enumeration classes) as needed. | `OMRON-SPECIFIC-DESIGN.md`; `~/Projects/aphytcomm`. |
-| **12** | PCCC data path (PLC/5, SLC, MicroLogix read/write). | `ab_server/pccc.c` (full), `ab_server_fiber/pccc.c` (Bytes-based partial). |
+| **10** | **Dialect:** Rockwell tag + UDT/template listing — `protocols/dialects/ab_listing.c`, registered via §7.6 (`0x6B`/`0x6C`). | `ROCKWELL-SPECIFIC-DESIGN.md §5`; `attic/` legacy encoder. |
+| **11** | **Dialect:** OMRON variable/structure enumeration + Simple Data Segment `0x80` — `protocols/dialects/omron_listing.c`. | `OMRON-SPECIFIC-DESIGN.md`; `~/Projects/aphytcomm`. |
+| **12** | **Dialect:** AB legacy PCCC data path (PLC/5, SLC, MicroLogix) — `protocols/dialects/pccc_data.c`. | `ab_server/pccc.c` (full), `ab_server_fiber/pccc.c` (Bytes-based partial). |
 
 Phases 0–4 reproduce and clean up current `ab_server` functionality; 5 adds
 discovery; 6–9 turn the core into an embeddable library with simulation
-callbacks; 10–12 add the remaining protocol coverage.
+callbacks. Phases 10–12 are **manufacturer-specific dialect modules** (§8) — each
+self-contained under `protocols/dialects/` and wired in through the generic CIP
+registry, so vendor differences never leak into the vendor-neutral core.
 
 ### 9.1 Status (current)
 
 | Phase | State |
 |-------|-------|
 | 0–9   | **Done.** Read/write (incl. tags larger than the comm buffer), Identity, UDP+TCP discovery, library refactor, callbacks, generic CIP registry — all passing the `run_device_sim_tests.sh` suite (11/11). |
-| 10    | Pending — Tag + UDT listing (`0x6B`/`0x6C`). |
-| 11    | Pending — OMRON dialect specifics. |
-| 12    | Pending — PCCC data path (PLC/5, SLC, MicroLogix). |
+| 10    | **Done.** Rockwell dialect: tag listing (class `0x6B`, service `0x55`, paged). Class `0x6C` registered; returns "unsupported" pending UDT template support. |
+| 11    | Pending — **OMRON dialect:** variable/structure enumeration + SDS `0x80`. |
+| 12    | Pending — **AB PCCC dialect:** PLC/5, SLC, MicroLogix data path. |
+
+The three remaining phases are manufacturer-specific dialect modules
+(`protocols/dialects/`), each plugged into the vendor-neutral core through the
+generic CIP object registry — AB and OMRON list tags / expose UDT details by
+entirely different mechanisms, so neither shares the other's code path.
 
 Post-Phase-9 hardening (not in the original table, **done**):
 
@@ -594,7 +653,235 @@ Post-Phase-9 hardening (not in the original table, **done**):
 
 ---
 
-## 10. Code-pointer appendix
+## 11. Future: folding the simulator into the libplctag tag API
+
+Sections 1–10 describe `libdevsim` as a standalone library with its own
+`device_sim_*` object API. This section is the architecture-of-record for the
+*next* step: exposing simulation through the existing `plc_tag_*` API so users
+learn one API, and the simulator reuses the client's tag-object machinery
+instead of duplicating it.
+
+### 11.1 Why merge (and when not to)
+
+The standalone `device_sim_*` API already works — a real libplctag client talks
+to it over localhost. So the merge is justified **only** by two payoffs:
+
+1. **One mental model** — no second API surface to learn.
+2. **Code deletion in the sim** — reuse the client id table, refcount, per-tag
+   mutex, `plc_tag_status`, and `plc_tag_register_callback` instead of the
+   bespoke `device_sim_tag_cb` / `conn_cb` / id management.
+
+Hard line: **server concerns never enter the client read/write hot path.** Keep
+the two apart by *dispatch*, not by `if(is_sim)` branches in `ab_tag_read`. If a
+step doesn't deliver payoff 1 or 2, skip it.
+
+### 11.2 Three pillars
+
+**1 — One tag-definition vocabulary (attribute string for both sides).**
+A simulated tag is *declared* with the same grammar a client uses to *address*
+one (`name=Foo&elem_type=DINT&elem_count=10`). One parser; the listing dialects
+(§8) derive symbol metadata from the same `tag_def_t`. The positional
+`device_sim_add_tag(type, dims, num_dims)` becomes an internal helper.
+
+**2 — Server role selected by dispatch, not a new object type.**
+Add one attribute `role=client` (default) `| server`, and key the
+`tag_type_map` (`lib/init.c`) on `(protocol, role)` instead of `protocol`:
+
+```
+{ .protocol="ab-eip", .role="server", .tag_constructor = ab_sim_create }
+```
+
+`find_tag_create_func` already does a first-match table scan — this is a column,
+not a rewrite. The returned handle is a real tag-table entry, so
+create/destroy/id/refcount/`plc_tag_status` are reused verbatim;
+`plc_tag_destroy`'s per-type destructor is where threads stop and tags free. New
+PLC type = one row + one constructor, no dispatcher edits. AB and OMRON share
+`protocol=ab-eip` and diverge through the §7.6 CIP registry; Modbus is its own
+row.
+
+**3 — Everything is a tag; the server is internal (laziest ownership).**
+No public "device handle" object. A `role=server` create is keyed by
+`bind_addr:port` in an internal registry: the first one finds-or-creates the
+backing server (threads, discovery); later server-role creates register their
+tag def with it. Each simulated tag is a normal `plc_tag` whose backing store is
+the sim's memory, so `plc_tag_get_int32(sim_tag,…)` reads that store — the
+`device_sim_tag_get` behaviour, through the API users already know. Server
+refcount = live server-role tags at that endpoint; last destroy tears it down.
+
+```c
+int32_t t = plc_tag_create(
+    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "&name=PumpSpeed&elem_type=DINT&elem_count=1", 0);
+plc_tag_set_int32(t, 0, 1234);   /* seed the simulated value */
+```
+
+*Alternative (only if explicit lifecycle is wanted):* a first-class device
+handle (`role=server` with no `name=` returns the device; tags attach via
+`device=<id>`). More surface, explicit start/stop. Default to the auto model.
+
+### 11.3 Configuration, realism, testing
+
+- **New attributes:** `role`; reuse of `elem_type`/`elem_count`/`name` on the
+  server side; fault injection `sim_delay_ms`, `sim_fault=<cip_status>`,
+  `sim_drop_rate`, `sim_max_packet` (map onto existing
+  `set_response_delay`/`set_max_packet`); identity via `make`/`model`/`serial`.
+- **Callbacks:** ride the existing `plc_tag_register_callback` read/write/created
+  enum; delete `device_sim_tag_cb` / `device_sim_conn_cb`.
+- **Realism:** keep the §8 dialect registry — it's the right seam. Keep the
+  partial-transfer (`0x06`) and packet-cap modeling; that's the part not to
+  simplify.
+- **Testing:** in-process loopback (client + server tag in one process). Add
+  `transport=loopback` to bypass the socket entirely (shared in-memory queue)
+  for fast unit tests; the real-socket path stays for integration. Reuse
+  `run_device_sim_tests.sh`.
+
+### 11.4 Feature gating for embedded use
+
+Single library, compile-time `#if`, default **on**. Do **not** ship multiple
+prebuilt artifacts — that is N build configs / artifacts / support matrices
+forever, for no source-level benefit.
+
+- One generated `plctag_features.h`:
+  `LIBPLCTAG_FEATURE_{SIM,AB,OMRON,MODBUS,PCCC}`.
+- `tag_type_map` rows and each protocol `.c` wrapped in `#if`. A disabled feature
+  drops its rows → its `protocol=` simply fails to match → clean
+  `PLCTAG_ERR_NOT_FOUND`. No runtime cost, no plugin loader.
+- CMake options `-DLIBPLCTAG_SIM=OFF` etc.; document a one-table feature matrix.
+
+Trade-off, plainly: single-source + `#if` costs guard discipline; multiple
+libraries cost a permanent N× packaging/CI/support burden. One library with
+flags is the lazy and correct choice.
+
+### 11.5 Phasing
+
+1. Unify the tag vocabulary — sim consumes attribute strings; `tag_def_t` is the
+   single source of symbol metadata. (Unblocks the listing dialects cleanly.)
+2. `(protocol, role)` dispatch + endpoint registry — server-role creates route
+   to a sim constructor; server tags are real tag-table entries.
+3. Replace `device_sim_*` callbacks with `plc_tag_register_callback`; delete the
+   duplicate callback types.
+4. Feature flags — `plctag_features.h`, CMake options, `#if`-guards.
+5. Fault injection + `transport=loopback`.
+
+Steps 1–3 are the merge; 4–5 are independent and land in any order.
+
+### 11.6 Examples
+
+All of these go through the existing `plc_tag_create` / `plc_tag_*` API. The only
+new attribute on the create string is `role=server` plus the optional `sim_*`
+and identity knobs; everything else is the grammar clients already use.
+
+**A. Minimal: one simulated DINT, seeded and read back in-process**
+
+```c
+/* role=server auto-starts the backing server on bind_addr:port. */
+int32_t srv = plc_tag_create(
+    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "&name=PumpSpeed&elem_type=DINT&elem_count=1", 1000);
+if(srv < 0) { /* handle error */ }
+
+plc_tag_set_int32(srv, 0, 1234);          /* seed the simulated value */
+
+/* a normal client elsewhere now reads 1234 over the wire: */
+int32_t cli = plc_tag_create(
+    "protocol=ab-eip&gateway=127.0.0.1&path=1,0&name=PumpSpeed&elem_count=1", 1000);
+plc_tag_read(cli, 1000);
+int32_t v = plc_tag_get_int32(cli, 0);    /* == 1234 */
+
+plc_tag_destroy(cli);
+plc_tag_destroy(srv);                     /* last server-role tag → server stops */
+```
+
+**B. Several tags on one device (same endpoint = same server)**
+
+```c
+const char *base = "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818";
+char attr[256];
+
+snprintf(attr, sizeof(attr), "%s&name=Flags&elem_type=BOOL&elem_count=32", base);
+int32_t flags = plc_tag_create(attr, 1000);
+
+snprintf(attr, sizeof(attr), "%s&name=Recipe&elem_type=INT&elem_count=10", base);
+int32_t recipe = plc_tag_create(attr, 1000);
+
+snprintf(attr, sizeof(attr), "%s&name=Setpoint&elem_type=REAL&elem_count=1", base);
+int32_t setpoint = plc_tag_create(attr, 1000);
+/* first create started the server; the next two register tags on it. */
+```
+
+**C. Multi-dimensional array tag**
+
+```c
+/* 2x3 DINT array — same dims grammar the client uses to address it. */
+int32_t grid = plc_tag_create(
+    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "&name=Grid&elem_type=DINT&dimensions=2,3", 1000);
+```
+
+**D. Identity + fault injection (realistic device, exercises client error paths)**
+
+```c
+int32_t srv = plc_tag_create(
+    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "&make=Rockwell&model=1756-L83E&serial=0x00C0FFEE"
+    "&sim_delay_ms=50"          /* every response delayed 50 ms              */
+    "&sim_max_packet=508"       /* force fragmentation / partial transfer    */
+    "&sim_fault=0x05"           /* return CIP status 0x05 (path destination  */
+                                /* unknown) so the client sees a real error  */
+    "&name=Temperature&elem_type=REAL&elem_count=1", 1000);
+```
+
+**E. OMRON server (same API, dialect selected by the §7.6 CIP registry)**
+
+```c
+int32_t srv = plc_tag_create(
+    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "&make=Omron&model=NX102&name=Tank.Level&elem_type=REAL&elem_count=1", 1000);
+```
+
+**F. Modbus server**
+
+```c
+int32_t srv = plc_tag_create(
+    "protocol=modbus-tcp&role=server&gateway=0.0.0.0&port=502"
+    "&name=HoldingRegs&elem_type=INT16&elem_count=100", 1000);
+```
+
+**G. Loopback transport — no socket, fast unit test**
+
+```c
+/* transport=loopback shares an in-memory queue; client and server tags in the
+ * same process never touch the network.  Ideal for CI. */
+int32_t srv = plc_tag_create(
+    "protocol=ab-eip&role=server&transport=loopback&name=X&elem_type=DINT&elem_count=1", 0);
+int32_t cli = plc_tag_create(
+    "protocol=ab-eip&transport=loopback&name=X&elem_count=1", 0);
+
+plc_tag_set_int32(srv, 0, 7);
+plc_tag_read(cli, 0);
+assert(plc_tag_get_int32(cli, 0) == 7);
+```
+
+**H. Write callback on the server side (reuses `plc_tag_register_callback`)**
+
+```c
+/* No bespoke device_sim_tag_cb — the server tag fires the same event enum a
+ * client tag does.  Here: observe a client's write land on the simulated tag. */
+void on_event(int32_t tag, int32_t event, int32_t status, void *udata) {
+    if(event == PLCTAG_EVENT_WRITE_COMPLETED) {
+        printf("client wrote Setpoint = %d\n", plc_tag_get_int32(tag, 0));
+    }
+}
+
+int32_t srv = plc_tag_create(
+    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "&name=Setpoint&elem_type=DINT&elem_count=1", 1000);
+plc_tag_register_callback(srv, on_event);
+```
+
+---
+
+## 12. Code-pointer appendix
 
 | Need | Copy / idea from |
 |------|------------------|

@@ -42,6 +42,8 @@ set(DEVSIM_CORE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/protocols/pccc.h
     ${CMAKE_CURRENT_SOURCE_DIR}/protocols/server.c
     ${CMAKE_CURRENT_SOURCE_DIR}/protocols/server.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocols/dialects/ab_listing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocols/dialects/ab_listing.h
 )
 
 add_library(devsim STATIC ${DEVSIM_CORE_FILES})
@@ -51,6 +53,7 @@ add_library(devsim STATIC ${DEVSIM_CORE_FILES})
 target_include_directories(devsim PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/lib
     ${CMAKE_CURRENT_SOURCE_DIR}/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocols/dialects
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils
 )
 

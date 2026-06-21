@@ -39,11 +39,16 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/lib/init.h>
+#include <libplctag/lib/plctag_features.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
-#include <libplctag/protocols/ab/ab.h>
-#include <libplctag/protocols/mb/modbus.h>
-#include <libplctag/protocols/omron/omron.h>
+#if LIBPLCTAG_FEATURE_EIP
+#    include <libplctag/protocols/ab/ab.h>
+#    include <libplctag/protocols/omron/omron.h>
+#endif
+#if LIBPLCTAG_FEATURE_MODBUS
+#    include <libplctag/protocols/mb/modbus.h>
+#endif
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -1044,14 +1049,18 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      */
     if(src_tag) {
         switch(src_tag->protocol_type) {
+#if LIBPLCTAG_FEATURE_EIP
             case TAG_PROTOCOL_AB:
             case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
 
             case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
             case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;
+#endif
 
+#if LIBPLCTAG_FEATURE_MODBUS
             case TAG_PROTOCOL_MODBUS:
             case TAG_PROTOCOL_MB_CONNECTION: tag_constructor = mb_tag_create; break;
+#endif
 
             default: tag_constructor = NULL; break;
         }
