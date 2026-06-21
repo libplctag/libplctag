@@ -295,11 +295,11 @@ int debug_register_logger(log_func_t log_callback) {
 
 
 int debug_unregister_logger(void) {
-    int rc = PLCTAG_STATUS_OK;
+    /* atomic_set_ptr swaps in NULL and returns the previous callback; if there
+     * was none, there was nothing to unregister. */
+    void *prev = atomic_set_ptr(&log_callback_func, NULL);
 
-    atomic_set_ptr(&log_callback_func, NULL);
-
-    return rc;
+    return prev ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_FOUND;
 }
 
 
