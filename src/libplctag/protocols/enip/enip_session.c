@@ -92,6 +92,11 @@
  * with no scheduled work, the session disconnects and waits for new work. */
 #define ENIP_MIN_INACTIVITY_MS ((int64_t)1000)
 #define ENIP_MAX_INACTIVITY_MS ((int64_t)30000)
+
+/* Connection-status event ring (§ @connection tag). Single producer (IO
+ * thread), multiple consumers (each @connection tag keeps its own read idx). */
+#define ENIP_CONN_STATUS_RING_SIZE ((int32_t)16)
+#define ENIP_CONN_STATUS_RING_MASK (ENIP_CONN_STATUS_RING_SIZE - 1)
 /* Upper bound on batch array sizes (stack-allocated); the actual runtime limit
  * c->max_batch is derived from the negotiated CIP payload after ForwardOpen
  * and is always clamped to this value. */
@@ -106,6 +111,7 @@
 enum {
     CONN_CONNECT = 0,
     CONN_REGISTER,
+    CONN_IDENTITY, /* Get_Attributes_All on the CIP Identity object, before ForwardOpen */
     CONN_OPEN,
     CONN_READY,
     CONN_SENDING,
@@ -158,6 +164,22 @@ struct enip_connection_t {
     int64_t last_activity_ms;
     uint8_t conn_status; /* PLCTAG_CONN_STATUS_* */
 
+    /* conn-status event ring; IO thread writes via set_conn_status, @connection
+     * tags drain via enip_session_next_conn_status. */
+    uint8_t conn_status_ring[ENIP_CONN_STATUS_RING_SIZE];
+    atomic_int32_t conn_status_ring_write_idx;
+
+    /* CIP Identity object, queried once during bring-up (§ @identity). Raw
+     * Get_Attributes_All payload cached for @identity tags; parsed fields kept
+     * for device detection. identity_data is mem_alloc'd, freed in destructor. */
+    bool identity_valid;
+    uint8_t *identity_data;
+    uint16_t identity_len;
+    uint16_t ident_vendor_id, ident_device_type, ident_product_code;
+    uint8_t ident_rev_major, ident_rev_minor;
+    uint16_t ident_status;
+    uint32_t ident_serial;
+
     uint8_t state;
     uint8_t resume_state;
 
@@ -187,6 +209,7 @@ static void complete_batch(enip_connection_t *c, int8_t status);
 static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void reset_connection(enip_connection_t *c);
 static void idle_disconnect(enip_connection_t *c);
+static void set_conn_status(enip_connection_t *c, uint8_t status);
 static void conn_destructor(void *arg);
 static THREAD_FUNC(io_thread_func);
 
@@ -258,7 +281,12 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
     c->max_cip_packet_size = ENIP_FO_CIP_SIZE;
     c->inactivity_timeout_ms = ENIP_MAX_INACTIVITY_MS;
     c->last_activity_ms = time_ms();
-    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_CONNECTING;
+
+    /* Start at DOWN with an empty ring, then record the CONNECTING transition so a
+     * fresh @connection tag (read idx 0) observes CONNECTING before UP. */
+    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_DOWN;
+    atomic_init_int32(&c->conn_status_ring_write_idx, 0);
+    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_CONNECTING);
 
     if(thread_create(&c->thread, io_thread_func, 32768, (void *)c) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create IO thread!");
@@ -272,10 +300,12 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
     return c;
 }
 
-enip_connection_t *enip_session_create(attr attribs) {
+enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
     const char *gateway = attr_get_str(attribs, "gateway", NULL);
     const char *path = attr_get_str(attribs, "path", NULL);
     int port = attr_get_int(attribs, "port", ENIP_DEFAULT_PORT);
+
+    if(is_new_out) { *is_new_out = false; }
 
     if(!gateway || str_length(gateway) == 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"gateway\" attribute.");
@@ -302,6 +332,7 @@ enip_connection_t *enip_session_create(attr attribs) {
 
         if(!result) {
             result = create_connection(gateway, path, port);
+            if(result && is_new_out) { *is_new_out = true; }
         }
     }
 
@@ -558,6 +589,29 @@ int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_value) {
     c->inactivity_timeout_ms = v;
 
     return rc;
+}
+
+/* Record a connection-status transition: update the field and, if it changed,
+ * push it onto the ring for @connection tags to observe. IO-thread only. */
+static void set_conn_status(enip_connection_t *c, uint8_t status) {
+    if(c->conn_status == status) { return; }
+
+    c->conn_status = status;
+
+    int32_t idx = (atomic_get_int32(&c->conn_status_ring_write_idx) + 1) & ENIP_CONN_STATUS_RING_MASK;
+    c->conn_status_ring[idx] = status;
+    atomic_set_int32(&c->conn_status_ring_write_idx, idx);
+}
+
+int32_t enip_session_conn_status_idx(enip_connection_t *c) { return atomic_get_int32(&c->conn_status_ring_write_idx); }
+
+bool enip_session_next_conn_status(enip_connection_t *c, int32_t *read_idx, int32_t *status_out) {
+    if(*read_idx == atomic_get_int32(&c->conn_status_ring_write_idx)) { return false; }
+
+    *read_idx = (*read_idx + 1) & ENIP_CONN_STATUS_RING_MASK;
+    *status_out = (int32_t)c->conn_status_ring[*read_idx];
+
+    return true;
 }
 
 /* ============================================================================
@@ -1415,7 +1469,8 @@ static void reset_connection(enip_connection_t *c) {
     c->rx_cap = ENIP_BOOTSTRAP_PACKET;
     c->connect_started = false;
     c->reconnect_at_ms = time_ms() + ENIP_RECONNECT_DELAY_MS;
-    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_ERR_WAIT;
+    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_DOWN);
+    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_ERR_WAIT);
     c->state = CONN_CONNECT;
 }
 
@@ -1437,7 +1492,8 @@ static void idle_disconnect(enip_connection_t *c) {
     c->tx_len = c->tx_off = 0;
     c->rx_cap = ENIP_BOOTSTRAP_PACKET;
     c->connect_started = false;
-    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_IDLE_WAIT;
+    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_DOWN);
+    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_IDLE_WAIT);
     c->state = CONN_IDLE;
 }
 
@@ -1592,7 +1648,7 @@ static THREAD_FUNC(io_thread_func) {
                 break;
 
             case CONN_READY: {
-                c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_UP;
+                set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_UP);
 
                 if(c->in_flight == NULL && c->batch_head == NULL) {
                     pick_batch(c, now, &wait_ms);
@@ -1615,6 +1671,7 @@ static THREAD_FUNC(io_thread_func) {
                 } else if(now - c->last_activity_ms >= c->inactivity_timeout_ms) {
                     /* gracefully ForwardClose the live connection before going
                      * idle; if there is none, just drop straight to idle. */
+                    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_DISCONNECTING);
                     if(c->session_handle != 0 && c->cip_conn_id != 0) {
                         c->state = CONN_CLOSE;
                     } else {
@@ -1636,7 +1693,7 @@ static THREAD_FUNC(io_thread_func) {
                 critical_block(c->sched_mutex) { have_work = (c->sched_head != NULL); }
 
                 if(have_work) {
-                    c->conn_status = (uint8_t)PLCTAG_CONN_STATUS_CONNECTING;
+                    set_conn_status(c, (uint8_t)PLCTAG_CONN_STATUS_CONNECTING);
                     c->reconnect_at_ms = 0;
                     c->last_activity_ms = time_ms();
                     c->state = CONN_CONNECT;

@@ -40,6 +40,7 @@
  * included without enip_tag.h.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <utils/attr.h>
@@ -50,8 +51,10 @@ typedef struct enip_tag_t enip_tag_t;
 typedef enip_tag_t *enip_tag_p;
 
 /* alloc + start the IO thread; returns a connection with one ref held by the
- * caller (no explicit destroy -- rc_dec drops the last ref). */
-extern enip_connection_t *enip_session_create(attr attribs);
+ * caller (no explicit destroy -- rc_dec drops the last ref). If is_new_out is
+ * non-NULL it is set true when a fresh connection was created, false when an
+ * existing one was reused (used by @connection tags to decide fresh vs late-join). */
+extern enip_connection_t *enip_session_create(attr attribs, bool *is_new_out);
 
 /* §13.3/13.6: under sched_mutex set op/op_time; if not already scheduled,
  * insert sorted; then socket_wake(c->sock). Returns PLCTAG_STATUS_PENDING.
@@ -74,6 +77,12 @@ extern size_t enip_session_max_cip(enip_connection_t *c);
 extern int enip_session_get_status(enip_connection_t *c);
 extern int enip_session_get_inactivity_timeout(enip_connection_t *c);
 extern int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_value);
+
+/* connection-status event ring, drained by @connection tags. Current write
+ * index is the late-join snapshot point; next_conn_status advances *read_idx by
+ * one entry and returns its status, or false when caught up. */
+extern int32_t enip_session_conn_status_idx(enip_connection_t *c);
+extern bool enip_session_next_conn_status(enip_connection_t *c, int32_t *read_idx, int32_t *status_out);
 
 /* registry lifecycle (called once from enip_init()/enip_teardown()). */
 extern int32_t enip_session_module_init(void);

@@ -75,6 +75,13 @@ struct enip_tag_t {
     Bytes path; /* encoded CIP IOI, into the tail */
     char *tag_name; /* into the tail */
     /* tail: tag_name (NUL), then the encoded CIP path bytes */
+
+    /* @connection special tag (no path/tail). Drains the connection's conn-status
+     * ring and fires PLCTAG_EVENT_CONN_STATUS_* events. */
+    int32_t conn_status_read_idx;
+    int32_t last_conn_state;
+    uint8_t is_connection_tag : 1;
+    uint8_t first_tickler_run : 1;
 };
 
 extern plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),

@@ -150,6 +150,15 @@ run_test "Set LINT bit" "set_lint_bit" \
     $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
     "--tag=${BASE}&name=TestLINTArray[0].43" --debug=4 --write=1
 
+# ----- STRING (Logix 88-byte counted struct) read/write -----
+run_test "STRING read" "string_read" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=string \
+    "--tag=${BASE}&name=barcode&elem_count=1" --debug=4
+
+run_test "STRING write" "string_write" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=string \
+    "--tag=${BASE}&name=barcode&elem_count=1" --debug=4 --write="hello enip"
+
 
 echo ""
 echo "=== Connection lifecycle and scheduling ==="

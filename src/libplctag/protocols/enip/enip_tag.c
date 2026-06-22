@@ -244,6 +244,82 @@ static int enip_tag_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name
     return (int)t->type_header_len;
 }
 
+/* ============================================================================
+ * @connection special tag (design doc §14.2): a status-only tag that mirrors
+ * the connection's conn-status ring as PLCTAG_EVENT_CONN_STATUS_* events.
+ * ============================================================================ */
+
+static int32_t enip_conn_tag_noop(plc_tag_p tag) {
+    (void)tag;
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t enip_conn_tag_status(plc_tag_p tag) { return tag->status; }
+
+static int enip_conn_tag_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+
+    if(str_cmp_i(attrib_name, "connection_status") == 0) { return (int)t->last_conn_state; }
+
+    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
+        return t->conn ? enip_session_get_inactivity_timeout(t->conn) : default_value;
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unsupported attribute \"%s\"!", attrib_name);
+    tag->status = (int8_t)PLCTAG_ERR_UNSUPPORTED;
+
+    return default_value;
+}
+
+/* Called by the generic tickler under api_mutex. Waits for the CREATED event to
+ * be dispatched, then (on the first run) synthesises the late-join state and
+ * drains any new conn-status transitions, firing one callback per transition. */
+static int32_t enip_conn_tag_tickler(plc_tag_p tag) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    if(!t->conn) { return PLCTAG_STATUS_OK; }
+
+    /* event_creation_complete is still set until plc_tag_create_ex dispatches
+     * CREATED; firing connection events before that would reorder them. */
+    if(tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
+
+    if(t->first_tickler_run) {
+        t->first_tickler_run = 0;
+
+        /* Late join: the session was already past DOWN at create time, so report
+         * the snapshot state since no ring entry exists for it. */
+        if(t->last_conn_state != (int32_t)PLCTAG_CONN_STATUS_DOWN && tag->callback) {
+            tag->callback(tag->tag_id, (int)(t->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET), PLCTAG_STATUS_OK,
+                          tag->userdata);
+        }
+    }
+
+    int32_t status = 0;
+    while(enip_session_next_conn_status(t->conn, &t->conn_status_read_idx, &status)) {
+        t->last_conn_state = status;
+        if(tag->callback) {
+            tag->callback(tag->tag_id, (int)(status + PLCTAG_EVENT_CONN_STATUS_OFFSET), PLCTAG_STATUS_OK, tag->userdata);
+        }
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+static struct tag_vtable_t enip_connection_tag_vtable = {
+    .abort = enip_conn_tag_noop,
+    .read = NULL,
+    .status = enip_conn_tag_status,
+    .tickler = enip_conn_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .get_int_attrib = enip_conn_tag_get_int_attrib,
+    .set_int_attrib = NULL,
+    .get_byte_array_attrib = NULL,
+};
+
 static int32_t enip_tag_data_written(plc_tag_p tag) {
     enip_tag_p t = (enip_tag_p)tag;
 
@@ -369,9 +445,78 @@ static enip_tag_p create_tag_object(attr attribs) {
     return tag;
 }
 
+/* Reuse an ENIP data or @connection source tag's connection, else find-or-create
+ * one from attribs. Sets *is_new true only for a freshly created connection. */
+static enip_connection_t *enip_tag_get_conn(attr attribs, plc_tag_p src_tag, bool *is_new) {
+    *is_new = false;
+
+    if(src_tag
+       && (src_tag->protocol_type == TAG_PROTOCOL_ENIP || src_tag->protocol_type == TAG_PROTOCOL_ENIP_CONNECTION)) {
+        return rc_inc(((enip_tag_p)src_tag)->conn);
+    }
+
+    return enip_session_create(attribs, is_new);
+}
+
+/* Build a status-only @connection tag: no CIP path, no OPEN_PROBE. */
+static plc_tag_p create_connection_tag(attr attribs,
+                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                       void *userdata, plc_tag_p src_tag) {
+    enip_tag_p tag = (enip_tag_p)rc_alloc((int)sizeof(struct enip_tag_t), enip_tag_destructor);
+    if(!tag) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate @connection tag!");
+        return NULL;
+    }
+
+    tag->vtable = &enip_connection_tag_vtable;
+    tag->byte_order = &enip_tag_byte_order;
+    tag->is_connection_tag = 1;
+    tag->first_tickler_run = 1;
+    tag->last_conn_state = (int32_t)PLCTAG_CONN_STATUS_DOWN;
+
+    int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->protocol_type = TAG_PROTOCOL_ENIP_CONNECTION;
+
+    bool is_new = false;
+    tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
+
+    if(!tag->conn) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create or find a connection!");
+        tag->status = (int8_t)PLCTAG_ERR_BAD_GATEWAY;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_ERR_BAD_GATEWAY);
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+        return (plc_tag_p)tag;
+    }
+
+    if(is_new) {
+        /* Fresh session: observe the full transition history from the start. */
+        tag->conn_status_read_idx = 0;
+        tag->last_conn_state = (int32_t)PLCTAG_CONN_STATUS_DOWN;
+    } else {
+        /* Late join: snapshot the current state; the first tickler synthesises it. */
+        tag->conn_status_read_idx = enip_session_conn_status_idx(tag->conn);
+        tag->last_conn_state = enip_session_get_status(tag->conn);
+    }
+
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_STATUS_OK);
+
+    return (plc_tag_p)tag;
+}
+
 plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                 void *userdata, plc_tag_p src_tag) {
     int32_t rc;
+
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        return create_connection_tag(attribs, tag_callback_func, userdata, src_tag);
+    }
 
     enip_tag_p tag = create_tag_object(attribs);
     if(!tag) { return NULL; }
@@ -385,11 +530,8 @@ plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t t
 
     tag->protocol_type = TAG_PROTOCOL_ENIP;
 
-    if(src_tag && src_tag->protocol_type == TAG_PROTOCOL_ENIP) {
-        tag->conn = rc_inc(((enip_tag_p)src_tag)->conn);
-    } else {
-        tag->conn = enip_session_create(attribs);
-    }
+    bool is_new = false;
+    tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
 
     if(!tag->conn) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create or find a connection!");
