@@ -320,6 +320,83 @@ static struct tag_vtable_t enip_connection_tag_vtable = {
     .get_byte_array_attrib = NULL,
 };
 
+/* ============================================================================
+ * @identity special tag: read-only, surfaces the connection's cached CIP
+ * Identity payload (raw Get_Attributes_All response, LE byte order). The
+ * session queries identity once during bring-up; this tag just copies the
+ * cached bytes once they are available.
+ * ============================================================================ */
+
+/* Copy the cached identity payload into tag->data; PENDING until it exists. */
+static int32_t enip_identity_tag_copy(plc_tag_p tag) {
+    enip_tag_p t = (enip_tag_p)tag;
+    uint8_t *data = NULL;
+    uint16_t len = 0;
+
+    if(!enip_session_get_identity(t->conn, &data, &len)) { return PLCTAG_STATUS_PENDING; }
+
+    uint8_t *buf = mem_realloc(tag->data, (int)len);
+    if(!buf) { return PLCTAG_ERR_NO_MEM; }
+
+    tag->data = buf;
+    tag->size = (int)len;
+    mem_copy(tag->data, data, (int)len);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t enip_identity_tag_abort(plc_tag_p tag) {
+    tag->read_in_flight = 0;
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t enip_identity_tag_status(plc_tag_p tag) { return tag->status; }
+
+static int32_t enip_identity_tag_read(plc_tag_p tag) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    if(!t->conn) { return PLCTAG_ERR_BAD_GATEWAY; }
+
+    tag->read_complete = 0;
+    tag->read_in_flight = 1;
+    tag->status = (int8_t)PLCTAG_STATUS_PENDING;
+    tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, (int8_t)PLCTAG_STATUS_OK);
+
+    /* The tickler finishes the read once the identity query has completed. */
+    return PLCTAG_STATUS_PENDING;
+}
+
+/* Called by the generic tickler under api_mutex. Completes a pending read when
+ * the session has cached the identity payload. */
+static int32_t enip_identity_tag_tickler(plc_tag_p tag) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    if(!t->conn || !tag->read_in_flight) { return PLCTAG_STATUS_OK; }
+
+    int32_t rc = enip_identity_tag_copy(tag);
+    if(rc == PLCTAG_STATUS_PENDING) { return PLCTAG_STATUS_OK; }
+
+    tag->read_in_flight = 0;
+    tag->read_complete = 1;
+    tag->status = (int8_t)rc;
+    tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
+
+    return PLCTAG_STATUS_OK;
+}
+
+static struct tag_vtable_t enip_identity_tag_vtable = {
+    .abort = enip_identity_tag_abort,
+    .read = enip_identity_tag_read,
+    .status = enip_identity_tag_status,
+    .tickler = enip_identity_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .get_int_attrib = NULL,
+    .set_int_attrib = NULL,
+    .get_byte_array_attrib = NULL,
+};
+
 static int32_t enip_tag_data_written(plc_tag_p tag) {
     enip_tag_p t = (enip_tag_p)tag;
 
@@ -510,12 +587,57 @@ static plc_tag_p create_connection_tag(attr attribs,
     return (plc_tag_p)tag;
 }
 
+/* Build a read-only @identity tag: no CIP path, no OPEN_PROBE. Surfaces the
+ * connection's cached CIP Identity payload. */
+static plc_tag_p create_identity_tag(attr attribs,
+                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                     void *userdata, plc_tag_p src_tag) {
+    enip_tag_p tag = (enip_tag_p)rc_alloc((int)sizeof(struct enip_tag_t), enip_tag_destructor);
+    if(!tag) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate @identity tag!");
+        return NULL;
+    }
+
+    tag->vtable = &enip_identity_tag_vtable;
+    tag->byte_order = &enip_tag_byte_order;
+    tag->is_identity_tag = 1;
+
+    int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->protocol_type = TAG_PROTOCOL_ENIP;
+
+    bool is_new = false;
+    tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
+
+    if(!tag->conn) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create or find a connection!");
+        tag->status = (int8_t)PLCTAG_ERR_BAD_GATEWAY;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_ERR_BAD_GATEWAY);
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+        return (plc_tag_p)tag;
+    }
+
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_STATUS_OK);
+
+    return (plc_tag_p)tag;
+}
+
 plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                 void *userdata, plc_tag_p src_tag) {
     int32_t rc;
 
     if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
         return create_connection_tag(attribs, tag_callback_func, userdata, src_tag);
+    }
+
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@identity") == 0) {
+        return create_identity_tag(attribs, tag_callback_func, userdata, src_tag);
     }
 
     enip_tag_p tag = create_tag_object(attribs);

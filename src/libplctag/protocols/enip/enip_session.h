@@ -84,6 +84,10 @@ extern int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_val
 extern int32_t enip_session_conn_status_idx(enip_connection_t *c);
 extern bool enip_session_next_conn_status(enip_connection_t *c, int32_t *read_idx, int32_t *status_out);
 
+/* Cached CIP Identity payload (raw Get_Attributes_All response), queried once
+ * during bring-up. Returns false until that query completes. */
+extern bool enip_session_get_identity(enip_connection_t *c, uint8_t **data_out, uint16_t *len_out);
+
 /* registry lifecycle (called once from enip_init()/enip_teardown()). */
 extern int32_t enip_session_module_init(void);
 extern void enip_session_module_teardown(void);

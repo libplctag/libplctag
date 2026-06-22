@@ -98,6 +98,26 @@ run_test() {
     fi
 }
 
+# Helper: run a command and pass only if its output matches a regex (grep -E).
+#   run_grep_test "<description>" "<log-suffix>" "<regex>" <command...>
+run_grep_test() {
+    local desc=$1
+    local suffix=$2
+    local pattern=$3
+    shift 3
+
+    let TEST++
+    echo -n "  Test $TEST: ${desc}... "
+    "$@" > "$LOG_DIR/${TEST}_${suffix}.log" 2>&1
+    if grep -qE "$pattern" "$LOG_DIR/${TEST}_${suffix}.log"; then
+        echo "OK"
+        let SUCCESSES++
+    else
+        echo "FAILURE (pattern '${pattern}' not found)"
+        let FAILURES++
+    fi
+}
+
 
 echo ""
 echo "=== Basic read/write (unconnected and connected messaging) ==="
@@ -158,6 +178,18 @@ run_test "STRING read" "string_read" \
 run_test "STRING write" "string_write" \
     $VALGRIND$TEST_DIR/tag_rw2 --type=string \
     "--tag=${BASE}&name=barcode&elem_count=1" --debug=4 --write="hello enip"
+
+# ----- @identity (CIP Identity object, queried during bring-up) -----
+run_test "@identity read" "identity" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=identity \
+    "--tag=${BASE}&name=@identity" --debug=4
+
+# Confirm the engine classifies the device from its Identity reply. The test PLC
+# is a 1756-L81E, whose CPU answers List Identity directly (device type PLC).
+run_grep_test "@identity device classified as ControlLogix" "identity_class" \
+    "device is ControlLogix-class" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=identity \
+    "--tag=${BASE}&name=@identity" --debug=4
 
 
 echo ""

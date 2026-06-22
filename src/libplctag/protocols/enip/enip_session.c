@@ -107,6 +107,14 @@
 #define ENIP_VENDOR_ID ((uint16_t)0xF33D)
 #define ENIP_ORIGINATOR_SERIAL ((uint32_t)0x21504345)
 
+/* CIP Identity classification. A Logix CPU reports the Rockwell vendor id and
+ * the PLC device type; on an L80-series controller the Ethernet ports are in the
+ * CPU module itself, so List Identity / Get_Attributes_All reach the CPU
+ * directly (device type PLC) rather than a comms adapter (0x000C). CompactLogix
+ * shares this signature -- both are "ControlLogix-class" for feature purposes. */
+#define CIP_VENDOR_ROCKWELL ((uint16_t)0x0001)
+#define CIP_DEVICE_TYPE_PLC ((uint16_t)0x000E)
+
 /* §4/§5: connection IO thread states. */
 enum {
     CONN_CONNECT = 0,
@@ -179,6 +187,7 @@ struct enip_connection_t {
     uint8_t ident_rev_major, ident_rev_minor;
     uint16_t ident_status;
     uint32_t ident_serial;
+    bool is_controllogix; /* Rockwell PLC device type; drives feature selection */
 
     uint8_t state;
     uint8_t resume_state;
@@ -229,6 +238,9 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data);
 static Bytes build_forward_open(enip_connection_t *c);
 static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes);
 static Bytes build_forward_close(enip_connection_t *c);
+static int32_t step_identity(enip_connection_t *c);
+static Bytes build_identity_request(enip_connection_t *c);
+static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 
 /* ============================================================================
  * Registry / lifecycle
@@ -393,6 +405,7 @@ static void conn_destructor(void *arg) {
 
     if(c->gateway) { mem_free(c->gateway); }
     if(c->path) { mem_free(c->path); }
+    if(c->identity_data) { mem_free(c->identity_data); }
 }
 
 /* ============================================================================
@@ -569,6 +582,15 @@ void enip_session_tag_detach(enip_connection_t *c, enip_tag_p t) {
 size_t enip_session_max_cip(enip_connection_t *c) { return c->max_cip_packet_size; }
 
 int enip_session_get_status(enip_connection_t *c) { return (int)c->conn_status; }
+
+/* Cached CIP Identity payload (raw Get_Attributes_All response). Returns false
+ * until the bring-up identity query has completed. */
+bool enip_session_get_identity(enip_connection_t *c, uint8_t **data_out, uint16_t *len_out) {
+    if(!c || !c->identity_valid) { return false; }
+    if(data_out) { *data_out = c->identity_data; }
+    if(len_out) { *len_out = c->identity_len; }
+    return true;
+}
 
 int enip_session_get_inactivity_timeout(enip_connection_t *c) { return (int)c->inactivity_timeout_ms; }
 
@@ -820,6 +842,7 @@ static int32_t step_waiting(enip_connection_t *c) {
 
     switch(c->resume_state) {
         case CONN_REGISTER: on_register_reply(c, &hdr); break;
+        case CONN_IDENTITY: on_identity_reply(c, &hdr, payload); break;
         case CONN_OPEN: on_open_reply(c, &hdr, payload); break;
         case CONN_CLOSE: on_close_reply(c, &hdr, payload); break;
         case CONN_READY: handle_tag_reply(c, &hdr, payload); break;
@@ -840,7 +863,9 @@ static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr) {
     }
 
     c->session_handle = hdr->session_handle;
-    c->state = CONN_OPEN;
+
+    /* Query identity once per device; an idle reconnect already knows it. */
+    c->state = c->identity_valid ? CONN_OPEN : CONN_IDENTITY;
 }
 
 static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
@@ -1609,6 +1634,140 @@ static Bytes build_forward_close(enip_connection_t *c) {
 }
 
 /* ============================================================================
+ * Identity (CIP Identity object, class 0x01 / instance 1, Get_Attributes_All)
+ * ============================================================================ */
+
+/* Build a Get_Attributes_All on the Identity object. With no routing path the
+ * bare CIP request goes in the Unconnected Data Item; with a path it is wrapped
+ * in an Unconnected_Send (0x52) carrying the route, mirroring AB. */
+static Bytes build_identity_request(enip_connection_t *c) {
+    Arena *a = &c->arena;
+
+    /* service 0x01 (Get_Attributes_All), path = Identity class 0x01 / instance 1 */
+    Bytes embedded = bytes_pack(a, BYTES_LE, (uint8_t)0x01, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x01, (uint8_t)0x24,
+                                 (uint8_t)0x01);
+    if(bytes_is_null(embedded)) { return bytes_null(); }
+
+    Bytes cip_payload;
+
+    if(c->path[0] == '\0') {
+        cip_payload = embedded;
+    } else {
+        Bytes route = enip_cip_encode_route(a, c->path);
+        if(bytes_is_null(route)) { return bytes_null(); }
+
+        uint8_t route_words = (uint8_t)(route.len / 2);
+
+        /* Unconnected_Send: service, path size words + Connection Manager path,
+         * priority/ticks, timeout ticks, embedded message length. */
+        Bytes us_hdr = bytes_pack(a, BYTES_LE, (uint8_t)CIP_UNCONN_SEND, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06,
+                                   (uint8_t)0x24, (uint8_t)0x01, (uint8_t)0x0A, (uint8_t)0x05, (uint16_t)embedded.len);
+        if(bytes_is_null(us_hdr)) { return bytes_null(); }
+
+        /* optional pad byte to word-align after an odd-length message, then
+         * route path size (words) + reserved byte. */
+        Bytes route_hdr = (embedded.len & 1)
+                              ? bytes_pack(a, BYTES_LE, (uint8_t)0x00, route_words, (uint8_t)0x00)
+                              : bytes_pack(a, BYTES_LE, route_words, (uint8_t)0x00);
+        if(bytes_is_null(route_hdr)) { return bytes_null(); }
+
+        cip_payload = bytes_concat(a, us_hdr, embedded, route_hdr, route);
+        if(bytes_is_null(cip_payload)) { return bytes_null(); }
+    }
+
+    Bytes cpf = enip_cpf_wrap_unconnected(a, cip_payload);
+    if(bytes_is_null(cpf)) { return bytes_null(); }
+
+    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+}
+
+static int32_t step_identity(enip_connection_t *c) {
+    arena_reset(&c->arena);
+
+    Bytes frame = build_identity_request(c);
+    if(bytes_is_null(frame)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build Identity request!");
+        reset_connection(c);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    c->tx_buf = frame.data;
+    c->tx_len = frame.len;
+    c->tx_off = 0;
+    c->resume_state = CONN_IDENTITY;
+    c->state = CONN_SENDING;
+
+    return PLCTAG_STATUS_OK;
+}
+
+static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+    if(hdr->status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Identity SendRRData failed, status 0x%08" PRIx32 ".", hdr->status);
+        reset_connection(c);
+        return;
+    }
+
+    uint16_t seq = 0;
+    Bytes cip;
+
+    if(!enip_cpf_unwrap(payload, false, &seq, &cip)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to unwrap Identity CPF reply!");
+        reset_connection(c);
+        return;
+    }
+
+    cip_reply_t reply;
+
+    /* Unconnected_Send is transparent on success: the reply is the embedded
+     * Get_Attributes_All reply. A non-zero status (including a 0x52 routing
+     * failure) is fatal to bring-up. */
+    if(!enip_cip_parse_reply(cip, &reply) || reply.status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Identity Get_Attributes_All rejected (CIP status 0x%02X, ext 0x%04X).",
+               reply.status, reply.ext_status);
+        reset_connection(c);
+        return;
+    }
+
+    if(reply.data.len > 0xFFFF) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Identity reply implausibly large (%zu bytes)!", reply.data.len);
+        reset_connection(c);
+        return;
+    }
+
+    uint8_t *buf = mem_alloc((int)reply.data.len);
+    if(!buf) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate identity buffer!");
+        reset_connection(c);
+        return;
+    }
+
+    mem_copy(buf, reply.data.data, (int)reply.data.len);
+
+    if(c->identity_data) { mem_free(c->identity_data); }
+    c->identity_data = buf;
+    c->identity_len = (uint16_t)reply.data.len;
+
+    /* parse the fixed-layout prefix; product name (SHORT_STRING) stays in buf. */
+    (void)bytes_unpack(reply.data, BYTES_LE, &c->ident_vendor_id, &c->ident_device_type, &c->ident_product_code,
+                       &c->ident_rev_major, &c->ident_rev_minor, &c->ident_status, &c->ident_serial);
+
+    c->is_controllogix = (c->ident_vendor_id == CIP_VENDOR_ROCKWELL && c->ident_device_type == CIP_DEVICE_TYPE_PLC);
+    c->identity_valid = true;
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
+           "Identity: vendor=0x%04X device_type=0x%04X product=0x%04X rev=%u.%u serial=0x%08X.", c->ident_vendor_id,
+           c->ident_device_type, c->ident_product_code, c->ident_rev_major, c->ident_rev_minor, c->ident_serial);
+
+    if(c->is_controllogix) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: device is ControlLogix-class (Rockwell PLC).");
+    } else {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: device is not ControlLogix-class.");
+    }
+
+    c->state = CONN_OPEN;
+}
+
+/* ============================================================================
  * Main loop
  * ============================================================================ */
 
@@ -1639,6 +1798,11 @@ static THREAD_FUNC(io_thread_func) {
 
             case CONN_REGISTER:
                 step_register(c);
+                wait_ms = 0;
+                break;
+
+            case CONN_IDENTITY:
+                step_identity(c);
                 wait_ms = 0;
                 break;
 

@@ -82,6 +82,7 @@ struct enip_tag_t {
     int32_t last_conn_state;
     uint8_t is_connection_tag : 1;
     uint8_t first_tickler_run : 1;
+    uint8_t is_identity_tag : 1;
 };
 
 extern plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
