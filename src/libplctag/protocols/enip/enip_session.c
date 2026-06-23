@@ -53,6 +53,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/enip/enip_cip.h>
 #include <libplctag/protocols/enip/enip_cpf.h>
+#include <libplctag/protocols/enip/enip_dialect.h>
 #include <libplctag/protocols/enip/enip_eip.h>
 #include <libplctag/protocols/enip/enip_session.h>
 #include <libplctag/protocols/enip/enip_tag.h>
@@ -196,6 +197,11 @@ struct enip_connection_t {
     uint32_t ident_serial;
     bool is_controllogix; /* Rockwell PLC device type; drives feature selection */
 
+    /* Manufacturer dialect (§16a.4): build/apply function pointers + the two
+     * sizing numbers. Defaults to &enip_logix_dialect at creation; reselected
+     * from the Identity reply at the end of bring-up. Never NULL. */
+    const enip_dialect_t *dialect;
+
     uint8_t state;
     uint8_t resume_state;
 
@@ -307,6 +313,7 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
 
     c->state = CONN_CONNECT;
     c->resume_state = CONN_CONNECT;
+    c->dialect = &enip_logix_dialect; /* reselected from Identity at bring-up */
     c->rx_cap = ENIP_BOOTSTRAP_PACKET;
     c->max_cip_packet_size = ENIP_FO_CIP_SIZE;
     c->inactivity_timeout_ms = ENIP_MAX_INACTIVITY_MS;
@@ -2066,6 +2073,7 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
                        &c->ident_rev_major, &c->ident_rev_minor, &c->ident_status, &c->ident_serial);
 
     c->is_controllogix = (c->ident_vendor_id == CIP_VENDOR_ROCKWELL && c->ident_device_type == CIP_DEVICE_TYPE_PLC);
+    c->dialect = enip_dialect_select(c->ident_vendor_id, c->ident_device_type);
     c->identity_valid = true;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
