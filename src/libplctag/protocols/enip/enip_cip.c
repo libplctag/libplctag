@@ -322,6 +322,71 @@ Bytes enip_cip_write(Arena *a, Bytes path, Bytes type_header, uint16_t count, By
  * ============================================================================ */
 
 /* ============================================================================
+ * CIP tag/UDT listing requests (class 0x6B / 0x6C)
+ * ============================================================================ */
+
+/* Build a class/instance logical path: 0x20 <class> 0x25 0x00 <inst_lo> <inst_hi>,
+ * optionally prefixed by an already-encoded symbolic segment.  Always even. */
+static Bytes cip_class_inst_path(Arena *a, Bytes prefix, uint8_t class_id, uint16_t instance) {
+    Bytes hdr = bytes_pack(a, BYTES_LE, (uint8_t)0x20, class_id, (uint8_t)0x25, (uint8_t)0x00, (uint16_t)instance);
+    if(bytes_is_null(hdr)) { return bytes_null(); }
+
+    if(bytes_is_null(prefix) || prefix.len == 0) { return hdr; }
+    if((prefix.len % 2) != 0) { return bytes_null(); }
+
+    return bytes_concat(a, prefix, hdr);
+}
+
+Bytes enip_cip_list_tags(Arena *a, Bytes prefix, uint16_t instance_id) {
+    if(!a) { return bytes_null(); }
+
+    Bytes path = cip_class_inst_path(a, prefix, (uint8_t)0x6B, instance_id);
+    if(bytes_is_null(path) || path.len > 0xFF * 2) { return bytes_null(); }
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_LIST_TAGS, (uint8_t)(path.len / 2));
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    /* num_attributes + attrs 0x02, 0x07, 0x08, 0x01 */
+    Bytes attrs =
+        bytes_pack(a, BYTES_LE, (uint16_t)4, (uint16_t)0x02, (uint16_t)0x07, (uint16_t)0x08, (uint16_t)0x01);
+    if(bytes_is_null(attrs)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path, attrs);
+}
+
+Bytes enip_cip_udt_meta(Arena *a, uint16_t udt_id) {
+    if(!a) { return bytes_null(); }
+
+    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, udt_id);
+    if(bytes_is_null(path)) { return bytes_null(); }
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_ATTR_LIST, (uint8_t)(path.len / 2));
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    /* num_attributes + attrs 0x04, 0x05, 0x02, 0x01 */
+    Bytes attrs =
+        bytes_pack(a, BYTES_LE, (uint16_t)4, (uint16_t)0x04, (uint16_t)0x05, (uint16_t)0x02, (uint16_t)0x01);
+    if(bytes_is_null(attrs)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path, attrs);
+}
+
+Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t total) {
+    if(!a) { return bytes_null(); }
+
+    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, udt_id);
+    if(bytes_is_null(path)) { return bytes_null(); }
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_READ, (uint8_t)(path.len / 2));
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    Bytes body = bytes_pack(a, BYTES_LE, (uint32_t)offset, (uint16_t)total);
+    if(bytes_is_null(body)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path, body);
+}
+
+/* ============================================================================
  * CIP Multiple Service Packet (0x0A) request builder
  * ============================================================================ */
 

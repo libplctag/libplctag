@@ -362,7 +362,9 @@ static int32_t enip_identity_tag_read(plc_tag_p tag) {
     tag->status = (int8_t)PLCTAG_STATUS_PENDING;
     tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, (int8_t)PLCTAG_STATUS_OK);
 
-    /* The tickler finishes the read once the identity query has completed. */
+    /* Mark due so the IO thread's service pass runs the tickler and completes it. */
+    enip_session_schedule(t->conn, t, ENIP_OP_IDLE, time_ms());
+
     return PLCTAG_STATUS_PENDING;
 }
 
@@ -389,6 +391,52 @@ static struct tag_vtable_t enip_identity_tag_vtable = {
     .read = enip_identity_tag_read,
     .status = enip_identity_tag_status,
     .tickler = enip_identity_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .get_int_attrib = NULL,
+    .set_int_attrib = NULL,
+    .get_byte_array_attrib = NULL,
+};
+
+/* ============================================================================
+ * @tags / @udt listing tags (ControlLogix-class only, gated in the IO thread):
+ * read-only tags that walk CIP class 0x6B (symbol/tag list) or class 0x6C
+ * (UDT/template definition) and accumulate the raw reply payload. They share the
+ * data-variant scheduler fields and ride the network-op path via ENIP_OP_LIST /
+ * ENIP_OP_UDT_META / ENIP_OP_UDT_FIELDS (see enip_session.c).
+ * ============================================================================ */
+
+static int32_t enip_listing_tag_read(plc_tag_p tag) {
+    enip_tag_p t = (enip_tag_p)tag;
+
+    if(!t->conn) { return PLCTAG_ERR_BAD_GATEWAY; }
+
+    t->read_complete = 0;
+    t->read_off = 0;
+    t->size = 0;
+
+    /* @tags restarts the instance scan at 0; @udt keeps its fixed template id
+     * (list_next_id, set at create) and begins with the metadata request. */
+    uint8_t op;
+    if(t->kind == ENIP_TAG_KIND_UDT) {
+        op = ENIP_OP_UDT_META;
+        t->list_total = 0;
+    } else {
+        op = ENIP_OP_LIST;
+        t->list_next_id = 0;
+    }
+
+    tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, (int8_t)PLCTAG_STATUS_OK);
+
+    return enip_session_schedule(t->conn, t, op, time_ms());
+}
+
+static struct tag_vtable_t enip_listing_tag_vtable = {
+    .abort = enip_tag_abort,
+    .read = enip_listing_tag_read,
+    .status = enip_tag_status,
+    .tickler = NULL,
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
@@ -547,7 +595,7 @@ static plc_tag_p create_connection_tag(attr attribs,
 
     tag->vtable = &enip_connection_tag_vtable;
     tag->byte_order = &enip_tag_byte_order;
-    tag->is_connection_tag = 1;
+    tag->kind = ENIP_TAG_KIND_CONNECTION;
     tag->first_tickler_run = 1;
     tag->last_conn_state = (int32_t)PLCTAG_CONN_STATUS_DOWN;
 
@@ -559,6 +607,7 @@ static plc_tag_p create_connection_tag(attr attribs,
     }
 
     tag->protocol_type = TAG_PROTOCOL_ENIP_CONNECTION;
+    tag->skip_tickler = 1; /* the IO thread ticklers ENIP tags, not the global tickler */
 
     bool is_new = false;
     tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
@@ -584,6 +633,9 @@ static plc_tag_p create_connection_tag(attr attribs,
     tag->status = (int8_t)PLCTAG_STATUS_OK;
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_STATUS_OK);
 
+    /* Join the active list so the IO thread runs enip_conn_tag_tickler. */
+    enip_session_schedule(tag->conn, tag, ENIP_OP_IDLE, time_ms());
+
     return (plc_tag_p)tag;
 }
 
@@ -600,7 +652,7 @@ static plc_tag_p create_identity_tag(attr attribs,
 
     tag->vtable = &enip_identity_tag_vtable;
     tag->byte_order = &enip_tag_byte_order;
-    tag->is_identity_tag = 1;
+    tag->kind = ENIP_TAG_KIND_IDENTITY;
 
     int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
@@ -610,6 +662,7 @@ static plc_tag_p create_identity_tag(attr attribs,
     }
 
     tag->protocol_type = TAG_PROTOCOL_ENIP;
+    tag->skip_tickler = 1; /* the IO thread ticklers ENIP tags, not the global tickler */
 
     bool is_new = false;
     tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
@@ -624,6 +677,57 @@ static plc_tag_p create_identity_tag(attr attribs,
 
     tag->status = (int8_t)PLCTAG_STATUS_OK;
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_STATUS_OK);
+
+    /* Join the active list; a read marks it due so the IO thread completes it. */
+    enip_session_schedule(tag->conn, tag, ENIP_OP_IDLE, time_ms());
+
+    return (plc_tag_p)tag;
+}
+
+/* Build a read-only @tags or @udt/<id> listing tag: no CIP path of its own (the
+ * listing class/instance is built per-request), no OPEN_PROBE. ControlLogix-class
+ * only; the IO thread rejects the network op on non-Rockwell devices. */
+static plc_tag_p create_listing_tag(attr attribs,
+                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                    void *userdata, plc_tag_p src_tag, bool is_udt, uint16_t udt_id) {
+    enip_tag_p tag = (enip_tag_p)rc_alloc((int)sizeof(struct enip_tag_t), enip_tag_destructor);
+    if(!tag) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate listing tag!");
+        return NULL;
+    }
+
+    tag->vtable = &enip_listing_tag_vtable;
+    tag->byte_order = &enip_tag_byte_order;
+    tag->kind = is_udt ? ENIP_TAG_KIND_UDT : ENIP_TAG_KIND_LISTING;
+
+    int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->protocol_type = TAG_PROTOCOL_ENIP;
+    tag->skip_tickler = 1; /* the IO thread ticklers ENIP tags, not the global tickler */
+    tag->ready = 1;        /* no OPEN_PROBE; a read goes straight to the listing op */
+    if(is_udt) { tag->list_next_id = udt_id; }
+
+    bool is_new = false;
+    tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
+
+    if(!tag->conn) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create or find a connection!");
+        tag->status = (int8_t)PLCTAG_ERR_BAD_GATEWAY;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_ERR_BAD_GATEWAY);
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+        return (plc_tag_p)tag;
+    }
+
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_STATUS_OK);
+
+    /* Join the active list; a read marks it due so the IO thread runs the op. */
+    enip_session_schedule(tag->conn, tag, ENIP_OP_IDLE, time_ms());
 
     return (plc_tag_p)tag;
 }
@@ -640,6 +744,21 @@ plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t t
         return create_identity_tag(attribs, tag_callback_func, userdata, src_tag);
     }
 
+    /* @tags / @udt/<id> are ControlLogix-class listing tags (gated to Rockwell in
+     * the IO thread, where the device identity is known). */
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@tags") == 0) {
+        return create_listing_tag(attribs, tag_callback_func, userdata, src_tag, false, 0);
+    }
+
+    if(strncmp(attr_get_str(attribs, "name", ""), "@udt/", 5) == 0) {
+        long udt_id = strtol(attr_get_str(attribs, "name", "") + 5, NULL, 10);
+        if(udt_id < 0 || udt_id > 0xFFFF) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "@udt id must be between 0 and 65535!");
+            return NULL;
+        }
+        return create_listing_tag(attribs, tag_callback_func, userdata, src_tag, true, (uint16_t)udt_id);
+    }
+
     enip_tag_p tag = create_tag_object(attribs);
     if(!tag) { return NULL; }
 
@@ -651,6 +770,7 @@ plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t t
     }
 
     tag->protocol_type = TAG_PROTOCOL_ENIP;
+    tag->skip_tickler = 1; /* the IO thread ticklers ENIP tags, not the global tickler */
 
     bool is_new = false;
     tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);

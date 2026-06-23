@@ -88,6 +88,12 @@
 #define ENIP_RECONNECT_DELAY_MS ((int64_t)1000)
 #define ENIP_IDLE_WAIT_MS ((int64_t)1000)
 
+/* Scheduler op_time for a special tag that has nothing pending: parked far in
+ * the future, made due again by set_conn_status (or a read) when work appears. */
+#define ENIP_FAR_FUTURE ((int64_t)INT64_MAX)
+/* Retry cadence for an @identity tag whose payload is not cached yet. */
+#define ENIP_SPECIAL_RETRY_MS ((int64_t)50)
+
 /* Inactivity timeout bounds; default is the maximum. After this much idle time
  * with no scheduled work, the session disconnects and waits for new work. */
 #define ENIP_MIN_INACTIVITY_MS ((int64_t)1000)
@@ -152,6 +158,7 @@ struct enip_connection_t {
     mutex_p sched_mutex;
     enip_tag_p sched_head, sched_tail;
     enip_tag_p in_flight;
+    enip_tag_p sched_cursor; /* service_special_tags walk position; sched_mutex */
 
     enip_tag_p batch_head;
     uint16_t batch_count;
@@ -209,6 +216,9 @@ static mutex_p s_registry_mutex = NULL;
 static void sched_insert_sorted(enip_connection_t *c, enip_tag_p t);
 static void sched_unlink(enip_connection_t *c, enip_tag_p t);
 static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms);
+static void service_due_tags(enip_connection_t *c, int64_t now);
+static int64_t rearm_time(enip_tag_p t, int64_t now);
+static int64_t next_special_wait(enip_connection_t *c, int64_t now, int64_t cap);
 static int32_t build_request(enip_connection_t *c);
 static Bytes build_single_cip_request(Arena *a, enip_connection_t *c, enip_tag_p t);
 static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t);
@@ -234,6 +244,14 @@ static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes paylo
 static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data);
+static Bytes build_listing_request(Arena *a, enip_tag_p t);
+static int32_t apply_listing_reply(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
+
+/* A tag that issues network ops via pick_batch (vs. the special tags that the
+ * service pass handles): a data tag, or an @tags/@udt listing tag. */
+static inline bool is_network_op_kind(enip_tag_p t) {
+    return t->kind == ENIP_TAG_KIND_DATA || t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT;
+}
 
 static Bytes build_forward_open(enip_connection_t *c);
 static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes);
@@ -451,6 +469,7 @@ static void sched_unlink(enip_connection_t *c, enip_tag_p t) {
 }
 
 static bool is_batch_eligible(enip_tag_p t) {
+    if(t->kind != ENIP_TAG_KIND_DATA) { return false; }
     if(atomic_get_bool(&t->abort_requested)) { return false; }
     if(!t->ready) { return false; }
     if(t->op == ENIP_OP_READ) { return t->elem_count <= t->window_elems; }
@@ -478,15 +497,20 @@ static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms) {
     critical_block(c->sched_mutex) {
         if(c->in_flight != NULL || c->batch_head != NULL) { break; }
 
-        if(c->sched_head == NULL || c->sched_head->op_time > now) {
-            if(c->sched_head != NULL) {
-                int64_t remaining = c->sched_head->op_time - now;
+        /* Special tags (@connection/@identity) are serviced by service_due_tags,
+         * not the network-op path; skip them to find the first network-op tag.
+         * @tags/@udt are not batch-eligible, so they fall through to the single
+         * in_flight dispatch below. */
+        enip_tag_p head = c->sched_head;
+        while(head != NULL && !is_network_op_kind(head)) { head = head->sched_next; }
+
+        if(head == NULL || head->op_time > now) {
+            if(head != NULL) {
+                int64_t remaining = head->op_time - now;
                 *wait_ms = (remaining < 0) ? 0 : remaining;
             }
             break;
         }
-
-        enip_tag_p head = c->sched_head;
 
         if(!is_batch_eligible(head)) {
             sched_unlink(c, head);
@@ -500,7 +524,7 @@ static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms) {
 
         enip_tag_p batch_tail = NULL;
         uint16_t count = 0;
-        enip_tag_p cur = c->sched_head;
+        enip_tag_p cur = head;
 
         while(cur != NULL && count < c->max_batch && cur->op_time <= now && is_batch_eligible(cur)) {
             size_t rs = (size_t)2 + batch_req_size(cur);
@@ -541,12 +565,138 @@ static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms) {
     }
 }
 
+/* Where a tag goes after service_due_tags runs its tickler:
+ *   - @connection: parked far in the future (set_conn_status re-arms it).
+ *   - @identity: short retry until the cached payload exists, then parked.
+ *   - data tag with a live network op: stays "now" for pick_batch.
+ *   - data auto-sync timer: the earliest of its next read/write fire time. */
+static int64_t rearm_time(enip_tag_p t, int64_t now) {
+    if(t->kind == ENIP_TAG_KIND_CONNECTION) {
+        /* The first tickler run bails until CREATED is dispatched; keep retrying
+         * until it has actually emitted the initial/late-join state, then park
+         * (set_conn_status re-arms it on the next transition). */
+        return t->first_tickler_run ? (now + ENIP_SPECIAL_RETRY_MS) : ENIP_FAR_FUTURE;
+    }
+
+    if(t->kind == ENIP_TAG_KIND_IDENTITY) {
+        return t->read_in_flight ? (now + ENIP_SPECIAL_RETRY_MS) : ENIP_FAR_FUTURE;
+    }
+
+    /* Idle data tag: park at its next auto-sync fire time (pick_batch owns a tag
+     * once it has a live op, so service_due_tags never re-arms a non-idle one). */
+    int64_t next = ENIP_FAR_FUTURE;
+    if(t->auto_sync_read_ms > 0 && t->auto_sync_next_read < next) { next = t->auto_sync_next_read; }
+    if(t->auto_sync_write_ms > 0 && t->auto_sync_next_write > 0 && t->auto_sync_next_write < next) {
+        next = t->auto_sync_next_write;
+    }
+    return next;
+}
+
+/* IO-thread tickler for every due tag in the active list: replaces the global
+ * tag tickler for ENIP (all ENIP tags set skip_tickler). Each tag is pinned
+ * across its api_mutex section so an API-thread destroy/unschedule cannot free
+ * it mid-service. c->sched_cursor always points at the pinned tag during the
+ * lock-release window, so removing the tag after it (sched_unlink) keeps the
+ * walk's successor pointer valid; the pinned tag itself cannot be removed. */
+/* First tag at or after `from` (following sched_next) that service_due_tags
+ * should run now: due (op_time <= now) and not a data tag with a live network
+ * op. A live-op data tag is pick_batch's to dispatch -- ticking it here would
+ * spin (it stays due until pick_batch consumes it). The list is sorted by
+ * op_time, so the first tag with op_time > now ends the due prefix. */
+static enip_tag_p next_serviceable(enip_tag_p from, int64_t now) {
+    for(enip_tag_p t = from; t != NULL && t->op_time <= now; t = t->sched_next) {
+        if(is_network_op_kind(t) && t->op != ENIP_OP_IDLE) { continue; }
+        return t;
+    }
+    return NULL;
+}
+
+static void service_due_tags(enip_connection_t *c, int64_t now) {
+    enip_tag_p t = NULL;
+
+    critical_block(c->sched_mutex) {
+        t = next_serviceable(c->sched_head, now);
+        if(t != NULL) {
+            rc_inc(t);
+            c->sched_cursor = t;
+        }
+    }
+
+    while(t != NULL) {
+        mutex_lock(t->api_mutex);
+        plc_tag_generic_tickler((plc_tag_p)t);
+        if(t->vtable && t->vtable->tickler) { t->vtable->tickler((plc_tag_p)t); }
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)t);
+        plc_tag_generic_wake_tag((plc_tag_p)t); /* wake any synchronous read/write */
+        mutex_unlock(t->api_mutex);
+
+        enip_tag_p next = NULL;
+
+        critical_block(c->sched_mutex) {
+            if(t->scheduled) {
+                enip_tag_p after = t->sched_next;
+
+                /* Re-arm only if the tickler did not hand the tag to pick_batch
+                 * (i.e. it is a special tag, or still an idle data tag). A tag
+                 * whose tickler just armed a read/write is now at op_time=now for
+                 * pick_batch -- leave it in place. */
+                if(!is_network_op_kind(t) || t->op == ENIP_OP_IDLE) {
+                    sched_unlink(c, t);
+                    t->op_time = rearm_time(t, now);
+                    sched_insert_sorted(c, t);
+                }
+
+                next = next_serviceable(after, now);
+            }
+
+            if(next != NULL) { rc_inc(next); }
+            c->sched_cursor = next;
+        }
+
+        rc_dec(t);
+        t = next;
+    }
+
+    critical_block(c->sched_mutex) { c->sched_cursor = NULL; }
+}
+
+/* Delay (ms, capped at cap) until the next @connection/@identity tag needs
+ * servicing. Special tags are serviceable in any connection state, so the IO
+ * loop clamps its wait to this; data tags are left to pick_batch (CONN_READY)
+ * to avoid spinning while disconnected. */
+static int64_t next_special_wait(enip_connection_t *c, int64_t now, int64_t cap) {
+    int64_t wait = cap;
+
+    critical_block(c->sched_mutex) {
+        for(enip_tag_p t = c->sched_head; t != NULL; t = t->sched_next) {
+            int64_t until = t->op_time - now;
+            if(until >= wait) { break; } /* list is sorted: nothing sooner remains */
+            if(!is_network_op_kind(t)) {
+                wait = (until < 0) ? 0 : until;
+                break;
+            }
+        }
+    }
+
+    return wait;
+}
+
 int32_t enip_session_schedule(enip_connection_t *c, enip_tag_p t, uint8_t op, int64_t op_time) {
     critical_block(c->sched_mutex) {
         t->op = op;
-        t->op_time = op_time;
 
-        if(!t->scheduled) { sched_insert_sorted(c, t); }
+        /* Re-sort if already listed (e.g. an auto-sync timer or parked @identity
+         * being pulled forward to fire now); plain insert otherwise. */
+        if(t->scheduled) {
+            if(t->op_time != op_time) {
+                sched_unlink(c, t);
+                t->op_time = op_time;
+                sched_insert_sorted(c, t);
+            }
+        } else {
+            t->op_time = op_time;
+            sched_insert_sorted(c, t);
+        }
     }
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, t->tag_id,
@@ -623,6 +773,21 @@ static void set_conn_status(enip_connection_t *c, uint8_t status) {
     int32_t idx = (atomic_get_int32(&c->conn_status_ring_write_idx) + 1) & ENIP_CONN_STATUS_RING_MASK;
     c->conn_status_ring[idx] = status;
     atomic_set_int32(&c->conn_status_ring_write_idx, idx);
+
+    /* Wake every @connection tag so service_due_tags drains the new transition.
+     * They are re-sorted to "now"; service re-parks them at ENIP_FAR_FUTURE. */
+    critical_block(c->sched_mutex) {
+        enip_tag_p t = c->sched_head;
+        while(t != NULL) {
+            enip_tag_p next = t->sched_next;
+            if(t->kind == ENIP_TAG_KIND_CONNECTION && t->op_time > 0) {
+                sched_unlink(c, t);
+                t->op_time = 0;
+                sched_insert_sorted(c, t);
+            }
+            t = next;
+        }
+    }
 }
 
 int32_t enip_session_conn_status_idx(enip_connection_t *c) { return atomic_get_int32(&c->conn_status_ring_write_idx); }
@@ -953,6 +1118,16 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
             if(!enip_cip_parse_reply(cip, &reply)) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse CIP reply!");
                 status = (int8_t)PLCTAG_ERR_BAD_REPLY;
+            } else if(t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT) {
+                /* @tags/@udt: a partial-transfer status (0x06) is continuation, not
+                 * an error; apply_listing_reply accumulates and sets more_windows. */
+                if(reply.status != 0 && reply.status != CIP_STATUS_FRAG) {
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status,
+                           reply.ext_status);
+                    status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
+                } else {
+                    status = (int8_t)apply_listing_reply(t, reply.status, reply.data, &more_windows);
+                }
             } else if(reply.status != 0) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status,
                        reply.ext_status);
@@ -1216,6 +1391,21 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
             req = build_single_cip_request(&c->arena, c, t);
             break;
 
+        case ENIP_OP_LIST:
+        case ENIP_OP_UDT_META:
+        case ENIP_OP_UDT_FIELDS:
+            /* @tags/@udt are ControlLogix-class only (CIP class 0x6B/0x6C); the
+             * device identity is known by the time pick_batch dispatches (queried
+             * during bring-up before CONN_READY). Reject on anything else. */
+            if(!c->is_controllogix) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are only supported on ControlLogix-class devices!");
+                complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
+                c->state = CONN_READY;
+                return PLCTAG_STATUS_OK;
+            }
+            req = build_listing_request(&c->arena, t);
+            break;
+
         default: break;
     }
 
@@ -1243,6 +1433,111 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
     c->state = CONN_SENDING;
 
     return PLCTAG_STATUS_OK;
+}
+
+/* @tags/@udt request for t's current op. read_off is the byte cursor into the
+ * accumulated buffer; list_next_id is the symbol instance id (@tags) or template
+ * id (@udt); list_total is the @udt field-definition byte target. */
+static Bytes build_listing_request(Arena *a, enip_tag_p t) {
+    switch(t->op) {
+        case ENIP_OP_LIST: return enip_cip_list_tags(a, t->path, (uint16_t)t->list_next_id);
+
+        case ENIP_OP_UDT_META: return enip_cip_udt_meta(a, (uint16_t)t->list_next_id);
+
+        case ENIP_OP_UDT_FIELDS: {
+            uint32_t remaining = (t->list_total > t->read_off) ? (t->list_total - t->read_off) : 0;
+            return enip_cip_udt_fields(a, (uint16_t)t->list_next_id, t->read_off, (uint16_t)remaining);
+        }
+
+        default: return bytes_null();
+    }
+}
+
+/* Accumulate one @tags/@udt reply into t->data and advance the continuation
+ * cursor. Sets *more when another request is needed (FRAG status, or the UDT
+ * metadata->fields transition). Caller holds t->api_mutex. */
+static int32_t apply_listing_reply(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
+    *more = false;
+
+    if(t->op == ENIP_OP_LIST) {
+        if(data.len > 0) {
+            size_t need = (size_t)t->read_off + data.len;
+            uint8_t *buf = mem_realloc(t->data, (int)need);
+            if(!buf) { return PLCTAG_ERR_NO_MEM; }
+            t->data = buf;
+            memcpy(t->data + t->read_off, data.data, data.len);
+            t->read_off = (uint32_t)need;
+            t->size = (int32_t)need;
+
+            /* Walk this packet's entries to find the highest instance id. Each
+             * entry is a 22-byte fixed prefix (instance_id u32, symbol_type u16,
+             * element_length u16, array_dims 3xu32, string_len u16) + name. */
+            size_t off = 0;
+            while(off + 22 <= data.len) {
+                uint32_t inst = 0;
+                uint16_t name_len = 0;
+                bytes_unpack(bytes_from_buf(data.data + off, data.len - off), BYTES_LE, &inst, BYTES_SKIP(16), &name_len);
+                t->list_next_id = inst + 1;
+                off += (size_t)22 + name_len;
+            }
+        }
+
+        if(cip_status == CIP_STATUS_FRAG) { *more = true; }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(t->op == ENIP_OP_UDT_META) {
+        /* The Get_Attribute_List reply packs count(2) then per-attribute
+         * {id(2), status(2), value}. Mirror the AB driver's fixed offsets to pull
+         * the four values and build a 14-byte synthetic header (udt id, field
+         * definition words, instance size, member count, handle). */
+        if(data.len < 30) { return PLCTAG_ERR_BAD_REPLY; }
+
+        uint32_t desc_words = 0, inst_size = 0;
+        uint16_t num_members = 0, handle = 0;
+        bytes_unpack(bytes_from_buf(data.data + 6, 4), BYTES_LE, &desc_words);
+        bytes_unpack(bytes_from_buf(data.data + 14, 4), BYTES_LE, &inst_size);
+        bytes_unpack(bytes_from_buf(data.data + 22, 2), BYTES_LE, &num_members);
+        bytes_unpack(bytes_from_buf(data.data + 28, 2), BYTES_LE, &handle);
+
+        uint8_t *buf = mem_realloc(t->data, 14);
+        if(!buf) { return PLCTAG_ERR_NO_MEM; }
+        t->data = buf;
+        Bytes hdr = bytes_from_buf(t->data, 14);
+        bytes_pack_into(hdr, BYTES_LE, (uint16_t)t->list_next_id, (uint32_t)desc_words, (uint32_t)inst_size,
+                        (uint16_t)num_members, (uint16_t)handle);
+        t->size = 14;
+
+        /* field-definition byte target (per the template docs), rounded up to 4. */
+        uint32_t total = (4 * desc_words) - 23;
+        t->list_total = (total + 3) & ~(uint32_t)3;
+        t->read_off = 0;
+
+        /* transition to reading the field definition bytes. */
+        t->op = ENIP_OP_UDT_FIELDS;
+        *more = true;
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(t->op == ENIP_OP_UDT_FIELDS) {
+        if(data.len > 0) {
+            size_t need = (size_t)14 + t->read_off + data.len;
+            uint8_t *buf = mem_realloc(t->data, (int)need);
+            if(!buf) { return PLCTAG_ERR_NO_MEM; }
+            t->data = buf;
+            memcpy(t->data + 14 + t->read_off, data.data, data.len);
+            t->read_off += (uint32_t)data.len;
+            t->size = (int32_t)need;
+        }
+
+        if(cip_status == CIP_STATUS_FRAG) { *more = true; }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    return PLCTAG_ERR_UNSUPPORTED;
 }
 
 static int32_t build_request(enip_connection_t *c) {
@@ -1453,15 +1748,34 @@ static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status) {
 
         if(t->op == ENIP_OP_OPEN_PROBE || t->op == ENIP_OP_OPEN_BULK) {
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_CREATED, status);
-        } else if(t->op == ENIP_OP_READ) {
+        } else if(t->op == ENIP_OP_READ || t->op == ENIP_OP_LIST || t->op == ENIP_OP_UDT_FIELDS) {
+            /* Clear read_in_flight here (the global tickler used to do it via the
+             * read_complete handshake, but ENIP tags skip that tickler). Without
+             * this, generic_tickler's !read_in_flight guard blocks every later
+             * auto-sync read. (@tags/@udt complete on their terminal op.) */
             t->read_complete = 1;
+            t->read_in_flight = 0;
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_READ_COMPLETED, status);
         } else if(t->op == ENIP_OP_WRITE) {
             t->write_complete = 1;
+            t->write_in_flight = 0;
+            t->auto_sync_next_write = 0;
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_WRITE_COMPLETED, status);
         }
 
         t->op = ENIP_OP_IDLE;
+    }
+
+    /* Auto-sync tags stay in the active list as IDLE timers (service_due_tags
+     * fires their next read/write); one-shot tags were already unlinked and are
+     * done. */
+    if(!aborted && (t->auto_sync_read_ms > 0 || t->auto_sync_write_ms > 0)) {
+        critical_block(c->sched_mutex) {
+            if(!t->scheduled) {
+                t->op_time = rearm_time(t, time_ms());
+                sched_insert_sorted(c, t);
+            }
+        }
     }
 
     plc_tag_generic_handle_event_callbacks((plc_tag_p)t);
@@ -1779,6 +2093,11 @@ static THREAD_FUNC(io_thread_func) {
         int mask = SOCK_EVENT_DEFAULT_MASK;
         int64_t wait_ms = ENIP_IDLE_WAIT_MS;
 
+        /* ENIP owns its own ticklering (all ENIP tags set skip_tickler): service
+         * @connection/@identity tags and auto-sync timers in every state. Data
+         * network ops are still dispatched by pick_batch in CONN_READY. */
+        service_due_tags(c, now);
+
         switch(c->state) {
             case CONN_CONNECT: {
                 int32_t rc = step_connect(c);
@@ -1887,6 +2206,11 @@ static THREAD_FUNC(io_thread_func) {
             case CONN_CLOSING:
             default: atomic_set_bool(&c->terminate, true); break;
         }
+
+        /* Clamp the wait so @connection/@identity tags (incl. a status change
+         * pushed during this iteration, or an @identity retry) are serviced on
+         * time regardless of connection state. */
+        if(wait_ms != 0) { wait_ms = next_special_wait(c, time_ms(), wait_ms); }
 
         if(wait_ms != 0 && !atomic_get_bool(&c->terminate)) {
             int timeout = (wait_ms > 1000) ? 1000 : (int)wait_ms;

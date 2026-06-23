@@ -54,6 +54,12 @@
 #define CIP_FWD_CLOSE   ((uint8_t)0x4E)
 #define CIP_UNCONN_SEND ((uint8_t)0x52) /* Connection Manager, same code as ReadFrag */
 #define CIP_MULTI_SVC   ((uint8_t)0x0A) /* Multiple Service Packet */
+#define CIP_LIST_TAGS   ((uint8_t)0x55) /* Get_Instance_Attribute_List (tag/symbol listing) */
+#define CIP_GET_ATTR_LIST ((uint8_t)0x03) /* Get_Attribute_List (UDT template metadata) */
+
+/* CIP general status: partial transfer ("too much data"); reissue from the
+ * next instance id / byte offset until a non-FRAG status is returned. */
+#define CIP_STATUS_FRAG ((uint8_t)0x06)
 
 /* service+reserved+status+ext_size, present in every CIP reply (§11.3) */
 #define CIP_READ_REPLY_OVERHEAD ((size_t)4)
@@ -152,6 +158,33 @@ extern Bytes enip_cip_read(Arena *a, Bytes path, uint16_t count);
  * type_header or data, or arena exhaustion.
  */
 extern Bytes enip_cip_write(Arena *a, Bytes path, Bytes type_header, uint16_t count, Bytes data);
+
+/*
+ * Encode a tag/symbol listing request (CIP 0x55, Get_Instance_Attribute_List)
+ * on the symbol class (0x6B) starting at `instance_id`.  `prefix` is an
+ * optional already-encoded symbolic segment (e.g. a "Program:Foo" scope) and
+ * may be bytes_null() for controller-scope listing.  Asks for attributes
+ * 0x02 (symbol type), 0x07 (element size), 0x08 (array dims), 0x01 (name).
+ * Continuation: reissue with instance_id = (highest returned id) + 1 while the
+ * reply status is CIP_STATUS_FRAG.
+ */
+extern Bytes enip_cip_list_tags(Arena *a, Bytes prefix, uint16_t instance_id);
+
+/*
+ * Encode a UDT/template metadata request (CIP 0x03, Get_Attribute_List) on the
+ * template class (0x6C) instance `udt_id`.  Asks for attributes 0x04 (field
+ * definition size in 32-bit words), 0x05 (instance size in bytes), 0x02 (member
+ * count), 0x01 (handle/type).
+ */
+extern Bytes enip_cip_udt_meta(Arena *a, uint16_t udt_id);
+
+/*
+ * Encode a UDT/template field-definition read (CIP 0x4C) on the template class
+ * (0x6C) instance `udt_id`, reading `total` bytes starting at byte `offset`.
+ * Reissue with offset advanced by the returned payload while the reply status
+ * is CIP_STATUS_FRAG.
+ */
+extern Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t total);
 
 /*
  * Split a CIP reply into its header fields and trailing data.

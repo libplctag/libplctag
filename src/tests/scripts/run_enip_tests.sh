@@ -191,6 +191,18 @@ run_grep_test "@identity device classified as ControlLogix" "identity_class" \
     $VALGRIND$TEST_DIR/tag_rw2 --type=identity \
     "--tag=${BASE}&name=@identity" --debug=4
 
+# ----- @tags / @udt listing (ControlLogix-class only; class 0x6B / 0x6C) -----
+# Controller-scope tag listing always exists on a Logix CPU. Dumped as raw bytes.
+run_test "@tags listing" "tags_list" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=sint8 \
+    "--tag=${BASE}&name=@tags" --debug=4
+
+# @udt/<id> needs a real template id (the low 12 bits of a structure tag's
+# symbol_type from @tags). Fill in a valid id from this PLC to exercise it:
+#   run_test "@udt listing" "udt_list" \
+#       $VALGRIND$TEST_DIR/tag_rw2 --type=sint8 \
+#       "--tag=${BASE}&name=@udt/<id>" --debug=4
+
 
 echo ""
 echo "=== Connection lifecycle and scheduling ==="

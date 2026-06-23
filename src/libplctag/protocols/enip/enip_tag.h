@@ -48,41 +48,64 @@ typedef enum {
     ENIP_OP_WRITE,
     ENIP_OP_OPEN_PROBE, /* §11.2 count=1 probe */
     ENIP_OP_OPEN_BULK,  /* §11.2 remaining elements, single shot for the MVP */
+    ENIP_OP_LIST,       /* @tags: class 0x6B Get_Instance_Attribute_List, id continuation */
+    ENIP_OP_UDT_META,   /* @udt: class 0x6C Get_Attribute_List (template metadata) */
+    ENIP_OP_UDT_FIELDS, /* @udt: class 0x6C CIP read of the field definition, offset continuation */
 } enip_op_t;
+
+/* Which variant of the per-tag union is active. Exactly one applies. */
+typedef enum {
+    ENIP_TAG_KIND_DATA = 0, /* normal data tag: scheduler + type/layout + path */
+    ENIP_TAG_KIND_CONNECTION, /* @connection */
+    ENIP_TAG_KIND_IDENTITY,   /* @identity */
+    ENIP_TAG_KIND_LISTING,    /* @tags: a data-variant tag driven by ENIP_OP_LIST */
+    ENIP_TAG_KIND_UDT,        /* @udt/<id>: a data-variant tag driven by ENIP_OP_UDT_* */
+} enip_tag_kind_t;
 
 struct enip_tag_t {
     TAG_BASE_STRUCT; /* data, size, status, byte_order, vtable, api_mutex, ... */
+    /* TAG_BASE_STRUCT must stay first: enip_tag_t "is a" plc_tag_t. */
 
-    enip_connection_t *conn; /* holds an rc ref; released in destructor */
+    enip_connection_t *conn; /* holds an rc ref; released in destructor; common to all variants */
 
-    /* scheduler membership -- conn->sched_mutex (§13) */
-    struct enip_tag_t *sched_prev, *sched_next;
-    int64_t op_time;
-    uint8_t op; /* enip_op_t */
-    uint8_t scheduled : 1;
+    /* Per-variant fields. The active member is selected by `kind` below: a
+     * data tag uses the data variant; @connection uses the conn_status variant;
+     * @identity uses neither (it reads conn's cached payload).
+     * Fields within each variant are ordered by decreasing size. */
+    union {
+        /* data tag: scheduler membership, learned type/layout, path/tail. */
+        struct {
+            Bytes path; /* encoded CIP IOI, into the tail */
+            struct enip_tag_t *sched_prev, *sched_next; /* conn->sched_mutex (§13) */
+            struct enip_tag_t *batch_next;              /* batch list; IO-thread-only */
+            char *tag_name;                             /* into the tail */
+            int64_t op_time;
+            /* type/layout learned at open -- api_mutex (§11.4) */
+            uint32_t elem_size, elem_count, window_elems, write_window_elems;
+            uint32_t read_off;    /* bulk cursor (elements); reused by OPEN_BULK, READ, WRITE */
+            uint32_t frag_offset; /* ReadFrag continuation cursor (post-MVP) */
+            /* @tags/@udt only (ENIP_TAG_KIND_LISTING/UDT): list_next_id is the
+             * next symbol instance id for @tags, or the fixed template id for
+             * @udt; list_total is the @udt field-definition byte target. */
+            uint32_t list_next_id, list_total;
+            uint8_t type_header[4];
+            uint8_t type_header_len; /* 2 or 4 */
+            uint8_t op;              /* enip_op_t */
+            uint8_t scheduled : 1;
+            uint8_t ready : 1;
+            /* tail: tag_name (NUL), then the encoded CIP path bytes */
+        };
 
-    /* type/layout learned at open -- api_mutex (§11.4) */
-    uint8_t type_header[4];
-    uint8_t type_header_len; /* 2 or 4 */
-    uint32_t elem_size, elem_count, window_elems, write_window_elems;
-    uint32_t read_off; /* bulk cursor (elements); reused by OPEN_BULK, READ, and WRITE */
-    uint8_t ready : 1;
+        /* @connection tag (no path/tail): drains the conn-status ring and fires
+         * PLCTAG_EVENT_CONN_STATUS_* events. */
+        struct {
+            int32_t conn_status_read_idx;
+            int32_t last_conn_state;
+            uint8_t first_tickler_run : 1;
+        };
+    };
 
-    uint32_t frag_offset; /* ReadFrag continuation cursor (post-MVP) */
-
-    struct enip_tag_t *batch_next; /* batch list linkage; IO-thread-only, no lock needed */
-
-    Bytes path; /* encoded CIP IOI, into the tail */
-    char *tag_name; /* into the tail */
-    /* tail: tag_name (NUL), then the encoded CIP path bytes */
-
-    /* @connection special tag (no path/tail). Drains the connection's conn-status
-     * ring and fires PLCTAG_EVENT_CONN_STATUS_* events. */
-    int32_t conn_status_read_idx;
-    int32_t last_conn_state;
-    uint8_t is_connection_tag : 1;
-    uint8_t first_tickler_run : 1;
-    uint8_t is_identity_tag : 1;
+    enip_tag_kind_t kind; /* selects the active union variant */
 };
 
 extern plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),

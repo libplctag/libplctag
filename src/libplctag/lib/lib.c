@@ -1194,6 +1194,15 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         int64_t start_time = time_ms();
         int64_t end_time = start_time + timeout;
 
+        /*
+         * Hold our own reference across the blocking wait.  The only other
+         * reference is the hashtable entry, which plc_tag_destroy() (e.g. from
+         * plc_tag_shutdown() on another thread) can drop to zero -- freeing the
+         * tag and its tag_cond_wait out from under cond_wait() below.  This
+         * extra ref keeps the tag alive until we are done dereferencing it.
+         */
+        rc_inc(tag);
+
         /* wake up the tickler in case it is needed to create the tag. */
         plc_tag_tickler_wake();
 
@@ -1218,7 +1227,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
 
-                rc_dec(tag);
+                rc_dec(tag); /* hashtable reference */
+                rc_dec(tag); /* our wait-loop reference */
                 return rc;
             }
 
@@ -1240,7 +1250,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
 
-                rc_dec(tag);
+                rc_dec(tag); /* hashtable reference */
+                rc_dec(tag); /* our wait-loop reference */
                 return rc;
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
@@ -1255,6 +1266,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "tag set up elapsed time %" PRId64 "ms", (time_ms() - start_time));
+
+        /* release the wait-loop reference taken above. */
+        rc_dec(tag);
     }
 
     /* dispatch any outstanding events. */
