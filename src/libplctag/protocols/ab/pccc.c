@@ -1226,8 +1226,9 @@ int parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address) {
     }
 
     /*
-     * if we have a null character we are at the end of the name
-     * and the subelement is not there.  That is not an error.
+     * The caller (parse_pccc_subelem) has already consumed the leading '.',
+     * so *str points directly at the mnemonic.  A null here means a trailing
+     * '.' with no field, which is not an error.
      */
 
     if((**str) == 0) {
@@ -1235,29 +1236,6 @@ int parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address) {
         address->sub_element = -1;
         return PLCTAG_STATUS_OK;
     }
-
-    /*
-     * We do have a character.  It must be . or / to be valid.
-     * The . character is valid before a mnemonic for a field in a structured type.
-     * The / character is valid before a bit number.
-     *
-     * If we see a bit number, then punt out of this routine.
-     */
-
-    if((**str) == '/') {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "No subelement in this logical address.");
-        address->sub_element = -1;
-        return PLCTAG_STATUS_OK;
-    }
-
-    /* make sure the next character is either / or . and nothing else. */
-    if((**str) != '.') {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Bad subelement field in logical address.");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* step past the . character */
-    (*str)++;
 
     /* search for a match. */
     for(size_t i = 0; i < (sizeof(sub_element_lookup) / sizeof(sub_element_lookup[0])); i++) {
