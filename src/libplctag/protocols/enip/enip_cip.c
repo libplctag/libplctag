@@ -386,54 +386,6 @@ Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t t
     return bytes_concat(a, header, path, body);
 }
 
-/* ============================================================================
- * CIP Multiple Service Packet (0x0A) request builder
- * ============================================================================ */
-
-Bytes enip_cip_multi_service(Arena *a, Bytes *sub_reqs, uint16_t count) {
-    if(!a || !sub_reqs || count == 0) { return bytes_null(); }
-
-    /* Compute total size: fixed header(8) + offset table(2*count) + sub-requests. */
-    size_t total = ENIP_MS_REQ_FIXED + (size_t)2 * count;
-    for(uint16_t i = 0; i < count; i++) {
-        if(bytes_is_null(sub_reqs[i])) { return bytes_null(); }
-        total += sub_reqs[i].len;
-    }
-
-    uint8_t *buf = (uint8_t *)arena_alloc(a, total);
-    if(!buf) { return bytes_null(); }
-
-    /* service + path */
-    buf[0] = CIP_MULTI_SVC;
-    buf[1] = (uint8_t)0x02; /* path_size_words = 2 words */
-    buf[2] = (uint8_t)0x20; /* class segment */
-    buf[3] = (uint8_t)0x02; /* Message Router class 0x02 */
-    buf[4] = (uint8_t)0x24; /* instance segment */
-    buf[5] = (uint8_t)0x01; /* instance 1 */
-
-    /* request_count LE16 */
-    buf[6] = (uint8_t)(count & 0xFFu);
-    buf[7] = (uint8_t)(count >> 8);
-
-    /* Offset table: each offset is relative to the start of the Number_of_Services
-     * field (CIP Vol 1 §3-5.5), i.e. it includes the 2-byte count itself.
-     * offset[0] = 2 (count) + 2*count (offset table). */
-    uint16_t off = (uint16_t)(2u + (uint16_t)2 * count);
-    for(uint16_t i = 0; i < count; i++) {
-        buf[8 + (size_t)2 * i]     = (uint8_t)(off & 0xFFu);
-        buf[8 + (size_t)2 * i + 1] = (uint8_t)(off >> 8);
-        off = (uint16_t)(off + (uint16_t)sub_reqs[i].len);
-    }
-
-    /* Sub-requests */
-    size_t pos = ENIP_MS_REQ_FIXED + (size_t)2 * count;
-    for(uint16_t i = 0; i < count; i++) {
-        memcpy(buf + pos, sub_reqs[i].data, sub_reqs[i].len);
-        pos += sub_reqs[i].len;
-    }
-
-    return bytes_from_buf(buf, total);
-}
 
 /* ============================================================================
  * CIP Multiple Service Packet reply parser

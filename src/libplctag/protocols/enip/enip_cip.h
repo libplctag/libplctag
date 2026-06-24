@@ -198,20 +198,6 @@ extern Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uin
 extern bool enip_cip_parse_reply(Bytes in, cip_reply_t *out);
 
 /*
- * Build a CIP Multiple Service Packet (0x0A) request from N pre-built
- * sub-requests.  sub_reqs[0..count-1] must each be a complete CIP service
- * request (output of enip_cip_read / enip_cip_write).
- *
- * The offset table entries are relative to the start of the offset array
- * per the CIP spec.  Caller must have already verified that the total fits
- * within the negotiated CIP payload budget (ENIP_MS_REQ_FIXED + 2*count +
- * sum(sub_reqs[i].len) <= max_cip - CIP_CONNECTED_ITEM_OVERHEAD).
- *
- * Returns bytes_null() on zero count or arena exhaustion.
- */
-extern Bytes enip_cip_multi_service(Arena *a, Bytes *sub_reqs, uint16_t count);
-
-/*
  * Parse the `data` slice from enip_cip_parse_reply when the outer service is
  * CIP_MULTI_SVC | 0x80.  Fills sub_replies[0..*count_out-1] as zero-copy
  * slices of `data`; each slice is a complete CIP sub-reply to be parsed with

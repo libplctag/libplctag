@@ -226,7 +226,7 @@ static void service_due_tags(enip_connection_t *c, int64_t now);
 static int64_t rearm_time(enip_tag_p t, int64_t now);
 static int64_t next_special_wait(enip_connection_t *c, int64_t now, int64_t cap);
 static int32_t build_request(enip_connection_t *c);
-static Bytes build_single_cip_request(Arena *a, enip_connection_t *c, enip_tag_p t);
+static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest);
 static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t);
 static int32_t build_batch_request(enip_connection_t *c);
 static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status);
@@ -1119,35 +1119,24 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
         if(!enip_cpf_unwrap(payload, true, &seq, &cip)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to unwrap connected CPF reply!");
             status = (int8_t)PLCTAG_ERR_BAD_REPLY;
-        } else {
+        } else if(t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT) {
+            /* @tags/@udt: a partial-transfer status (0x06) is continuation, not
+             * an error; apply_listing_reply accumulates and sets more_windows. */
             cip_reply_t reply;
-
             if(!enip_cip_parse_reply(cip, &reply)) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse CIP reply!");
                 status = (int8_t)PLCTAG_ERR_BAD_REPLY;
-            } else if(t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT) {
-                /* @tags/@udt: a partial-transfer status (0x06) is continuation, not
-                 * an error; apply_listing_reply accumulates and sets more_windows. */
-                if(reply.status != 0 && reply.status != CIP_STATUS_FRAG) {
-                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status,
-                           reply.ext_status);
-                    status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
-                } else {
-                    status = (int8_t)apply_listing_reply(t, reply.status, reply.data, &more_windows);
-                }
-            } else if(reply.status != 0) {
+            } else if(reply.status != 0 && reply.status != CIP_STATUS_FRAG) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status,
                        reply.ext_status);
                 status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
             } else {
-                status = (int8_t)apply_tag_reply(c, t, reply.data);
-
-                if(status == (int8_t)PLCTAG_STATUS_OK
-                   && (t->op == ENIP_OP_OPEN_BULK || t->op == ENIP_OP_READ || t->op == ENIP_OP_WRITE)
-                   && t->read_off < t->elem_count) {
-                    more_windows = true;
-                }
+                status = (int8_t)apply_listing_reply(t, reply.status, reply.data, &more_windows);
             }
+        } else {
+            /* data tag: the dialect parses the reply, interprets status, copies
+             * into t->data, and sets more_windows for the next round trip. */
+            status = (int8_t)c->dialect->apply(c, t, cip, &more_windows);
         }
     }
 
@@ -1342,36 +1331,114 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-/* Build one CIP sub-request for t's current op; does NOT reset the arena.
+/* Logix/Micro800 apply (enip_dialect_t.apply): parse one CIP reply, treat any
+ * non-zero CIP status as a remote error, copy into t->data via apply_tag_reply,
+ * and set *more when another read/write window is due. Caller holds api_mutex. */
+static int32_t enip_logix_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
+    *more = false;
+
+    cip_reply_t reply;
+    if(!enip_cip_parse_reply(cip_reply, &reply)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse CIP reply!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    if(reply.status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status, reply.ext_status);
+        return PLCTAG_ERR_REMOTE_ERR;
+    }
+
+    int32_t rc = apply_tag_reply(c, t, reply.data);
+
+    if(rc == PLCTAG_STATUS_OK && (t->op == ENIP_OP_OPEN_BULK || t->op == ENIP_OP_READ || t->op == ENIP_OP_WRITE)
+       && t->read_off < t->elem_count) {
+        *more = true;
+    }
+
+    return rc;
+}
+
+const enip_dialect_t enip_logix_dialect = {
+    .name = "logix",
+    .requested_cip_size = 0, /* engine default (ENIP_FO_CIP_SIZE); see build_forward_open */
+    .max_batch_cap = 0,      /* no cap: Multiple Service Packet (0x0A) supported */
+    .build = enip_logix_build,
+    .apply = enip_logix_apply,
+};
+
+/* §16a.4 dialect selection from CIP Identity. Logix/Micro800 and (for now)
+ * OMRON ride the symbolic dialect; PLC-5/SLC500/MicroLogix get the PCCC dialect.
+ * ponytail: PCCC families are distinguished by name at tag create, not here. */
+const enip_dialect_t *enip_dialect_select(uint16_t vendor_id, uint16_t device_type) {
+    (void)vendor_id;
+    (void)device_type;
+    return &enip_logix_dialect;
+}
+
+/* Logix/Micro800 symbolic build (enip_dialect_t.build): encode the CIP
+ * sub-request for t's current data op into the caller-owned `dest` region.
+ * Returns the used prefix of dest, or bytes_null() if it does not fit / on
+ * error. Uses c->arena as scratch (the existing CIP encoders allocate there).
  * Caller holds t->api_mutex. */
-static Bytes build_single_cip_request(Arena *a, enip_connection_t *c, enip_tag_p t) {
-    (void)c;
+static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
+    Arena *a = &c->arena;
+    Bytes req = bytes_null();
+
     switch(t->op) {
+        case ENIP_OP_OPEN_PROBE: req = enip_cip_read(a, t->path, 1); break;
+
+        case ENIP_OP_OPEN_BULK: {
+            uint32_t n = t->elem_count - t->read_off;
+            if(n > t->window_elems) { n = t->window_elems; }
+            Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
+            req = enip_cip_read(a, path, (uint16_t)n);
+            break;
+        }
+
         case ENIP_OP_READ:
             if(t->elem_count <= 1) {
-                return enip_cip_read(a, t->path, (uint16_t)t->elem_count);
+                req = enip_cip_read(a, t->path, (uint16_t)t->elem_count);
             } else {
                 uint32_t n = t->elem_count - t->read_off;
                 if(n > t->window_elems) { n = t->window_elems; }
                 Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
-                return enip_cip_read(a, path, (uint16_t)n);
+                req = enip_cip_read(a, path, (uint16_t)n);
             }
+            break;
 
         case ENIP_OP_WRITE: {
             Bytes type_header = bytes_from_buf(t->type_header, t->type_header_len);
             if(t->elem_count <= 1) {
                 Bytes data = bytes_from_buf(t->data, (size_t)t->size);
-                return enip_cip_write(a, t->path, type_header, (uint16_t)t->elem_count, data);
+                req = enip_cip_write(a, t->path, type_header, (uint16_t)t->elem_count, data);
             } else {
                 uint32_t n = write_window_count(t);
                 Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
                 Bytes data = bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, (size_t)n * (size_t)t->elem_size);
-                return enip_cip_write(a, path, type_header, (uint16_t)n, data);
+                req = enip_cip_write(a, path, type_header, (uint16_t)n, data);
             }
+            break;
         }
 
         default: return bytes_null();
     }
+
+    if(bytes_is_null(req) || req.len > dest.len) { return bytes_null(); }
+
+    memcpy(dest.data, req.data, req.len);
+    return bytes_from_buf(dest.data, req.len);
+}
+
+/* Allocate a CIP-payload-budget dest from c->arena and ask the dialect to
+ * encode t's current request into it (the dialect owns no buffer; the caller
+ * does). `budget` bounds one sub-request: the full CIP payload for a single op,
+ * or the space the 0x0A packer has left. Returns the used slice or null.
+ * ponytail: batch passes the full budget per sub (count-limited by pick_batch);
+ * a size-greedy 0x0A packer can pass the true remaining space later. */
+static Bytes dialect_build(enip_connection_t *c, enip_tag_p t, size_t budget) {
+    uint8_t *buf = arena_alloc(&c->arena, budget);
+    if(!buf) { return bytes_null(); }
+    return c->dialect->build(c, t, bytes_from_buf(buf, budget));
 }
 
 /* Build the tx frame for c->in_flight's current op and transition to
@@ -1383,19 +1450,11 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
     Bytes req = bytes_null();
 
     switch(t->op) {
-        case ENIP_OP_OPEN_PROBE: req = enip_cip_read(&c->arena, t->path, 1); break;
-
-        case ENIP_OP_OPEN_BULK: {
-            uint32_t n = t->elem_count - t->read_off;
-            if(n > t->window_elems) { n = t->window_elems; }
-            Bytes path = enip_cip_encode_path_at(&c->arena, t->path, t->read_off);
-            req = enip_cip_read(&c->arena, path, (uint16_t)n);
-            break;
-        }
-
+        case ENIP_OP_OPEN_PROBE:
+        case ENIP_OP_OPEN_BULK:
         case ENIP_OP_READ:
         case ENIP_OP_WRITE:
-            req = build_single_cip_request(&c->arena, c, t);
+            req = dialect_build(c, t, c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD);
             break;
 
         case ENIP_OP_LIST:
@@ -1573,31 +1632,43 @@ static int32_t build_batch_request(enip_connection_t *c) {
         t = t->batch_next;
     }
 
-    Bytes *sub_reqs = (Bytes *)arena_alloc(&c->arena, (size_t)c->batch_count * sizeof(Bytes));
-    if(!sub_reqs) {
-        complete_batch(c, (int8_t)PLCTAG_ERR_NO_MEM);
-        c->state = CONN_READY;
-        return PLCTAG_STATUS_OK;
-    }
-    bool build_ok = true;
+    /* Pack the Multiple Service (0x0A) request in place: the dialect encodes
+     * each sub-request directly into its slot in this single buffer, so the
+     * whole batch costs one budget-sized allocation instead of one per tag
+     * (max_batch can reach ~54, which would blow the arena). */
+    size_t budget = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
+    size_t header_size = ENIP_MS_REQ_FIXED + (size_t)2 * c->batch_count;
+    uint8_t *ms_buf = (uint8_t *)arena_alloc(&c->arena, budget);
+    bool build_ok = (ms_buf != NULL && header_size <= budget);
+    size_t cursor = header_size;
     t = c->batch_head;
-    for(uint16_t i = 0; i < c->batch_count; i++) {
-        sub_reqs[i] = build_single_cip_request(&c->arena, c, t);
-        if(bytes_is_null(sub_reqs[i])) {
+    for(uint16_t i = 0; build_ok && i < c->batch_count; i++) {
+        /* offset[i] is relative to the Number_of_Services field at buf[6]. */
+        uint16_t off = (uint16_t)(cursor - 6);
+        ms_buf[8 + (size_t)2 * i]     = (uint8_t)(off & 0xFFu);
+        ms_buf[8 + (size_t)2 * i + 1] = (uint8_t)(off >> 8);
+
+        Bytes used = c->dialect->build(c, t, bytes_from_buf(ms_buf + cursor, budget - cursor));
+        if(bytes_is_null(used)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "build_batch_request: failed at sub-request %u!", (unsigned)i);
             build_ok = false;
             break;
         }
+        cursor += used.len;
         t = t->batch_next;
     }
 
     Bytes frame = bytes_null();
     if(build_ok) {
-        Bytes ms = enip_cip_multi_service(&c->arena, sub_reqs, c->batch_count);
-        if(!bytes_is_null(ms)) {
-            Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
-            frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
-        }
+        /* Multiple Service header: service + Message Router path + count. */
+        ms_buf[0] = CIP_MULTI_SVC;
+        ms_buf[1] = 0x02; ms_buf[2] = 0x20; ms_buf[3] = 0x02; ms_buf[4] = 0x24; ms_buf[5] = 0x01;
+        ms_buf[6] = (uint8_t)(c->batch_count & 0xFFu);
+        ms_buf[7] = (uint8_t)(c->batch_count >> 8);
+
+        Bytes ms = bytes_from_buf(ms_buf, cursor);
+        Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
+        frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
     }
 
     t = c->batch_head;
