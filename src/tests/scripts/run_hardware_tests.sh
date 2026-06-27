@@ -401,8 +401,30 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: connection tag connection state transitions (ControlLogix)... "
+echo -n "Test $TEST: connection tag connection state transitions (ControlLogix L81)... "
 $VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@connection" > "$LOG_DIR/${TEST}_logix_connection_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: connection tag connection state transitions (ControlLogix L61)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=ab-eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&name=@connection" > "$LOG_DIR/${TEST}_logix_connection_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: connection tag connection state transitions (ControlLogix L55)... "
+$VALGRIND$TEST_DIR/test_connection_tag "--tag=protocol=ab-eip&gateway=10.206.1.37&path=1,5&plc=ControlLogix&name=@connection" > "$LOG_DIR/${TEST}_logix_connection_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

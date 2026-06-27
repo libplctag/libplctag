@@ -255,16 +255,14 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
  * ---------------------------------------------------------------------- */
 
 static void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
-    tag_state_t *ts;
+    tag_state_t *ts = (tag_state_t *)userdata;
     int32_t rc, ws;
 
-    (void)userdata;
-
-    ts = find_tag_state(tag_id);
     if(!ts) { return; }
 
     switch(event) {
         case PLCTAG_EVENT_CREATED:
+            ts->tag_id = tag_id;
             fprintf(stderr, "[tag %d] CREATED: %s\n", (int)tag_id, plc_tag_decode_error(status));
             break;
 
@@ -475,7 +473,7 @@ int main(int argc, char **argv) {
         compat_atomic_store_int32(&tag_states[i].completed, 0);
 
         fprintf(stderr, "Creating @connection tag %d/%d: %s\n", i + 1, num_tags, tag_path);
-        tag = plc_tag_create_ex(tag_path, tag_callback, NULL, 0);
+        tag = plc_tag_create_ex(tag_path, tag_callback, &tag_states[i], 0);
         if(tag < 0) {
             fprintf(stderr, "ERROR: could not create @connection tag %d: %s\n", i + 1, plc_tag_decode_error((int)tag));
             while(--i >= 0) { plc_tag_destroy(tag_handles[i]); }
