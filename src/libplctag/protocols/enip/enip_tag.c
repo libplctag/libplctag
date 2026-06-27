@@ -732,6 +732,85 @@ static plc_tag_p create_listing_tag(attr attribs,
     return (plc_tag_p)tag;
 }
 
+/* Build a PLC-5/SLC/MicroLogix data tag from a parsed PCCC logical address.
+ * No symbolic path and no OPEN_PROBE: the element size comes straight from the
+ * address letter, so the data buffer is sized here and the tag is born ready.
+ * The PCCC dialect (Execute-PCCC, CIP 0x4B) builds/parses the network ops. */
+static plc_tag_p create_pccc_tag(attr attribs, const pccc_addr_t *addr,
+                                 void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                 void *userdata, plc_tag_p src_tag) {
+    enip_tag_p tag = (enip_tag_p)rc_alloc((int)sizeof(struct enip_tag_t), enip_tag_destructor);
+    if(!tag) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate PCCC tag!");
+        return NULL;
+    }
+
+    tag->vtable = &enip_tag_vtable;
+    tag->byte_order = &enip_tag_byte_order;
+    tag->kind = ENIP_TAG_KIND_PCCC;
+    tag->pccc_addr = *addr;
+    tag->elem_size = (uint32_t)addr->element_size_bytes;
+    tag->elem_count = (uint32_t)attr_get_int(attribs, "elem_count", 1);
+
+    /* PLC-5 vs SLC/MicroLogix selects the address encoder and PCCC function
+     * codes. Not derivable from CIP Identity, so honour an explicit hint
+     * (plc=plc5 / cpu=plc-5); default to the SLC/MicroLogix family. */
+    const char *plc = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", ""));
+    tag->pccc_plc5 = (uint8_t)(strchr(plc, '5') != NULL);
+
+    if(addr->is_bit) {
+        tag->is_bit = 1;
+        tag->bit = addr->bit;
+    }
+
+    int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->protocol_type = TAG_PROTOCOL_ENIP;
+    tag->skip_tickler = 1; /* the IO thread ticklers ENIP tags, not the global tickler */
+
+    /* Size and allocate the data buffer now -- there is no probe to learn it. */
+    size_t total_size = (size_t)tag->elem_size * (size_t)tag->elem_count;
+    if(total_size == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "PCCC tag has zero size (bad element size or count)!");
+        rc_dec(tag);
+        return NULL;
+    }
+    tag->data = mem_alloc((int)total_size);
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate PCCC tag data buffer!");
+        rc_dec(tag);
+        return NULL;
+    }
+    tag->size = (int32_t)total_size;
+    tag->window_elems = tag->elem_count;       /* PCCC has no fragmentation: whole tag in one shot */
+    tag->write_window_elems = tag->elem_count;
+    tag->ready = 1; /* no OPEN_PROBE; a read/write goes straight to its PCCC op */
+
+    bool is_new = false;
+    tag->conn = enip_tag_get_conn(attribs, src_tag, &is_new);
+
+    if(!tag->conn) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create or find a connection!");
+        tag->status = (int8_t)PLCTAG_ERR_BAD_GATEWAY;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_ERR_BAD_GATEWAY);
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+        return (plc_tag_p)tag;
+    }
+
+    tag->status = (int8_t)PLCTAG_STATUS_OK;
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)PLCTAG_STATUS_OK);
+
+    /* Join the active list; a read/write marks it due so the IO thread runs the op. */
+    enip_session_schedule(tag->conn, tag, ENIP_OP_IDLE, time_ms());
+
+    return (plc_tag_p)tag;
+}
+
 plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                 void *userdata, plc_tag_p src_tag) {
     int32_t rc;
@@ -757,6 +836,17 @@ plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t t
             return NULL;
         }
         return create_listing_tag(attribs, tag_callback_func, userdata, src_tag, true, (uint16_t)udt_id);
+    }
+
+    /* A PLC-5/SLC/MicroLogix logical address (N7:0, F8:0, B3:0/2, ...) parses
+     * cleanly here; a Logix symbolic name does not. Use that as the PCCC
+     * discriminator -- the device family is not yet known (Identity comes during
+     * bring-up), but only a PCCC PLC accepts these addresses.
+     * ponytail: name-syntax detection, not a separate plc= switch. */
+    pccc_addr_t pccc_addr = {0};
+    if(enip_pccc_parse_logical_address(attr_get_str(attribs, "name", ""), &pccc_addr) == PLCTAG_STATUS_OK
+       && pccc_addr.file_type != PCCC_FILE_UNKNOWN) {
+        return create_pccc_tag(attribs, &pccc_addr, tag_callback_func, userdata, src_tag);
     }
 
     enip_tag_p tag = create_tag_object(attribs);

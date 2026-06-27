@@ -115,9 +115,27 @@ target_link_libraries(test_enip_eip_cpf PRIVATE cmocka plctag_static ${EXTRA_LIN
 
 add_test(NAME unit_test_enip_eip_cpf COMMAND test_enip_eip_cpf)
 
+# test_enip_pccc_addr: tests PCCC address parse/encode (pure, no I/O)
+add_executable(test_enip_pccc_addr
+    test_enip_pccc_addr.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_pccc_addr.c
+)
+
+target_include_directories(test_enip_pccc_addr PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${cmocka_SOURCE_DIR}/include
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_enip_pccc_addr PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_enip_pccc_addr COMMAND test_enip_pccc_addr)
+
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_enip_type test_enip_cip_path test_enip_eip_cpf
+    DEPENDS test_init test_enip_type test_enip_cip_path test_enip_eip_cpf test_enip_pccc_addr
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

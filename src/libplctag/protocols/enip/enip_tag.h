@@ -39,6 +39,7 @@
 
 #include <stdint.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/enip/enip_pccc_addr.h> /* pccc_addr_t for PCCC data tags */
 #include <libplctag/protocols/enip/enip_session.h>
 #include <utils/bytes.h>
 
@@ -60,6 +61,7 @@ typedef enum {
     ENIP_TAG_KIND_IDENTITY,   /* @identity */
     ENIP_TAG_KIND_LISTING,    /* @tags: a data-variant tag driven by ENIP_OP_LIST */
     ENIP_TAG_KIND_UDT,        /* @udt/<id>: a data-variant tag driven by ENIP_OP_UDT_* */
+    ENIP_TAG_KIND_PCCC,       /* PLC-5/SLC/MicroLogix: data-variant tag, Execute-PCCC (no probe) */
 } enip_tag_kind_t;
 
 struct enip_tag_t {
@@ -88,11 +90,16 @@ struct enip_tag_t {
              * next symbol instance id for @tags, or the fixed template id for
              * @udt; list_total is the @udt field-definition byte target. */
             uint32_t list_next_id, list_total;
+            /* PCCC only (ENIP_TAG_KIND_PCCC): the parsed logical address (N7:0,
+             * F8:0, ...) and which encoder/function family to use. Filled at
+             * create; the probe is skipped (elem_size comes from the address). */
+            pccc_addr_t pccc_addr;
             uint8_t type_header[4];
             uint8_t type_header_len; /* 2 or 4 */
             uint8_t op;              /* enip_op_t */
             uint8_t scheduled : 1;
             uint8_t ready : 1;
+            uint8_t pccc_plc5 : 1; /* PCCC: PLC-5 encoding/functions (else SLC/MicroLogix) */
             /* tail: tag_name (NUL), then the encoded CIP path bytes */
         };
 

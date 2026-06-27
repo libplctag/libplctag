@@ -1135,8 +1135,11 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
             }
         } else {
             /* data tag: the dialect parses the reply, interprets status, copies
-             * into t->data, and sets more_windows for the next round trip. */
-            status = (int8_t)c->dialect->apply(c, t, cip, &more_windows);
+             * into t->data, and sets more_windows for the next round trip. PCCC
+             * is selected per-tag (see enip_dialect.h); everything else uses the
+             * connection's identity-selected dialect. */
+            const enip_dialect_t *d = (t->kind == ENIP_TAG_KIND_PCCC) ? &enip_pccc_dialect : c->dialect;
+            status = (int8_t)d->apply(c, t, cip, &more_windows);
         }
     }
 
@@ -1429,6 +1432,141 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
     return bytes_from_buf(dest.data, req.len);
 }
 
+/* ============================================================================
+ * PCCC dialect: PLC-5 / SLC500 / MicroLogix (Execute-PCCC, CIP service 0x4B).
+ * The CIP request rides the same connected CPF+EIP wrap as the symbolic dialect;
+ * build/apply just speak PCCC. Reuses ab/pccc.c's pure address encoders.
+ * ========================================================================= */
+
+#define PCCC_EXECUTE_SVC ((uint8_t)0x4B)
+#define PCCC_TYPED_CMD ((uint8_t)0x0F)
+#define PCCC_PLC5_READ_FNC ((uint8_t)0x01)
+#define PCCC_PLC5_WRITE_FNC ((uint8_t)0x00)
+#define PCCC_SLC_READ_FNC ((uint8_t)0xA2)
+#define PCCC_SLC_WRITE_FNC ((uint8_t)0xAA)
+#define PCCC_VENDOR_ID ((uint16_t)0xF33D)     /* matches ab/defs.h AB_EIP_VENDOR_ID */
+#define PCCC_VENDOR_SN ((uint32_t)0x21504345) /* matches ab/defs.h AB_EIP_VENDOR_SN */
+/* In a parsed reply.data: requestor id (7) + PCCC cmd(1)+sts(1)+tns(2) = 11. */
+#define PCCC_REPLY_HDR ((size_t)11)
+#define PCCC_REPLY_STS_OFF ((size_t)8)
+
+static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
+    if(t->op != ENIP_OP_READ && t->op != ENIP_OP_WRITE) { return bytes_null(); }
+
+    bool is_write = (t->op == ENIP_OP_WRITE);
+    size_t data_len = is_write ? (size_t)t->size : 0;
+
+    /* SLC/MicroLogix carry the transfer size in a single byte. */
+    if(!t->pccc_plc5 && (size_t)t->size > 0xFFu) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC SLC transfer size %d exceeds 255 bytes!", (int)t->size);
+        return bytes_null();
+    }
+
+    /* Encode the logical address with the family encoder (copy: it may adjust). */
+    uint8_t addr_buf[32];
+    pccc_addr_t addr = t->pccc_addr;
+    Bytes encoded = t->pccc_plc5 ? enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)))
+                                 : enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
+    if(bytes_is_null(encoded) || encoded.len == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
+        return bytes_null();
+    }
+    size_t addr_len = encoded.len;
+
+    /* CIP/PCCC header(13) + PCCC cmd fixed(plc5:9, slc:6) + addr + [plc5 read size byte] + write data. */
+    size_t need = 13 + (t->pccc_plc5 ? 9u : 6u) + addr_len + (t->pccc_plc5 && !is_write ? 1u : 0u) + data_len;
+    if(need > dest.len) { return bytes_null(); }
+
+    uint16_t tns = (uint16_t)(c->conn_seq + 1);
+    uint8_t *p = dest.data;
+    size_t pos = 0;
+
+    /* CIP Execute-PCCC header + requestor id. */
+    p[pos++] = PCCC_EXECUTE_SVC;
+    p[pos++] = 0x02; /* path size in 16-bit words */
+    p[pos++] = 0x20; p[pos++] = 0x67; p[pos++] = 0x24; p[pos++] = 0x01; /* PCCC object 0x67 inst 1 */
+    p[pos++] = 0x07; /* requestor id size = vendor_id(2) + serial(4) + this byte */
+    p[pos++] = (uint8_t)(PCCC_VENDOR_ID & 0xFFu);
+    p[pos++] = (uint8_t)(PCCC_VENDOR_ID >> 8);
+    p[pos++] = (uint8_t)(PCCC_VENDOR_SN & 0xFFu);
+    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 8) & 0xFFu);
+    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 16) & 0xFFu);
+    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 24) & 0xFFu);
+
+    /* PCCC command: CMD, STS=0, TNS, FNC, ... */
+    p[pos++] = PCCC_TYPED_CMD;
+    p[pos++] = 0x00;
+    p[pos++] = (uint8_t)(tns & 0xFFu);
+    p[pos++] = (uint8_t)(tns >> 8);
+
+    if(t->pccc_plc5) {
+        p[pos++] = is_write ? PCCC_PLC5_WRITE_FNC : PCCC_PLC5_READ_FNC;
+        p[pos++] = 0x00; p[pos++] = 0x00;                   /* offset = 0 */
+        uint16_t words = (uint16_t)((size_t)t->size / 2u);  /* transfer size in words */
+        p[pos++] = (uint8_t)(words & 0xFFu);
+        p[pos++] = (uint8_t)(words >> 8);
+        memcpy(p + pos, addr_buf, (size_t)addr_len);
+        pos += (size_t)addr_len;
+        if(!is_write) { p[pos++] = (uint8_t)t->size; } /* PLC-5 read appends total byte size */
+    } else {
+        p[pos++] = is_write ? PCCC_SLC_WRITE_FNC : PCCC_SLC_READ_FNC;
+        p[pos++] = (uint8_t)t->size; /* transfer size in bytes */
+        memcpy(p + pos, addr_buf, (size_t)addr_len);
+        pos += (size_t)addr_len;
+    }
+
+    if(is_write) {
+        memcpy(p + pos, t->data, data_len);
+        pos += data_len;
+    }
+
+    return bytes_from_buf(dest.data, pos);
+}
+
+static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
+    (void)c;
+    *more = false; /* PCCC has no fragmentation: one round trip per op. */
+
+    cip_reply_t reply;
+    if(!enip_cip_parse_reply(cip_reply, &reply)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse PCCC CIP reply!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    if(reply.status != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC CIP error 0x%02X (ext 0x%04X).", reply.status, reply.ext_status);
+        return PLCTAG_ERR_REMOTE_ERR;
+    }
+
+    if(reply.data.len < PCCC_REPLY_HDR) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC reply too short (%zu bytes)!", reply.data.len);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* PCCC-level STS. 0xF0 carries an extended code in the next byte; treating
+     * any non-zero as a remote error is enough for the data path. */
+    uint8_t pccc_sts = reply.data.data[PCCC_REPLY_STS_OFF];
+    if(pccc_sts != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC status error 0x%02X.", pccc_sts);
+        return PLCTAG_ERR_REMOTE_ERR;
+    }
+
+    if(t->op == ENIP_OP_WRITE) { return PLCTAG_STATUS_OK; }
+
+    size_t avail = reply.data.len - PCCC_REPLY_HDR;
+    size_t n = (avail < (size_t)t->size) ? avail : (size_t)t->size;
+    memcpy(t->data, reply.data.data + PCCC_REPLY_HDR, n);
+    return PLCTAG_STATUS_OK;
+}
+
+const enip_dialect_t enip_pccc_dialect = {
+    .name = "pccc",
+    .requested_cip_size = 0,
+    .max_batch_cap = 1, /* single in-flight: no Multiple Service (0x0A) packing */
+    .build = enip_pccc_build,
+    .apply = enip_pccc_apply,
+};
+
 /* Allocate a CIP-payload-budget dest from c->arena and ask the dialect to
  * encode t's current request into it (the dialect owns no buffer; the caller
  * does). `budget` bounds one sub-request: the full CIP payload for a single op,
@@ -1436,9 +1574,12 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
  * ponytail: batch passes the full budget per sub (count-limited by pick_batch);
  * a size-greedy 0x0A packer can pass the true remaining space later. */
 static Bytes dialect_build(enip_connection_t *c, enip_tag_p t, size_t budget) {
+    /* PCCC is selected per-tag (see enip_dialect.h); everything else uses the
+     * connection's identity-selected dialect. */
+    const enip_dialect_t *d = (t->kind == ENIP_TAG_KIND_PCCC) ? &enip_pccc_dialect : c->dialect;
     uint8_t *buf = arena_alloc(&c->arena, budget);
     if(!buf) { return bytes_null(); }
-    return c->dialect->build(c, t, bytes_from_buf(buf, budget));
+    return d->build(c, t, bytes_from_buf(buf, budget));
 }
 
 /* Build the tx frame for c->in_flight's current op and transition to

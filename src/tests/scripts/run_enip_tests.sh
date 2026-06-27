@@ -18,6 +18,10 @@ LOG_DIR=${2:-.}  # Default to current directory if not specified
 GW="10.206.1.40"
 PATH_ROUTE="1,4"
 
+# PCCC devices (direct, no routing path) — mirror run_hardware_tests.sh.
+MICROLOGIX_GW="10.206.1.36"
+PLC5_GW="10.206.1.38"
+
 # Base tag attribute string used by all data-tag tests.  The manufacturer is
 # auto-detected by the generic enip module via GetIdentity, so no plc= is given.
 BASE="protocol=enip-tcp&gateway=${GW}&path=${PATH_ROUTE}"
@@ -118,6 +122,25 @@ run_grep_test() {
     fi
 }
 
+# Helper: like run_test but inverted — the command is EXPECTED to fail.
+#   run_fail_test "<description>" "<log-suffix>" <command...>
+run_fail_test() {
+    local desc=$1
+    local suffix=$2
+    shift 2
+
+    let TEST++
+    echo -n "  Test $TEST: ${desc}... "
+    "$@" > "$LOG_DIR/${TEST}_${suffix}.log" 2>&1
+    if [ $? == 0 ]; then   # this should NOT succeed
+        echo "FAILURE (unexpected success)"
+        let FAILURES++
+    else
+        echo "OK"
+        let SUCCESSES++
+    fi
+}
+
 
 echo ""
 echo "=== Basic read/write (unconnected and connected messaging) ==="
@@ -202,6 +225,69 @@ run_test "@tags listing" "tags_list" \
 #   run_test "@udt listing" "udt_list" \
 #       $VALGRIND$TEST_DIR/tag_rw2 --type=sint8 \
 #       "--tag=${BASE}&name=@udt/<id>" --debug=4
+
+
+echo ""
+echo "=== PCCC data files (MicroLogix and PLC/5, via protocol=enip-tcp) ==="
+
+# Mirrors run_hardware_tests.sh tests 14-24 but drives the generic enip module.
+# The PCCC tag kind is selected per-tag from the logical address (N7:0/B3:0/...);
+# plc= only sets the PLC-5 vs SLC encoding (anything with a '5' -> PLC-5).
+
+MICRO_BASE="protocol=enip-tcp&gateway=${MICROLOGIX_GW}&plc=micrologix"
+PLC5_BASE="protocol=enip-tcp&gateway=${PLC5_GW}&plc=plc5"
+
+# ----- MicroLogix (SLC-style encoding) -----
+run_test "B data file MicroLogix read/write" "pccc_micro_b" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=uint16 \
+    "--tag=${MICRO_BASE}&name=B3:0" --write=0 --debug=4
+
+run_test "B bit data file MicroLogix read/write" "pccc_micro_b_bit" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
+    "--tag=${MICRO_BASE}&name=B3:0/6" --write=1 --debug=4
+
+run_test "N data file MicroLogix read/write" "pccc_micro_n" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=sint16 \
+    "--tag=${MICRO_BASE}&name=N7:0" --write=42 --debug=4
+
+run_test "N bit data file MicroLogix read/write" "pccc_micro_n_bit" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
+    "--tag=${MICRO_BASE}&name=N7:0/10" --write=1 --debug=4
+
+run_test "L data file MicroLogix read/write" "pccc_micro_l" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=sint32 \
+    "--tag=${MICRO_BASE}&elem_count=4&name=L10:0" --write=0,1,2,3 --debug=4
+
+run_test "L bit data file MicroLogix read" "pccc_micro_l_bit_read" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
+    "--tag=${MICRO_BASE}&name=L10:0/23" --debug=4
+
+# Writing a single bit of an L (32-bit) data file is not supported -> must fail.
+run_fail_test "L bit data file MicroLogix write (expected failure)" "pccc_micro_l_bit_write" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
+    "--tag=${MICRO_BASE}&name=L10:0/23" --write=1 --debug=4
+
+# ----- PLC/5 (PLC-5-style encoding) -----
+run_test "B data file PLC5 read/write" "pccc_plc5_b" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=uint16 \
+    "--tag=${PLC5_BASE}&elem_count=1&name=B3:0" --write=0 --debug=4
+
+run_test "B bit data file PLC5 read/write" "pccc_plc5_b_bit" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
+    "--tag=${PLC5_BASE}&elem_count=1&name=B3:0/10" --write=1 --debug=4
+
+run_test "N data file PLC5 read/write" "pccc_plc5_n" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=sint16 \
+    "--tag=${PLC5_BASE}&elem_count=1&name=N7:0" --write=0 --debug=4
+
+run_test "N bit data file PLC5 read/write" "pccc_plc5_n_bit" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=bit \
+    "--tag=${PLC5_BASE}&elem_count=1&name=N7:0/10" --write=1 --debug=4
+
+# ----- Timer .acc mnemonic subelement (exercises the parse fix) -----
+run_test "PLC5 timer .acc mnemonic read" "pccc_plc5_timer_acc" \
+    $VALGRIND$TEST_DIR/tag_rw2 --type=sint16 \
+    "--tag=${PLC5_BASE}&elem_count=1&name=T4:0.acc" --debug=4
 
 
 echo ""

@@ -84,6 +84,13 @@ typedef struct enip_dialect_t {
  * for every connection; also serves OMRON named I/O until its dialect lands. */
 extern const enip_dialect_t enip_logix_dialect;
 
+/* PLC-5 / SLC500 / MicroLogix PCCC dialect (Execute-PCCC, CIP service 0x4B).
+ * Unlike the symbolic dialect this is selected per-tag (by ENIP_TAG_KIND_PCCC,
+ * decided from the tag name at create) rather than per-connection from Identity:
+ * PCCC addressing and the probe-less bring-up are known at tag create, and the
+ * PLC-5-vs-SLC encoding split is not reliably derivable from CIP Identity. */
+extern const enip_dialect_t enip_pccc_dialect;
+
 /* Select the dialect for a connection from its parsed CIP Identity fields.
  * Called once at the end of identity bring-up. Never returns NULL. */
 extern const enip_dialect_t *enip_dialect_select(uint16_t vendor_id, uint16_t device_type);
