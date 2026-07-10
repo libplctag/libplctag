@@ -31,76 +31,80 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/protocols/enip/enip_type.h>
-#include <inttypes.h>
-#include <utils/debug.h>
+#include <libplctag/protocols/enip/client/enip_eip.h>
 
-/* CIP atomic types are always little-endian on the wire. */
-static const tag_byte_order_t ENIP_ATOMIC_BYTE_ORDER = {
-    .is_allocated = 0,
+Bytes enip_eip_encode(Arena *a, enip_eip_hdr_t *h, Bytes payload) {
+    if(!a || !h) { return bytes_null(); }
 
-    .int16_order = {0, 1},
-    .int32_order = {0, 1, 2, 3},
-    .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-    .float32_order = {0, 1, 2, 3},
-    .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-};
+    h->length = (uint16_t)payload.len;
 
-typedef struct {
-    uint16_t type_code;
-    uint32_t elem_size;
-} enip_atomic_type_entry_t;
+    Bytes hdr = bytes_pack(a, BYTES_LE, h->command, h->length, h->session_handle, h->status, h->sender_context, h->options);
+    if(bytes_is_null(hdr)) { return bytes_null(); }
 
-/* clang-format off */
-static const enip_atomic_type_entry_t ENIP_ATOMIC_TYPES[] = {
-    { CIP_TYPE_BOOL,  1 },
-    { CIP_TYPE_SINT,  1 },
-    { CIP_TYPE_INT,   2 },
-    { CIP_TYPE_DINT,  4 },
-    { CIP_TYPE_LINT,  8 },
-    { CIP_TYPE_USINT, 1 },
-    { CIP_TYPE_UINT,  2 },
-    { CIP_TYPE_UDINT, 4 },
-    { CIP_TYPE_ULINT, 8 },
-    { CIP_TYPE_REAL,  4 },
-    { CIP_TYPE_LREAL, 8 },
-    { CIP_TYPE_BYTE,  1 },
-    { CIP_TYPE_WORD,  2 },
-    { CIP_TYPE_DWORD, 4 },
-    { CIP_TYPE_LWORD, 8 },
-};
-/* clang-format on */
+    if(bytes_is_null(payload) || payload.len == 0) { return hdr; }
 
-#define ENIP_NUM_ATOMIC_TYPES ((size_t)(sizeof(ENIP_ATOMIC_TYPES) / sizeof(ENIP_ATOMIC_TYPES[0])))
+    return bytes_concat(a, hdr, payload);
+}
 
-bool enip_type_decode(Bytes reply_data, uint8_t *header_len_out, uint32_t *elem_size_hint_out, tag_byte_order_t *order_out) {
-    if(bytes_is_null(reply_data) || reply_data.len < 2 || !header_len_out || !elem_size_hint_out || !order_out) {
-        return false;
-    }
+bool enip_eip_decode(Bytes in, enip_eip_hdr_t *h, Bytes *payload) {
+    if(bytes_is_null(in) || in.len < ENIP_EIP_HEADER_SIZE || !h || !payload) { return false; }
 
-    uint16_t type_code = (uint16_t)((uint16_t)reply_data.data[0] | (uint16_t)((uint16_t)reply_data.data[1] << 8));
+    Bytes rest = bytes_unpack(in, BYTES_LE, &h->command, &h->length, &h->session_handle, &h->status, &h->sender_context,
+                               &h->options);
+    if(bytes_is_null(rest)) { return false; }
 
-    if(type_code == CIP_TYPE_STRUCT_HEADER) {
-        if(reply_data.len < ENIP_TYPE_HEADER_LEN_STRUCT) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "reply too short for structure header.");
-            return false;
-        }
+    if(rest.len < h->length) { return false; }
 
-        *header_len_out = ENIP_TYPE_HEADER_LEN_STRUCT;
-        *elem_size_hint_out = 0;
-        return true;
-    }
+    *payload = bytes_slice(rest, 0, h->length);
 
-    for(size_t i = 0; i < ENIP_NUM_ATOMIC_TYPES; i++) {
-        if(ENIP_ATOMIC_TYPES[i].type_code == type_code) {
-            *header_len_out = ENIP_TYPE_HEADER_LEN_ATOMIC;
-            *elem_size_hint_out = ENIP_ATOMIC_TYPES[i].elem_size;
-            *order_out = ENIP_ATOMIC_BYTE_ORDER;
-            return true;
-        }
-    }
+    return true;
+}
 
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "unknown CIP type code 0x%04" PRIX16 ".", type_code);
+Bytes enip_eip_register_session(Arena *a) {
+    if(!a) { return bytes_null(); }
 
-    return false;
+    /* payload: protocol_version(2)=1, options(2)=0 */
+    Bytes payload = bytes_pack(a, BYTES_LE, (uint16_t)1, (uint16_t)0);
+    if(bytes_is_null(payload)) { return bytes_null(); }
+
+    enip_eip_hdr_t hdr = {
+        .command = ENIP_CMD_REGISTER_SESSION,
+        .length = 0,
+        .session_handle = 0,
+        .status = 0,
+        .sender_context = 0,
+        .options = 0,
+    };
+
+    return enip_eip_encode(a, &hdr, payload);
+}
+
+Bytes enip_eip_send_rr_data(Arena *a, uint32_t session_handle, Bytes cpf) {
+    if(!a || bytes_is_null(cpf)) { return bytes_null(); }
+
+    enip_eip_hdr_t hdr = {
+        .command = ENIP_CMD_UNCONNECTED_SEND,
+        .length = 0,
+        .session_handle = session_handle,
+        .status = 0,
+        .sender_context = 0,
+        .options = 0,
+    };
+
+    return enip_eip_encode(a, &hdr, cpf);
+}
+
+Bytes enip_eip_send_unit_data(Arena *a, uint32_t session_handle, Bytes cpf) {
+    if(!a || bytes_is_null(cpf)) { return bytes_null(); }
+
+    enip_eip_hdr_t hdr = {
+        .command = ENIP_CMD_CONNECTED_SEND,
+        .length = 0,
+        .session_handle = session_handle,
+        .status = 0,
+        .sender_context = 0,
+        .options = 0,
+    };
+
+    return enip_eip_encode(a, &hdr, cpf);
 }

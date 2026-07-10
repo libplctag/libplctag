@@ -40,8 +40,8 @@
  * enip_tag_create routes to either a @connection tag or a normal protocol tag,
  * sharing connections by gateway+route_path through a global registry.
  */
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_conn.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_conn.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>

@@ -40,7 +40,7 @@
 #include "utils/arena.h"
 #include "utils/bytes.h"
 #include "device_sim.h"
-#include "eip.h"
+#include <libplctag/protocols/enip/common/eip.h>
 #include "server.h"
 
 /* ============================================================================

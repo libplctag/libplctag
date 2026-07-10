@@ -47,11 +47,11 @@
  *   enip_metadata_fetch_root_symbols instead of hand-rolled loop.
  */
 
-#include <libplctag/protocols/enip/enip_mfg_ops.h>
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_conn.h>
-#include <libplctag/protocols/enip/enip_cip.h>
-#include <libplctag/protocols/enip/enip_packetizer.h>
+#include <libplctag/protocols/enip/client/enip_mfg_ops.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_conn.h>
+#include <libplctag/protocols/enip/client/enip_cip.h>
+#include <libplctag/protocols/enip/client/enip_packetizer.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <inttypes.h>
 #include <platform.h>

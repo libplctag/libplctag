@@ -61,10 +61,10 @@
  *   - Confirm all wire format details against src/external_docs/aphytcomm.
  */
 
-#include <libplctag/protocols/enip/enip_mfg_ops.h>
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_conn.h>
-#include <libplctag/protocols/enip/enip_cip.h>
+#include <libplctag/protocols/enip/client/enip_mfg_ops.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_conn.h>
+#include <libplctag/protocols/enip/client/enip_cip.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <utils/debug.h>
 #include <utils/enip_wait.h>

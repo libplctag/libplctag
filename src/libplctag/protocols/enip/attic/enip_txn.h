@@ -44,7 +44,7 @@
  * tested.
  */
 
-#include <libplctag/protocols/enip/enip_conn.h>
+#include <libplctag/protocols/enip/client/enip_conn.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
 #include <stdint.h>

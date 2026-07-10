@@ -53,8 +53,8 @@
 #include "utils/atomic_utils.h"
 #include "utils/debug.h"
 #include "cpf.h"
-#include "device.h"
-#include "discovery.h"
+#include <libplctag/protocols/enip/server/device.h>
+#include <libplctag/protocols/enip/server/discovery.h>
 #include "eip.h"
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS

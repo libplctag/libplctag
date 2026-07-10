@@ -43,7 +43,7 @@
 #include "utils/debug.h"
 #include "cip.h"
 #include "cpf.h"
-#include "device.h"
+#include <libplctag/protocols/enip/server/device.h>
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS
 

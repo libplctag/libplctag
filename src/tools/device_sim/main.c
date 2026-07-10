@@ -40,7 +40,7 @@
 #include <libplctag/lib/libplctag.h>
 #include "platform.h"
 #include "utils/debug.h"
-#include "device_sim.h"
+#include <libplctag/protocols/enip/server/device_sim.h>
 #include "args.h"
 
 /* ============================================================================

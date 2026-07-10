@@ -49,8 +49,8 @@
  * matches — no change needed).
  */
 
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_packetizer.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_packetizer.h>
 #include <utils/debug.h>
 
 /* Phase 1: compute CIP-payload budget from a ForwardOpen-negotiated size (plan §5.9).

@@ -45,9 +45,9 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/protocols/enip/enip_cip.h>
-#include <libplctag/protocols/enip/enip_session.h>
-#include <libplctag/protocols/enip/enip_tag.h>
+#include <libplctag/protocols/enip/client/enip_cip.h>
+#include <libplctag/protocols/enip/client/enip_session.h>
+#include <libplctag/protocols/enip/client/enip_tag.h>
 #include <platform.h>
 #include <utils/arena.h>
 #include <utils/attr.h>

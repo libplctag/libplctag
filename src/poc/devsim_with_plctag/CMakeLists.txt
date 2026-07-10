@@ -5,7 +5,8 @@ add_executable(devsim_with_plctag ${CMAKE_CURRENT_SOURCE_DIR}/devsim_with_plctag
 target_include_directories(devsim_with_plctag PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/lib)
 
-# libdevsim bundles plctag_static, so linking it reaches both the device_sim
-# and the plc_tag public APIs from one executable.
-target_link_libraries(devsim_with_plctag PRIVATE devsim ${EXTRA_LINKER_LIBS})
+# The device_sim_* and plc_tag_* APIs are both compiled into plctag_static
+# (server-tag sources under LIBPLCTAG_FEATURE_SERVER), so linking it alone
+# reaches both from one executable.
+target_link_libraries(devsim_with_plctag PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 target_link_options(devsim_with_plctag PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})

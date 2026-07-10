@@ -42,7 +42,7 @@
 #include "utils/arena.h"
 #include "utils/bytes.h"
 #include "utils/debug.h"
-#include "device.h"
+#include <libplctag/protocols/enip/server/device.h>
 #include "pccc.h"
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS

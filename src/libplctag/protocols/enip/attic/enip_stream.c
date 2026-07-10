@@ -44,8 +44,8 @@
  * socket_read_wait's restartable I/O state parameter.
  */
 
-#include <libplctag/protocols/enip/enip_stream.h>
-#include <libplctag/protocols/enip/enip_eip.h>
+#include <libplctag/protocols/enip/client/enip_stream.h>
+#include <libplctag/protocols/enip/client/enip_eip.h>
 #include <utils/debug.h>
 
 /* Read exactly 24-byte EIP header, parse payload length, read body.

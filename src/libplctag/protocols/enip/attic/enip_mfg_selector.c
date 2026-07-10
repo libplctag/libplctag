@@ -45,7 +45,7 @@
  */
 
 #include <inttypes.h>
-#include <libplctag/protocols/enip/enip_mfg_ops.h>
+#include <libplctag/protocols/enip/client/enip_mfg_ops.h>
 #include <utils/debug.h>
 #include <string.h>
 

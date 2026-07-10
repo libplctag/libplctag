@@ -37,7 +37,7 @@
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
-#include "device.h"
+#include <libplctag/protocols/enip/server/device.h>
 
 /* ============================================================================
  * CPF item type codes

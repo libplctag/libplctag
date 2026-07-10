@@ -51,7 +51,7 @@
  *   - get_int_attrib: add "state" attribute returning the DISCONNECTED/OPENING/READY enum.
  */
 
-#include <libplctag/protocols/enip/enip.h>
+#include <libplctag/protocols/enip/client/enip.h>
 #include <libplctag/protocols/enip/tag.h>
 #include <utils/debug.h>
 #include <utils/rc.h>

@@ -44,7 +44,7 @@
 #include <libplctag/lib/version.h>
 #if LIBPLCTAG_FEATURE_EIP
 #    include <libplctag/protocols/ab/ab.h>
-#    include <libplctag/protocols/enip/enip.h>
+#    include <libplctag/protocols/enip/client/enip.h>
 #    include <libplctag/protocols/omron/omron.h>
 #endif
 #if LIBPLCTAG_FEATURE_MODBUS

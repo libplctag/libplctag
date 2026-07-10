@@ -52,11 +52,11 @@
 #include "utils/bytes.h"
 #include "utils/debug.h"
 #include "cip.h"
-#include "device.h"
-#include "device_sim.h"
+#include <libplctag/protocols/enip/server/device.h>
+#include <libplctag/protocols/enip/server/device_sim.h>
 #include "eip.h"
 #include "identity.h"
-#include "pccc.h"
+#include <libplctag/protocols/enip/dialects/pccc/pccc.h>
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS
 

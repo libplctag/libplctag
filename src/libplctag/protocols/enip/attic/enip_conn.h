@@ -32,7 +32,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/protocols/enip/enip_mfg_ops.h>
+#include <libplctag/protocols/enip/client/enip_mfg_ops.h>
 #include <platform.h>
 #include <stdbool.h>
 #include <utils/arena.h>

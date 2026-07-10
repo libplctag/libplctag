@@ -39,7 +39,7 @@
 #include "cmocka.h"
 
 #include <libplctag/lib/libplctag.h>
-#include <libplctag/protocols/enip/enip_pccc_addr.h>
+#include <libplctag/protocols/enip/client/enip_pccc_addr.h>
 
 /* ============================================================================
  * enip_pccc_parse_logical_address

@@ -46,7 +46,7 @@
  */
 
 #include <libplctag/lib/tag.h>
-#include <libplctag/protocols/enip/enip_op.h>
+#include <libplctag/protocols/enip/client/enip_op.h>
 #include <stdbool.h>
 #include <stdint.h>
 

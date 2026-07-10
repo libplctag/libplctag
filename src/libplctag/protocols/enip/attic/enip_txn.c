@@ -31,12 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_txn.h>
-#include <libplctag/protocols/enip/enip_eip.h>
-#include <libplctag/protocols/enip/enip_cpf.h>
-#include <libplctag/protocols/enip/enip_cip.h>
-#include <libplctag/protocols/enip/enip_stream.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_txn.h>
+#include <libplctag/protocols/enip/client/enip_eip.h>
+#include <libplctag/protocols/enip/client/enip_cpf.h>
+#include <libplctag/protocols/enip/client/enip_cip.h>
+#include <libplctag/protocols/enip/client/enip_stream.h>
 #include <platform.h>
 #include <utils/debug.h>
 

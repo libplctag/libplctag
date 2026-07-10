@@ -108,6 +108,13 @@ if(LIBPLCTAG_FEATURE_MODBUS)
         "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.h")
 endif()
 
+# Server tags (device simulator): EtherNet/IP server runtime, folded in from
+# the former libdevsim (see SERVER_TAGS.md). Requires the EIP client sources
+# above for ENIP_SERVER_SOURCES to have been set.
+if(LIBPLCTAG_FEATURE_SERVER AND LIBPLCTAG_FEATURE_EIP)
+    list(APPEND libplctag_SRCS "${ENIP_SERVER_SOURCES}")
+endif()
+
 
 macro(print_all_ar_link_variables)
     message(STATUS "print_all_ar_link_variables------------------------------------------{")

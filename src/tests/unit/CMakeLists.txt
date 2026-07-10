@@ -63,7 +63,7 @@ add_test(NAME unit_test_init COMMAND test_init)
 # test_enip_type: tests enip_type_decode() (pure, no I/O)
 add_executable(test_enip_type
     test_enip_type.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_type.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/client/enip_type.c
 )
 
 target_include_directories(test_enip_type PRIVATE
@@ -81,7 +81,7 @@ add_test(NAME unit_test_enip_type COMMAND test_enip_type)
 # test_enip_cip_path: tests enip_cip_encode_path() (pure, no I/O)
 add_executable(test_enip_cip_path
     test_enip_cip_path.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_cip.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/client/enip_cip.c
 )
 
 target_include_directories(test_enip_cip_path PRIVATE
@@ -99,8 +99,8 @@ add_test(NAME unit_test_enip_cip_path COMMAND test_enip_cip_path)
 # test_enip_eip_cpf: tests enip_eip_*/enip_cpf_* encode/decode round trips (pure, no I/O)
 add_executable(test_enip_eip_cpf
     test_enip_eip_cpf.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_eip.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_cpf.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/client/enip_eip.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/client/enip_cpf.c
 )
 
 target_include_directories(test_enip_eip_cpf PRIVATE
@@ -118,7 +118,7 @@ add_test(NAME unit_test_enip_eip_cpf COMMAND test_enip_eip_cpf)
 # test_enip_pccc_addr: tests PCCC address parse/encode (pure, no I/O)
 add_executable(test_enip_pccc_addr
     test_enip_pccc_addr.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/enip_pccc_addr.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols/enip/client/enip_pccc_addr.c
 )
 
 target_include_directories(test_enip_pccc_addr PRIVATE

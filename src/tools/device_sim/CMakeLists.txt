@@ -7,9 +7,9 @@ else()
 endif()
 
 # ============================================================================
-# device_sim — CLI executable; thin wrapper over libdevsim (built in
-# src/libdevsim).  The devsim target exports its lib/ and protocols/ include
-# dirs PUBLICly, so no include paths are needed here.
+# device_sim — CLI executable; thin wrapper over the server-tag sources that
+# live in src/libplctag/protocols/enip/{common,server,dialects} and are
+# compiled into plctag_static under LIBPLCTAG_FEATURE_SERVER (SERVER_TAGS.md).
 # ============================================================================
 
 set(DEVICE_SIM_FILES
@@ -20,5 +20,5 @@ set(DEVICE_SIM_FILES
 
 add_executable(device_sim ${DEVICE_SIM_FILES})
 
-target_link_libraries(device_sim PRIVATE devsim)
+target_link_libraries(device_sim PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 target_link_options(device_sim PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})

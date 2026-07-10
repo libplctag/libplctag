@@ -42,7 +42,7 @@
 #include <stdint.h>
 
 #include <libplctag/lib/libplctag.h>
-#include <libplctag/protocols/enip/enip_pccc_addr.h>
+#include <libplctag/protocols/enip/client/enip_pccc_addr.h>
 #include <platform.h>
 #include <utils/bytes.h>
 #include <utils/debug.h>

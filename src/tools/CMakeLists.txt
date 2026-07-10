@@ -12,5 +12,6 @@ add_subdirectory("tag_rw_deprecated")
 add_subdirectory("tag_rw2")
 add_subdirectory("list_tags_logix")
 add_subdirectory("list_tags_micro8x0")
-# device_sim / libdevsim is built at the top level (parallel to libplctag)
+# device_sim (thin CLI over the server-tag sources in plctag_static) is added
+# at the top level, gated by LIBPLCTAG_FEATURE_SERVER (see SERVER_TAGS.md)
 add_subdirectory("replay")

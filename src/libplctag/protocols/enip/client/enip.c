@@ -31,80 +31,29 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/protocols/enip/enip_eip.h>
+/*
+ * Module entry points (design doc §14.1).  Thin forwarders to
+ * enip_session.c / enip_tag.c.
+ */
 
-Bytes enip_eip_encode(Arena *a, enip_eip_hdr_t *h, Bytes payload) {
-    if(!a || !h) { return bytes_null(); }
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_session.h>
+#include <libplctag/protocols/enip/client/enip_tag.h>
+#include <utils/debug.h>
 
-    h->length = (uint16_t)payload.len;
+int enip_init(void) {
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Starting.");
 
-    Bytes hdr = bytes_pack(a, BYTES_LE, h->command, h->length, h->session_handle, h->status, h->sender_context, h->options);
-    if(bytes_is_null(hdr)) { return bytes_null(); }
-
-    if(bytes_is_null(payload) || payload.len == 0) { return hdr; }
-
-    return bytes_concat(a, hdr, payload);
+    return enip_session_module_init();
 }
 
-bool enip_eip_decode(Bytes in, enip_eip_hdr_t *h, Bytes *payload) {
-    if(bytes_is_null(in) || in.len < ENIP_EIP_HEADER_SIZE || !h || !payload) { return false; }
+void enip_teardown(void) {
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Starting.");
 
-    Bytes rest = bytes_unpack(in, BYTES_LE, &h->command, &h->length, &h->session_handle, &h->status, &h->sender_context,
-                               &h->options);
-    if(bytes_is_null(rest)) { return false; }
-
-    if(rest.len < h->length) { return false; }
-
-    *payload = bytes_slice(rest, 0, h->length);
-
-    return true;
+    enip_session_module_teardown();
 }
 
-Bytes enip_eip_register_session(Arena *a) {
-    if(!a) { return bytes_null(); }
-
-    /* payload: protocol_version(2)=1, options(2)=0 */
-    Bytes payload = bytes_pack(a, BYTES_LE, (uint16_t)1, (uint16_t)0);
-    if(bytes_is_null(payload)) { return bytes_null(); }
-
-    enip_eip_hdr_t hdr = {
-        .command = ENIP_CMD_REGISTER_SESSION,
-        .length = 0,
-        .session_handle = 0,
-        .status = 0,
-        .sender_context = 0,
-        .options = 0,
-    };
-
-    return enip_eip_encode(a, &hdr, payload);
-}
-
-Bytes enip_eip_send_rr_data(Arena *a, uint32_t session_handle, Bytes cpf) {
-    if(!a || bytes_is_null(cpf)) { return bytes_null(); }
-
-    enip_eip_hdr_t hdr = {
-        .command = ENIP_CMD_UNCONNECTED_SEND,
-        .length = 0,
-        .session_handle = session_handle,
-        .status = 0,
-        .sender_context = 0,
-        .options = 0,
-    };
-
-    return enip_eip_encode(a, &hdr, cpf);
-}
-
-Bytes enip_eip_send_unit_data(Arena *a, uint32_t session_handle, Bytes cpf) {
-    if(!a || bytes_is_null(cpf)) { return bytes_null(); }
-
-    enip_eip_hdr_t hdr = {
-        .command = ENIP_CMD_CONNECTED_SEND,
-        .length = 0,
-        .session_handle = session_handle,
-        .status = 0,
-        .sender_context = 0,
-        .options = 0,
-    };
-
-    return enip_eip_encode(a, &hdr, cpf);
+plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                           void *userdata, plc_tag_p src_tag) {
+    return enip_tag_create_impl(attribs, tag_callback_func, userdata, src_tag);
 }

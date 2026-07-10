@@ -31,69 +31,76 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/protocols/enip/enip_cpf.h>
+#include <libplctag/protocols/enip/client/enip_type.h>
+#include <inttypes.h>
+#include <utils/debug.h>
 
-#define ENIP_CPF_HEADER_SIZE ((size_t)8) /* iface_handle(4) + timeout(2) + item_count(2) */
+/* CIP atomic types are always little-endian on the wire. */
+static const tag_byte_order_t ENIP_ATOMIC_BYTE_ORDER = {
+    .is_allocated = 0,
 
-Bytes enip_cpf_wrap_unconnected(Arena *a, Bytes cip) {
-    if(!a || bytes_is_null(cip)) { return bytes_null(); }
+    .int16_order = {0, 1},
+    .int32_order = {0, 1, 2, 3},
+    .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+    .float32_order = {0, 1, 2, 3},
+    .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+};
 
-    /* header: iface_handle(4)=0, timeout(2)=0, item_count(2)=2 */
-    /* Null Address Item: type(2)=0x0000, length(2)=0 */
-    /* Unconnected Data Item header: type(2)=0x00B2, length(2)=cip.len */
-    return bytes_pack(a, BYTES_LE, (uint32_t)0, (uint16_t)0, (uint16_t)2, CPF_NULL_ADDR, (uint16_t)0, CPF_UCONN_DATA,
-                       (uint16_t)cip.len, cip);
-}
+typedef struct {
+    uint16_t type_code;
+    uint32_t elem_size;
+} enip_atomic_type_entry_t;
 
-Bytes enip_cpf_wrap_connected(Arena *a, uint32_t conn_id, uint16_t seq, Bytes cip) {
-    if(!a || bytes_is_null(cip)) { return bytes_null(); }
+/* clang-format off */
+static const enip_atomic_type_entry_t ENIP_ATOMIC_TYPES[] = {
+    { CIP_TYPE_BOOL,  1 },
+    { CIP_TYPE_SINT,  1 },
+    { CIP_TYPE_INT,   2 },
+    { CIP_TYPE_DINT,  4 },
+    { CIP_TYPE_LINT,  8 },
+    { CIP_TYPE_USINT, 1 },
+    { CIP_TYPE_UINT,  2 },
+    { CIP_TYPE_UDINT, 4 },
+    { CIP_TYPE_ULINT, 8 },
+    { CIP_TYPE_REAL,  4 },
+    { CIP_TYPE_LREAL, 8 },
+    { CIP_TYPE_BYTE,  1 },
+    { CIP_TYPE_WORD,  2 },
+    { CIP_TYPE_DWORD, 4 },
+    { CIP_TYPE_LWORD, 8 },
+};
+/* clang-format on */
 
-    /* header: iface_handle(4)=0, timeout(2)=0, item_count(2)=2 */
-    /* Connected Address Item: type(2)=0x00A1, length(2)=4, conn_id(4) */
-    /* Connected Data Item header: type(2)=0x00B1, length(2)=(seq(2)+cip.len) */
-    uint16_t cdi_len = (uint16_t)(2 + cip.len);
+#define ENIP_NUM_ATOMIC_TYPES ((size_t)(sizeof(ENIP_ATOMIC_TYPES) / sizeof(ENIP_ATOMIC_TYPES[0])))
 
-    return bytes_pack(a, BYTES_LE, (uint32_t)0, (uint16_t)0, (uint16_t)2, CPF_CONN_ADDR, (uint16_t)4, conn_id, CPF_CONN_DATA,
-                       cdi_len, seq, cip);
-}
+bool enip_type_decode(Bytes reply_data, uint8_t *header_len_out, uint32_t *elem_size_hint_out, tag_byte_order_t *order_out) {
+    if(bytes_is_null(reply_data) || reply_data.len < 2 || !header_len_out || !elem_size_hint_out || !order_out) {
+        return false;
+    }
 
-bool enip_cpf_unwrap(Bytes in, bool connected, uint16_t *seq_out, Bytes *cip_out) {
-    if(bytes_is_null(in) || in.len < ENIP_CPF_HEADER_SIZE || !seq_out || !cip_out) { return false; }
+    uint16_t type_code = (uint16_t)((uint16_t)reply_data.data[0] | (uint16_t)((uint16_t)reply_data.data[1] << 8));
 
-    uint32_t iface_handle = 0;
-    uint16_t router_timeout = 0;
-    uint16_t item_count = 0;
-
-    Bytes items = bytes_unpack(in, BYTES_LE, &iface_handle, &router_timeout, &item_count);
-    if(bytes_is_null(items)) { return false; }
-
-    uint16_t target_type = connected ? CPF_CONN_DATA : CPF_UCONN_DATA;
-
-    for(uint16_t i = 0; i < item_count; i++) {
-        uint16_t item_type = 0;
-        uint16_t item_len = 0;
-
-        Bytes rest = bytes_unpack(items, BYTES_LE, &item_type, &item_len);
-        if(bytes_is_null(rest) || rest.len < item_len) { return false; }
-
-        if(item_type == target_type) {
-            Bytes data = bytes_slice(rest, 0, item_len);
-
-            if(connected) {
-                if(data.len < 2) { return false; }
-                Bytes payload = bytes_unpack(data, BYTES_LE, seq_out);
-                if(bytes_is_null(payload)) { return false; }
-                *cip_out = payload;
-            } else {
-                *seq_out = 0;
-                *cip_out = data;
-            }
-
-            return true;
+    if(type_code == CIP_TYPE_STRUCT_HEADER) {
+        if(reply_data.len < ENIP_TYPE_HEADER_LEN_STRUCT) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "reply too short for structure header.");
+            return false;
         }
 
-        items = bytes_slice(rest, item_len, rest.len - item_len);
+        *header_len_out = ENIP_TYPE_HEADER_LEN_STRUCT;
+        *elem_size_hint_out = 0;
+        return true;
     }
+
+    for(size_t i = 0; i < ENIP_NUM_ATOMIC_TYPES; i++) {
+        if(ENIP_ATOMIC_TYPES[i].type_code == type_code) {
+            *header_len_out = ENIP_TYPE_HEADER_LEN_ATOMIC;
+            *elem_size_hint_out = ENIP_ATOMIC_TYPES[i].elem_size;
+            *order_out = ENIP_ATOMIC_BYTE_ORDER;
+            return true;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "unknown CIP type code 0x%04" PRIX16 ".", type_code);
 
     return false;
 }

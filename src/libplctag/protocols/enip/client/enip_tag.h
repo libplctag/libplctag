@@ -39,8 +39,8 @@
 
 #include <stdint.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/protocols/enip/enip_pccc_addr.h> /* pccc_addr_t for PCCC data tags */
-#include <libplctag/protocols/enip/enip_session.h>
+#include <libplctag/protocols/enip/client/enip_pccc_addr.h> /* pccc_addr_t for PCCC data tags */
+#include <libplctag/protocols/enip/client/enip_session.h>
 #include <utils/bytes.h>
 
 typedef enum {

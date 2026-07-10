@@ -51,8 +51,8 @@
 
 #include "platform.h"
 #include "utils/debug.h"
-#include "device.h"
-#include "device_sim.h"
+#include <libplctag/protocols/enip/server/device.h>
+#include <libplctag/protocols/enip/server/device_sim.h>
 #include "ab_listing.h"
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS

@@ -51,8 +51,8 @@
  * No debug-module change needed: this file already uses DEBUG_MODULE_ENIP.
  */
 
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_cip.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_cip.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
 #include <inttypes.h>

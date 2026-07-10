@@ -50,7 +50,7 @@
 #include "utils/bytes.h"
 #include "utils/debug.h"
 #include "device.h"
-#include "identity.h"
+#include <libplctag/protocols/enip/common/identity.h>
 #include "server.h"
 #include "discovery.h"
 

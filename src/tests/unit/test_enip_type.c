@@ -37,7 +37,7 @@
 #include <setjmp.h>
 #include "cmocka.h"
 
-#include <libplctag/protocols/enip/enip_type.h>
+#include <libplctag/protocols/enip/client/enip_type.h>
 
 static void test_decode_dint(void **state) {
     (void)state;

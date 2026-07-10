@@ -45,9 +45,9 @@
  * No functional changes needed to this file.
  */
 
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_cip.h>
-#include <libplctag/protocols/enip/enip_name.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_cip.h>
+#include <libplctag/protocols/enip/client/enip_name.h>
 #include <utils/debug.h>
 #include <string.h>
 

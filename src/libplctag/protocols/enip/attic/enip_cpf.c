@@ -47,8 +47,8 @@
  * No debug-module issues: this file uses DEBUG_MODULE_ENIP correctly.
  */
 
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_cpf.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_cpf.h>
 #include <utils/bytes.h>
 #include <utils/debug.h>
 

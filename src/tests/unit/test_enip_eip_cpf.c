@@ -38,8 +38,8 @@
 #include <setjmp.h>
 #include "cmocka.h"
 
-#include <libplctag/protocols/enip/enip_cpf.h>
-#include <libplctag/protocols/enip/enip_eip.h>
+#include <libplctag/protocols/enip/client/enip_cpf.h>
+#include <libplctag/protocols/enip/client/enip_eip.h>
 #include <utils/arena.h>
 
 #define ARENA_SIZE ((size_t)4096)

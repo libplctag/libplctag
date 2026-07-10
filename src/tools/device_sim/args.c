@@ -39,8 +39,8 @@
 #include <libplctag/lib/libplctag.h>
 #include "platform.h"
 #include "args.h"
-#include "device.h"
-#include "device_sim.h"
+#include <libplctag/protocols/enip/server/device.h>
+#include <libplctag/protocols/enip/server/device_sim.h>
 
 /* ============================================================================
  * CIP type table

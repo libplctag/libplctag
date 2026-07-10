@@ -46,7 +46,7 @@
 #include <stdlib.h>
 
 #include "libplctag.h"
-#include "device_sim.h"
+#include <libplctag/protocols/enip/server/device_sim.h>
 
 #define SIM_PORT ((uint16_t)44818)
 #define EXPECTED ((int32_t)1234567)

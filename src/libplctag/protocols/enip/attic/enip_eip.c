@@ -42,8 +42,8 @@
  * in future (there are none today, so the file is already compliant).
  */
 
-#include <libplctag/protocols/enip/enip.h>
-#include <libplctag/protocols/enip/enip_eip.h>
+#include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_eip.h>
 #include <utils/bytes.h>
 
 /* Phase 1: correct as-is — no changes needed.

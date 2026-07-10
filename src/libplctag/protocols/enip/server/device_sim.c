@@ -39,10 +39,10 @@
 #include "utils/debug.h"
 #include "device.h"
 #include "device_sim.h"
-#include "identity.h"
+#include <libplctag/protocols/enip/common/identity.h>
 #include "server.h"
 #include "discovery.h"
-#include "dialects/ab_listing.h"
+#include <libplctag/protocols/enip/dialects/rockwell/ab_listing.h>
 
 #define DEBUG_MOD DEBUG_MODULE_UTILS
 

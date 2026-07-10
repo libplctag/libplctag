@@ -47,8 +47,8 @@
  */
 
 #include <stdint.h>
-#include "device.h"
-#include "device_sim.h"
+#include <libplctag/protocols/enip/server/device.h>
+#include <libplctag/protocols/enip/server/device_sim.h>
 
 extern int32_t ab_listing_register(device_sim_t *sim, device_t *dev);
 
