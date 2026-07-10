@@ -59,23 +59,24 @@
 
 struct {
     const char *protocol;
+    const char *role;
     const char *make;
     const char *family;
     const char *model;
     const tag_create_function tag_constructor;
 } tag_type_map[] = {
-    /* System tags */
-    {.protocol = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
+    /* System tags (matched by make/family/model, not protocol/role) */
+    {.protocol = NULL, .role = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
 #if LIBPLCTAG_FEATURE_EIP
     /* Allen-Bradley PLCs */
-    {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
-    {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
-    {.protocol = "enip-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
-    {.protocol = "enip_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
+    {.protocol = "ab-eip", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol = "ab_eip", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol = "enip-tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
+    {.protocol = "enip_tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
 #endif
 #if LIBPLCTAG_FEATURE_MODBUS
-    {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
-    {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}
+    {.protocol = "modbus-tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
+    {.protocol = "modbus_tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}
 #endif
 };
 
@@ -103,16 +104,18 @@ static atomic_int32_t library_state = ATOMIC_INT_STATIC_INIT;
 tag_create_function find_tag_create_func(attr attributes) {
     int i = 0;
     const char *protocol = attr_get_str(attributes, "protocol", NULL);
+    const char *role = attr_get_str(attributes, "role", "client");
     const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
     const char *family = attr_get_str(attributes, "family", NULL);
     const char *model = attr_get_str(attributes, "model", NULL);
     int num_entries = (sizeof(tag_type_map) / sizeof(tag_type_map[0]));
 
-    /* if protocol is set, then use it to match. */
+    /* if protocol is set, then use it plus the role (default "client") to match. */
     if(protocol && str_length(protocol) > 0) {
         for(i = 0; i < num_entries; i++) {
-            if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s", protocol);
+            if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0 && tag_type_map[i].role
+               && str_cmp_i(tag_type_map[i].role, role) == 0) {
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s role=%s", protocol, role);
                 return tag_type_map[i].tag_constructor;
             }
         }

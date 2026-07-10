@@ -57,9 +57,11 @@ work.
 ## 2. The caveat that makes the ordering pay off
 
 Build the server's CIP encode/decode from day one as a **shared,
-direction-agnostic codec** under `protocols/cip/`, consumed by both server-side
-decode and (later) client-side encode — **not** buried inside the server
-runtime.
+direction-agnostic codec** under `protocols/enip/common/`, consumed by both
+server-side decode and (later) client-side encode — **not** buried inside the
+server runtime. CIP is only ever carried over EtherNet/IP, so the shared codec
+belongs under `enip/` (with `client/` and `server/` as siblings that consume it),
+not a top-level `protocols/cip/`.
 
 - If the codec is shareable, the client rewrite's arena/bytes migration becomes
   "adopt the existing codec" instead of "write a new one."
@@ -85,8 +87,9 @@ Per `SERVER_TAGS.md §11`:
 1. Add `LIBPLCTAG_FEATURE_{EIP,MODBUS,SERVER}` CMake options + generated
    `plctag_features.h`; gate the existing client sources (no behaviour change —
    proves the gates).
-2. Move libdevsim sources into `protocols/server/`; **extract the CIP codec into
-   a shared `protocols/cip/` from the start** (the §2 caveat).
+2. Move libdevsim sources into `protocols/enip/{common,server,dialects}/` and
+   `protocols/modbus/server/`; **extract the direction-agnostic CIP/EIP codec into
+   `protocols/enip/common/` from the start** (the §2 caveat).
 3. Replace the `device_sim_*` object API with `eip_server_tag_create` /
    `modbus_server_tag_create` + the server vtable; delete `device_sim.[ch]`.
 4. Add the `role` column + server rows to `tag_type_map`.
@@ -94,14 +97,16 @@ Per `SERVER_TAGS.md §11`:
 6. Map server attributes; add debug modules; port tests to loopback + localhost.
 
 Exit criteria: server tags work, the loopback simulator + fault injection +
-golden-byte harness exist, the shared CIP codec is in `protocols/cip/`.
+golden-byte harness exist, the shared CIP codec is in `protocols/enip/common/`.
 
 ### Phase B — Client rewrite (stands on Phase A's foundation)
 
 Per the EIP-refactor estimate:
 
-1. **Adopt the shared codec** in the AB client encode/decode (this is the
-   former arena/bytes "warm-up", now mostly reuse). Land golden wire-byte tests.
+1. **Adopt the shared codec** in the AB client encode/decode — the new client
+   lives in `protocols/enip/client/` and consumes the same `protocols/enip/common/`
+   codec the server decode already uses (this is the former arena/bytes "warm-up",
+   now mostly reuse). Land golden wire-byte tests.
 2. **AB tag-queued engine** — delete the `ab_request_t` lifecycle, push state
    onto the tag `op` + a session state machine with a batching/packing step.
    Extract the shared transport layer as you go. Golden tests green at each step.

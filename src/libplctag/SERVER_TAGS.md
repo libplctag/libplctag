@@ -59,26 +59,43 @@ them is YAGNI. `SERVER` with no protocol enabled is a CMake configure error.
 
 ## 3. Code layout — dissolving libdevsim into the protocols tree
 
-Everything moves under `src/libplctag/protocols/server/`. Client code is
-untouched; the server EIP decode stays separate from `protocols/ab/` so the two
-directions never couple.
+Protocol is the top axis. Below each protocol sit `common/` (shared,
+direction-agnostic codec), `client/`, `server/`, and — for EtherNet/IP —
+`dialects/`. Client and server share as much as possible **through `common/`**;
+neither couples to the legacy `protocols/ab/` tree (which Phase B deletes). The
+only server code allowed above the protocol level is the raw TCP accept-loop /
+wake-pipe plumbing — platform mechanics, not protocol logic — which factors into
+`utils/`, not `protocols/`.
 
 | New location | From libdevsim | Notes |
 |--------------|----------------|-------|
-| `protocols/server/server.c/.h` | `protocols/server.c` | TCP listener + per-connection thread, endpoint registry |
-| `protocols/server/server_tag.c` | `lib/device_sim.c` | the `(protocol,role=server)` constructors + backing store; public `device_sim_*` API **deleted** |
-| `protocols/server/device.h` | `lib/device.h` | `tag_def_t`, endpoint/store structs (internal) |
-| `protocols/server/eip.c cpf.c cip.c` | same names | server-side EIP/CPF/CIP framing |
-| `protocols/server/identity.c discovery.c` | same names | CIP Identity object + UDP List Identity/Services |
-| `protocols/server/dialects/*.c` | `dialects/*` | AB/OMRON/PCCC listing — unchanged, plugged in via the CIP object registry |
+| `protocols/enip/common/eip.c cpf.c cip.c` | `protocols/{eip,cpf,cip}.c` | direction-agnostic EIP/CPF/CIP codec — server decode now, client encode later |
+| `protocols/enip/common/identity.c` | `protocols/identity.c` | CIP Identity object encode/decode — shared by the server reply and the client `@identity` read |
+| `protocols/enip/server/server.c/.h` | `protocols/server.c` | EIP endpoint: per-connection thread + endpoint registry (accept-loop mechanics come from `utils/`) |
+| `protocols/enip/server/server_tag.c` | `lib/device_sim.c` | the `(ab-eip, role=server)` constructor + backing store; public `device_sim_*` API **deleted** |
+| `protocols/enip/server/device.h` | `lib/device.h` | `tag_def_t`, endpoint/store structs (internal) |
+| `protocols/enip/server/discovery.c` | `protocols/discovery.c` | UDP List Identity/Services **responder** (server-only for now — see note) |
+| `protocols/enip/dialects/{rockwell,omron,pccc}/*.c` | `dialects/*` | AB/OMRON/PCCC listing + PCCC data path — unchanged, plugged in via the CIP object registry |
+| `utils/` accept-loop helper (name TBD) | accept loop in `protocols/server.c` | cross-protocol TCP accept + wake-pipe; platform mechanics, not protocol logic (option A) |
 | `../utils/arena.c bytes.c` | already shared | add to libplctag sources under `LIBPLCTAG_FEATURE_SERVER` |
 
-The Modbus server is small — one file `protocols/server/modbus_server.c` next to
-the client `protocols/mb/modbus.c`.
+**Discovery note:** the List Identity/Services **responder** is server-only today
+and lives in `enip/server/discovery.c`. Client-side discovery (active scanning,
+à la `scan_eip_network`) is planned for the future — not built now. When it lands,
+the List Identity item **encode/decode** moves into `enip/common/` (next to
+`identity.c`) and the client scanner lives in `enip/client/`, so responder and
+scanner share one codec. Place the encode/decode with that future split in mind.
 
-CMake: append the `server/` sources to `libplctag_SRCS` only when
-`LIBPLCTAG_FEATURE_SERVER` is set, and the per-protocol server files only when
-that protocol is also enabled.
+The Modbus server lives at `protocols/modbus/server/modbus_server.c`, with framing
+shared from `protocols/modbus/common/` (the client moves to
+`protocols/modbus/client/`). Modbus has no `dialects/` and no CIP.
+
+CMake: append each protocol's `common/` + `server/` sources to `libplctag_SRCS`
+only when both `LIBPLCTAG_FEATURE_SERVER` and that protocol's feature are set. The
+cross-protocol accept-loop helper compiles under `LIBPLCTAG_FEATURE_SERVER` alone.
+The moved `enip/common/` codec is gated under `SERVER` for now (its only consumer
+is the server decode); it graduates to plain `LIBPLCTAG_FEATURE_EIP` in Phase B
+when the client adopts it.
 
 ---
 
@@ -259,7 +276,10 @@ not under a `libdevsim` tree.
 1. Add `LIBPLCTAG_FEATURE_{EIP,MODBUS,SERVER}` CMake options + generated
    `plctag_features.h`; gate the **current** AB/OMRON/Modbus client sources under
    EIP/MODBUS (no behaviour change — proves the gates).
-2. Move libdevsim sources into `protocols/server/` (§3); compile under `SERVER`.
+2. Move libdevsim sources into `protocols/enip/{common,server,dialects}/` and
+   `protocols/modbus/server/` (§3); extract the direction-agnostic CIP/EIP codec
+   into `protocols/enip/common/`. Compile the server sources under `SERVER` (+ the
+   protocol flag) and the cross-protocol accept-loop helper under `SERVER`.
 3. Replace `device_sim_*` object API with `eip_server_tag_create` /
    `modbus_server_tag_create` + the server vtable (§5); delete `device_sim.[ch]`.
 4. Add the `role` column + server rows to `tag_type_map` (§4).
