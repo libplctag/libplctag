@@ -47,7 +47,6 @@
  * Constants
  * ============================================================================ */
 
-#define DEBUG_MOD   DEBUG_MODULE_UTILS
 #define EIP_HEADER_SIZE ((size_t)24)
 #define CLIENT_ARENA_SIZE ((size_t)65536)
 #define ACCEPT_TIMEOUT_MS ((int32_t)1000)
@@ -188,7 +187,7 @@ static THREAD_FUNC(conn_handler) {
     thread_detach();
 
     if(arena_init(&arena, CLIENT_ARENA_SIZE) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "Failed to allocate client arena.");
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "Failed to allocate client arena.");
         registry_remove(c->registry, c->sock);
         socket_close(c->sock);
         socket_destroy(&c->sock);
@@ -205,7 +204,7 @@ static THREAD_FUNC(conn_handler) {
     sess.local_ipv4 = c->device->local_ipv4;
     socket_local_ipv4(c->sock, &sess.local_ipv4);
 
-    pdebug(DEBUG_MOD, DEBUG_DETAIL, 0, "Connection handler started.");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "Connection handler started.");
 
     if(c->device->connect_cb) {
         c->device->connect_cb(c->device->sim, c->device->connect_user_data);
@@ -217,14 +216,14 @@ static THREAD_FUNC(conn_handler) {
         /* Phase 1: read 24-byte EIP header. */
         Bytes hdr = bytes_alloc(&arena, EIP_HEADER_SIZE);
         if(bytes_is_null(hdr)) {
-            pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "Arena OOM allocating EIP header buffer.");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "Arena OOM allocating EIP header buffer.");
             break;
         }
 
         int32_t rc = recv_exact(c->sock, c->device, hdr.data, (int32_t)hdr.len);
         if(rc != PLCTAG_STATUS_OK) {
             if(rc != PLCTAG_ERR_ABORT && rc != PLCTAG_ERR_BAD_CONNECTION) {
-                pdebug(DEBUG_MOD, DEBUG_WARN, 0, "EIP header recv error %d.", rc);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "EIP header recv error %d.", rc);
             }
             break;
         }
@@ -232,19 +231,19 @@ static THREAD_FUNC(conn_handler) {
         /* Phase 2: extract and validate payload length. */
         uint16_t payload_len = 0;
         if(bytes_is_null(bytes_unpack(hdr, BYTES_LE, BYTES_SKIP(2), &payload_len))) {
-            pdebug(DEBUG_MOD, DEBUG_WARN, 0, "Failed to unpack EIP payload length.");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Failed to unpack EIP payload length.");
             break;
         }
 
         if(sess.max_eip_packet_size > 0 && (size_t)payload_len > sess.max_eip_packet_size) {
-            pdebug(DEBUG_MOD, DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                    "EIP payload_len=%u exceeds negotiated max %zu — closing.",
                    (unsigned)payload_len, sess.max_eip_packet_size);
             break;
         }
 
         if((size_t)payload_len > arena_remaining(&arena)) {
-            pdebug(DEBUG_MOD, DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                    "EIP payload_len=%u exceeds arena space — closing.", (unsigned)payload_len);
             break;
         }
@@ -254,19 +253,19 @@ static THREAD_FUNC(conn_handler) {
         if(payload_len > 0) {
             payload = bytes_alloc(&arena, payload_len);
             if(bytes_is_null(payload)) {
-                pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "Arena OOM allocating payload buffer.");
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "Arena OOM allocating payload buffer.");
                 break;
             }
             rc = recv_exact(c->sock, c->device, payload.data, (int32_t)payload.len);
             if(rc != PLCTAG_STATUS_OK) {
                 if(rc != PLCTAG_ERR_ABORT && rc != PLCTAG_ERR_BAD_CONNECTION) {
-                    pdebug(DEBUG_MOD, DEBUG_WARN, 0, "EIP payload recv error %d.", rc);
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "EIP payload recv error %d.", rc);
                 }
                 break;
             }
         }
 
-        pdebug(DEBUG_MOD, DEBUG_DETAIL, 0,
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0,
                "EIP request: payload=%u bytes.", (unsigned)payload_len);
 
         /* Phase 4: dispatch. */
@@ -284,13 +283,13 @@ static THREAD_FUNC(conn_handler) {
         rc = send_all(c->sock, c->device, resp.data, (int32_t)resp.len);
         if(rc != PLCTAG_STATUS_OK) {
             if(rc != PLCTAG_ERR_ABORT && rc != PLCTAG_ERR_BAD_CONNECTION) {
-                pdebug(DEBUG_MOD, DEBUG_WARN, 0, "EIP response send error %d.", rc);
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "EIP response send error %d.", rc);
             }
             break;
         }
     }
 
-    pdebug(DEBUG_MOD, DEBUG_DETAIL, 0, "Connection handler closing.");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "Connection handler closing.");
 
     if(c->device->disconnect_cb) {
         c->device->disconnect_cb(c->device->sim, c->device->disconnect_user_data);
@@ -318,20 +317,20 @@ extern THREAD_FUNC(server_listener) {
 
     mem_free(lctx);   /* context only needed to pass arguments; free now */
 
-    pdebug(DEBUG_MOD, DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "Listener starting on %s:%u.",
            device->bind_addr ? device->bind_addr : "0.0.0.0",
            (unsigned)device->port);
 
     rc = socket_create(&listen_sock);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "socket_create failed: %d.", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "socket_create failed: %d.", rc);
         THREAD_RETURN(0);
     }
 
     rc = socket_listen_tcp(listen_sock, device->bind_addr, device->port, 128);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "socket_listen_tcp failed: %d.", rc);
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "socket_listen_tcp failed: %d.", rc);
         socket_destroy(&listen_sock);
         THREAD_RETURN(0);
     }
@@ -345,13 +344,13 @@ extern THREAD_FUNC(server_listener) {
         if(rc == PLCTAG_ERR_TIMEOUT) { continue; }
         if(rc == PLCTAG_ERR_ABORT)   { break; }
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MOD, DEBUG_WARN, 0, "socket_accept error %d.", rc);
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "socket_accept error %d.", rc);
             break;
         }
 
         conn_ctx_t *c = (conn_ctx_t *)mem_alloc((int)sizeof(conn_ctx_t));
         if(!c) {
-            pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "Failed to allocate connection context.");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "Failed to allocate connection context.");
             socket_close(client);
             socket_destroy(&client);
             continue;
@@ -364,7 +363,7 @@ extern THREAD_FUNC(server_listener) {
 
         thread_p t;
         if(thread_create(&t, conn_handler, CONN_STACK_SIZE, c) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MOD, DEBUG_ERROR, 0, "thread_create failed for connection.");
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_ERROR, 0, "thread_create failed for connection.");
             registry_remove(registry, client);
             socket_close(client);
             socket_destroy(&client);
@@ -373,7 +372,7 @@ extern THREAD_FUNC(server_listener) {
         /* thread detaches itself; do not join t */
     }
 
-    pdebug(DEBUG_MOD, DEBUG_INFO, 0, "Listener stopping.");
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Listener stopping.");
 
     registry_remove(registry, listen_sock);
     socket_close(listen_sock);

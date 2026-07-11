@@ -54,7 +54,6 @@
 #include "server.h"
 #include "discovery.h"
 
-#define DEBUG_MOD DEBUG_MODULE_UTILS
 
 /* ============================================================================
  * Constants
@@ -153,18 +152,18 @@ extern THREAD_FUNC(discovery_thread) {
     int32_t rc;
     Arena   arena;
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
            "Discovery thread starting on UDP port %u.", (unsigned)dev->port);
 
     rc = socket_create(&udp);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_ERROR, 0, "Discovery: socket_create failed %d.", rc);
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "Discovery: socket_create failed %d.", rc);
         THREAD_RETURN(0);
     }
 
     rc = socket_open_udp(udp, dev->bind_addr, dev->port, true);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_ERROR, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
                "Discovery: socket_open_udp port=%u failed %d.", (unsigned)dev->port, rc);
         socket_destroy(&udp);
         THREAD_RETURN(0);
@@ -173,7 +172,7 @@ extern THREAD_FUNC(discovery_thread) {
     registry_add(reg, udp);
 
     if(arena_init(&arena, DISC_ARENA_SIZE) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_ERROR, 0, "Discovery: arena_init failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "Discovery: arena_init failed.");
         registry_remove(reg, udp);
         socket_close(udp);
         socket_destroy(&udp);
@@ -193,13 +192,13 @@ extern THREAD_FUNC(discovery_thread) {
         if(rc == PLCTAG_ERR_TIMEOUT) { continue; }
         if(rc == PLCTAG_ERR_ABORT)   { break; }
         if(rc < 0) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Discovery: recv_from error %d.", rc);
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Discovery: recv_from error %d.", rc);
             continue;
         }
 
         size_t pkt_len = (size_t)rc;
         if(pkt_len < EIP_HDR_SIZE) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Discovery: packet too short (%zu bytes).", pkt_len);
             continue;
         }
@@ -214,7 +213,7 @@ extern THREAD_FUNC(discovery_thread) {
         uint32_t options    = 0;
         bytes_unpack(pkt, BYTES_LE, &cmd, &req_len, &session, &status, &sender_ctx, &options);
 
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
                "Discovery: cmd=0x%04x from %s:%u.", (unsigned)cmd, src_host, (unsigned)src_port);
 
         Bytes cpf = {NULL, 0};
@@ -234,31 +233,31 @@ extern THREAD_FUNC(discovery_thread) {
                 cpf = discovery_list_interfaces_cpf(&arena);
                 break;
             default:
-                pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                        "Discovery: unknown cmd 0x%04x — ignored.", (unsigned)cmd);
                 continue;
         }
 
         if(bytes_is_null(cpf)) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Discovery: CPF build failed for cmd=0x%04x.", (unsigned)cmd);
             continue;
         }
 
         Bytes resp = build_eip_udp_reply(&arena, cmd, sender_ctx, cpf);
         if(bytes_is_null(resp)) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Discovery: arena OOM building reply.");
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Discovery: arena OOM building reply.");
             continue;
         }
 
         rc = socket_send_to(udp, resp.data, (int32_t)resp.len, src_host, src_port);
         if(rc < 0) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Discovery: send_to %s:%u failed %d.", src_host, (unsigned)src_port, rc);
         }
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0, "Discovery thread stopping.");
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0, "Discovery thread stopping.");
 
     arena_free(&arena);
     registry_remove(reg, udp);

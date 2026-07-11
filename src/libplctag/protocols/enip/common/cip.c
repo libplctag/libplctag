@@ -58,7 +58,6 @@
 #include "identity.h"
 #include <libplctag/protocols/enip/dialects/pccc/pccc.h>
 
-#define DEBUG_MOD DEBUG_MODULE_UTILS
 
 /* ============================================================================
  * CIP service codes
@@ -149,14 +148,14 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
     Bytes svc_path    = {0};
     Bytes svc_payload = {0};
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "cip_dispatch_unconnected: len=%zu.", payload.len);
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "cip_dispatch_unconnected: len=%zu.", payload.len);
 
     if(!parse_cip_request(payload, &svc, &svc_path, &svc_payload)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Failed to parse CIP request.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Failed to parse CIP request.");
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "CIP unconnected service=0x%02x.", (unsigned)svc);
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "CIP unconnected service=0x%02x.", (unsigned)svc);
 
     {
         Bytes r = try_cip_object(a, svc, svc_path, svc_payload, dev, 504);
@@ -185,18 +184,18 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
                 uint16_t embedded_len = 0;
                 Bytes embedded_rest = bytes_unpack(svc_payload, BYTES_LE, BYTES_SKIP(2), &embedded_len);
                 if(bytes_is_null(embedded_rest)) {
-                    pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                            "Unconnected Send: failed to unpack embedded length.");
                     return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
                 }
                 Bytes embedded = bytes_slice(embedded_rest, 0, embedded_len);
                 if(bytes_is_null(embedded)) {
-                    pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                            "Unconnected Send: embedded slice failed (len=%u).",
                            (unsigned)embedded_len);
                     return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
                 }
-                pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
                        "Unconnected Send: unwrapping embedded CIP request (%u bytes).",
                        (unsigned)embedded_len);
                 return cip_dispatch_unconnected(a, embedded, sess, dev);
@@ -212,7 +211,7 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
             return handle_write(a, svc, svc_path, svc_payload, dev);
 
         default:
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Unsupported unconnected CIP service 0x%02x.", (unsigned)svc);
             return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
@@ -224,14 +223,14 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
     Bytes svc_path    = {0};
     Bytes svc_payload = {0};
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "cip_dispatch_connected: len=%zu.", payload.len);
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "cip_dispatch_connected: len=%zu.", payload.len);
 
     if(!parse_cip_request(payload, &svc, &svc_path, &svc_payload)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Failed to parse connected CIP request.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Failed to parse connected CIP request.");
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "CIP connected service=0x%02x.", (unsigned)svc);
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "CIP connected service=0x%02x.", (unsigned)svc);
 
     {
         size_t obj_max = (max_resp > 4) ? max_resp - 4 : 0;
@@ -256,7 +255,7 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
             return handle_write(a, svc, svc_path, svc_payload, dev);
 
         default:
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Unsupported connected CIP service 0x%02x.", (unsigned)svc);
             return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
@@ -271,14 +270,14 @@ static bool parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes 
 
     Bytes rest = bytes_unpack(input, BYTES_LE, svc, &path_len_words);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "parse_cip_request: too short (len=%zu).", input.len);
         return false;
     }
 
     size_t path_bytes = (size_t)path_len_words * 2;
     if(path_bytes > rest.len) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "parse_cip_request: path_bytes=%zu exceeds rest.len=%zu.", path_bytes, rest.len);
         return false;
     }
@@ -300,7 +299,7 @@ static bool extract_path(Bytes input, size_t *offset, bool padded, Bytes *out_pa
     *offset += 1;
 
     if(path_len_words == 0) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "extract_path: path_len_words is 0.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "extract_path: path_len_words is 0.");
         return false;
     }
 
@@ -331,19 +330,19 @@ static bool parse_tag_path(Bytes tag_path, device_t *dev, tag_def_t **tag_out,
 
     Bytes rest = bytes_unpack(tag_path, BYTES_LE, &seg_type, &name_len_u8);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "parse_tag_path: too short.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "parse_tag_path: too short.");
         return false;
     }
 
     if(seg_type != CIP_SYMBOLIC_SEGMENT) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "parse_tag_path: expected symbolic segment 0x91, got 0x%02x.", (unsigned)seg_type);
         return false;
     }
 
     size_t name_len = (size_t)name_len_u8;
     if(name_len > rest.len) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "parse_tag_path: name_len=%zu exceeds remaining=%zu.", name_len, rest.len);
         return false;
     }
@@ -357,19 +356,25 @@ static bool parse_tag_path(Bytes tag_path, device_t *dev, tag_def_t **tag_out,
         rest = after_pad;
     }
 
-    /* Linear search for matching tag. */
-    tag_def_t *tag = dev->tags;
-    while(tag) {
-        int32_t tag_name_len = str_length(tag->name);
-        if(tag_name_len == (int32_t)name_len
-           && mem_cmp((void*)tag->name, tag_name_len, (void*)name_bytes, (int)name_len) == 0) {
-            break;
+    /* Linear search for matching tag, under dev->tags_mutex: safe even while
+     * a role=server tag is concurrently appended or removed on another
+     * connection's request. */
+    tag_def_t *tag = NULL;
+    critical_block(dev->tags_mutex) {
+        tag_def_t *t = dev->tags;
+        while(t) {
+            int32_t tag_name_len = str_length(t->name);
+            if(tag_name_len == (int32_t)name_len
+               && mem_cmp((void*)t->name, tag_name_len, (void*)name_bytes, (int)name_len) == 0) {
+                tag = t;
+                break;
+            }
+            t = t->next_tag;
         }
-        tag = tag->next_tag;
     }
 
     if(!tag) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "parse_tag_path: tag '%.*s' not found.", (int)name_len, name_bytes);
         return false;
     }
@@ -384,7 +389,7 @@ static bool parse_tag_path(Bytes tag_path, device_t *dev, tag_def_t **tag_out,
         uint32_t idx_val32 = 0;
 
         if(*num_idx_out >= 3) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "parse_tag_path: too many index segments.");
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "parse_tag_path: too many index segments.");
             return false;
         }
 
@@ -418,14 +423,14 @@ static bool parse_tag_path(Bytes tag_path, device_t *dev, tag_def_t **tag_out,
                 break;
             }
             default:
-                pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                        "parse_tag_path: unknown index segment type 0x%02x.", (unsigned)idx_type);
                 return false;
         }
     }
 
     if(*num_idx_out != 0 && *num_idx_out != (uint32_t)tag->num_dimensions) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "parse_tag_path: wrong index count: got %u expected 0 or %zu.",
                *num_idx_out, tag->num_dimensions);
         return false;
@@ -444,7 +449,7 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes,
 
     for(uint32_t i = 0; i < num_idx; i++) {
         if(indexes[i] >= tag->dimensions[i]) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Index %u out of bounds for dim %u.", (unsigned)indexes[i], (unsigned)i);
             return false;
         }
@@ -466,7 +471,7 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes,
     *end_out   = *start_out + (size_t)elem_count * tag->elem_size;
 
     if(*end_out > total_elems * tag->elem_size) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "Request end offset %zu exceeds tag size %zu.",
                *end_out, total_elems * tag->elem_size);
         return false;
@@ -643,7 +648,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     /* svc_path must target the Connection Manager. */
     if(mem_cmp((void*)svc_path.data, (int)svc_path.len,
                (void*)CIP_CONN_MGR_PATH, (int)sizeof(CIP_CONN_MGR_PATH)) != 0) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Open: bad connection manager path.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Open: bad connection manager path.");
         return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
@@ -654,7 +659,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
                               &conn_timeout_mult, BYTES_SKIP(3),
                               &c2s_rpi);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Open: fixed field unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Open: fixed field unpack failed.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
@@ -668,29 +673,29 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     }
 
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Open: conn params unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Open: conn params unpack failed.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
     rest = bytes_unpack(rest, BYTES_LE, &transport_class);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Open: transport class unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Open: transport class unpack failed.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
     /* Extract connection path; we accept any valid path. */
     if(!extract_path(rest, &path_offset, false, &conn_path)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Open: connection path extract failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Open: connection path extract failed.");
         return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
            "Forward Open: connection path len=%zu (accepted).", conn_path.len);
 
     /* Rejection counter for testing (starts at 0 = never reject). */
     if(sess->reject_fo_count > 0) {
         sess->reject_fo_count--;
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
                "Forward Open: rejecting (count remaining: %d).", (int)sess->reject_fo_count);
         return cip_error(a, svc, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_DUPLICATE_CONN);
     }
@@ -715,7 +720,7 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
 
     eip_session_set_connected_sizes(sess, sess->server_to_client_max_packet);
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
            "Forward Open success: server_conn_id=0x%08x seq=0x%04x.",
            (unsigned)sess->server_connection_id, (unsigned)sess->server_connection_seq);
 
@@ -740,7 +745,7 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
 
     if(mem_cmp((void*)svc_path.data, (int)svc_path.len,
                (void*)CIP_CONN_MGR_PATH, (int)sizeof(CIP_CONN_MGR_PATH)) != 0) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Close: bad connection manager path.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Close: bad connection manager path.");
         return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
@@ -748,23 +753,23 @@ static Bytes handle_forward_close(Arena *a, uint8_t svc, Bytes svc_path, Bytes s
                               &secs_per_tick, &timeout_ticks,
                               &conn_serial, &vendor_id, &client_serial);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Close: header unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Close: header unpack failed.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
     if(!extract_path(rest, &path_offset, true, &conn_path)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Close: path extract failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Close: path extract failed.");
         return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
     }
 
     if(conn_serial != sess->client_connection_serial_number
        || vendor_id != sess->client_vendor_id
        || client_serial != sess->client_serial_number) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "Forward Close: connection ID mismatch.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "Forward Close: connection ID mismatch.");
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0, "Forward Close: closing connection.");
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0, "Forward Close: closing connection.");
 
     sess->server_connection_id  = 0;
     sess->client_connection_id  = 0;
@@ -793,26 +798,26 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
     bool   fragmented    = false;
 
     if(!parse_tag_path(svc_path, dev, &tag, &num_idx, indexes)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to parse tag path.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to parse tag path.");
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &elem_count);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to unpack elem_count.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to unpack elem_count.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
     if(svc == CIP_SRV_READ_FRAG) {
         rest = bytes_unpack(rest, BYTES_LE, &frag_offset);
         if(bytes_is_null(rest)) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to unpack frag_offset.");
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to unpack frag_offset.");
             return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
         }
     }
 
     if(!calc_offsets(tag, num_idx, indexes, elem_count, &byte_start, &byte_end)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_read: calc_offsets failed for tag '%s' elem_count=%u.",
                tag->name, (unsigned)elem_count);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
@@ -820,7 +825,7 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
 
     byte_start += frag_offset;
     if(byte_start > byte_end) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_read: frag_offset 0x%08x pushes start past end.", (unsigned)frag_offset);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
@@ -837,7 +842,7 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
     if(tag->elem_size > 0 && copy_len > 0) { copy_len = (copy_len / elem_bytes) * elem_bytes; }
 
     if(copy_len == 0) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_read: no room for even one element (max_data=%zu elem_bytes=%zu).",
                max_data, elem_bytes);
         return cip_error(a, svc, CIP_ERR_FRAG, false, 0);
@@ -860,6 +865,12 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
 
     mutex_lock(tag->data_mutex);
     mem_copy(data_buf.data, tag->data + byte_start, (int)copy_len);
+    /* Server-tag (role=server) event delivery: only on the final fragment of
+     * a (possibly multi-request) read, so the owning plc_tag's tickler fires
+     * READ_COMPLETED once per logical read, not once per wire fragment. No
+     * new lock: data_mutex is already held here. device_sim_* tags have no
+     * owning plc_tag polling this flag, so it is simply never cleared/unused. */
+    if(!fragmented) { tag->pending_read_event = true; }
     mutex_unlock(tag->data_mutex);
 
     if(tag->read_cb) {
@@ -868,7 +879,7 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
 
     Bytes resp = bytes_concat(a, hdr, data_buf);
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
            "Read '%s': %zu bytes%s.", tag->name, copy_len, fragmented ? " (fragmented)" : "");
 
     return resp;
@@ -887,18 +898,18 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     size_t byte_end      = 0;
 
     if(!parse_tag_path(svc_path, dev, &tag, &num_idx, indexes)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to parse tag path.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to parse tag path.");
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &req_type, &elem_count);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to unpack type/elem_count.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to unpack type/elem_count.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
     if(req_type != tag->tag_type) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "Write type mismatch: got 0x%04x expected 0x%04x.",
                (unsigned)req_type, (unsigned)tag->tag_type);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
@@ -907,13 +918,13 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     if(svc == CIP_SRV_WRITE_FRAG) {
         rest = bytes_unpack(rest, BYTES_LE, &frag_offset);
         if(bytes_is_null(rest)) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to unpack frag_offset.");
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to unpack frag_offset.");
             return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
         }
     }
 
     if(!calc_offsets(tag, num_idx, indexes, elem_count, &byte_start, &byte_end)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_write: calc_offsets failed for tag '%s' elem_count=%u.",
                tag->name, (unsigned)elem_count);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
@@ -923,20 +934,27 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
 
     size_t write_len = rest.len;
     if(write_len > byte_end - byte_start) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "Write data (%zu) exceeds tag slice (%zu).", write_len, byte_end - byte_start);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     mutex_lock(tag->data_mutex);
     mem_copy(tag->data + byte_start, rest.data, (int)write_len);
+    /* Server-tag (role=server) event delivery — see the matching comment in
+     * handle_read(). Known limitation: unlike reads, this write path has no
+     * server-side fragmentation state, so a multi-request WriteFrag sequence
+     * sets this on every chunk, not just the last; the owning plc_tag's
+     * tickler may then raise WRITE_COMPLETED more than once for one logical
+     * fragmented write. Acceptable for now — most writes fit in one request. */
+    tag->pending_write_event = true;
     mutex_unlock(tag->data_mutex);
 
     if(tag->write_cb) {
         tag->write_cb(dev->sim, tag->name, (void *)rest.data, (uint32_t)write_len, tag->user_data);
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "Write '%s': %zu bytes.", tag->name, write_len);
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "Write '%s': %zu bytes.", tag->name, write_len);
 
     return bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
 }
@@ -966,13 +984,13 @@ static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pa
     uint8_t class_id = 0, instance_id = 0, attr_id = 0;
 
     if(!parse_class_instance_path(svc_path, &class_id, &instance_id, &attr_id)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_identity: malformed class/instance path (len=%zu).", svc_path.len);
         return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
     }
 
     if(class_id != 0x01 || instance_id != 1) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_identity: unsupported class=0x%02x instance=%u.",
                (unsigned)class_id, (unsigned)instance_id);
         return cip_error(a, svc, CIP_ERR_PATH_UNKNOWN, false, 0);
@@ -990,26 +1008,26 @@ static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pa
         Bytes hdr = bytes_pack(a, BYTES_LE,
                                (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
         if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0, "Identity GetAttributesAll OK.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "Identity GetAttributesAll OK.");
         return bytes_concat(a, hdr, obj);
     }
 
     if(svc == CIP_SRV_GET_ATTR_SINGLE) {
         if(attr_id == 0) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "handle_identity: GetAttributeSingle — no attribute in path.");
             return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
         }
         Bytes val = identity_encode_get_attr_single(a, (uint16_t)attr_id, id);
         if(bytes_is_null(val)) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "handle_identity: unsupported attribute %u.", (unsigned)attr_id);
             return cip_error(a, svc, CIP_ERR_PATH_UNKNOWN, false, 0);
         }
         Bytes hdr = bytes_pack(a, BYTES_LE,
                                (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
         if(bytes_is_null(hdr)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
                "Identity GetAttributeSingle attr=%u OK.", (unsigned)attr_id);
         return bytes_concat(a, hdr, val);
     }
@@ -1024,12 +1042,12 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
 
     Bytes payload_rest = bytes_unpack(svc_payload, BYTES_LE, &svc_count);
     if(bytes_is_null(payload_rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "handle_multi: failed to unpack service count.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_multi: failed to unpack service count.");
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
 
     if(svc_count == 0 || svc_count > MAX_SUB_REQUESTS) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_multi: invalid service count %u (max %u).",
                (unsigned)svc_count, (unsigned)MAX_SUB_REQUESTS);
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
@@ -1042,7 +1060,7 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
 
     payload_rest = bytes_unpack(payload_rest, BYTES_LE, BYTES_ARRAY(req_offsets, (size_t)svc_count));
     if(bytes_is_null(payload_rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_multi: failed to unpack %u request offsets.", (unsigned)svc_count);
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
     }
@@ -1054,7 +1072,7 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
     size_t max_payload = max_packet - CIP_RESP_HDR_SIZE - 2;
 
     if(max_payload < (size_t)svc_count * 6) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_multi: max_payload=%zu too small for %u sub-responses.",
                max_payload, (unsigned)svc_count);
         return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0);
@@ -1073,7 +1091,7 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
         uint16_t next_off = (i + 1 < svc_count) ? req_offsets[i + 1] : (uint16_t)svc_payload.len;
 
         if(req_off >= svc_payload.len || next_off > svc_payload.len || req_off >= next_off) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "handle_multi: sub-request %u has invalid offsets [%u,%u).",
                    (unsigned)i, (unsigned)req_off, (unsigned)next_off);
             return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);

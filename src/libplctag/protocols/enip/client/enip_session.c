@@ -115,12 +115,62 @@
 #define ENIP_ORIGINATOR_SERIAL ((uint32_t)0x21504345)
 
 /* CIP Identity classification. A Logix CPU reports the Rockwell vendor id and
- * the PLC device type; on an L80-series controller the Ethernet ports are in the
- * CPU module itself, so List Identity / Get_Attributes_All reach the CPU
- * directly (device type PLC) rather than a comms adapter (0x000C). CompactLogix
- * shares this signature -- both are "ControlLogix-class" for feature purposes. */
+ * device_type=0x000E ("Programmable Logic Controller"); on an L80-series
+ * controller the Ethernet ports are in the CPU module itself, so List Identity /
+ * Get_Attributes_All reach the CPU directly rather than a comms adapter
+ * (0x000C, MicroLogix's signature). CompactLogix shares the Logix signature --
+ * both are "ControlLogix-class" for feature purposes.
+ *
+ * device_type=0x000E is NOT unique to Logix, though: a real PLC/5 reports the
+ * identical vendor+device_type (captured byte-for-byte in
+ * enip/DEVSIM_WIRE_REFERENCE.md's identity table). MicroLogix is already
+ * excluded by device_type alone; PLC/5 (and, defensively, SLC-500 -- same PCCC
+ * family, same reasoning, but its device_type is NOT independently verified
+ * against real hardware in this tree) are excluded by product-name catalog
+ * prefix instead, since that's the field that actually differs. */
 #define CIP_VENDOR_ROCKWELL ((uint16_t)0x0001)
 #define CIP_DEVICE_TYPE_PLC ((uint16_t)0x000E)
+
+/* Product name (CIP SHORT_STRING: 1-byte length + ASCII, no terminator) sits
+ * immediately after the fixed 14-byte identity prefix (vendor_id u16 +
+ * device_type u16 + product_code u16 + rev_major u8 + rev_minor u8 +
+ * status u16 + serial u32). */
+#define CIP_IDENTITY_FIXED_PREFIX_LEN ((size_t)14)
+
+/* Known Rockwell PCCC-family catalog-number prefixes that can share
+ * device_type=0x000E with Logix. "PLC-5" is verified against a real capture;
+ * "1747-" (SLC-500) is the standard Rockwell catalog prefix but is not
+ * independently verified against real hardware here -- confirm against a real
+ * SLC-500 if one becomes available and remove this note. */
+static const char *const PCCC_PRODUCT_NAME_PREFIXES[] = {"PLC-5", "1747-", NULL};
+
+/* True if reply_data's product-name field starts with a known PCCC-family
+ * catalog prefix. reply_data is the full Get_Attributes_All payload (the
+ * fixed prefix plus the trailing SHORT_STRING); returns false (not PCCC) on
+ * any parse failure -- the caller only uses this to EXCLUDE devices from
+ * ControlLogix-class treatment, so failing closed here means "assume Logix",
+ * matching the pre-existing default for anything not explicitly PCCC. */
+static bool identity_product_name_is_pccc(Bytes reply_data) {
+    if(reply_data.len <= CIP_IDENTITY_FIXED_PREFIX_LEN) { return false; }
+
+    Bytes rest = bytes_slice(reply_data, CIP_IDENTITY_FIXED_PREFIX_LEN, reply_data.len - CIP_IDENTITY_FIXED_PREFIX_LEN);
+    if(bytes_is_null(rest) || rest.len < 1) { return false; }
+
+    uint8_t name_len = rest.data[0];
+    if((size_t)name_len > rest.len - 1) { return false; }
+
+    Bytes name = bytes_slice(rest, 1, name_len);
+    if(bytes_is_null(name)) { return false; }
+
+    for(int i = 0; PCCC_PRODUCT_NAME_PREFIXES[i]; i++) {
+        size_t prefix_len = (size_t)str_length(PCCC_PRODUCT_NAME_PREFIXES[i]);
+        if(name.len >= prefix_len && mem_cmp(name.data, (int)prefix_len, (void *)PCCC_PRODUCT_NAME_PREFIXES[i], (int)prefix_len) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 /* §4/§5: connection IO thread states. */
 enum {
@@ -2284,7 +2334,8 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
     (void)bytes_unpack(reply.data, BYTES_LE, &c->ident_vendor_id, &c->ident_device_type, &c->ident_product_code,
                        &c->ident_rev_major, &c->ident_rev_minor, &c->ident_status, &c->ident_serial);
 
-    c->is_controllogix = (c->ident_vendor_id == CIP_VENDOR_ROCKWELL && c->ident_device_type == CIP_DEVICE_TYPE_PLC);
+    c->is_controllogix = (c->ident_vendor_id == CIP_VENDOR_ROCKWELL && c->ident_device_type == CIP_DEVICE_TYPE_PLC
+                          && !identity_product_name_is_pccc(reply.data));
     c->dialect = enip_dialect_select(c->ident_vendor_id, c->ident_device_type);
     c->identity_valid = true;
 

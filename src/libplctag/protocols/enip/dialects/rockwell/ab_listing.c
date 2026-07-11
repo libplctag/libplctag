@@ -55,7 +55,6 @@
 #include <libplctag/protocols/enip/server/device_sim.h>
 #include "ab_listing.h"
 
-#define DEBUG_MOD DEBUG_MODULE_UTILS
 
 /* CIP service code for GetInstanceAttributeList */
 #define CIP_SRV_GET_INSTANCE_ATTR_LIST ((uint8_t)0x55)
@@ -93,7 +92,7 @@ extern int32_t ab_listing_register(device_sim_t *sim, device_t *dev) {
     rc = device_sim_add_cip_object(sim, 0x6Bu, DEVICE_SIM_ANY_INSTANCE,
                                    handle_symbol_list, dev);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_ERROR, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
                "ab_listing_register: failed to register class 0x6B handler.");
         return rc;
     }
@@ -101,12 +100,12 @@ extern int32_t ab_listing_register(device_sim_t *sim, device_t *dev) {
     rc = device_sim_add_cip_object(sim, 0x6Cu, DEVICE_SIM_ANY_INSTANCE,
                                    handle_template, dev);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_ERROR, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
                "ab_listing_register: failed to register class 0x6C handler.");
         return rc;
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
            "ab_listing_register: registered class 0x6B/0x6C handlers.");
     return PLCTAG_STATUS_OK;
 }
@@ -174,101 +173,107 @@ static uint16_t compute_symbol_type(tag_def_t *tag) {
  * Tags are assigned 1-based instance IDs by their order in dev->tags.
  * PCCC tags (data_file_num != 0) are skipped; they are not CIP symbols.
  */
-static int32_t handle_symbol_list(device_sim_t *sim, uint8_t service,
-                                  const uint8_t *path, uint32_t path_len,
-                                  const uint8_t *req, uint32_t req_len,
-                                  uint8_t *resp, uint32_t resp_cap,
-                                  uint32_t *resp_len, void *user_data) {
+static int32_t handle_symbol_list(device_sim_t *sim, uint8_t service, const uint8_t *path, uint32_t path_len, const uint8_t *req,
+                                  uint32_t req_len, uint8_t *resp, uint32_t resp_cap, uint32_t *resp_len, void *user_data) {
     device_t *dev = (device_t *)user_data;
 
-    (void)sim; (void)req; (void)req_len;
+    (void)sim;
+    (void)req;
+    (void)req_len;
 
     if(service != CIP_SRV_GET_INSTANCE_ATTR_LIST) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
-               "ab_listing: class 0x6B does not support service 0x%02x.", (unsigned)service);
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "ab_listing: class 0x6B does not support service 0x%02x.", (unsigned)service);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     uint32_t start_instance = 0;
     parse_start_instance(path, path_len, &start_instance);
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
-           "ab_listing: symbol list request start_instance=%u.", (unsigned)start_instance);
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "ab_listing: symbol list request start_instance=%u.", (unsigned)start_instance);
 
     uint32_t instance_id = 0;
-    tag_def_t *tag = dev->tags;
+    int32_t rc = PLCTAG_STATUS_OK;
     *resp_len = 0;
 
-    while(tag) {
-        instance_id++;
+    /* The whole walk runs under dev->tags_mutex: safe even while a
+     * role=server tag is concurrently appended/removed on another
+     * connection's request. Uses break (not return) on every early exit —
+     * critical_block only unlocks correctly via its own for-loop's normal
+     * flow, so a bare return from inside would leak the lock. */
+    critical_block(dev->tags_mutex) {
+        tag_def_t *tag = dev->tags;
 
-        /* Skip PCCC tags and tags before the pagination start. */
-        if(tag->data_file_num != 0 || instance_id < start_instance) {
+        while(tag) {
+            instance_id++;
+
+            /* Skip PCCC tags and tags before the pagination start. */
+            if(tag->data_file_num != 0 || instance_id < start_instance) {
+                tag = tag->next_tag;
+                continue;
+            }
+
+            uint32_t name_len = (uint32_t)str_length(tag->name);
+            uint32_t entry_size = TAG_ENTRY_FIXED_SIZE + name_len;
+
+            /* No room for this entry: truncate and signal more data. */
+            if(*resp_len + entry_size > resp_cap) {
+                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "ab_listing: truncating at instance %u; cap=%u used=%u.",
+                       (unsigned)instance_id, (unsigned)resp_cap, (unsigned)*resp_len);
+                rc = DEVICE_SIM_MORE_DATA;
+                break;
+            }
+
+            uint8_t *p = resp + *resp_len;
+            uint16_t sym_type = compute_symbol_type(tag);
+            uint16_t elem_len = (uint16_t)tag->elem_size;
+            uint32_t dim0 = (tag->num_dimensions >= 1) ? (uint32_t)tag->dimensions[0] : 0u;
+            uint32_t dim1 = (tag->num_dimensions >= 2) ? (uint32_t)tag->dimensions[1] : 0u;
+            uint32_t dim2 = (tag->num_dimensions >= 3) ? (uint32_t)tag->dimensions[2] : 0u;
+
+            /* Pack little-endian: instance_id(u32) */
+            p[0] = (uint8_t)(instance_id & 0xFFu);
+            p[1] = (uint8_t)((instance_id >> 8) & 0xFFu);
+            p[2] = (uint8_t)((instance_id >> 16) & 0xFFu);
+            p[3] = (uint8_t)((instance_id >> 24) & 0xFFu);
+            /* sym_type(u16) */
+            p[4] = (uint8_t)(sym_type & 0xFFu);
+            p[5] = (uint8_t)((sym_type >> 8) & 0xFFu);
+            /* elem_len(u16) */
+            p[6] = (uint8_t)(elem_len & 0xFFu);
+            p[7] = (uint8_t)((elem_len >> 8) & 0xFFu);
+            /* dim[0](u32) */
+            p[8] = (uint8_t)(dim0 & 0xFFu);
+            p[9] = (uint8_t)((dim0 >> 8) & 0xFFu);
+            p[10] = (uint8_t)((dim0 >> 16) & 0xFFu);
+            p[11] = (uint8_t)((dim0 >> 24) & 0xFFu);
+            /* dim[1](u32) */
+            p[12] = (uint8_t)(dim1 & 0xFFu);
+            p[13] = (uint8_t)((dim1 >> 8) & 0xFFu);
+            p[14] = (uint8_t)((dim1 >> 16) & 0xFFu);
+            p[15] = (uint8_t)((dim1 >> 24) & 0xFFu);
+            /* dim[2](u32) */
+            p[16] = (uint8_t)(dim2 & 0xFFu);
+            p[17] = (uint8_t)((dim2 >> 8) & 0xFFu);
+            p[18] = (uint8_t)((dim2 >> 16) & 0xFFu);
+            p[19] = (uint8_t)((dim2 >> 24) & 0xFFu);
+            /* name_len(u16) */
+            p[20] = (uint8_t)(name_len & 0xFFu);
+            p[21] = (uint8_t)((name_len >> 8) & 0xFFu);
+            /* name bytes (not null-terminated) */
+            mem_copy(p + 22, tag->name, (int)name_len);
+
+            *resp_len += entry_size;
+
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_SPEW, 0, "ab_listing: packed instance %u '%s' sym_type=0x%04x.", (unsigned)instance_id,
+                   tag->name, (unsigned)sym_type);
+
             tag = tag->next_tag;
-            continue;
         }
-
-        uint32_t name_len   = (uint32_t)str_length(tag->name);
-        uint32_t entry_size = TAG_ENTRY_FIXED_SIZE + name_len;
-
-        /* No room for this entry: truncate and signal more data. */
-        if(*resp_len + entry_size > resp_cap) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
-                   "ab_listing: truncating at instance %u; cap=%u used=%u.",
-                   (unsigned)instance_id, (unsigned)resp_cap, (unsigned)*resp_len);
-            return DEVICE_SIM_MORE_DATA;
-        }
-
-        uint8_t  *p       = resp + *resp_len;
-        uint16_t sym_type = compute_symbol_type(tag);
-        uint16_t elem_len = (uint16_t)tag->elem_size;
-        uint32_t dim0 = (tag->num_dimensions >= 1) ? (uint32_t)tag->dimensions[0] : 0u;
-        uint32_t dim1 = (tag->num_dimensions >= 2) ? (uint32_t)tag->dimensions[1] : 0u;
-        uint32_t dim2 = (tag->num_dimensions >= 3) ? (uint32_t)tag->dimensions[2] : 0u;
-
-        /* Pack little-endian: instance_id(u32) */
-        p[0]  = (uint8_t)(instance_id & 0xFFu);
-        p[1]  = (uint8_t)((instance_id >> 8) & 0xFFu);
-        p[2]  = (uint8_t)((instance_id >> 16) & 0xFFu);
-        p[3]  = (uint8_t)((instance_id >> 24) & 0xFFu);
-        /* sym_type(u16) */
-        p[4]  = (uint8_t)(sym_type & 0xFFu);
-        p[5]  = (uint8_t)((sym_type >> 8) & 0xFFu);
-        /* elem_len(u16) */
-        p[6]  = (uint8_t)(elem_len & 0xFFu);
-        p[7]  = (uint8_t)((elem_len >> 8) & 0xFFu);
-        /* dim[0](u32) */
-        p[8]  = (uint8_t)(dim0 & 0xFFu);
-        p[9]  = (uint8_t)((dim0 >> 8) & 0xFFu);
-        p[10] = (uint8_t)((dim0 >> 16) & 0xFFu);
-        p[11] = (uint8_t)((dim0 >> 24) & 0xFFu);
-        /* dim[1](u32) */
-        p[12] = (uint8_t)(dim1 & 0xFFu);
-        p[13] = (uint8_t)((dim1 >> 8) & 0xFFu);
-        p[14] = (uint8_t)((dim1 >> 16) & 0xFFu);
-        p[15] = (uint8_t)((dim1 >> 24) & 0xFFu);
-        /* dim[2](u32) */
-        p[16] = (uint8_t)(dim2 & 0xFFu);
-        p[17] = (uint8_t)((dim2 >> 8) & 0xFFu);
-        p[18] = (uint8_t)((dim2 >> 16) & 0xFFu);
-        p[19] = (uint8_t)((dim2 >> 24) & 0xFFu);
-        /* name_len(u16) */
-        p[20] = (uint8_t)(name_len & 0xFFu);
-        p[21] = (uint8_t)((name_len >> 8) & 0xFFu);
-        /* name bytes (not null-terminated) */
-        mem_copy(p + 22, tag->name, (int)name_len);
-
-        *resp_len += entry_size;
-
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_SPEW, 0,
-               "ab_listing: packed instance %u '%s' sym_type=0x%04x.",
-               (unsigned)instance_id, tag->name, (unsigned)sym_type);
-
-        tag = tag->next_tag;
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
-           "ab_listing: symbol list complete, %u bytes.", (unsigned)*resp_len);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "ab_listing: symbol list complete, %u bytes.", (unsigned)*resp_len);
     return PLCTAG_STATUS_OK;
 }
 
@@ -292,7 +297,7 @@ static int32_t handle_template(device_sim_t *sim, uint8_t service,
     /* ponytail: UDT template not yet implemented; no UDT-typed tags in the
      * listing so the client will not query class 0x6C in practice. */
     *resp_len = 0;
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
            "ab_listing: class 0x6C service 0x%02x not yet supported (UDT/template).",
            (unsigned)service);
     return PLCTAG_ERR_UNSUPPORTED;

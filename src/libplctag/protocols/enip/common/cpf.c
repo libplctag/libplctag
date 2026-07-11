@@ -45,7 +45,6 @@
 #include "cpf.h"
 #include <libplctag/protocols/enip/server/device.h>
 
-#define DEBUG_MOD DEBUG_MODULE_UTILS
 
 /* ============================================================================
  * Internal types
@@ -91,14 +90,14 @@ static Bytes wrap_connected(Arena *a, Bytes cip_response, uint32_t conn_id, uint
 extern Bytes cpf_handle_unconnected(Arena *a, Bytes payload, eip_session_t *sess, device_t *dev) {
     cpf_unconnected_hdr_t hdr = {0};
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
            "cpf_handle_unconnected: payload len=%zu.", payload.len);
 
     Bytes cip_data = cpf_parse_unconnected(payload, &hdr);
     if(bytes_is_null(cip_data)) { return (Bytes){0}; }
 
     if(hdr.item_count != 2 || hdr.item0_type != CPF_ITEM_NULL_ADDR || hdr.item1_type != CPF_ITEM_UCONN_DATA) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "CPF unconnected: unexpected items count=%u item0=0x%04x item1=0x%04x.",
                (unsigned)hdr.item_count, (unsigned)hdr.item0_type, (unsigned)hdr.item1_type);
         return (Bytes){0};
@@ -106,7 +105,7 @@ extern Bytes cpf_handle_unconnected(Arena *a, Bytes payload, eip_session_t *sess
 
     Bytes cip_response = cip_dispatch_unconnected(a, cip_data, sess, dev);
     if(bytes_is_null(cip_response)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "CPF unconnected: CIP dispatch returned null.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "CPF unconnected: CIP dispatch returned null.");
         return (Bytes){0};
     }
 
@@ -117,21 +116,21 @@ extern Bytes cpf_handle_unconnected(Arena *a, Bytes payload, eip_session_t *sess
 extern Bytes cpf_handle_connected(Arena *a, Bytes payload, eip_session_t *sess, device_t *dev) {
     cpf_connected_hdr_t hdr = {0};
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
            "cpf_handle_connected: payload len=%zu.", payload.len);
 
     Bytes cip_data = cpf_parse_connected(payload, &hdr);
     if(bytes_is_null(cip_data)) { return (Bytes){0}; }
 
     if(hdr.item_count != 2 || hdr.item0_type != CPF_ITEM_CONN_ADDR || hdr.item1_type != CPF_ITEM_CONN_DATA) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "CPF connected: unexpected items count=%u item0=0x%04x item1=0x%04x.",
                (unsigned)hdr.item_count, (unsigned)hdr.item0_type, (unsigned)hdr.item1_type);
         return (Bytes){0};
     }
 
     if(hdr.conn_id != sess->server_connection_id) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "CPF connected: connection ID mismatch: got 0x%08x expected 0x%08x.",
                (unsigned)hdr.conn_id, (unsigned)sess->server_connection_id);
         return (Bytes){0};
@@ -142,7 +141,7 @@ extern Bytes cpf_handle_connected(Arena *a, Bytes payload, eip_session_t *sess, 
 
     Bytes cip_response = cip_dispatch_connected(a, cip_data, sess, dev, sess->max_cip_packet_size);
     if(bytes_is_null(cip_response)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "CPF connected: CIP dispatch returned null.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "CPF connected: CIP dispatch returned null.");
         return (Bytes){0};
     }
 
@@ -160,11 +159,11 @@ static Bytes cpf_parse_unconnected(Bytes payload, cpf_unconnected_hdr_t *hdr) {
                               &hdr->item0_type, &hdr->item0_len,
                               &hdr->item1_type, &hdr->item1_len);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "CPF unconnected: header unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "CPF unconnected: header unpack failed.");
         return (Bytes){0};
     }
     if(rest.len != (size_t)hdr->item1_len) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "CPF unconnected: payload length mismatch, expected %zu, got %zu.",
                (size_t)hdr->item1_len, rest.len);
         return (Bytes){0};
@@ -182,11 +181,11 @@ static Bytes cpf_parse_connected(Bytes payload, cpf_connected_hdr_t *hdr) {
                               &hdr->item1_type, &hdr->item1_len,
                               &hdr->seq_num);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "CPF connected: header unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "CPF connected: header unpack failed.");
         return (Bytes){0};
     }
     if(hdr->item1_len < 2 || rest.len != (size_t)(hdr->item1_len - 2)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "CPF connected: payload length mismatch, expected %zu, got %zu.",
                hdr->item1_len >= 2 ? (size_t)(hdr->item1_len - 2) : (size_t)0, rest.len);
         return (Bytes){0};
@@ -224,7 +223,7 @@ static Bytes wrap_unconnected(Arena *a, Bytes cip_response) {
 
     Bytes hdr_bytes = cpf_encode_unconnected(a, &hdr);
     if(bytes_is_null(hdr_bytes)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "wrap_unconnected: arena alloc failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "wrap_unconnected: arena alloc failed.");
         return (Bytes){0};
     }
     return bytes_concat(a, hdr_bytes, cip_response);
@@ -243,7 +242,7 @@ static Bytes wrap_connected(Arena *a, Bytes cip_response, uint32_t conn_id, uint
 
     Bytes hdr_bytes = cpf_encode_connected(a, &hdr);
     if(bytes_is_null(hdr_bytes)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "wrap_connected: arena alloc failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "wrap_connected: arena alloc failed.");
         return (Bytes){0};
     }
     return bytes_concat(a, hdr_bytes, cip_response);

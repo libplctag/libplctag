@@ -1,11 +1,9 @@
-#pragma once
-
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -33,13 +31,52 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#pragma once
+
+#include <stdint.h>
+
+#include "device_sim.h"
+
 /*
- * plctag_features.h — compile-time feature gates.
+ * endpoint.c — lazy find-or-create-by-(bind_addr,port) registry for
+ * role=server tags (SERVER_TAGS.md).
  *
- * GENERATED from plctag_features.h.in by CMake; do not edit.
- * Each macro is 0 or 1.  See REFACTOR_PLAN.md / SERVER_TAGS.md.
+ * device_sim_create/start/stop/destroy already implement everything a
+ * listening endpoint needs (identity seeding, dialect registration, listener
+ * + discovery threads, clean shutdown) for the explicit-lifecycle
+ * device_sim_* API. This registry is a thin, refcounted wrapper around those
+ * same functions so that independent plc_tag_create(role=server,...) calls
+ * can share one running endpoint keyed by (bind_addr, port): the first call
+ * at an endpoint starts it; later calls just add a tag to the same device_t;
+ * the last plc_tag_destroy stops it. Mirrors the find_or_create_* idiom
+ * already used by protocols/ab/session.c (session_find_or_create) and
+ * protocols/mb/modbus.c (find_or_create_plc).
  */
 
-#define LIBPLCTAG_FEATURE_EIP 1
-#define LIBPLCTAG_FEATURE_MODBUS 1
-#define LIBPLCTAG_FEATURE_SERVER 0
+/* Must be called once before any endpoint_find_or_create(), and once at
+ * shutdown. Guarded by LIBPLCTAG_FEATURE_SERVER at the call site (lib/init.c). */
+extern int32_t endpoint_registry_init(void);
+extern void endpoint_registry_teardown(void);
+
+/*
+ * Find an existing endpoint at (bind_addr,port) and increment its refcount,
+ * or create+start a new one (device_sim_create + device_sim_start) with
+ * refcount 1. bind_addr may be NULL (any interface); NULL and "0.0.0.0" are
+ * treated as the same key.
+ *
+ * plc_type is only used when creating a new endpoint; if an endpoint already
+ * exists at this (bind_addr,port), its original plc_type wins and this
+ * parameter is ignored (a server can only be one PLC type per endpoint).
+ *
+ * Returns NULL on failure (out of memory or thread/socket creation failure).
+ */
+extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, plc_type_t plc_type);
+
+/*
+ * Decrement the refcount of the endpoint owning sim. At zero, stops the
+ * listener/discovery threads (device_sim_stop + join) and destroys the
+ * device_sim_t (device_sim_destroy) before returning. Safe to call while
+ * other tags still reference the same endpoint (refcount > 0 leaves it
+ * running untouched).
+ */
+extern void endpoint_release(device_sim_t *sim);

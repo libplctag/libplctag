@@ -57,7 +57,6 @@
 #include <libplctag/protocols/enip/server/discovery.h>
 #include "eip.h"
 
-#define DEBUG_MOD DEBUG_MODULE_UTILS
 
 /* ============================================================================
  * Constants
@@ -108,20 +107,20 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
     sess->sender_context = req_hdr.sender_context;
 
     if(sess->max_eip_packet_size > 0 && (size_t)req_hdr.payload_len > sess->max_eip_packet_size) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "EIP payload_len=%u exceeds negotiated max %zu — closing connection.",
                (unsigned)req_hdr.payload_len, sess->max_eip_packet_size);
         return (Bytes){0};
     }
 
     if(payload.len != (size_t)req_hdr.payload_len) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "EIP payload size mismatch: declared %u received %zu — closing connection.",
                (unsigned)req_hdr.payload_len, payload.len);
         return (Bytes){0};
     }
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
            "eip_dispatch: cmd=0x%04x payload len=%zu.", (unsigned)req_hdr.cmd, payload.len);
 
     switch(req_hdr.cmd) {
@@ -146,13 +145,13 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
             break;
 
         default:
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Unknown EIP command 0x%04x.", (unsigned)req_hdr.cmd);
             return make_eip_error(a, &req_hdr);
     }
 
     if(bytes_is_null(response_body)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "EIP handler returned null body for cmd=0x%04x.", (unsigned)req_hdr.cmd);
         return make_eip_error(a, &req_hdr);
     }
@@ -195,7 +194,7 @@ static bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr) {
                               &hdr->cmd, &hdr->payload_len, &hdr->session_handle,
                               &hdr->status, &hdr->sender_context, &hdr->options);
     if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "eip_parse_hdr: header unpack failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "eip_parse_hdr: header unpack failed.");
         return false;
     }
     return true;
@@ -217,7 +216,7 @@ static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *ses
     if(h == 0) { h = atomic_add_int32(&s_next_session_handle, 1); }
     sess->session_handle = (uint32_t)h;
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
            "RegisterSession: assigned handle 0x%08x.", (unsigned)sess->session_handle);
 
     return bytes_pack(a, BYTES_LE, EIP_REG_SESSION_VERSION, (uint16_t)0);
@@ -226,7 +225,7 @@ static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *ses
 
 static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
     (void)a;
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_INFO, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
            "UnregisterSession: handle 0x%08x.", (unsigned)sess->session_handle);
     sess->session_handle = 0;
     return (Bytes){0};
@@ -244,7 +243,7 @@ static Bytes make_eip_response(Arena *a, eip_hdr_t *req_hdr, eip_session_t *sess
 
     Bytes hdr_bytes = eip_encode_hdr(a, &resp);
     if(bytes_is_null(hdr_bytes)) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "make_eip_response: arena alloc failed.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "make_eip_response: arena alloc failed.");
         return (Bytes){0};
     }
     return bytes_concat(a, hdr_bytes, body);

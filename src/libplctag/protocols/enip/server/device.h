@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "platform.h"
@@ -70,6 +71,16 @@ typedef struct tag_def_s {
     device_sim_tag_cb  read_cb;
     device_sim_tag_cb  write_cb;
     void              *user_data;
+
+    /* Server-tag (role=server, SERVER_TAGS.md) event delivery.  Set by the
+     * listener thread in handle_read/handle_write (server/common/cip.c),
+     * already under data_mutex there — no new lock. Cleared by the owning
+     * plc_tag's own tickler vtable function, which takes data_mutex itself to
+     * check these two plain bools before deciding to raise READ_COMPLETED /
+     * WRITE_COMPLETED. Unused (always false) for device_sim_* tags, which
+     * have no owning plc_tag to notify. */
+    bool               pending_read_event;
+    bool               pending_write_event;
 } tag_def_t;
 
 /* ============================================================================
@@ -122,7 +133,21 @@ typedef struct {
 
     int32_t      response_delay_ms;
 
+    /* Tag list.  device_sim_* builds this once before device_sim_start() and
+     * never mutates it again (append-only via device_tags_append below).
+     * Server tags (role=server) may additionally append to an already-running
+     * endpoint's list, and may later remove their own entry, concurrently
+     * with readers (other connections' requests) walking it — tags_mutex
+     * protects every access (append, remove, and read-side walks in
+     * common/cip.c, dialects/pccc/pccc.c, dialects/rockwell/ab_listing.c).
+     * tags_tail makes append O(1). Removed tag_def_t entries are unlinked but
+     * NOT freed until the whole endpoint is torn down (device_sim_destroy) —
+     * a deliberate, bounded leak for the lifetime of the endpoint that avoids
+     * needing to prove no in-flight request still holds the raw pointer a
+     * lookup returned; see device_tags_remove() below. */
     tag_def_t   *tags;
+    tag_def_t   *tags_tail;
+    mutex_p      tags_mutex;
 
     /* Back-pointer to the owning device_sim_t — set once at create, never changes.
      * Lets protocol handlers pass the public handle to tag callbacks without
@@ -145,3 +170,58 @@ typedef struct {
     identity_t   identity;
     mutex_p      identity_mutex;
 } device_t;
+
+/* ============================================================================
+ * tags list accessors — the single point of contact with device_t.tags for
+ * every reader/writer across common/, server/, and dialects/.  All three take
+ * dev->tags_mutex; there is no lock-free code anywhere in this list.
+ * ============================================================================ */
+
+/* Append at the tail (O(1) via tags_tail), under tags_mutex. Safe to call on
+ * an already-running endpoint (role=server) or before device_sim_start()
+ * (device_sim_*) alike. */
+static inline void device_tags_append(device_t *dev, tag_def_t *tag) {
+    critical_block(dev->tags_mutex) {
+        tag->next_tag = NULL;
+        if(dev->tags_tail) {
+            dev->tags_tail->next_tag = tag;
+        } else {
+            dev->tags = tag;
+        }
+        dev->tags_tail = tag;
+    }
+}
+
+/* Unlink tag from the list under tags_mutex.  Does NOT free tag — see the
+ * tags field comment above for why entries are intentionally leaked between
+ * removal and whole-endpoint teardown. */
+static inline void device_tags_remove(device_t *dev, tag_def_t *tag) {
+    critical_block(dev->tags_mutex) {
+        if(dev->tags == tag) {
+            dev->tags = tag->next_tag;
+        } else {
+            tag_def_t *p = dev->tags;
+            while(p && p->next_tag != tag) { p = p->next_tag; }
+            if(p) { p->next_tag = tag->next_tag; }
+        }
+        if(dev->tags_tail == tag) {
+            tag_def_t *p = dev->tags;
+            dev->tags_tail = NULL;
+            while(p) { dev->tags_tail = p; p = p->next_tag; }
+        }
+    }
+}
+
+/* Internal-only accessor (device_sim_t itself stays opaque outside
+ * device_sim.c): lets server/endpoint.c and server/eip_server_tag.c reach the
+ * device_t behind a device_sim_t returned by endpoint_find_or_create()
+ * without exposing the struct layout through the public device_sim.h. */
+extern device_t *device_sim_get_device(device_sim_t *sim);
+
+/* Allocate a tag_def_t owning its own data buffer + data_mutex (elem_size
+ * bytes/element, elem_count elements). Used by device_sim_add_tag/
+ * device_sim_add_pccc_tag and by server/eip_server_tag.c's constructor; the
+ * caller fills in num_dimensions/dimensions and appends via
+ * device_tags_append() above. NULL on invalid args or allocation failure. */
+extern tag_def_t *device_tag_alloc(const char *name, tag_type_t type, size_t elem_size, size_t elem_count,
+                                   device_sim_tag_cb read_cb, device_sim_tag_cb write_cb, void *user_data);

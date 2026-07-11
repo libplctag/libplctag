@@ -45,7 +45,6 @@
 #include <libplctag/protocols/enip/server/device.h>
 #include "pccc.h"
 
-#define DEBUG_MOD DEBUG_MODULE_UTILS
 
 /* ============================================================================
  * Constants
@@ -95,11 +94,11 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
     Bytes pccc_cmd  = {0};
     Bytes pccc_resp = {0};
 
-    pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
            "pccc_dispatch: payload len=%zu.", payload.len);
 
     if(payload.len < PCCC_CIP_HEADER_SIZE + 4) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "PCCC: payload too short.");
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "PCCC: payload too short.");
         pccc_resp = pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, 0);
         goto build_response;
     }
@@ -110,7 +109,7 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
         if(pccc_pkt.len < 4
            || pccc_pkt.data[0] != PCCC_CMD_PREFIX[0]
            || pccc_pkt.data[1] != PCCC_CMD_PREFIX[1]) {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "PCCC: bad command prefix 0x%02x 0x%02x.",
                    (unsigned)pccc_pkt.data[0], (unsigned)pccc_pkt.data[1]);
             pccc_resp = pccc_error(a, PCCC_ERR_UNSUPPORTED_CMD, 0);
@@ -122,7 +121,7 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
         pccc_cmd = bytes_slice(pccc_pkt, 4, pccc_pkt.len - 4);
         sess->pccc_seq_id = seq_id;
 
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_DETAIL, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
                "PCCC seq=0x%04x cmd=0x%02x plc_type=%d.",
                (unsigned)seq_id, (unsigned)cmd_byte, (int)dev->plc_type);
 
@@ -132,7 +131,7 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
                 case PLC5_CMD_WRITE: pccc_resp = handle_plc5_write(a, pccc_cmd, seq_id, dev); break;
                 case PLC5_CMD_RMW:   pccc_resp = handle_plc5_rmw(a, pccc_cmd, seq_id, dev);   break;
                 default:
-                    pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                            "PCCC PLC/5: unknown cmd 0x%02x.", (unsigned)cmd_byte);
                     pccc_resp = pccc_error(a, PCCC_ERR_UNSUPPORTED_CMD, seq_id);
                     break;
@@ -143,13 +142,13 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
                 case SLC_CMD_WRITE: pccc_resp = handle_slc_write(a, pccc_cmd, seq_id, dev); break;
                 case SLC_CMD_RMW:   pccc_resp = handle_slc_rmw(a, pccc_cmd, seq_id, dev);   break;
                 default:
-                    pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+                    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                            "PCCC SLC: unknown cmd 0x%02x.", (unsigned)cmd_byte);
                     pccc_resp = pccc_error(a, PCCC_ERR_UNSUPPORTED_CMD, seq_id);
                     break;
             }
         } else {
-            pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "PCCC: unsupported plc_type %d.", (int)dev->plc_type);
             pccc_resp = pccc_error(a, PCCC_ERR_UNSUPPORTED_CMD, 0);
         }
@@ -173,9 +172,15 @@ static Bytes pccc_error(Arena *a, uint8_t err, uint16_t seq_id) {
 
 
 static tag_def_t *find_tag_by_file_num(device_t *dev, size_t file_num) {
-    tag_def_t *tag = dev->tags;
-    while(tag && tag->data_file_num != file_num) { tag = tag->next_tag; }
-    return tag;
+    tag_def_t *found = NULL;
+    critical_block(dev->tags_mutex) {
+        tag_def_t *tag = dev->tags;
+        while(tag) {
+            if(tag->data_file_num == file_num) { found = tag; break; }
+            tag = tag->next_tag;
+        }
+    }
+    return found;
 }
 
 
@@ -200,7 +205,7 @@ static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *de
 
     tag_def_t *tag = find_tag_by_file_num(dev, file_num);
     if(!tag) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0, "PLC/5 read: tag file %u not found.", (unsigned)file_num);
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "PLC/5 read: tag file %u not found.", (unsigned)file_num);
         return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id);
     }
 
@@ -342,7 +347,7 @@ static Bytes handle_slc_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
     if(!tag) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
 
     if((uint16_t)tag->tag_type != (uint16_t)file_type) {
-        pdebug(DEBUG_MOD, PLCTAG_DEBUG_WARN, 0,
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "SLC read: file type mismatch got 0x%02x expected 0x%04x.",
                (unsigned)file_type, (unsigned)tag->tag_type);
         return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id);
