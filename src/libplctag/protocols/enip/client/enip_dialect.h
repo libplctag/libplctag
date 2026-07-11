@@ -54,6 +54,7 @@
 #include <stdint.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
+#include <libplctag/protocols/enip/common/plc_type.h>
 
 typedef struct enip_connection_t enip_connection_t;
 typedef struct enip_tag_t *enip_tag_p;
@@ -81,8 +82,15 @@ typedef struct enip_dialect_t {
 } enip_dialect_t;
 
 /* Logix/Micro800 symbolic dialect (CIP Read/Write Tag 0x4C/0x4D). The default
- * for every connection; also serves OMRON named I/O until its dialect lands. */
+ * for every connection. */
 extern const enip_dialect_t enip_logix_dialect;
+
+/* OMRON NJ/NX symbolic dialect. Shares enip_logix_dialect's build/apply
+ * verbatim (OMRON-SPECIFIC-DESIGN.md §1: same path encoding, same Read/Write
+ * Tag services, same CIP Common Format reply framing) -- the only difference
+ * is requested_cip_size (§2.2). Byte-fragment mode for oversized single
+ * elements (§3) and tag/UDT enumeration (§5) are out of MVP scope. */
+extern const enip_dialect_t enip_omron_dialect;
 
 /* PLC-5 / SLC500 / MicroLogix PCCC dialect (Execute-PCCC, CIP service 0x4B).
  * Unlike the symbolic dialect this is selected per-tag (by ENIP_TAG_KIND_PCCC,
@@ -91,6 +99,7 @@ extern const enip_dialect_t enip_logix_dialect;
  * PLC-5-vs-SLC encoding split is not reliably derivable from CIP Identity. */
 extern const enip_dialect_t enip_pccc_dialect;
 
-/* Select the dialect for a connection from its parsed CIP Identity fields.
- * Called once at the end of identity bring-up. Never returns NULL. */
-extern const enip_dialect_t *enip_dialect_select(uint16_t vendor_id, uint16_t device_type);
+/* Select the dialect for a connection from its classified PLC family (see
+ * common/plc_classify.h). Called once at the end of identity bring-up, after
+ * enip_classify_plc(). Never returns NULL. */
+extern const enip_dialect_t *enip_dialect_select(enip_plc_type_t plc_type);

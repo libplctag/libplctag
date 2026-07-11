@@ -1379,12 +1379,22 @@ const enip_dialect_t enip_logix_dialect = {
     .apply = enip_logix_apply,
 };
 
-/* §16a.4 dialect selection from CIP Identity. Logix/Micro800 and (for now)
- * OMRON ride the symbolic dialect; PLC-5/SLC500/MicroLogix get the PCCC dialect.
- * ponytail: PCCC families are distinguished by name at tag create, not here. */
-const enip_dialect_t *enip_dialect_select(uint16_t vendor_id, uint16_t device_type) {
-    (void)vendor_id;
-    (void)device_type;
+/* OMRON-SPECIFIC-DESIGN.md §6: same build/apply as Logix (§1 -- identical path
+ * encoding, Read/Write Tag services, and CIP Common Format reply framing);
+ * only the requested Forward Open size differs (§2.2 family default). */
+const enip_dialect_t enip_omron_dialect = {
+    .name = "omron-njnx",
+    .requested_cip_size = 1900,
+    .max_batch_cap = 0,
+    .build = enip_logix_build,
+    .apply = enip_logix_apply,
+};
+
+/* §16a.4 dialect selection from the classified PLC family. PCCC families are
+ * distinguished by name at tag create (ENIP_TAG_KIND_PCCC), not here -- see
+ * enip_pccc_dialect's comment in enip_dialect.h. */
+const enip_dialect_t *enip_dialect_select(enip_plc_type_t plc_type) {
+    if(plc_type == ENIP_PLC_OMRON_NJNX) { return &enip_omron_dialect; }
     return &enip_logix_dialect;
 }
 
@@ -2295,7 +2305,7 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
                        &c->ident_rev_major, &c->ident_rev_minor, &c->ident_status, &c->ident_serial);
 
     c->plc_type = enip_classify_plc(c->ident_vendor_id, reply.data);
-    c->dialect = enip_dialect_select(c->ident_vendor_id, c->ident_device_type);
+    c->dialect = enip_dialect_select(c->plc_type);
     c->identity_valid = true;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
