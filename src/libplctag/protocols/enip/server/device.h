@@ -38,7 +38,7 @@
 #include <stdint.h>
 #include "platform.h"
 #include "utils/atomic_utils.h"
-#include "device_sim.h"   /* public POD types: device_sim_t, plc_type_t,
+#include "device_sim.h"   /* public POD types: device_sim_t, enip_plc_type_t,
                              tag_type_t, identity_t, the callback typedefs */
 
 /* ============================================================================
@@ -81,6 +81,12 @@ typedef struct tag_def_s {
      * have no owning plc_tag to notify. */
     bool               pending_read_event;
     bool               pending_write_event;
+
+    /* Fault injection (SERVER_TAGS.md sim_fault=): when nonzero, handle_read/
+     * handle_write (common/cip.c) return this CIP general-status code instead
+     * of touching data or the tag's read/write callbacks. Set once at tag
+     * creation (eip_server_tag_create); read-only after, so no lock needed. */
+    uint8_t            fault_status;
 } tag_def_t;
 
 /* ============================================================================
@@ -123,7 +129,7 @@ typedef struct {
  * ============================================================================ */
 
 typedef struct {
-    plc_type_t   plc_type;
+    enip_plc_type_t plc_type;
     uint16_t     port;
     const char  *bind_addr;
     uint32_t     local_ipv4;   /* host-byte-order; in List Identity replies */

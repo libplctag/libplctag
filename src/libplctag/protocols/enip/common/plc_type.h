@@ -1,3 +1,4 @@
+#pragma once
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,52 +32,43 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
-#include <stdint.h>
-
-#include "device_sim.h"
-
-/*
- * endpoint.c — lazy find-or-create-by-(bind_addr,port) registry for
- * role=server tags (SERVER_TAGS.md).
- *
- * device_sim_create/start/stop/destroy already implement everything a
- * listening endpoint needs (identity seeding, dialect registration, listener
- * + discovery threads, clean shutdown) for the explicit-lifecycle
- * device_sim_* API. This registry is a thin, refcounted wrapper around those
- * same functions so that independent plc_tag_create(role=server,...) calls
- * can share one running endpoint keyed by (bind_addr, port): the first call
- * at an endpoint starts it; later calls just add a tag to the same device_t;
- * the last plc_tag_destroy stops it. Mirrors the find_or_create_* idiom
- * already used by protocols/ab/session.c (session_find_or_create) and
- * protocols/mb/modbus.c (find_or_create_plc).
- */
-
-/* Must be called once before any endpoint_find_or_create(), and once at
- * shutdown. Guarded by LIBPLCTAG_FEATURE_SERVER at the call site (lib/init.c). */
-extern int32_t endpoint_registry_init(void);
-extern void endpoint_registry_teardown(void);
+#include <stdbool.h>
+#include <stddef.h>
+#include "platform.h"
+#include "utils/bytes.h"
 
 /*
- * Find an existing endpoint at (bind_addr,port) and increment its refcount,
- * or create+start a new one (device_sim_create + device_sim_start) with
- * refcount 1. bind_addr may be NULL (any interface); NULL and "0.0.0.0" are
- * treated as the same key.
+ * PLC family shared by both directions of the ENIP protocol: the client uses
+ * it to auto-classify a connection from its CIP Identity reply (vendor id +
+ * device type + product-name catalog prefix, see dialects/rockwell and
+ * dialects/omron); the server (device_sim/eip_server_tag) uses the same
+ * value to select which family's identity, tag-listing behavior, and (for
+ * PCCC families) data path to emulate. One enum for both directions so
+ * "what the client can detect" and "what the server can emulate" can never
+ * drift apart. Mirrors the family list in protocols/ab/defs.h's plc_type_t
+ * (copied, not shared/linked -- ab is being folded away, see
+ * SERVER_TAGS.md); named enip_plc_type_t, not plc_type_t, only to avoid a
+ * generic, easily-collided name.
  *
- * plc_type is only used when creating a new endpoint; if an endpoint already
- * exists at this (bind_addr,port), its original plc_type wins and this
- * parameter is ignored (a server can only be one PLC type per endpoint).
- *
- * Returns NULL on failure (out of memory or thread/socket creation failure).
+ * Unlike ab's AB_PLC_NONE (a "user hasn't said yet" sentinel for an
+ * attribute the user types in), ENIP_PLC_UNKNOWN here means "we saw a real
+ * CIP Identity reply and it did not match any recognized catalog prefix" on
+ * the client side; the server side never emulates ENIP_PLC_UNKNOWN (it is
+ * not a valid `plc=` selection -- see eip_server_tag.c's parse_plc_type).
  */
-extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type);
+typedef enum {
+    ENIP_PLC_UNKNOWN = 0,
+    ENIP_PLC_PLC5,
+    ENIP_PLC_SLC,
+    ENIP_PLC_MLGX,
+    ENIP_PLC_LGX,
+    ENIP_PLC_MICRO800,
+    ENIP_PLC_OMRON_NJNX,
+} enip_plc_type_t;
 
-/*
- * Decrement the refcount of the endpoint owning sim. At zero, stops the
- * listener/discovery threads (device_sim_stop + join) and destroys the
- * device_sim_t (device_sim_destroy) before returning. Safe to call while
- * other tags still reference the same endpoint (refcount > 0 leaves it
- * running untouched).
- */
-extern void endpoint_release(device_sim_t *sim);
+/* True if name starts with prefix (case-sensitive, matches Rockwell/OMRON
+ * catalog-number conventions). */
+static inline bool bytes_has_prefix(Bytes name, const char *prefix) {
+    size_t prefix_len = str_length(prefix) < 0 ? 0 : (size_t)str_length(prefix);
+    return name.data && name.len >= prefix_len && mem_cmp(name.data, (int)prefix_len, (void *)prefix, (int)prefix_len) == 0;
+}

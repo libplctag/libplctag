@@ -155,7 +155,7 @@ static void append_tag(device_t *dev, tag_def_t *tag) {
  * Lifecycle
  * ============================================================================ */
 
-extern device_sim_t *device_sim_create(plc_type_t plc_type, const char *bind_addr, uint16_t port) {
+extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *bind_addr, uint16_t port) {
     device_sim_t *sim = (device_sim_t *)mem_alloc((int)sizeof(device_sim_t));
     if(!sim) { return NULL; }
     mem_set(sim, 0, (int)sizeof(device_sim_t));
@@ -205,7 +205,7 @@ extern device_sim_t *device_sim_create(plc_type_t plc_type, const char *bind_add
     }
 
     /* Register manufacturer-specific CIP dialect handlers. */
-    if(plc_type == PLC_CONTROL_LOGIX || plc_type == PLC_MICRO800) {
+    if(plc_type == ENIP_PLC_LGX || plc_type == ENIP_PLC_MICRO800) {
         if(ab_listing_register(sim, &sim->dev) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "device_sim_create: ab_listing_register failed (tag listing will not work).");

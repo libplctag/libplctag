@@ -34,7 +34,10 @@ endif()
 if(LIBPLCTAG_FEATURE_EIP)
     message("Adding AB protocol sources to build.")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab")
-    message("Adding ENIP protocol sources to build.")
+endif()
+
+if(LIBPLCTAG_FEATURE_ENIP)
+    message("Adding ENIP protocol sources to build (experimental/beta).")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/enip")
 endif()
 
@@ -78,11 +81,9 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
-# EtherNet/IP: Allen-Bradley (AB_PROTOCOL_SOURCES from the ab/ subdirectory),
-# the generic ENIP engine (ENIP_PROTOCOL_SOURCES from the enip/ subdirectory) + OMRON.
+# EtherNet/IP: Allen-Bradley (AB_PROTOCOL_SOURCES from the ab/ subdirectory) + OMRON.
 if(LIBPLCTAG_FEATURE_EIP)
     list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")
-    list(APPEND libplctag_SRCS "${ENIP_PROTOCOL_SOURCES}")
     list(APPEND libplctag_SRCS
         "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron_common.c"
@@ -101,6 +102,11 @@ if(LIBPLCTAG_FEATURE_EIP)
         "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/tag.h")
 endif()
 
+# Generic ENIP protocol engine (experimental/beta, off by default).
+if(LIBPLCTAG_FEATURE_ENIP)
+    list(APPEND libplctag_SRCS "${ENIP_PROTOCOL_SOURCES}")
+endif()
+
 # Modbus/TCP.
 if(LIBPLCTAG_FEATURE_MODBUS)
     list(APPEND libplctag_SRCS
@@ -109,9 +115,9 @@ if(LIBPLCTAG_FEATURE_MODBUS)
 endif()
 
 # Server tags (device simulator): EtherNet/IP server runtime, folded in from
-# the former libdevsim (see SERVER_TAGS.md). Requires the EIP client sources
-# above for ENIP_SERVER_SOURCES to have been set.
-if(LIBPLCTAG_FEATURE_SERVER AND LIBPLCTAG_FEATURE_EIP)
+# the former libdevsim (see SERVER_TAGS.md). Requires the ENIP engine sources
+# above for ENIP_SERVER_SOURCES to have been set. Experimental/beta.
+if(LIBPLCTAG_FEATURE_SERVER AND LIBPLCTAG_FEATURE_ENIP)
     list(APPEND libplctag_SRCS "${ENIP_SERVER_SOURCES}")
 endif()
 

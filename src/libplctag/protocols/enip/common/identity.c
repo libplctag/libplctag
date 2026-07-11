@@ -56,20 +56,25 @@
 #define SOCKADDR_AF_INET  ((uint16_t)2)
 
 /* ============================================================================
- * Built-in identity table, one entry per plc_type_t value.
+ * Built-in identity table, one entry per enip_plc_type_t value. Shared with
+ * the client's CIP-Identity auto-classification (dialects/rockwell/omron
+ * *_classify.c): the vendor_id/device_type/product_name prefix emitted here
+ * for a given family MUST match what that family's classifier recognizes,
+ * so a client talking to this simulator detects the family it was told to
+ * emulate.
  *
  * Captured values (byte-exact):
- *   PLC_CONTROL_LOGIX → 1756-L81E/B  rev 31.11
- *   PLC_PLC5          → PLC-5/30 C/K - 1785-ENET 2.17  rev 3.11
- *   PLC_MICROLOGIX    → 1763-L16BWA B/12.00  rev 2.12
+ *   ENIP_PLC_LGX  → 1756-L81E/B  rev 31.11
+ *   ENIP_PLC_PLC5 → PLC-5/30 C/K - 1785-ENET 2.17  rev 3.11
+ *   ENIP_PLC_MLGX → 1763-L16BWA B/12.00  rev 2.12
  *
  * Reasonable defaults (not from captures):
- *   PLC_MICRO800, PLC_OMRON, PLC_SLC
+ *   ENIP_PLC_MICRO800, ENIP_PLC_OMRON_NJNX, ENIP_PLC_SLC
  * ============================================================================ */
 
 static const identity_t IDENTITIES[] = {
-    /* [PLC_CONTROL_LOGIX] — 1756-L81E/B (capture exact) */
-    [PLC_CONTROL_LOGIX] = {
+    /* [ENIP_PLC_LGX] — 1756-L81E/B (capture exact) */
+    [ENIP_PLC_LGX] = {
         .vendor_id      = 0x0001,
         .device_type    = 0x000E,
         .product_code   = 0x00A4,
@@ -80,8 +85,8 @@ static const identity_t IDENTITIES[] = {
         .product_name   = "1756-L81E/B",
         .state          = 0x03,
     },
-    /* [PLC_MICRO800] — 2080-LC50-48QBB (reasonable default) */
-    [PLC_MICRO800] = {
+    /* [ENIP_PLC_MICRO800] — 2080-LC50-48QBB (reasonable default) */
+    [ENIP_PLC_MICRO800] = {
         .vendor_id      = 0x0001,
         .device_type    = 0x000E,
         .product_code   = 0x014E,
@@ -92,9 +97,11 @@ static const identity_t IDENTITIES[] = {
         .product_name   = "2080-LC50-48QBB",
         .state          = 0x03,
     },
-    /* [PLC_OMRON] — NJ501-1400 (reasonable default) */
-    [PLC_OMRON] = {
-        .vendor_id      = 0x02D4,
+    /* [ENIP_PLC_OMRON_NJNX] — NJ501-1400 (reasonable default). vendor_id
+     * 0x002F matches common/plc_classify.c's CIP_VENDOR_OMRON -- keep the
+     * two in sync. */
+    [ENIP_PLC_OMRON_NJNX] = {
+        .vendor_id      = 0x002F,
         .device_type    = 0x000C,
         .product_code   = 0x0069,
         .revision_major = 1,
@@ -104,8 +111,8 @@ static const identity_t IDENTITIES[] = {
         .product_name   = "NJ501-1400",
         .state          = 0x03,
     },
-    /* [PLC_PLC5] — PLC-5/30 C/K (capture exact) */
-    [PLC_PLC5] = {
+    /* [ENIP_PLC_PLC5] — PLC-5/30 C/K (capture exact) */
+    [ENIP_PLC_PLC5] = {
         .vendor_id      = 0x0001,
         .device_type    = 0x000E,
         .product_code   = 0x0012,
@@ -116,8 +123,8 @@ static const identity_t IDENTITIES[] = {
         .product_name   = "PLC-5/30 C/K - 1785-ENET 2.17 ",
         .state          = 0x03,
     },
-    /* [PLC_SLC] — SLC 5/05 (reasonable default) */
-    [PLC_SLC] = {
+    /* [ENIP_PLC_SLC] — SLC 5/05 (reasonable default) */
+    [ENIP_PLC_SLC] = {
         .vendor_id      = 0x0001,
         .device_type    = 0x000E,
         .product_code   = 0x001C,
@@ -128,8 +135,8 @@ static const identity_t IDENTITIES[] = {
         .product_name   = "1747-L553 B/5.03",
         .state          = 0x03,
     },
-    /* [PLC_MICROLOGIX] — 1763-L16BWA (capture exact) */
-    [PLC_MICROLOGIX] = {
+    /* [ENIP_PLC_MLGX] — 1763-L16BWA (capture exact) */
+    [ENIP_PLC_MLGX] = {
         .vendor_id      = 0x0001,
         .device_type    = 0x000C,
         .product_code   = 0x00B9,
@@ -148,9 +155,11 @@ static const identity_t IDENTITIES[] = {
  * Public functions
  * ============================================================================ */
 
-extern const identity_t *identity_for_plc_type(plc_type_t pt) {
-    if((size_t)pt < IDENTITIES_COUNT) { return &IDENTITIES[(size_t)pt]; }
-    return &IDENTITIES[PLC_CONTROL_LOGIX];
+extern const identity_t *identity_for_plc_type(enip_plc_type_t pt) {
+    /* pt == ENIP_PLC_UNKNOWN (index 0) is a valid array index but an unused,
+     * zero-filled row -- treat it the same as an out-of-range value. */
+    if(pt != ENIP_PLC_UNKNOWN && (size_t)pt < IDENTITIES_COUNT) { return &IDENTITIES[(size_t)pt]; }
+    return &IDENTITIES[ENIP_PLC_LGX];
 }
 
 

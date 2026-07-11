@@ -207,28 +207,54 @@ All optional except `role`. Everything else reuses existing client attributes.
 | `gateway` / `port` | `0.0.0.0` / proto default | bind address + listen port for the endpoint |
 | `name`, `elem_type`, `elem_size`, `elem_count`, `dimensions` | — | tag definition (same grammar as client) |
 | `make`, `model`, `vendor_id`, `device_type`, `product_code`, `serial`, `revision` | per-protocol defaults | identity object seed |
-| `sim_delay_ms` | 0 | delay every response (latency simulation) |
-| `sim_max_packet` | proto max | force fragmentation / partial-transfer paths |
-| `sim_fault` | none | force a CIP/Modbus error status for this tag |
-| `transport` | `tcp` | `loopback` = in-process shared queue, no socket (tests) |
+| `sim_delay_ms` | 0 | delay every response (latency simulation); endpoint-scoped (see below) |
+| `sim_max_packet` | proto max | force fragmentation / partial-transfer paths; endpoint-scoped, applies to both directions |
+| `sim_fault` | none (0) | force a CIP general-status error (e.g. `0x05`) for reads/writes on this specific tag |
+| `transport` | `tcp` | not implemented — see note below |
 
 Modbus maps `name`/`elem_type` to register file + address range; CIP maps to a
 symbol the dialect listing advertises.
+
+Implementation notes (ENIP, `eip_server_tag_create`):
+- `sim_delay_ms`/`sim_max_packet` set fields on the shared `device_t`
+  (`device_sim_set_response_delay`/`device_sim_set_max_packet`), so they take
+  effect only for the tag that starts a *new* endpoint — a tag joining an
+  already-running endpoint cannot change its delay/packet-size, matching
+  `sim_delay_ms`/`sim_max_packet`'s status as endpoint-, not tag-, properties.
+- `sim_fault` is genuinely per-tag (`tag_def_t.fault_status`): `common/cip.c`'s
+  `handle_read`/`handle_write` return that CIP status immediately, before
+  touching data or the read/write callbacks, for every remote request against
+  that tag only — sibling tags on the same endpoint are unaffected.
+- `transport=loopback` is deliberately not implemented: it would require an
+  in-process transport parallel to the real TCP/UDP listener, and per-project
+  guidance the socket path must be solid first. The existing loopback-*style*
+  coverage (`server_tag_basic`, §9) already exercises everything through a
+  real `127.0.0.1` socket instead.
+- Modbus's `modbus_server_tag_create` equivalent does not exist yet — these
+  attributes are ENIP-only for now.
 
 ---
 
 ## 8. Debug module additions
 
-Append to the `PLCTAG_MODULE_*` enum in `lib/libplctag.h` (continues at 27); the
-CMake generator (`ParseLibplctagHeader.cmake`) picks them up automatically into
-`debug_module_t` and the name table.
+Appended to the `PLCTAG_MODULE_*` enum in `lib/libplctag.h` (continues at 27);
+the CMake generator (`ParseLibplctagHeader.cmake`) picks it up automatically
+into `debug_module_t` and the name table — no other file needed editing.
 
 ```
-PLCTAG_MODULE_SERVER         = 27,   /* listener thread, endpoint registry, server tag */
-PLCTAG_MODULE_SERVER_EIP     = 28,   /* server-side EIP/CPF/CIP decode */
-PLCTAG_MODULE_SERVER_MODBUS  = 29,   /* server-side Modbus decode */
-PLCTAG_MODULE_SERVER_DIALECT = 30,   /* AB/OMRON/PCCC tag & UDT listing */
+PLCTAG_MODULE_SERVER = 28,   /* server tag listener/endpoint registry (server/endpoint.c, server/eip_server_tag.c) */
 ```
+
+As-built this is a single module, not the four originally sketched here. The
+ENIP protocol codec (`common/cip.c`, `common/eip.c`, `common/cpf.c`,
+`dialects/*`) — server- and client-side alike — was already consolidated onto
+`PLCTAG_MODULE_ENIP` in an earlier pass (see git history); adding
+`SERVER_EIP`/`SERVER_DIALECT` would mean re-splitting that already-deliberate
+consolidation for no operational benefit. `PLCTAG_MODULE_SERVER` covers only
+the layer that's genuinely new and separate: the endpoint find-or-create
+registry and the `role=server` tag constructor/vtable, neither of which
+existed before this session's P3/P4 work. `PLCTAG_MODULE_SERVER_MODBUS` is
+deferred until a Modbus server-tag constructor exists.
 
 Discovery logs under `PLCTAG_MODULE_SERVER` (not its own module — see §2).
 
@@ -236,22 +262,35 @@ Discovery logs under `PLCTAG_MODULE_SERVER` (not its own module — see §2).
 
 ## 9. Testing
 
-Reuse the existing libplctag test harness; the `device_sim` CLI and
-`run_device_sim_tests.sh` are retired.
+As-built (`src/poc/server_tag_basic/server_tag_basic.c`, wired into the CMake
+build via `src/poc/CMakeLists.txt`, run manually — not yet ported into the
+CTest-driven part of the harness): a single localhost-socket process exercises
+`role=server` tags entirely through `plc_tag_*`, no `device_sim_*`:
 
-- **Loopback unit tests** (`transport=loopback`): create a server tag and a
-  client tag in one process, no socket; assert client read == seeded value,
-  client write lands on the server tag. Fast, deterministic, CI-friendly.
-- **One localhost socket test** per protocol for the real transport path
-  (discovery, fragmentation), porting the old 11 device_sim scenarios.
-- **Callback test**: register a `create_ex` callback on a server tag, drive a
-  client read and a client write, assert `READ_COMPLETED` / `WRITE_COMPLETED`
-  fire with correct direction (§6.1).
-- **Fault-injection test**: `sim_fault`/`sim_max_packet`/`sim_delay_ms` produce
-  the expected client-visible error / fragmentation / latency.
-- **Feature-gate build test**: configure with each of `SERVER`, `EIP`, `MODBUS`
-  off and confirm the library builds and the disabled `protocol=`/`role=server`
-  returns `PLCTAG_ERR_NOT_FOUND`.
+- **Test 1/2** — basic round trip, and a second server tag joining an
+  already-running endpoint (endpoint find-or-create + shared-endpoint tag
+  isolation).
+- **Test 3** — callback direction: a client write to a server tag fires
+  `WRITE_COMPLETED` on *that tag's own* callback (§6.1).
+- **Test 4** — destroy one server tag while a sibling on the same endpoint
+  keeps serving requests.
+- **Test 5** — `sim_fault` forces a CIP error status for one tag without
+  affecting its endpoint siblings.
+
+`run_device_sim_tests.sh` (11 scenarios against the old `device_sim` CLI) is
+still run alongside this, not retired — `device_sim_*` and `role=server`
+coexist deliberately (P5 in the implementation plan hasn't started).
+
+Not yet done:
+- Not ported into the `ctest`-run part of the suite (currently a manual binary,
+  like the `ab_server`/`modbus_server*` POCs it sits next to).
+- No feature-gate build test (`SERVER`/`EIP`/`MODBUS` each off) confirming
+  `role=server` returns `PLCTAG_ERR_NOT_FOUND` when the feature is disabled.
+- `sim_max_packet`/`sim_delay_ms` (endpoint-scoped) have no automated
+  assertion of client-visible fragmentation/latency yet — only `sim_fault` has
+  a test (Test 5 above).
+- No Modbus server-tag test (no Modbus server-tag constructor yet).
+- `transport=loopback` intentionally not implemented — see §7's note.
 
 New test files live with the existing tests (e.g. `src/tests/server_tag_*.c`),
 not under a `libdevsim` tree.

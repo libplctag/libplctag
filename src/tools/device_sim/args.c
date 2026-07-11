@@ -94,16 +94,6 @@ static const char *find_char(const char *s, char c) {
     return *s ? s : NULL;
 }
 
-static bool str_eq_i(const char *a, const char *b) {
-    while(*a && *b) {
-        char ca = (*a >= 'a' && *a <= 'z') ? (char)(*a - 32) : *a;
-        char cb = (*b >= 'a' && *b <= 'z') ? (char)(*b - 32) : *b;
-        if(ca != cb) { return false; }
-        a++; b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
 static bool str_neq_i(const char *a, size_t alen, const char *b, size_t blen) {
     if(alen != blen) { return false; }
     for(size_t i = 0; i < alen; i++) {
@@ -149,28 +139,28 @@ static int32_t parse_int32_val(const char *s, int32_t def) {
  * PLC type parser
  * ============================================================================ */
 
-static plc_type_t parse_plc_type(const char *s) {
-    if(!s || *s == '\0') { return PLC_CONTROL_LOGIX; }
-    if(str_eq_i(s, "ControlLogix") || str_eq_i(s, "logix") || str_eq_i(s, "LGX")) {
-        return PLC_CONTROL_LOGIX;
+static enip_plc_type_t parse_plc_type(const char *s) {
+    if(!s || *s == '\0') { return ENIP_PLC_LGX; }
+    if(str_cmp_i(s, "ControlLogix") == 0 || str_cmp_i(s, "logix") == 0 || str_cmp_i(s, "LGX") == 0) {
+        return ENIP_PLC_LGX;
     }
-    if(str_eq_i(s, "Micro800") || str_eq_i(s, "micro800")) {
-        return PLC_MICRO800;
+    if(str_cmp_i(s, "Micro800") == 0) {
+        return ENIP_PLC_MICRO800;
     }
-    if(str_eq_i(s, "Omron") || str_eq_i(s, "omron-njnx") || str_eq_i(s, "omron_njnx")) {
-        return PLC_OMRON;
+    if(str_cmp_i(s, "Omron") == 0 || str_cmp_i(s, "omron-njnx") == 0 || str_cmp_i(s, "omron_njnx") == 0) {
+        return ENIP_PLC_OMRON_NJNX;
     }
-    if(str_eq_i(s, "PLC5") || str_eq_i(s, "PLC/5")) {
-        return PLC_PLC5;
+    if(str_cmp_i(s, "PLC5") == 0 || str_cmp_i(s, "PLC/5") == 0) {
+        return ENIP_PLC_PLC5;
     }
-    if(str_eq_i(s, "SLC") || str_eq_i(s, "SLC500")) {
-        return PLC_SLC;
+    if(str_cmp_i(s, "SLC") == 0 || str_cmp_i(s, "SLC500") == 0) {
+        return ENIP_PLC_SLC;
     }
-    if(str_eq_i(s, "Micrologix") || str_eq_i(s, "MicroLogix")) {
-        return PLC_MICROLOGIX;
+    if(str_cmp_i(s, "Micrologix") == 0 || str_cmp_i(s, "MicroLogix") == 0) {
+        return ENIP_PLC_MLGX;
     }
     fprintf(stderr, "device_sim: unknown PLC type '%s', defaulting to ControlLogix.\n", s);
-    return PLC_CONTROL_LOGIX;
+    return ENIP_PLC_LGX;
 }
 
 /* ============================================================================
@@ -350,7 +340,7 @@ extern int32_t args_parse(int argc, char **argv, device_sim_t **sim_out, int32_t
     *debug_level_out = PLCTAG_DEBUG_WARN;
 
     /* First pass: collect scalar options before creating the sim. */
-    plc_type_t  plc_type   = PLC_CONTROL_LOGIX;
+    enip_plc_type_t plc_type = ENIP_PLC_LGX;
     uint16_t    port       = 44818;
     const char *bind_addr  = NULL;
     int32_t     delay_ms   = 0;

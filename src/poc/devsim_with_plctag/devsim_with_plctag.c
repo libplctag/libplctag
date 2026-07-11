@@ -53,7 +53,7 @@
 
 int main(void) {
     /* --- libdevsim: stand up an embedded simulator with one DINT tag --- */
-    device_sim_t *sim = device_sim_create(PLC_CONTROL_LOGIX, NULL, SIM_PORT);
+    device_sim_t *sim = device_sim_create(ENIP_PLC_LGX, NULL, SIM_PORT);
     if(!sim) {
         printf("device_sim_create failed\n");
         return 1;

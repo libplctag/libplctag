@@ -1,3 +1,4 @@
+#pragma once
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,52 +32,35 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
 #include <stdint.h>
-
-#include "device_sim.h"
-
-/*
- * endpoint.c — lazy find-or-create-by-(bind_addr,port) registry for
- * role=server tags (SERVER_TAGS.md).
- *
- * device_sim_create/start/stop/destroy already implement everything a
- * listening endpoint needs (identity seeding, dialect registration, listener
- * + discovery threads, clean shutdown) for the explicit-lifecycle
- * device_sim_* API. This registry is a thin, refcounted wrapper around those
- * same functions so that independent plc_tag_create(role=server,...) calls
- * can share one running endpoint keyed by (bind_addr, port): the first call
- * at an endpoint starts it; later calls just add a tag to the same device_t;
- * the last plc_tag_destroy stops it. Mirrors the find_or_create_* idiom
- * already used by protocols/ab/session.c (session_find_or_create) and
- * protocols/mb/modbus.c (find_or_create_plc).
- */
-
-/* Must be called once before any endpoint_find_or_create(), and once at
- * shutdown. Guarded by LIBPLCTAG_FEATURE_SERVER at the call site (lib/init.c). */
-extern int32_t endpoint_registry_init(void);
-extern void endpoint_registry_teardown(void);
+#include "utils/bytes.h"
+#include "plc_type.h"
 
 /*
- * Find an existing endpoint at (bind_addr,port) and increment its refcount,
- * or create+start a new one (device_sim_create + device_sim_start) with
- * refcount 1. bind_addr may be NULL (any interface); NULL and "0.0.0.0" are
- * treated as the same key.
+ * Classify a CIP Identity Get_Attributes_All reply into a specific PLC
+ * family, by vendor id + product-name catalog-family prefix. Shared by both
+ * directions of the ENIP protocol: the client uses this to auto-classify a
+ * live connection; the server (device_sim/eip_server_tag) uses the
+ * resulting enip_plc_type_t to select which family to emulate (plc_type.h).
  *
- * plc_type is only used when creating a new endpoint; if an endpoint already
- * exists at this (bind_addr,port), its original plc_type wins and this
- * parameter is ignored (a server can only be one PLC type per endpoint).
+ * Deliberately centralized here rather than split into per-vendor dialect
+ * directories (dialects/rockwell, dialects/omron): List Identity /
+ * Get_Attributes_All may be answered by *either* the PLC's own CPU or a
+ * separate Ethernet bridge/adapter module sitting in the same chassis --
+ * e.g. a ControlLogix rack's 1756-ENBT/EN2T/EN4TR, an SLC 500's
+ * 1747-AENTR remote I/O adapter, a CompactLogix/1769 I/O system's
+ * 1769-AENTR. Either one's product name shares its family's catalog prefix
+ * ("1756-", "1747-", "1769-", ...) even though CPU vs adapter modules
+ * report different CIP device_type values -- so device_type is NOT part of
+ * the match, only vendor id + catalog-family prefix. The prefix table lives
+ * in one place (plc_classify.c) because the vendor ids, device families,
+ * and their real-world product-name collisions (adapters/bridges sharing a
+ * CPU's catalog prefix) all have to be reasoned about together to get this
+ * right -- splitting it across per-vendor files made it too easy for one
+ * vendor's table to drift out of sync with what's actually been verified.
  *
- * Returns NULL on failure (out of memory or thread/socket creation failure).
+ * reply_data is the full Get_Attributes_All payload (fixed 14-byte prefix +
+ * product-name SHORT_STRING). Returns ENIP_PLC_UNKNOWN for anything that
+ * doesn't match a known family -- never defaults to a specific family.
  */
-extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type);
-
-/*
- * Decrement the refcount of the endpoint owning sim. At zero, stops the
- * listener/discovery threads (device_sim_stop + join) and destroys the
- * device_sim_t (device_sim_destroy) before returning. Safe to call while
- * other tags still reference the same endpoint (refcount > 0 leaves it
- * running untouched).
- */
-extern void endpoint_release(device_sim_t *sim);
+extern enip_plc_type_t enip_classify_plc(uint16_t vendor_id, Bytes reply_data);

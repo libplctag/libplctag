@@ -154,6 +154,33 @@ int main(void) {
         CHECK(true, "reading destroyed server tag's name fails cleanly (create itself failed)");
     }
 
+    printf("\n=== Test 5: sim_fault forces a CIP error status ===\n");
+
+    snprintf(attr, sizeof(attr),
+             "protocol=ab-eip&role=server&gateway=0.0.0.0&port=%d&name=TestFault&elem_type=DINT&elem_count=1&sim_fault=0x05",
+             TEST_PORT);
+    int32_t srv3 = plc_tag_create(attr, TIMEOUT_MS);
+    CHECK(srv3 >= 0, "create fault-injecting server tag");
+
+    snprintf(attr, sizeof(attr), "protocol=ab-eip&gateway=127.0.0.1:%d&path=1,0&plc=ControlLogix&elem_count=1&name=TestFault",
+             TEST_PORT);
+    /* ab-eip does an implicit type-discovery read as part of connecting, so
+     * the fault may surface at create() itself rather than waiting for an
+     * explicit plc_tag_read(). Either way it must never report success. */
+    int32_t cli3 = plc_tag_create(attr, TIMEOUT_MS);
+    if(cli3 >= 0) {
+        CHECK(plc_tag_read(cli3, TIMEOUT_MS) != PLCTAG_STATUS_OK, "client read gets the injected fault, not success");
+        plc_tag_destroy(cli3);
+    } else {
+        CHECK(true, "client read gets the injected fault, not success (create itself failed)");
+    }
+
+    /* the sibling tag on the same endpoint (srv1) must be unaffected --
+     * fault_status is per-tag, not per-endpoint. */
+    CHECK(plc_tag_read(cli1, TIMEOUT_MS) == PLCTAG_STATUS_OK, "unrelated tag on the same endpoint still reads fine");
+
+    plc_tag_destroy(srv3);
+
     plc_tag_destroy(cli1);
     plc_tag_destroy(cli2);
     plc_tag_destroy(srv1);

@@ -35,10 +35,10 @@
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
-#include <libplctag/protocols/enip/server/device.h>   /* provides identity_t, plc_type_t */
+#include <libplctag/protocols/enip/server/device.h>   /* provides identity_t */
 
 /* Return the built-in default identity for a given PLC type (used at create time). */
-extern const identity_t *identity_for_plc_type(plc_type_t pt);
+extern const identity_t *identity_for_plc_type(enip_plc_type_t pt);
 
 /*
  * Encode GetAttributesAll body (no CIP response header).

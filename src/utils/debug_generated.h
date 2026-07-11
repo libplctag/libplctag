@@ -47,9 +47,10 @@ typedef enum {
     DEBUG_MODULE_MB_CONNECTION = 25,
     DEBUG_MODULE_OMRON_CONNECTION = 26,
     DEBUG_MODULE_ENIP = 27,
+    DEBUG_MODULE_SERVER = 28,
 } debug_module_t;
 
-#define DEBUG_MODULE_COUNT 28
+#define DEBUG_MODULE_COUNT 29
 
 /* Module name lookup table - indexed by debug_module_t value */
 extern const char *debug_module_names[DEBUG_MODULE_COUNT];

@@ -197,7 +197,8 @@ typedef enum {
     PLCTAG_MODULE_AB_CONNECTION = 24,
     PLCTAG_MODULE_MB_CONNECTION = 25,
     PLCTAG_MODULE_OMRON_CONNECTION = 26,
-    PLCTAG_MODULE_ENIP = 27
+    PLCTAG_MODULE_ENIP = 27,
+    PLCTAG_MODULE_SERVER = 28   /* server tag listener/endpoint registry (SERVER_TAGS.md); protocol codec stays under PLCTAG_MODULE_ENIP */
 } plctag_debug_module_t;
 
 

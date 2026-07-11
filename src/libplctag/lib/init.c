@@ -37,13 +37,15 @@
 #include <libplctag/lib/tag.h>
 #if LIBPLCTAG_FEATURE_EIP
 #    include <libplctag/protocols/ab/ab.h>
-#    include <libplctag/protocols/enip/client/enip.h>
 #    include <libplctag/protocols/omron/omron.h>
+#endif
+#if LIBPLCTAG_FEATURE_ENIP
+#    include <libplctag/protocols/enip/client/enip.h>
 #endif
 #if LIBPLCTAG_FEATURE_MODBUS
 #    include <libplctag/protocols/mb/modbus.h>
 #endif
-#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_EIP
+#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_ENIP
 #    include <libplctag/protocols/enip/server/eip_server_tag.h>
 #    include <libplctag/protocols/enip/server/endpoint.h>
 #endif
@@ -75,6 +77,9 @@ struct {
     /* Allen-Bradley PLCs */
     {.protocol = "ab-eip", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
     {.protocol = "ab_eip", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+#endif
+#if LIBPLCTAG_FEATURE_ENIP
+    /* generic ENIP client engine (experimental/beta) */
     {.protocol = "enip-tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
     {.protocol = "enip_tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
 #endif
@@ -82,7 +87,7 @@ struct {
     {.protocol = "modbus-tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
     {.protocol = "modbus_tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
 #endif
-#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_EIP
+#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_ENIP
     /* Server tags (SERVER_TAGS.md): host a value for remote clients instead of
      * addressing one. AB and OMRON share one constructor — they diverge only
      * through the CIP object registry (dialect listing), same as the
@@ -190,7 +195,7 @@ void destroy_modules(void) {
         return;
     }
 
-#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_EIP
+#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_ENIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down server-tag endpoint registry.");
     endpoint_registry_teardown();
 #endif
@@ -208,7 +213,9 @@ void destroy_modules(void) {
 #if LIBPLCTAG_FEATURE_EIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
+#endif
 
+#if LIBPLCTAG_FEATURE_ENIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down ENIP module.");
     enip_teardown();
 #endif
@@ -340,7 +347,9 @@ int initialize_modules(void) {
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
+#endif
 
+#if LIBPLCTAG_FEATURE_ENIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing ENIP module.");
     rc = enip_init();
     if(rc != PLCTAG_STATUS_OK) {
@@ -350,7 +359,7 @@ int initialize_modules(void) {
     }
 #endif
 
-#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_EIP
+#if LIBPLCTAG_FEATURE_SERVER && LIBPLCTAG_FEATURE_ENIP
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing server-tag endpoint registry.");
     rc = endpoint_registry_init();
     if(rc != PLCTAG_STATUS_OK) {

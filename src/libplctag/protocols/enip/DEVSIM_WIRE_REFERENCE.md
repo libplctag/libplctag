@@ -70,7 +70,7 @@ src/libdevsim/                  the library (static; links plctag_static)
   lib/
     device_sim.h         PUBLIC, FFI-clean API (the only installed header)
     device_sim.c         device_sim_t lifecycle + tag/identity/registry API impl
-    device.h             plc_type_t, identity_t, tag_def_t, device_t (shared context)
+    device.h             enip_plc_type_t (common/plc_type.h), identity_t, tag_def_t, device_t (shared context)
   protocols/             === vendor-NEUTRAL core (CIP/EIP common to every PLC) ===
     server.c/.h            TCP listener thread + per-connection thread (linear flow)
     discovery.c/.h        UDP List Identity responder (+ ListServices/ListInterfaces)
@@ -448,7 +448,7 @@ threads. `device_sim_stop` is idempotent and safe to trigger from a handler.
 typedef struct device_sim_s device_sim_t;   /* opaque */
 
 typedef struct {
-    plc_type_t  plc_type;
+    enip_plc_type_t plc_type;
     uint16_t    port;
     const char *bind_addr;
     int32_t     response_delay_ms;

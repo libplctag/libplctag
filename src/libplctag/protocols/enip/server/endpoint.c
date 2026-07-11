@@ -100,7 +100,7 @@ static void endpoint_entry_cleanup(void *entry_data) {
         }
     }
 
-    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0, "endpoint_entry_cleanup: stopping endpoint port=%u.", (unsigned)e->port);
+    pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_INFO, 0, "endpoint_entry_cleanup: stopping endpoint port=%u.", (unsigned)e->port);
 
     device_sim_destroy(e->sim);
     if(e->bind_addr) { mem_free(e->bind_addr); }
@@ -137,7 +137,7 @@ extern void endpoint_registry_teardown(void) {
         int len = vector_length(endpoints);
         for(int i = 0; i < len; i++) {
             endpoint_entry_t *e = (endpoint_entry_t *)vector_get(endpoints, i);
-            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_WARN, 0,
                    "endpoint_registry_teardown: endpoint port=%u still registered at shutdown; releasing.",
                    (unsigned)e->port);
             rc_dec(e);
@@ -151,11 +151,11 @@ extern void endpoint_registry_teardown(void) {
 }
 
 
-extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, plc_type_t plc_type) {
+extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type) {
     device_sim_t *result = NULL;
 
     if(!endpoint_registry_mutex) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: registry not initialized.");
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: registry not initialized.");
         return NULL;
     }
 
@@ -172,7 +172,7 @@ extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t por
                  * Treat that as "not found" and fall through to create a
                  * fresh endpoint rather than resurrecting a dying one. */
                 if(rc_inc(e)) {
-                    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "endpoint_find_or_create: joining existing endpoint port=%u.",
+                    pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_DETAIL, 0, "endpoint_find_or_create: joining existing endpoint port=%u.",
                            (unsigned)port);
                     result = e->sim;
                 }
@@ -183,19 +183,19 @@ extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t por
         if(!result) {
             device_sim_t *sim = device_sim_create(plc_type, bind_addr, port);
             if(!sim) {
-                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: device_sim_create failed.");
+                pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: device_sim_create failed.");
                 break;
             }
 
             if(device_sim_start(sim) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: device_sim_start failed.");
+                pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: device_sim_start failed.");
                 device_sim_destroy(sim);
                 break;
             }
 
             endpoint_entry_t *e2 = (endpoint_entry_t *)rc_alloc((int)sizeof(endpoint_entry_t), endpoint_entry_cleanup);
             if(!e2) {
-                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: rc_alloc failed.");
+                pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: rc_alloc failed.");
                 device_sim_destroy(sim);
                 break;
             }
@@ -205,14 +205,14 @@ extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t por
             e2->sim       = sim;
 
             if(vector_insert(endpoints, vector_length(endpoints), e2) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: vector_insert failed.");
+                pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: vector_insert failed.");
                 /* Not yet in the vector, so endpoint_entry_cleanup's
                  * vector_find_index will simply not find it — still safe. */
                 rc_dec(e2);
                 break;
             }
 
-            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0, "endpoint_find_or_create: started new endpoint port=%u.", (unsigned)port);
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_INFO, 0, "endpoint_find_or_create: started new endpoint port=%u.", (unsigned)port);
             result = sim;
         }
     }

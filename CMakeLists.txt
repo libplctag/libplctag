@@ -74,14 +74,18 @@ set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 set(MAX_DEBUG_LEVEL 4 CACHE STRING "Maximum debug level to include in the build (0-5)")
 set(LIBPLCTAG_ENABLE_COVERAGE 0 CACHE BOOL "Enable code coverage measurement")
 
-# Compile-time feature gates.  Default on for the protocols; SERVER turns on when
-# the server-tag sources are integrated (Phase A of REFACTOR_PLAN.md).
+# Compile-time feature gates.  EIP (Allen-Bradley + OMRON, protocols/ab +
+# protocols/omron) and MODBUS are the stable, long-established protocols and
+# default on. ENIP (protocols/enip: the generic ENIP client engine and,
+# together with SERVER, the role=server tag runtime) is experimental/beta and
+# defaults OFF -- opt in explicitly to build it.
 set(LIBPLCTAG_FEATURE_EIP 1 CACHE BOOL "Build EtherNet/IP support (Allen-Bradley + OMRON)")
 set(LIBPLCTAG_FEATURE_MODBUS 1 CACHE BOOL "Build Modbus/TCP support")
-set(LIBPLCTAG_FEATURE_SERVER 0 CACHE BOOL "Build server tag (device simulator) support")
+set(LIBPLCTAG_FEATURE_ENIP 0 CACHE BOOL "Build the generic ENIP protocol engine (experimental/beta)")
+set(LIBPLCTAG_FEATURE_SERVER 0 CACHE BOOL "Build server tag (device simulator) support (experimental/beta)")
 
-if(LIBPLCTAG_FEATURE_SERVER AND NOT (LIBPLCTAG_FEATURE_EIP OR LIBPLCTAG_FEATURE_MODBUS))
-    message(FATAL_ERROR "LIBPLCTAG_FEATURE_SERVER requires LIBPLCTAG_FEATURE_EIP and/or LIBPLCTAG_FEATURE_MODBUS.")
+if(LIBPLCTAG_FEATURE_SERVER AND NOT (LIBPLCTAG_FEATURE_ENIP OR LIBPLCTAG_FEATURE_MODBUS))
+    message(FATAL_ERROR "LIBPLCTAG_FEATURE_SERVER requires LIBPLCTAG_FEATURE_ENIP and/or LIBPLCTAG_FEATURE_MODBUS.")
 endif()
 
 # message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")

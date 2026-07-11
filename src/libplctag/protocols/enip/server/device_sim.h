@@ -51,17 +51,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <libplctag/protocols/enip/common/plc_type.h>
+
 /* ============================================================================
  * Opaque handle
  * ============================================================================ */
 
 typedef struct device_sim_s device_sim_t;
 
-/* ============================================================================
- * PLC type
- * ============================================================================ */
-
-typedef enum { PLC_CONTROL_LOGIX, PLC_MICRO800, PLC_OMRON, PLC_PLC5, PLC_SLC, PLC_MICROLOGIX } plc_type_t;
+/* PLC type to emulate: enip_plc_type_t (common/plc_type.h) is shared with the
+ * client's CIP-Identity auto-classification -- whatever family the client
+ * can detect on the wire, the simulator can emulate, and vice versa. */
 
 /* ============================================================================
  * Tag type codes (CIP and PCCC)
@@ -170,7 +170,7 @@ typedef int32_t (*device_sim_cip_cb)(device_sim_t *sim, uint8_t service, const u
  * overridden with device_sim_set_identity() before or after start.
  * Returns NULL on allocation failure.
  */
-extern device_sim_t *device_sim_create(plc_type_t plc_type, const char *bind_addr, uint16_t port);
+extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *bind_addr, uint16_t port);
 
 /*
  * Optional configuration — all must be called before device_sim_start().

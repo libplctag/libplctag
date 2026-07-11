@@ -1,4 +1,7 @@
 set(ENIP_PROTOCOL_SOURCES
+                     "${CMAKE_CURRENT_SOURCE_DIR}/common/plc_type.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/common/plc_classify.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/common/plc_classify.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_type.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_type.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_cip.h"

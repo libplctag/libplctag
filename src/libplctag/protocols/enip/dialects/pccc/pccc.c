@@ -125,7 +125,7 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
                "PCCC seq=0x%04x cmd=0x%02x plc_type=%d.",
                (unsigned)seq_id, (unsigned)cmd_byte, (int)dev->plc_type);
 
-        if(dev->plc_type == PLC_PLC5) {
+        if(dev->plc_type == ENIP_PLC_PLC5) {
             switch(cmd_byte) {
                 case PLC5_CMD_READ:  pccc_resp = handle_plc5_read(a, pccc_cmd, seq_id, dev);  break;
                 case PLC5_CMD_WRITE: pccc_resp = handle_plc5_write(a, pccc_cmd, seq_id, dev); break;
@@ -136,7 +136,7 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
                     pccc_resp = pccc_error(a, PCCC_ERR_UNSUPPORTED_CMD, seq_id);
                     break;
             }
-        } else if(dev->plc_type == PLC_SLC || dev->plc_type == PLC_MICROLOGIX) {
+        } else if(dev->plc_type == ENIP_PLC_SLC || dev->plc_type == ENIP_PLC_MLGX) {
             switch(cmd_byte) {
                 case SLC_CMD_READ:  pccc_resp = handle_slc_read(a, pccc_cmd, seq_id, dev);  break;
                 case SLC_CMD_WRITE: pccc_resp = handle_slc_write(a, pccc_cmd, seq_id, dev); break;

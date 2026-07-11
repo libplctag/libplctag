@@ -802,6 +802,12 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
+    if(tag->fault_status != CIP_OK) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "handle_read: '%s' forcing fault status 0x%02x.",
+               tag->name, (unsigned)tag->fault_status);
+        return cip_error(a, svc, tag->fault_status, false, 0);
+    }
+
     Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &elem_count);
     if(bytes_is_null(rest)) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_read: failed to unpack elem_count.");
@@ -900,6 +906,12 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     if(!parse_tag_path(svc_path, dev, &tag, &num_idx, indexes)) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "handle_write: failed to parse tag path.");
         return cip_error(a, svc, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    if(tag->fault_status != CIP_OK) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "handle_write: '%s' forcing fault status 0x%02x.",
+               tag->name, (unsigned)tag->fault_status);
+        return cip_error(a, svc, tag->fault_status, false, 0);
     }
 
     Bytes rest = bytes_unpack(svc_payload, BYTES_LE, &req_type, &elem_count);

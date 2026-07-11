@@ -116,16 +116,16 @@ static bool lookup_cip_type(const char *name, tag_type_t *type_out, size_t *elem
     return false;
 }
 
-static plc_type_t parse_plc_type(const char *s) {
-    if(!s || *s == '\0') { return PLC_CONTROL_LOGIX; }
-    if(str_cmp_i(s, "ControlLogix") == 0 || str_cmp_i(s, "logix") == 0) { return PLC_CONTROL_LOGIX; }
-    if(str_cmp_i(s, "Micro800") == 0) { return PLC_MICRO800; }
-    if(str_cmp_i(s, "Omron") == 0) { return PLC_OMRON; }
-    if(str_cmp_i(s, "PLC5") == 0 || str_cmp_i(s, "PLC/5") == 0) { return PLC_PLC5; }
-    if(str_cmp_i(s, "SLC") == 0 || str_cmp_i(s, "SLC500") == 0) { return PLC_SLC; }
-    if(str_cmp_i(s, "Micrologix") == 0) { return PLC_MICROLOGIX; }
-    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "eip_server_tag_create: unknown plc=\"%s\", defaulting to ControlLogix.", s);
-    return PLC_CONTROL_LOGIX;
+static enip_plc_type_t parse_plc_type(const char *s) {
+    if(!s || *s == '\0') { return ENIP_PLC_LGX; }
+    if(str_cmp_i(s, "ControlLogix") == 0 || str_cmp_i(s, "logix") == 0) { return ENIP_PLC_LGX; }
+    if(str_cmp_i(s, "Micro800") == 0) { return ENIP_PLC_MICRO800; }
+    if(str_cmp_i(s, "Omron") == 0) { return ENIP_PLC_OMRON_NJNX; }
+    if(str_cmp_i(s, "PLC5") == 0 || str_cmp_i(s, "PLC/5") == 0) { return ENIP_PLC_PLC5; }
+    if(str_cmp_i(s, "SLC") == 0 || str_cmp_i(s, "SLC500") == 0) { return ENIP_PLC_SLC; }
+    if(str_cmp_i(s, "Micrologix") == 0) { return ENIP_PLC_MLGX; }
+    pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_WARN, 0, "eip_server_tag_create: unknown plc=\"%s\", defaulting to ControlLogix.", s);
+    return ENIP_PLC_LGX;
 }
 
 /* ============================================================================
@@ -284,7 +284,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
 
     const char *name = attr_get_str(attribs, "name", NULL);
     if(!name || str_length(name) < 1) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: name= is required.");
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: name= is required.");
         return PLC_TAG_P_NULL;
     }
 
@@ -292,28 +292,28 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     tag_type_t tag_type = 0;
     size_t elem_size = 0;
     if(!type_str || !lookup_cip_type(type_str, &tag_type, &elem_size)) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_type= is required and must be one of BOOL/SINT/INT/DINT/LINT/REAL/LREAL (got \"%s\").",
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_type= is required and must be one of BOOL/SINT/INT/DINT/LINT/REAL/LREAL (got \"%s\").",
                type_str ? type_str : "(none)");
         return PLC_TAG_P_NULL;
     }
 
     int elem_count_attr = attr_get_int(attribs, "elem_count", 1);
     if(elem_count_attr < 1) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_count= must be >= 1.");
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_count= must be >= 1.");
         return PLC_TAG_P_NULL;
     }
     size_t elem_count = (size_t)elem_count_attr;
 
     const char *bind_addr = attr_get_str(attribs, "gateway", NULL);
     uint16_t port = (uint16_t)attr_get_int(attribs, "port", 44818);
-    plc_type_t plc_type = parse_plc_type(attr_get_str(attribs, "plc", NULL));
+    enip_plc_type_t plc_type = parse_plc_type(attr_get_str(attribs, "plc", NULL));
 
-    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0, "eip_server_tag_create: name=\"%s\" type=%s elem_count=%zu gateway=%s port=%u.",
+    pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_INFO, 0, "eip_server_tag_create: name=\"%s\" type=%s elem_count=%zu gateway=%s port=%u.",
            name, type_str, elem_count, bind_addr ? bind_addr : "0.0.0.0", (unsigned)port);
 
     eip_server_tag_p tag = (eip_server_tag_p)rc_alloc((int)sizeof(struct eip_server_tag_t), eip_server_tag_destroy);
     if(!tag) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: rc_alloc failed.");
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: rc_alloc failed.");
         return PLC_TAG_P_NULL;
     }
 
@@ -323,7 +323,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
 
     int rc = plc_tag_generic_init_tag(ptag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: plc_tag_generic_init_tag failed: %s.",
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: plc_tag_generic_init_tag failed: %s.",
                plc_tag_decode_error(rc));
         rc_dec(tag);
         return PLC_TAG_P_NULL;
@@ -334,7 +334,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     size_t total_size = elem_size * elem_count;
     ptag->data = (uint8_t *)mem_alloc((int)total_size);
     if(!ptag->data) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: failed to allocate %zu bytes of tag data.",
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: failed to allocate %zu bytes of tag data.",
                total_size);
         rc_dec(tag);
         return PLC_TAG_P_NULL;
@@ -343,7 +343,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
 
     tag->sim = endpoint_find_or_create(bind_addr, port, plc_type);
     if(!tag->sim) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: endpoint_find_or_create failed.");
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: endpoint_find_or_create failed.");
         rc_dec(tag);
         return PLC_TAG_P_NULL;
     }
@@ -352,7 +352,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
 
     tag->tag_def = device_tag_alloc(name, tag_type, elem_size, elem_count, NULL, NULL, NULL);
     if(!tag->tag_def) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: device_tag_alloc failed.");
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: device_tag_alloc failed.");
         rc_dec(tag);
         return PLC_TAG_P_NULL;
     }
@@ -360,12 +360,23 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     tag->tag_def->dimensions[0] = elem_count;
     tag->tag_def->dimensions[1] = 1;
     tag->tag_def->dimensions[2] = 1;
+    tag->tag_def->fault_status = (uint8_t)attr_get_int(attribs, "sim_fault", 0);
 
     device_tags_append(dev, tag->tag_def);
 
+    /* sim_delay_ms / sim_max_packet are endpoint-scoped (SERVER_TAGS.md §7):
+     * they take effect only for the tag that starts a new endpoint, since a
+     * running endpoint's response delay and packet-size limits are shared by
+     * every tag on it (mirrors the device_sim CLI's --delay=). 0 (unset)
+     * leaves the endpoint's defaults untouched. */
+    int32_t sim_delay_ms = (int32_t)attr_get_int(attribs, "sim_delay_ms", 0);
+    if(sim_delay_ms != 0) { device_sim_set_response_delay(tag->sim, (uint32_t)sim_delay_ms); }
+    int32_t sim_max_packet = (int32_t)attr_get_int(attribs, "sim_max_packet", 0);
+    if(sim_max_packet != 0) { device_sim_set_max_packet(tag->sim, (uint32_t)sim_max_packet, (uint32_t)sim_max_packet); }
+
     tag_raise_event(ptag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
 
-    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, tag->tag_id, "eip_server_tag_create: done.");
+    pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_INFO, tag->tag_id, "eip_server_tag_create: done.");
 
     return ptag;
 }

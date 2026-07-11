@@ -34,4 +34,5 @@ const char *debug_module_names[] = {
     [25] = "MB_CONNECTION",
     [26] = "OMRON_CONNECTION",
     [27] = "ENIP",
+    [28] = "SERVER",
 };

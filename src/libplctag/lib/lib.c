@@ -44,8 +44,10 @@
 #include <libplctag/lib/version.h>
 #if LIBPLCTAG_FEATURE_EIP
 #    include <libplctag/protocols/ab/ab.h>
-#    include <libplctag/protocols/enip/client/enip.h>
 #    include <libplctag/protocols/omron/omron.h>
+#endif
+#if LIBPLCTAG_FEATURE_ENIP
+#    include <libplctag/protocols/enip/client/enip.h>
 #endif
 #if LIBPLCTAG_FEATURE_MODBUS
 #    include <libplctag/protocols/mb/modbus.h>
@@ -1051,11 +1053,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             case TAG_PROTOCOL_AB:
             case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
 
-            case TAG_PROTOCOL_ENIP:
-            case TAG_PROTOCOL_ENIP_CONNECTION: tag_constructor = enip_tag_create; break;
-
             case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
             case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;
+#endif
+
+#if LIBPLCTAG_FEATURE_ENIP
+            case TAG_PROTOCOL_ENIP:
+            case TAG_PROTOCOL_ENIP_CONNECTION: tag_constructor = enip_tag_create; break;
 #endif
 
 #if LIBPLCTAG_FEATURE_MODBUS
