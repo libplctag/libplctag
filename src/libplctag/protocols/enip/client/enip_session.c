@@ -264,9 +264,15 @@ static Bytes build_listing_request(Arena *a, enip_tag_p t);
 static int32_t apply_listing_reply(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
 
 /* A tag that issues network ops via pick_batch (vs. the special tags that the
- * service pass handles): a data tag, or an @tags/@udt listing tag. */
+ * service pass handles): a data tag, a PCCC tag, or an @tags/@udt listing tag.
+ * PCCC (PLC-5/SLC/MicroLogix) tags are not batch-eligible (is_batch_eligible
+ * requires ENIP_TAG_KIND_DATA; PCCC's own dialect also caps max_batch_cap at
+ * 1), but they still need pick_batch's single-in-flight dispatch to ever send
+ * a request -- without this, service_due_tags's tickler-only pass runs
+ * forever and a PCCC read/write never leaves the scheduler. */
 static inline bool is_network_op_kind(enip_tag_p t) {
-    return t->kind == ENIP_TAG_KIND_DATA || t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT;
+    return t->kind == ENIP_TAG_KIND_DATA || t->kind == ENIP_TAG_KIND_PCCC || t->kind == ENIP_TAG_KIND_LISTING
+           || t->kind == ENIP_TAG_KIND_UDT;
 }
 
 static Bytes build_forward_open(enip_connection_t *c);
@@ -349,18 +355,17 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
 
 enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
     const char *gateway = attr_get_str(attribs, "gateway", NULL);
-    const char *path = attr_get_str(attribs, "path", NULL);
+    /* "path" is optional: a device reachable directly over Ethernet (no
+     * backplane/DH+ bridging hop -- the common case for a MicroLogix/SLC/PLC-5
+     * with its own Ethernet port) needs no CIP route. enip_cip_encode_route
+     * treats "" as a valid empty route, not an error. */
+    const char *path = attr_get_str(attribs, "path", "");
     int port = attr_get_int(attribs, "port", ENIP_DEFAULT_PORT);
 
     if(is_new_out) { *is_new_out = false; }
 
     if(!gateway || str_length(gateway) == 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"gateway\" attribute.");
-        return NULL;
-    }
-
-    if(!path || str_length(path) == 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"path\" attribute.");
         return NULL;
     }
 
@@ -1464,14 +1469,134 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
 #define PCCC_PLC5_WRITE_FNC ((uint8_t)0x00)
 #define PCCC_SLC_READ_FNC ((uint8_t)0xA2)
 #define PCCC_SLC_WRITE_FNC ((uint8_t)0xAA)
+#define PCCC_PLC5_RMW_FNC ((uint8_t)0x26)
+#define PCCC_SLC_RMW_FNC ((uint8_t)0xAB)
 #define PCCC_VENDOR_ID ((uint16_t)0xF33D)     /* matches ab/defs.h AB_EIP_VENDOR_ID */
 #define PCCC_VENDOR_SN ((uint32_t)0x21504345) /* matches ab/defs.h AB_EIP_VENDOR_SN */
 /* In a parsed reply.data: requestor id (7) + PCCC cmd(1)+sts(1)+tns(2) = 11. */
 #define PCCC_REPLY_HDR ((size_t)11)
 #define PCCC_REPLY_STS_OFF ((size_t)8)
 
+/* Write the CIP/PCCC header + requestor id shared by every Execute-PCCC
+ * request (13 bytes), then the PCCC command fields up to and including FNC.
+ * Returns the new position. */
+static size_t pccc_write_header(uint8_t *p, uint16_t tns, uint8_t fnc) {
+    size_t pos = 0;
+    p[pos++] = PCCC_EXECUTE_SVC;
+    p[pos++] = 0x02; /* path size in 16-bit words */
+    p[pos++] = 0x20; p[pos++] = 0x67; p[pos++] = 0x24; p[pos++] = 0x01; /* PCCC object 0x67 inst 1 */
+    p[pos++] = 0x07; /* requestor id size = vendor_id(2) + serial(4) + this byte */
+    p[pos++] = (uint8_t)(PCCC_VENDOR_ID & 0xFFu);
+    p[pos++] = (uint8_t)(PCCC_VENDOR_ID >> 8);
+    p[pos++] = (uint8_t)(PCCC_VENDOR_SN & 0xFFu);
+    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 8) & 0xFFu);
+    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 16) & 0xFFu);
+    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 24) & 0xFFu);
+    p[pos++] = PCCC_TYPED_CMD;
+    p[pos++] = 0x00;
+    p[pos++] = (uint8_t)(tns & 0xFFu);
+    p[pos++] = (uint8_t)(tns >> 8);
+    p[pos++] = fnc;
+    return pos;
+}
+
+/* PLC-5 masked bit write (Execute-PCCC function 0x26, "Protected Typed Logical
+ * Read/Write with mask"): AND-mask/OR-mask pair, one byte per element byte.
+ * The remote never learns the current value of the word -- only the target
+ * bit's byte gets a non-0xFF/0x00 mask entry -- so unrelated bits are never
+ * clobbered. Mirrors ab/pccc.c:plc5_tag_write_bit_start; server side is
+ * dialects/pccc/pccc.c:handle_plc5_rmw. */
+static Bytes enip_pccc_build_plc5_bit_write(enip_connection_t *c, enip_tag_p t, Bytes dest) {
+    uint8_t addr_buf[32];
+    pccc_addr_t addr = t->pccc_addr;
+    Bytes encoded = enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
+    if(bytes_is_null(encoded) || encoded.len == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
+        return bytes_null();
+    }
+
+    size_t need = 13 + 5 + encoded.len + 2u * (size_t)t->elem_size;
+    if(need > dest.len) { return bytes_null(); }
+
+    uint8_t *p = dest.data;
+    size_t pos = pccc_write_header(p, (uint16_t)(c->conn_seq + 1), PCCC_PLC5_RMW_FNC);
+
+    memcpy(p + pos, encoded.data, encoded.len);
+    pos += encoded.len;
+
+    size_t byte_idx = (size_t)(t->bit / 8);
+    uint8_t bit_mask = (uint8_t)(1u << (t->bit % 8));
+    bool bit_set = (t->data[byte_idx] & bit_mask) != 0;
+
+    for(uint32_t i = 0; i < t->elem_size; i++) {
+        p[pos++] = ((size_t)i == byte_idx) ? (bit_set ? (uint8_t)0xFF : (uint8_t)~bit_mask) : (uint8_t)0xFF;
+    }
+    for(uint32_t i = 0; i < t->elem_size; i++) {
+        p[pos++] = ((size_t)i == byte_idx) ? (bit_set ? bit_mask : (uint8_t)0x00) : (uint8_t)0x00;
+    }
+
+    return bytes_from_buf(dest.data, pos);
+}
+
+/* SLC/MicroLogix masked bit write (Execute-PCCC function 0xAB, "SLC Range
+ * Write with mask"): a single 16-bit mask/set pair -- the mask is transmitted
+ * as 2 bytes regardless of element size, so this only applies to 2-byte (B/N)
+ * data files. A 32-bit L-file bit is not maskable this way (matches AB: real
+ * hardware and run_enip_tests.sh's MicroLogix L-bit-write test both expect
+ * failure). Mirrors ab/pccc.c:slc_tag_write_bit_start; server side is
+ * dialects/pccc/pccc.c:handle_slc_rmw. */
+static Bytes enip_pccc_build_slc_bit_write(enip_connection_t *c, enip_tag_p t, Bytes dest) {
+    if(t->elem_size != 2 || t->size != 2) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id,
+               "SLC/MicroLogix masked bit write requires a 2-byte element (mask is 16 bits); got %u bytes.",
+               (unsigned)t->elem_size);
+        return bytes_null();
+    }
+
+    uint8_t addr_buf[32];
+    pccc_addr_t addr = t->pccc_addr;
+    Bytes encoded = enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
+    if(bytes_is_null(encoded) || encoded.len == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
+        return bytes_null();
+    }
+
+    size_t need = 13 + 5 + 1 + encoded.len + 2 + 2;
+    if(need > dest.len) { return bytes_null(); }
+
+    uint8_t *p = dest.data;
+    size_t pos = pccc_write_header(p, (uint16_t)(c->conn_seq + 1), PCCC_SLC_RMW_FNC);
+
+    p[pos++] = (uint8_t)t->size; /* transfer size in bytes, fixed at 2 */
+
+    memcpy(p + pos, encoded.data, encoded.len);
+    pos += encoded.len;
+
+    uint8_t mask[2] = {0, 0};
+    mask[t->bit / 8] = (uint8_t)(1u << (t->bit % 8));
+    memcpy(p + pos, mask, 2);
+    pos += 2;
+
+    /* set bytes: only the masked bit is honored remotely, so t->data's other
+     * bits (whatever they happen to hold locally) are harmless. */
+    memcpy(p + pos, t->data, 2);
+    pos += 2;
+
+    return bytes_from_buf(dest.data, pos);
+}
+
 static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
     if(t->op != ENIP_OP_READ && t->op != ENIP_OP_WRITE) { return bytes_null(); }
+
+    /* A single-bit write must go out as a masked RMW, never a plain word
+     * write: t->data only ever holds the bit this tag cares about (it is
+     * never populated by a real read of the sibling bits), so overwriting the
+     * whole word would clobber them on real hardware. Bit reads need no
+     * special handling -- they fall through to the plain word read below and
+     * the generic plc_tag_get_bit() extracts the bit locally. */
+    if(t->is_bit && t->op == ENIP_OP_WRITE) {
+        return t->pccc_plc5 ? enip_pccc_build_plc5_bit_write(c, t, dest) : enip_pccc_build_slc_bit_write(c, t, dest);
+    }
 
     bool is_write = (t->op == ENIP_OP_WRITE);
     size_t data_len = is_write ? (size_t)t->size : 0;

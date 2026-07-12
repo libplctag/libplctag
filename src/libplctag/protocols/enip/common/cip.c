@@ -254,6 +254,13 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
         case CIP_SRV_WRITE_FRAG:
             return handle_write(a, svc, svc_path, svc_payload, dev);
 
+        case CIP_SRV_PCCC_EXECUTE:
+            /* The generic client always talks PCCC over the connection it
+             * Forward-Opened (same connected channel as symbolic Read/Write),
+             * never Unconnected_Send -- so this must be handled here too, not
+             * just in cip_dispatch_unconnected. */
+            return pccc_dispatch(a, payload, sess, dev);
+
         default:
             pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "Unsupported connected CIP service 0x%02x.", (unsigned)svc);

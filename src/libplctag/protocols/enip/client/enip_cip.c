@@ -215,7 +215,13 @@ Bytes enip_cip_encode_path_at(Arena *a, Bytes base_path, uint32_t index) {
  * ============================================================================ */
 
 Bytes enip_cip_encode_route(Arena *a, const char *route) {
-    if(!a || !route || route[0] == '\0') { return bytes_null(); }
+    if(!a) { return bytes_null(); }
+
+    /* No routing segment (direct connection -- e.g. a MicroLogix/SLC/PLC-5
+     * reachable straight over Ethernet, no bridging backplane/DH+ hop): a
+     * valid, empty path, not an error. Distinct from bytes_null(), which
+     * callers (build_forward_open) treat as "could not encode". */
+    if(!route || route[0] == '\0') { return bytes_alloc(a, 0); }
 
     uint8_t tmp[ENIP_CIP_PATH_MAX_LEN];
     size_t total = 0;
