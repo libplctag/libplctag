@@ -116,6 +116,27 @@ static bool lookup_cip_type(const char *name, tag_type_t *type_out, size_t *elem
     return false;
 }
 
+/* pccc_type= letter, matching args.c's PCCC_TYPES table (B/N/L/F/R). */
+static const cip_type_entry_t PCCC_TYPES[] = {
+    {"B", TAG_PCCC_TYPE_BIT,  2},
+    {"N", TAG_PCCC_TYPE_INT,  2},
+    {"L", TAG_PCCC_TYPE_DINT, 4},
+    {"F", TAG_PCCC_TYPE_REAL, 4},
+    {"R", TAG_PCCC_TYPE_REAL, 4},
+    {NULL, 0,                 0},
+};
+
+static bool lookup_pccc_type(const char *letter, tag_type_t *type_out, size_t *elem_size_out) {
+    for(const cip_type_entry_t *e = PCCC_TYPES; e->name; e++) {
+        if(str_cmp_i(letter, e->name) == 0) {
+            *type_out = e->type;
+            *elem_size_out = e->elem_size;
+            return true;
+        }
+    }
+    return false;
+}
+
 static enip_plc_type_t parse_plc_type(const char *s) {
     if(!s || *s == '\0') { return ENIP_PLC_LGX; }
     if(str_cmp_i(s, "ControlLogix") == 0 || str_cmp_i(s, "logix") == 0) { return ENIP_PLC_LGX; }
@@ -288,25 +309,52 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
         return PLC_TAG_P_NULL;
     }
 
-    const char *type_str = attr_get_str(attribs, "elem_type", NULL);
+    const char *pccc_type_str = attr_get_str(attribs, "pccc_type", NULL);
+    bool is_pccc = pccc_type_str && str_length(pccc_type_str) > 0;
+
+    const char *type_str = is_pccc ? pccc_type_str : attr_get_str(attribs, "elem_type", NULL);
     tag_type_t tag_type = 0;
     size_t elem_size = 0;
-    if(!type_str || !lookup_cip_type(type_str, &tag_type, &elem_size)) {
-        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_type= is required and must be one of BOOL/SINT/INT/DINT/LINT/REAL/LREAL (got \"%s\").",
+    bool type_ok = type_str && (is_pccc ? lookup_pccc_type(type_str, &tag_type, &elem_size)
+                                         : lookup_cip_type(type_str, &tag_type, &elem_size));
+    if(!type_ok) {
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+               "eip_server_tag_create: %s is required and must be one of %s (got \"%s\").",
+               is_pccc ? "pccc_type=" : "elem_type=", is_pccc ? "B/N/L/F/R" : "BOOL/SINT/INT/DINT/LINT/REAL/LREAL",
                type_str ? type_str : "(none)");
         return PLC_TAG_P_NULL;
     }
 
-    int elem_count_attr = attr_get_int(attribs, "elem_count", 1);
-    if(elem_count_attr < 1) {
-        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_count= must be >= 1.");
-        return PLC_TAG_P_NULL;
+    /* dim0/dim1/dim2 (CIP only) describe a multi-dimensional array for
+     * wire-level indexed addressing (common/cip.c) and @tags dimension
+     * reporting (dialects/rockwell/ab_listing.c); PCCC tags stay 1D. When
+     * unset, elem_count= gives a flat 1D array (the common case). */
+    uint32_t num_dims = 1;
+    uint32_t dims[3] = {1, 1, 1};
+    if(!is_pccc && attr_get_int(attribs, "dim0", 0) > 0) {
+        dims[0] = (uint32_t)attr_get_int(attribs, "dim0", 0);
+        if(attr_get_int(attribs, "dim1", 0) > 0) {
+            num_dims = 2;
+            dims[1] = (uint32_t)attr_get_int(attribs, "dim1", 0);
+            if(attr_get_int(attribs, "dim2", 0) > 0) {
+                num_dims = 3;
+                dims[2] = (uint32_t)attr_get_int(attribs, "dim2", 0);
+            }
+        }
+    } else {
+        int elem_count_attr = attr_get_int(attribs, "elem_count", 1);
+        if(elem_count_attr < 1) {
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_count= must be >= 1.");
+            return PLC_TAG_P_NULL;
+        }
+        dims[0] = (uint32_t)elem_count_attr;
     }
-    size_t elem_count = (size_t)elem_count_attr;
+    size_t elem_count = (size_t)dims[0] * (size_t)dims[1] * (size_t)dims[2];
 
     const char *bind_addr = attr_get_str(attribs, "gateway", NULL);
     uint16_t port = (uint16_t)attr_get_int(attribs, "port", 44818);
     enip_plc_type_t plc_type = parse_plc_type(attr_get_str(attribs, "plc", NULL));
+    const char *model = attr_get_str(attribs, "model", NULL);
 
     pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_INFO, 0, "eip_server_tag_create: name=\"%s\" type=%s elem_count=%zu gateway=%s port=%u.",
            name, type_str, elem_count, bind_addr ? bind_addr : "0.0.0.0", (unsigned)port);
@@ -341,7 +389,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     }
     ptag->size = (int)total_size;
 
-    tag->sim = endpoint_find_or_create(bind_addr, port, plc_type);
+    tag->sim = endpoint_find_or_create(bind_addr, port, plc_type, model);
     if(!tag->sim) {
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: endpoint_find_or_create failed.");
         rc_dec(tag);
@@ -356,11 +404,12 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
         rc_dec(tag);
         return PLC_TAG_P_NULL;
     }
-    tag->tag_def->num_dimensions = 1;
-    tag->tag_def->dimensions[0] = elem_count;
-    tag->tag_def->dimensions[1] = 1;
-    tag->tag_def->dimensions[2] = 1;
+    tag->tag_def->num_dimensions = num_dims;
+    tag->tag_def->dimensions[0] = dims[0];
+    tag->tag_def->dimensions[1] = dims[1];
+    tag->tag_def->dimensions[2] = dims[2];
     tag->tag_def->fault_status = (uint8_t)attr_get_int(attribs, "sim_fault", 0);
+    if(is_pccc) { tag->tag_def->data_file_num = (size_t)attr_get_int(attribs, "pccc_file", 0); }
 
     device_tags_append(dev, tag->tag_def);
 

@@ -64,3 +64,14 @@
  * doesn't match a known family -- never defaults to a specific family.
  */
 extern enip_plc_type_t enip_classify_plc(uint16_t vendor_id, Bytes reply_data);
+
+/*
+ * Classify by catalog-prefix match alone (no vendor id, no wire reply) --
+ * used for the client's model= attribute (ENIP-SESSION-DESIGN.md), which
+ * lets a caller override a connection's auto-detected family, e.g. when
+ * talking through a bridge/adapter whose own identity does not reflect the
+ * end device, or against a device_sim endpoint. Matches the same table as
+ * enip_classify_plc(), ignoring vendor id (an explicit override is trusted
+ * as given). Returns ENIP_PLC_UNKNOWN if name matches no known prefix.
+ */
+extern enip_plc_type_t enip_classify_plc_by_name(const char *name);

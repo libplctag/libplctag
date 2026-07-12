@@ -126,6 +126,7 @@ static int32_t enip_tag_read(plc_tag_p tag) {
     t->read_complete = 0;
 
     if(t->elem_count > 1) { t->read_off = 0; }
+    if(t->fragmented_elem) { t->frag_offset = 0; } /* §16a.6: fresh fragment cursor for this read */
 
     tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, (int8_t)PLCTAG_STATUS_OK);
 
@@ -149,6 +150,7 @@ static int32_t enip_tag_write(plc_tag_p tag) {
     t->write_complete = 0;
 
     if(t->elem_count > 1) { t->read_off = 0; }
+    if(t->fragmented_elem) { t->frag_offset = 0; } /* §16a.6: fresh fragment cursor for this write */
 
     tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, (int8_t)PLCTAG_STATUS_OK);
 

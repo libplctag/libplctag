@@ -32,13 +32,13 @@
  ***************************************************************************/
 
 /*
- * devsim_with_plctag — proof that one executable can link BOTH libplctag and
- * libdevsim.  libdevsim already bundles the static libplctag, so linking
- * libdevsim is enough to reach the plc_tag_* public API too.
+ * devsim_with_plctag — proof that a server tag (role=server) and a client tag
+ * can coexist in one process, both through the ordinary plc_tag_* API: no
+ * separate simulator library or lifecycle.
  *
- * It starts an in-process ControlLogix simulator with a single DINT tag, seeds
- * the value through the device_sim API, then connects to it over loopback with
- * the libplctag client API and reads the value back.
+ * It creates an in-process ControlLogix server tag holding a single DINT,
+ * seeds its value with plc_tag_set_int32, then connects to it over loopback
+ * with a second, ordinary client tag and reads the value back.
  */
 
 #include <stdint.h>
@@ -46,53 +46,41 @@
 #include <stdlib.h>
 
 #include "libplctag.h"
-#include <libplctag/protocols/enip/server/device_sim.h>
 
 #define SIM_PORT ((uint16_t)44818)
 #define EXPECTED ((int32_t)1234567)
 
 int main(void) {
-    /* --- libdevsim: stand up an embedded simulator with one DINT tag --- */
-    device_sim_t *sim = device_sim_create(ENIP_PLC_LGX, NULL, SIM_PORT);
-    if(!sim) {
-        printf("device_sim_create failed\n");
+    /* --- server tag: the backing store served over the wire --- */
+    int32_t server_tag = plc_tag_create(
+        "protocol=ab-eip&role=server&gateway=127.0.0.1&port=44818&plc=ControlLogix"
+        "&name=TestDINT&elem_type=DINT&elem_count=1",
+        5000);
+    if(plc_tag_status(server_tag) != PLCTAG_STATUS_OK) {
+        printf("server tag create failed: %s\n", plc_tag_decode_error(plc_tag_status(server_tag)));
         return 1;
     }
 
-    uint32_t dims[1] = {1};
-    if(device_sim_add_tag(sim, "TestDINT", TAG_CIP_TYPE_DINT, dims, 1, NULL, NULL, NULL) != PLCTAG_STATUS_OK) {
-        printf("device_sim_add_tag failed\n");
-        device_sim_destroy(sim);
-        return 1;
-    }
+    plc_tag_set_int32(server_tag, 0, EXPECTED);
+    plc_tag_write(server_tag, 5000); /* push local value into the served buffer */
 
-    int32_t seed = EXPECTED;
-    device_sim_tag_set(sim, "TestDINT", 0, &seed, sizeof(seed));
-
-    if(device_sim_start(sim) != PLCTAG_STATUS_OK) {
-        printf("device_sim_start failed\n");
-        device_sim_destroy(sim);
-        return 1;
-    }
-
-    /* --- libplctag: connect to that simulator and read the tag back --- */
-    int32_t tag = plc_tag_create(
+    /* --- client tag: connect to that server tag and read the value back --- */
+    int32_t client_tag = plc_tag_create(
         "protocol=ab-eip&gateway=127.0.0.1:44818&path=1,0&plc=ControlLogix&elem_count=1&name=TestDINT",
         5000);
 
     int32_t rc = 1;
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        printf("plc_tag_create failed: %s\n", plc_tag_decode_error(plc_tag_status(tag)));
-    } else if(plc_tag_read(tag, 5000) != PLCTAG_STATUS_OK) {
+    if(plc_tag_status(client_tag) != PLCTAG_STATUS_OK) {
+        printf("plc_tag_create failed: %s\n", plc_tag_decode_error(plc_tag_status(client_tag)));
+    } else if(plc_tag_read(client_tag, 5000) != PLCTAG_STATUS_OK) {
         printf("plc_tag_read failed\n");
     } else {
-        int32_t got = plc_tag_get_int32(tag, 0);
+        int32_t got = plc_tag_get_int32(client_tag, 0);
         printf("read TestDINT = %d (expected %d): %s\n", got, EXPECTED, got == EXPECTED ? "OK" : "MISMATCH");
         rc = (got == EXPECTED) ? 0 : 1;
     }
 
-    plc_tag_destroy(tag);
-    device_sim_stop(sim);
-    device_sim_destroy(sim);
+    plc_tag_destroy(client_tag);
+    plc_tag_destroy(server_tag);
     return rc;
 }

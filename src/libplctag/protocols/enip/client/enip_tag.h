@@ -48,6 +48,7 @@ typedef enum {
     ENIP_OP_READ,
     ENIP_OP_WRITE,
     ENIP_OP_OPEN_PROBE, /* §11.2 count=1 probe */
+    ENIP_OP_OPEN_PROBE_FRAG, /* §16a.6 continuation of a fragmented (too-large) OPEN_PROBE element */
     ENIP_OP_OPEN_BULK,  /* §11.2 remaining elements, single shot for the MVP */
     ENIP_OP_LIST,       /* @tags: class 0x6B Get_Instance_Attribute_List, id continuation */
     ENIP_OP_UDT_META,   /* @udt: class 0x6C Get_Attribute_List (template metadata) */
@@ -85,7 +86,15 @@ struct enip_tag_t {
             /* type/layout learned at open -- api_mutex (§11.4) */
             uint32_t elem_size, elem_count, window_elems, write_window_elems;
             uint32_t read_off;    /* bulk cursor (elements); reused by OPEN_BULK, READ, WRITE */
-            uint32_t frag_offset; /* ReadFrag continuation cursor (post-MVP) */
+            /* §16a.6 byte-granular fragmentation: live byte cursor, reused by
+             * OPEN_PROBE_FRAG (open-time) and by READ/WRITE when
+             * fragmented_elem is set (post-open explicit read/write of the
+             * same too-large element). frag_write_chunk is the fixed
+             * per-request byte count a fragmented WRITE sends (computed once,
+             * mirrors write_window_elems for the array case -- see
+             * apply_tag_reply's OPEN_PROBE_FRAG completion). */
+            uint32_t frag_offset;
+            uint32_t frag_write_chunk;
             /* @tags/@udt only (ENIP_TAG_KIND_LISTING/UDT): list_next_id is the
              * next symbol instance id for @tags, or the fixed template id for
              * @udt; list_total is the @udt field-definition byte target. */
@@ -97,9 +106,12 @@ struct enip_tag_t {
             uint8_t type_header[4];
             uint8_t type_header_len; /* 2 or 4 */
             uint8_t op;              /* enip_op_t */
+            uint8_t frag_align;      /* §16a.6: fragment alignment in bytes, default 8 */
             uint8_t scheduled : 1;
             uint8_t ready : 1;
-            uint8_t pccc_plc5 : 1; /* PCCC: PLC-5 encoding/functions (else SLC/MicroLogix) */
+            uint8_t pccc_plc5 : 1;      /* PCCC: PLC-5 encoding/functions (else SLC/MicroLogix) */
+            uint8_t fragmented_elem : 1; /* §16a.6: this tag's single element needs Read/WriteFrag, not plain Read/Write */
+            uint8_t frag_more : 1;       /* set by apply_tag_reply when the last CIP reply was CIP_STATUS_FRAG */
             /* tail: tag_name (NUL), then the encoded CIP path bytes */
         };
 

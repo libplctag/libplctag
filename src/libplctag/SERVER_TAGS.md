@@ -277,9 +277,20 @@ CTest-driven part of the harness): a single localhost-socket process exercises
 - **Test 5** — `sim_fault` forces a CIP error status for one tag without
   affecting its endpoint siblings.
 
-`run_device_sim_tests.sh` (11 scenarios against the old `device_sim` CLI) is
-still run alongside this, not retired — `device_sim_*` and `role=server`
-coexist deliberately (P5 in the implementation plan hasn't started).
+`run_device_sim_tests.sh` (11 scenarios against the `device_sim` CLI) is still
+run alongside this, not retired — but as of P5, the `device_sim` CLI and the
+`devsim_with_plctag` POC no longer call `device_sim_*` themselves: both build
+`plc_tag_create("...&role=server&...")` attribute strings instead
+(`src/tools/device_sim/args.c`'s `args_build_tag_attr_str`), so this test still
+exercises `role=server` end to end, just through a different front door than
+`server_tag_basic`. `device_sim_create`/`_start`/`_stop`/`_destroy` etc. remain
+in the tree as the internal endpoint runtime that `server/endpoint.c` and
+`server/eip_server_tag.c` build on (see `device_sim.h`'s header comment) — they
+were never a second, parallel public API to retire, so "delete `device_sim_*`"
+from the original P5 wording didn't apply once P3/P4 turned out to reuse it
+rather than duplicate it. `device_sim.h` was already not part of the installed
+public API (only `lib/libplctag.h` is installed), confirming there was nothing
+external depending on it to migrate off of.
 
 Not yet done:
 - Not ported into the `ctest`-run part of the suite (currently a manual binary,
@@ -299,8 +310,12 @@ not under a `libdevsim` tree.
 
 ## 10. Migration & doc updates
 
-1. Move libdevsim sources per §3; delete the `device_sim_*` public API and
-   `src/libdevsim/CMakeLists.txt`; remove the `devsim` build target.
+1. Move libdevsim sources per §3; `src/libdevsim/CMakeLists.txt` and the
+   standalone `devsim` build target are already gone (folded into
+   `protocols/enip/CMakeLists.txt` under `LIBPLCTAG_FEATURE_SERVER`, P2).
+   `device_sim_*` itself was not deleted — see §9's note — but the
+   `device_sim` CLI and `devsim_with_plctag` POC no longer call it directly
+   (P5).
 2. Keep `DESIGN_deprecated.md` for protocol-wire reference (identity bytes, CIP
    dialect formats) — it is still the authoritative wire-format record.
 3. Add the three `LIBPLCTAG_FEATURE_*` options to the top-level CMake with a
@@ -320,7 +335,14 @@ not under a `libdevsim` tree.
    into `protocols/enip/common/`. Compile the server sources under `SERVER` (+ the
    protocol flag) and the cross-protocol accept-loop helper under `SERVER`.
 3. Replace `device_sim_*` object API with `eip_server_tag_create` /
-   `modbus_server_tag_create` + the server vtable (§5); delete `device_sim.[ch]`.
+   `modbus_server_tag_create` + the server vtable (§5). As-built,
+   `device_sim.[ch]` was not deleted: `eip_server_tag_create`/`endpoint.c`
+   call into it as the shared internal endpoint runtime rather than
+   duplicating it, and it was never part of the installed public headers, so
+   there was no external API to retire it away from. What *was* migrated off
+   `device_sim_*` (P5): the `device_sim` CLI and `devsim_with_plctag` POC,
+   which now build `role=server` attribute strings instead of calling
+   `device_sim_create`/`_add_tag`/etc. directly.
 4. Add the `role` column + server rows to `tag_type_map` (§4).
 5. Wire `tag_raise_event` read/write calls into the listener's request servicing
    (§6.1).

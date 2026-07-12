@@ -151,7 +151,7 @@ extern void endpoint_registry_teardown(void) {
 }
 
 
-extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type) {
+extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type, const char *model) {
     device_sim_t *result = NULL;
 
     if(!endpoint_registry_mutex) {
@@ -181,7 +181,7 @@ extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t por
         }
 
         if(!result) {
-            device_sim_t *sim = device_sim_create(plc_type, bind_addr, port);
+            device_sim_t *sim = device_sim_create(plc_type, model, bind_addr, port);
             if(!sim) {
                 pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "endpoint_find_or_create: device_sim_create failed.");
                 break;

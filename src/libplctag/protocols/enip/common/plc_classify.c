@@ -114,3 +114,16 @@ extern enip_plc_type_t enip_classify_plc(uint16_t vendor_id, Bytes reply_data) {
 
     return ENIP_PLC_UNKNOWN;
 }
+
+extern enip_plc_type_t enip_classify_plc_by_name(const char *name) {
+    if(!name || name[0] == '\0') { return ENIP_PLC_UNKNOWN; }
+
+    int32_t len = str_length(name);
+    Bytes name_bytes = bytes_from_buf((const uint8_t *)name, len < 0 ? 0 : (size_t)len);
+
+    for(size_t i = 0; i < PLC_CLASSIFY_TABLE_COUNT; i++) {
+        if(bytes_has_prefix(name_bytes, PLC_CLASSIFY_TABLE[i].product_name_prefix)) { return PLC_CLASSIFY_TABLE[i].plc_type; }
+    }
+
+    return ENIP_PLC_UNKNOWN;
+}

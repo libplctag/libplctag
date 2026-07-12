@@ -80,12 +80,16 @@
 /* EIP header (24) + connected CPF overhead (22). */
 #define ENIP_FRAMING_OVERHEAD (ENIP_EIP_HEADER_SIZE + ENIP_CPF_CONNECTED_OVERHEAD)
 
-/* Backing store for the per-connection arena; covers rx_cap (504 + 46 = 550)
- * and tx-side scratch. Building a write request concatenates the CIP payload
- * (up to ~504 bytes), then the CPF wrap, then the EIP frame -- each step
- * allocates a fresh buffer without freeing the last, so a single max-size
- * write request can consume ~3x its wire size before arena_reset. */
-#define ENIP_ARENA_SIZE ((size_t)4096)
+/* Backing store for the per-connection arena; covers rx_cap (max_cip_packet_size
+ * + ENIP_FRAMING_OVERHEAD) and tx-side scratch. Building a write request
+ * concatenates the CIP payload, then the CPF wrap, then the EIP frame -- each
+ * step allocates a fresh buffer without freeing the last, so a single
+ * max-size write request can consume ~3x its wire size before arena_reset.
+ * Sized for the largest requested_cip_size any dialect asks for via Large
+ * Forward Open (currently 4002, enip_logix_dialect/enip_omron_dialect --
+ * see ENIP-SESSION-DESIGN.md §16.4) with headroom; bump this if a future
+ * dialect requests something bigger. */
+#define ENIP_ARENA_SIZE ((size_t)16384)
 
 /* Backoff after a connect/IO failure, and idle poll cadence. */
 #define ENIP_RECONNECT_DELAY_MS ((int64_t)1000)
@@ -152,8 +156,21 @@ struct enip_connection_t {
 
     char *gateway;
     char *path;
+    char *model; /* optional; overrides identity-based classification (§ model=) */
     int tcp_port;
     bool is_connected_path;
+
+    /* Large Forward Open (0x5B) try/fallback (ENIP-SESSION-DESIGN.md §16.4):
+     * try_large_fo is what the *next* step_open() attempt should use, reset
+     * true at connection creation; on_open_reply clears it (remembered for
+     * this connection's later reconnects) the first time a Large attempt is
+     * rejected with CIP 0x08 (Service Not Supported). used_large_fo and
+     * requested_cip_size record what the in-flight attempt actually asked
+     * for, so on_open_reply/parse_forward_open_reply don't have to re-derive
+     * it from the dialect. */
+    bool try_large_fo;
+    bool used_large_fo;
+    size_t requested_cip_size;
 
     sock_p sock;
     thread_p thread;
@@ -259,7 +276,7 @@ static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr);
 static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
-static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data);
+static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
 static Bytes build_listing_request(Arena *a, enip_tag_p t);
 static int32_t apply_listing_reply(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
 
@@ -275,7 +292,7 @@ static inline bool is_network_op_kind(enip_tag_p t) {
            || t->kind == ENIP_TAG_KIND_UDT;
 }
 
-static Bytes build_forward_open(enip_connection_t *c);
+static Bytes build_forward_open(enip_connection_t *c, bool use_large);
 static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes);
 static Bytes build_forward_close(enip_connection_t *c);
 static int32_t step_identity(enip_connection_t *c);
@@ -290,7 +307,7 @@ static bool conn_key_matches(enip_connection_t *c, const char *gateway, const ch
     return c->tcp_port == port && str_cmp(c->gateway, gateway) == 0 && str_cmp(c->path, path) == 0;
 }
 
-static enip_connection_t *create_connection(const char *gateway, const char *path, int port) {
+static enip_connection_t *create_connection(const char *gateway, const char *path, const char *model, int port) {
     enip_connection_t *c = rc_alloc((int)sizeof(enip_connection_t), conn_destructor);
     if(!c) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate connection!");
@@ -301,8 +318,12 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
 
     c->gateway = str_dup(gateway);
     c->path = str_dup(path);
+    /* model is optional (str_dup(NULL) is NULL, not an error -- unlike
+     * gateway/path, which are required and checked below). */
+    c->model = (model && model[0] != '\0') ? str_dup(model) : NULL;
     c->tcp_port = port;
     c->is_connected_path = true;
+    c->try_large_fo = true;
 
     if(!c->gateway || !c->path) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to copy gateway/path strings!");
@@ -360,6 +381,11 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
      * with its own Ethernet port) needs no CIP route. enip_cip_encode_route
      * treats "" as a valid empty route, not an error. */
     const char *path = attr_get_str(attribs, "path", "");
+    /* model= overrides identity-based classification for this connection
+     * (see on_identity_reply); only used when creating a new connection --
+     * an existing connection at this (gateway,path,port) keeps whatever its
+     * first tag set, same as path/gateway themselves. */
+    const char *model = attr_get_str(attribs, "model", NULL);
     int port = attr_get_int(attribs, "port", ENIP_DEFAULT_PORT);
 
     if(is_new_out) { *is_new_out = false; }
@@ -383,7 +409,7 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
         }
 
         if(!result) {
-            result = create_connection(gateway, path, port);
+            result = create_connection(gateway, path, model, port);
             if(result && is_new_out) { *is_new_out = true; }
         }
     }
@@ -445,6 +471,7 @@ static void conn_destructor(void *arg) {
 
     if(c->gateway) { mem_free(c->gateway); }
     if(c->path) { mem_free(c->path); }
+    if(c->model) { mem_free(c->model); }
     if(c->identity_data) { mem_free(c->identity_data); }
 }
 
@@ -494,6 +521,10 @@ static bool is_batch_eligible(enip_tag_p t) {
     if(t->kind != ENIP_TAG_KIND_DATA) { return false; }
     if(atomic_get_bool(&t->abort_requested)) { return false; }
     if(!t->ready) { return false; }
+    /* §16a.6: a fragmented element needs its own exclusive Read/WriteFrag
+     * continuation loop; it can never be folded into a Multiple Service
+     * Packet alongside other tags. */
+    if(t->fragmented_elem) { return false; }
     if(t->op == ENIP_OP_READ) { return t->elem_count <= t->window_elems; }
     if(t->op == ENIP_OP_WRITE) { return t->elem_count <= t->write_window_elems; }
     return false;
@@ -909,7 +940,9 @@ static int32_t step_open(enip_connection_t *c) {
     c->our_conn_id = (uint32_t)random_u64(0xFFFFFFFFu);
     if(c->our_conn_id == 0) { c->our_conn_id = 1; }
 
-    Bytes frame = build_forward_open(c);
+    c->used_large_fo = c->try_large_fo;
+
+    Bytes frame = build_forward_open(c, c->used_large_fo);
     if(bytes_is_null(frame)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build ForwardOpen request!");
         reset_connection(c);
@@ -1071,7 +1104,21 @@ static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes paylo
         return;
     }
 
-    if(parse_forward_open_reply(c, cip) != PLCTAG_STATUS_OK) {
+    int32_t rc = parse_forward_open_reply(c, cip);
+    if(rc != PLCTAG_STATUS_OK) {
+        /* A Large Forward Open (0x5B) rejected as unsupported is not a hard
+         * failure: fall back to standard Forward Open (0x54) once, and
+         * remember not to try Large again on this connection's later
+         * reconnects (§16.4). Any other rejection, including the standard
+         * attempt itself failing, is fatal to bring-up as before. */
+        if(rc == PLCTAG_ERR_UNSUPPORTED && c->used_large_fo) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
+                   "Target does not support Large Forward Open; falling back to standard Forward Open.");
+            c->try_large_fo = false;
+            c->state = CONN_OPEN;
+            return;
+        }
+
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardOpen rejected by target!");
         reset_connection(c);
         return;
@@ -1185,7 +1232,9 @@ static uint32_t write_window_count(enip_tag_p t) {
     return n;
 }
 
-static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
+static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    t->frag_more = false;
+
     if(t->op == ENIP_OP_OPEN_PROBE) {
         uint8_t header_len = 0;
         uint32_t elem_size_hint = 0;
@@ -1203,15 +1252,6 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
             return PLCTAG_ERR_BAD_REPLY;
         }
 
-        uint32_t elem_size = (uint32_t)(data.len - (size_t)header_len);
-
-        size_t per_elem_overhead = CIP_CONNECTED_ITEM_OVERHEAD + CIP_READ_REPLY_OVERHEAD + (size_t)header_len;
-        if(per_elem_overhead + (size_t)elem_size > c->max_cip_packet_size) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Element size %" PRIu32 " is too large for the connection!",
-                   elem_size);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
         if(header_len > sizeof(t->type_header)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Type header (%u bytes) is too large!", (unsigned int)header_len);
             return PLCTAG_ERR_BAD_REPLY;
@@ -1219,6 +1259,41 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
 
         memcpy(t->type_header, data.data, header_len);
         t->type_header_len = header_len;
+
+        uint32_t chunk = (uint32_t)(data.len - (size_t)header_len);
+
+        if(status == CIP_STATUS_FRAG) {
+            /* §16a.6: the element does not fit one packet. Only a single
+             * element (elem_count<=1) can be byte-fragmented this way -- an
+             * array whose individual elements are each this large is a known
+             * limitation (see the design doc's fragmentation section). */
+            if(t->elem_count > 1) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id,
+                       "Element exceeds the connection and elem_count>1 array fragmentation is not supported!");
+                return PLCTAG_ERR_TOO_LARGE;
+            }
+
+            uint8_t *buf = mem_alloc((int)chunk);
+            if(!buf) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to allocate tag data buffer!");
+                return PLCTAG_ERR_NO_MEM;
+            }
+
+            if(t->data) { mem_free(t->data); }
+
+            t->data = buf;
+            t->size = (int32_t)chunk;
+            memcpy(t->data, data.data + header_len, chunk);
+
+            t->frag_offset = chunk;
+            t->frag_more = true;
+            t->op = ENIP_OP_OPEN_PROBE_FRAG;
+
+            return PLCTAG_STATUS_OK;
+        }
+
+        uint32_t elem_size = chunk;
+
         t->elem_size = elem_size;
 
         size_t total_size = (size_t)elem_size * (size_t)t->elem_count;
@@ -1274,6 +1349,63 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
         }
 
         return PLCTAG_STATUS_OK;
+    } else if(t->op == ENIP_OP_OPEN_PROBE_FRAG) {
+        /* §16a.6: continuation of a fragmented single-element OPEN_PROBE.
+         * Every ReadFrag reply re-sends the type header (already known from
+         * the first fragment); total size is not known upfront, so grow
+         * t->data as fragments arrive, matching the classic AB driver's
+         * check_read_status_connected(). */
+        if(data.len < (size_t)t->type_header_len) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+
+        uint32_t chunk = (uint32_t)(data.len - (size_t)t->type_header_len);
+        size_t new_size = (size_t)t->size + (size_t)chunk;
+
+        uint8_t *buf = mem_realloc(t->data, (int)new_size);
+        if(!buf) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
+            return PLCTAG_ERR_NO_MEM;
+        }
+
+        memcpy(buf + t->size, data.data + t->type_header_len, chunk);
+        t->data = buf;
+        t->size = (int32_t)new_size;
+        t->frag_offset += chunk;
+
+        if(status == CIP_STATUS_FRAG) {
+            t->frag_more = true;
+            return PLCTAG_STATUS_OK;
+        }
+
+        /* final fragment: the element is now fully assembled. */
+        t->elem_size = (uint32_t)t->size;
+        t->elem_count = 1;
+        t->window_elems = 1;
+        t->write_window_elems = 1;
+        t->frag_align = (t->elem_size < 8) ? (uint8_t)t->elem_size : (uint8_t)8;
+        t->fragmented_elem = 1;
+        t->frag_offset = 0;
+        t->read_off = 1;
+        t->ready = 1;
+        t->op = ENIP_OP_OPEN_PROBE; /* cosmetic: complete_tag() keys CREATED off this */
+
+        /* §16a.6: fixed per-request byte count for a fragmented WRITE, sized
+         * from this connection's negotiated capacity; mirrors
+         * write_window_elems's role for the array case (both build and
+         * apply recompute the same chunk from fixed inputs, so they always
+         * agree without passing state between them). */
+        {
+            size_t fixed = (size_t)1 /* service */ + 1 /* path_size_words */ + (size_t)t->path.len
+                         + (size_t)t->type_header_len + 2 /* elem_count */ + 4 /* byte_offset */;
+            size_t cap = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
+            size_t usable = (cap > fixed) ? (cap - fixed) : 0;
+            size_t frag_chunk = (usable / t->frag_align) * t->frag_align;
+            t->frag_write_chunk = (frag_chunk > 0) ? (uint32_t)frag_chunk : (uint32_t)t->frag_align;
+        }
+
+        return PLCTAG_STATUS_OK;
     } else if(t->op == ENIP_OP_OPEN_BULK) {
         if(data.len < (size_t)t->type_header_len) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
@@ -1307,6 +1439,36 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
             return PLCTAG_ERR_BAD_REPLY;
         }
 
+        if(t->fragmented_elem) {
+            /* §16a.6: same growth strategy as OPEN_PROBE_FRAG, cursor reset
+             * to 0 by enip_tag_read() at the start of this read. */
+            uint32_t chunk = (uint32_t)(data.len - (size_t)t->type_header_len);
+            size_t dest_off = (size_t)t->frag_offset;
+            size_t needed = dest_off + (size_t)chunk;
+
+            if(needed > (size_t)t->size) {
+                uint8_t *buf = mem_realloc(t->data, (int)needed);
+                if(!buf) {
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
+                    return PLCTAG_ERR_NO_MEM;
+                }
+                t->data = buf;
+                t->size = (int32_t)needed;
+                t->elem_size = (uint32_t)needed;
+            }
+
+            memcpy(t->data + dest_off, data.data + t->type_header_len, chunk);
+            t->frag_offset += chunk;
+
+            if(status == CIP_STATUS_FRAG) {
+                t->frag_more = true;
+            } else {
+                t->frag_offset = 0;
+            }
+
+            return PLCTAG_STATUS_OK;
+        }
+
         if(t->elem_count <= 1) {
             size_t copy_len = data.len - (size_t)t->type_header_len;
             if(copy_len > (size_t)t->size) { copy_len = (size_t)t->size; }
@@ -1337,8 +1499,29 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
 
         return PLCTAG_STATUS_OK;
     } else if(t->op == ENIP_OP_WRITE) {
-        /* CIP write replies carry no data; advance the cursor by however many
-         * elements the just-sent request covered (§11.5). */
+        /* CIP write replies carry no data. */
+        if(t->fragmented_elem) {
+            /* §16a.6: advance by the same chunk size build's WriteFrag just
+             * sent (recomputed here, not passed in -- deterministic from
+             * fixed inputs, mirrors write_window_count() for the array
+             * case). Cursor reset to 0 by enip_tag_write() at the start of
+             * this write. */
+            size_t remaining = (size_t)t->size - (size_t)t->frag_offset;
+            size_t chunk = (remaining < (size_t)t->frag_write_chunk) ? remaining : (size_t)t->frag_write_chunk;
+
+            t->frag_offset += (uint32_t)chunk;
+
+            if(t->frag_offset < (uint32_t)t->size) {
+                t->frag_more = true;
+            } else {
+                t->frag_offset = 0;
+            }
+
+            return PLCTAG_STATUS_OK;
+        }
+
+        /* advance the cursor by however many elements the just-sent request
+         * covered (§11.5). */
         if(t->elem_count > 1) { t->read_off += write_window_count(t); }
 
         return PLCTAG_STATUS_OK;
@@ -1350,8 +1533,10 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, Bytes data) {
 }
 
 /* Logix/Micro800 apply (enip_dialect_t.apply): parse one CIP reply, treat any
- * non-zero CIP status as a remote error, copy into t->data via apply_tag_reply,
- * and set *more when another read/write window is due. Caller holds api_mutex. */
+ * non-zero CIP status other than CIP_STATUS_FRAG (§16a.6: fragmentation
+ * continuation, not an error) as a remote error, copy into t->data via
+ * apply_tag_reply, and set *more when another read/write window (or
+ * fragment) is due. Caller holds api_mutex. */
 static int32_t enip_logix_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
     *more = false;
 
@@ -1361,25 +1546,37 @@ static int32_t enip_logix_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_re
         return PLCTAG_ERR_BAD_REPLY;
     }
 
-    if(reply.status != 0) {
+    if(reply.status != 0 && reply.status != CIP_STATUS_FRAG) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status, reply.ext_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    int32_t rc = apply_tag_reply(c, t, reply.data);
+    int32_t rc = apply_tag_reply(c, t, reply.status, reply.data);
 
-    if(rc == PLCTAG_STATUS_OK && (t->op == ENIP_OP_OPEN_BULK || t->op == ENIP_OP_READ || t->op == ENIP_OP_WRITE)
-       && t->read_off < t->elem_count) {
-        *more = true;
+    if(rc == PLCTAG_STATUS_OK) {
+        if(t->frag_more) {
+            *more = true;
+        } else if((t->op == ENIP_OP_OPEN_BULK || t->op == ENIP_OP_READ || t->op == ENIP_OP_WRITE)
+                  && t->read_off < t->elem_count) {
+            *more = true;
+        }
     }
 
     return rc;
 }
 
+/* requested_cip_size 4002: the Large Forward Open size ControlLogix/
+ * CompactLogix/GuardLogix (5580/5380/5370) and Micro800 "E" (2080-L50E/L70E)
+ * grant, per vendor documentation (unverified against real hardware in this
+ * tree). §16.4: the connection always tries Large Forward Open (0x5B) first
+ * with this size and falls back to a plain 504-byte standard Forward Open
+ * (0x54) if the target rejects 0x5B with CIP 0x08 -- so a target that can't
+ * actually do 4002 (older Micro800, or anything else) just costs one extra
+ * round trip on first connect, not a wrong value. */
 const enip_dialect_t enip_logix_dialect = {
     .name = "logix",
-    .requested_cip_size = 0, /* engine default (ENIP_FO_CIP_SIZE); see build_forward_open */
-    .max_batch_cap = 0,      /* no cap: Multiple Service Packet (0x0A) supported */
+    .requested_cip_size = 4002,
+    .max_batch_cap = 0, /* no cap: Multiple Service Packet (0x0A) supported */
     .build = enip_logix_build,
     .apply = enip_logix_apply,
 };
@@ -1387,9 +1584,23 @@ const enip_dialect_t enip_logix_dialect = {
 /* OMRON-SPECIFIC-DESIGN.md §6: same build/apply as Logix (§1 -- identical path
  * encoding, Read/Write Tag services, and CIP Common Format reply framing);
  * only the requested Forward Open size differs (§2.2 family default). */
+/* requested_cip_size 1892: "modern Sysmac standard" per vendor documentation
+ * (unverified against real hardware in this tree) -- covers the NX1/NJ
+ * mainline (NX102, NX1P2, NJ501, NJ301). The flagship NX7-series (NX701) is
+ * documented as negotiating up to 9600, and legacy CJ1W-EIP21/early-NJ
+ * bridges as low as 1444; this dialect doesn't distinguish those from the
+ * mainline (no sub-family classification -- common/plc_classify.c only
+ * resolves to ENIP_PLC_OMRON_NJNX, not a specific catalog line), so 1892 is
+ * the safer common denominator: Forward Open is accept/reject, not a
+ * negotiate-down, so a target that can't honor 1892 rejects the connection
+ * outright rather than silently granting less. A target that can't do Large
+ * Forward Open at all still recovers via the 0x08 fallback (§16.4); a
+ * target that supports 0x5B but rejects this specific size for some other
+ * reason is a hard failure, same as an oversized standard-FO request always
+ * was. */
 const enip_dialect_t enip_omron_dialect = {
     .name = "omron-njnx",
-    .requested_cip_size = 1900,
+    .requested_cip_size = 1892,
     .max_batch_cap = 0,
     .build = enip_logix_build,
     .apply = enip_logix_apply,
@@ -1413,7 +1624,14 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
     Bytes req = bytes_null();
 
     switch(t->op) {
-        case ENIP_OP_OPEN_PROBE: req = enip_cip_read(a, t->path, 1); break;
+        /* §16a.6: always ReadFrag (offset 0), not plain ReadTag -- for an
+         * element that fits, the reply is identical (status 0, all the
+         * data); for one that doesn't, the device signals CIP_STATUS_FRAG
+         * and apply_tag_reply switches to ENIP_OP_OPEN_PROBE_FRAG instead of
+         * this needing a client-side "will it fit" pre-check. */
+        case ENIP_OP_OPEN_PROBE: req = enip_cip_read_frag(a, t->path, 1, 0); break;
+
+        case ENIP_OP_OPEN_PROBE_FRAG: req = enip_cip_read_frag(a, t->path, 1, t->frag_offset); break;
 
         case ENIP_OP_OPEN_BULK: {
             uint32_t n = t->elem_count - t->read_off;
@@ -1424,7 +1642,9 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
         }
 
         case ENIP_OP_READ:
-            if(t->elem_count <= 1) {
+            if(t->fragmented_elem) {
+                req = enip_cip_read_frag(a, t->path, 1, t->frag_offset);
+            } else if(t->elem_count <= 1) {
                 req = enip_cip_read(a, t->path, (uint16_t)t->elem_count);
             } else {
                 uint32_t n = t->elem_count - t->read_off;
@@ -1436,7 +1656,16 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
 
         case ENIP_OP_WRITE: {
             Bytes type_header = bytes_from_buf(t->type_header, t->type_header_len);
-            if(t->elem_count <= 1) {
+            if(t->fragmented_elem) {
+                /* §16a.6: fixed-size aligned chunk, computed once at
+                 * fragmentation-detection time (see apply_tag_reply's
+                 * OPEN_PROBE_FRAG completion) so build and apply always
+                 * agree on the chunk boundary without exchanging state. */
+                size_t remaining = (size_t)t->size - (size_t)t->frag_offset;
+                size_t chunk = (remaining < (size_t)t->frag_write_chunk) ? remaining : (size_t)t->frag_write_chunk;
+                Bytes data = bytes_from_buf(t->data + t->frag_offset, chunk);
+                req = enip_cip_write_frag(a, t->path, type_header, 1, t->frag_offset, data);
+            } else if(t->elem_count <= 1) {
                 Bytes data = bytes_from_buf(t->data, (size_t)t->size);
                 req = enip_cip_write(a, t->path, type_header, (uint16_t)t->elem_count, data);
             } else {
@@ -1737,6 +1966,7 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
 
     switch(t->op) {
         case ENIP_OP_OPEN_PROBE:
+        case ENIP_OP_OPEN_PROBE_FRAG:
         case ENIP_OP_OPEN_BULK:
         case ENIP_OP_READ:
         case ENIP_OP_WRITE:
@@ -2071,7 +2301,7 @@ static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes 
                    (unsigned)i, sub.status, sub.ext_status);
             status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
         } else {
-            status = (int8_t)apply_tag_reply(c, t, sub.data);
+            status = (int8_t)apply_tag_reply(c, t, (uint8_t)0, sub.data);
         }
 
         /* Advance batch_head before complete_tag (which calls rc_dec). */
@@ -2110,7 +2340,7 @@ static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status) {
     } else {
         t->status = status;
 
-        if(t->op == ENIP_OP_OPEN_PROBE || t->op == ENIP_OP_OPEN_BULK) {
+        if(t->op == ENIP_OP_OPEN_PROBE || t->op == ENIP_OP_OPEN_PROBE_FRAG || t->op == ENIP_OP_OPEN_BULK) {
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_CREATED, status);
         } else if(t->op == ENIP_OP_READ || t->op == ENIP_OP_LIST || t->op == ENIP_OP_UDT_FIELDS) {
             /* Clear read_in_flight here (the global tickler used to do it via the
@@ -2204,7 +2434,27 @@ static void idle_disconnect(enip_connection_t *c) {
  * ForwardOpen (§14.3 wire layout)
  * ============================================================================ */
 
-static Bytes build_forward_open(enip_connection_t *c) {
+/* Network Connection Parameters flag bits (redundant_owner=0, connection_type=
+ * Point-to-Point, priority=Low, size_type=Variable), same values already
+ * proven against real hardware by the classic AB driver (protocols/ab/defs.h
+ * AB_EIP_CONN_PARAM / AB_EIP_CONN_PARAM_EX): standard is a 16-bit field with
+ * a 9-bit size (max 511) OR'd in; Large is a 32-bit field with the same
+ * flag bits shifted up 16 and a 16-bit size (max 65535) OR'd in. */
+#define ENIP_CONN_PARAM ((uint16_t)0x4200)
+#define ENIP_CONN_PARAM_EX ((uint32_t)0x42000000)
+#define ENIP_FO_STD_MAX_SIZE ((size_t)511)
+#define ENIP_FO_LG_MAX_SIZE ((size_t)65535)
+#define CIP_ERR_SERVICE_NOT_SUPPORTED ((uint8_t)0x08)
+
+/* use_large selects Large Forward Open (0x5B, 32-bit connection-size fields,
+ * up to 65535 bytes) vs standard (0x54, 16-bit fields, up to 511 bytes).
+ * §16.4: the caller (step_open) always tries Large first; on_open_reply
+ * falls back to standard once if the target rejects 0x5B with CIP 0x08.
+ * Requested size is the dialect's requested_cip_size (0 -> ENIP_FO_CIP_SIZE
+ * default) for a Large attempt, or always ENIP_FO_CIP_SIZE for a standard
+ * one -- a standard attempt exists only as the fallback for a target that
+ * can't do more than that anyway. */
+static Bytes build_forward_open(enip_connection_t *c, bool use_large) {
     Arena *a = &c->arena;
 
     Bytes route = enip_cip_encode_route(a, c->path);
@@ -2218,13 +2468,28 @@ static Bytes build_forward_open(enip_connection_t *c) {
 
     uint8_t conn_path_words = (uint8_t)(connection_path.len / 2);
 
-    Bytes fo_prefix = bytes_pack(a, BYTES_LE, CIP_FWD_OPEN, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24,
+    uint8_t fo_service = use_large ? CIP_FWD_OPEN_LG : CIP_FWD_OPEN;
+
+    Bytes fo_prefix = bytes_pack(a, BYTES_LE, fo_service, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06, (uint8_t)0x24,
                                   (uint8_t)0x01, (uint8_t)0x0A, (uint8_t)0x0E, (uint32_t)0, c->our_conn_id, c->conn_serial,
                                   ENIP_VENDOR_ID, ENIP_ORIGINATOR_SERIAL, (uint8_t)0x03, (uint8_t)0x00, (uint8_t)0x00,
                                   (uint8_t)0x00);
     if(bytes_is_null(fo_prefix)) { return bytes_null(); }
 
-    Bytes fo_params = bytes_pack(a, BYTES_LE, (uint32_t)1000000, (uint16_t)0x43F8, (uint32_t)1000000, (uint16_t)0x43F8);
+    size_t want = use_large ? (c->dialect->requested_cip_size ? c->dialect->requested_cip_size : ENIP_FO_CIP_SIZE)
+                             : ENIP_FO_CIP_SIZE;
+    size_t max_size = use_large ? ENIP_FO_LG_MAX_SIZE : ENIP_FO_STD_MAX_SIZE;
+    if(want > max_size) { want = max_size; }
+    c->requested_cip_size = want;
+
+    Bytes fo_params;
+    if(use_large) {
+        uint32_t params = ENIP_CONN_PARAM_EX | (uint32_t)want;
+        fo_params = bytes_pack(a, BYTES_LE, (uint32_t)1000000, params, (uint32_t)1000000, params);
+    } else {
+        uint16_t params = (uint16_t)(ENIP_CONN_PARAM | (uint16_t)want);
+        fo_params = bytes_pack(a, BYTES_LE, (uint32_t)1000000, params, (uint32_t)1000000, params);
+    }
     if(bytes_is_null(fo_params)) { return bytes_null(); }
 
     Bytes fo_suffix = bytes_pack(a, BYTES_LE, (uint8_t)0xA3, conn_path_words);
@@ -2245,9 +2510,13 @@ static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_by
     if(!enip_cip_parse_reply(cip_reply_bytes, &reply)) { return PLCTAG_ERR_BAD_REPLY; }
 
     if(reply.status != 0) {
+        /* CIP_ERR_SERVICE_NOT_SUPPORTED (0x08) on a Large attempt just means
+         * this target doesn't implement 0x5B -- on_open_reply (the only
+         * caller) recognizes that case via c->used_large_fo and retries with
+         * standard Forward Open instead of tearing the connection down. */
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardOpen failed, CIP status 0x%02X (ext 0x%04X).", reply.status,
                reply.ext_status);
-        return PLCTAG_ERR_REMOTE_ERR;
+        return (reply.status == CIP_ERR_SERVICE_NOT_SUPPORTED) ? PLCTAG_ERR_UNSUPPORTED : PLCTAG_ERR_REMOTE_ERR;
     }
 
     uint32_t o_to_t_conn_id = 0, t_to_o_conn_id = 0;
@@ -2265,7 +2534,10 @@ static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_by
     c->cip_conn_id = o_to_t_conn_id;
     (void)t_to_o_conn_id;
 
-    c->max_cip_packet_size = ENIP_FO_CIP_SIZE;
+    /* A status-0 reply means the target accepted the size step_open() asked
+     * for (Variable connection size, not restated in the reply -- see
+     * build_forward_open); c->requested_cip_size was stashed there. */
+    c->max_cip_packet_size = c->requested_cip_size ? c->requested_cip_size : ENIP_FO_CIP_SIZE;
     c->rx_cap = c->max_cip_packet_size + ENIP_FRAMING_OVERHEAD;
 
     size_t cip_payload = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
@@ -2430,6 +2702,25 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
                        &c->ident_rev_major, &c->ident_rev_minor, &c->ident_status, &c->ident_serial);
 
     c->plc_type = enip_classify_plc(c->ident_vendor_id, reply.data);
+
+    /* model= (enip_session_create) overrides the device's own reported
+     * identity -- e.g. talking through a bridge/adapter whose identity does
+     * not reflect the end device, or forcing a family against a device_sim
+     * endpoint. An unrecognized model is a warning, not a hard error: keep
+     * the discovered classification rather than falling back to UNKNOWN. */
+    if(c->model) {
+        enip_plc_type_t override_type = enip_classify_plc_by_name(c->model);
+        if(override_type != ENIP_PLC_UNKNOWN) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: model=\"%s\" overrides discovered family %s -> %s.", c->model,
+                   identity_plc_type_name(c->plc_type), identity_plc_type_name(override_type));
+            c->plc_type = override_type;
+        } else {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
+                   "Identity: model=\"%s\" does not match any known catalog prefix; keeping discovered family %s.", c->model,
+                   identity_plc_type_name(c->plc_type));
+        }
+    }
+
     c->dialect = enip_dialect_select(c->plc_type);
     c->identity_valid = true;
 

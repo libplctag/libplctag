@@ -324,6 +324,40 @@ Bytes enip_cip_write(Arena *a, Bytes path, Bytes type_header, uint16_t count, By
 }
 
 /* ============================================================================
+ * CIP ReadTag Fragmented (0x52) / WriteTag Fragmented (0x53) requests (§16a.6)
+ * ============================================================================ */
+
+Bytes enip_cip_read_frag(Arena *a, Bytes path, uint16_t count, uint32_t byte_offset) {
+    if(!a || bytes_is_null(path) || path.len == 0 || (path.len % 2) != 0 || path.len > 0xFF * 2) { return bytes_null(); }
+
+    uint8_t path_size_words = (uint8_t)(path.len / 2);
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_READ_FRAG, path_size_words);
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    Bytes tail = bytes_pack(a, BYTES_LE, count, byte_offset);
+    if(bytes_is_null(tail)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path, tail);
+}
+
+Bytes enip_cip_write_frag(Arena *a, Bytes path, Bytes type_header, uint16_t count, uint32_t byte_offset, Bytes data) {
+    if(!a || bytes_is_null(path) || path.len == 0 || (path.len % 2) != 0 || path.len > 0xFF * 2) { return bytes_null(); }
+    if(bytes_is_null(type_header) || type_header.len == 0) { return bytes_null(); }
+    if(bytes_is_null(data)) { return bytes_null(); }
+
+    uint8_t path_size_words = (uint8_t)(path.len / 2);
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_WRITE_FRAG, path_size_words);
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    Bytes tail = bytes_pack(a, BYTES_LE, count, byte_offset);
+    if(bytes_is_null(tail)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path, type_header, tail, data);
+}
+
+/* ============================================================================
  * CIP reply parsing
  * ============================================================================ */
 

@@ -49,6 +49,7 @@
 #define CIP_READ        ((uint8_t)0x4C)
 #define CIP_WRITE       ((uint8_t)0x4D)
 #define CIP_READ_FRAG   ((uint8_t)0x52)
+#define CIP_WRITE_FRAG  ((uint8_t)0x53)
 #define CIP_FWD_OPEN    ((uint8_t)0x54)
 #define CIP_FWD_OPEN_LG ((uint8_t)0x5B)
 #define CIP_FWD_CLOSE   ((uint8_t)0x4E)
@@ -158,6 +159,30 @@ extern Bytes enip_cip_read(Arena *a, Bytes path, uint16_t count);
  * type_header or data, or arena exhaustion.
  */
 extern Bytes enip_cip_write(Arena *a, Bytes path, Bytes type_header, uint16_t count, Bytes data);
+
+/*
+ * Encode a CIP ReadTag Fragmented (0x52) request: service(1) +
+ * path_size_words(1) + path(N) + element_count(2) + byte_offset(4).
+ * §16a.6: used instead of enip_cip_read() for a single element (count=1)
+ * that may not fit one packet; the reply's CIP status is CIP_STATUS_FRAG
+ * while more data remains, and the type header + data are re-sent on every
+ * fragment (offset continues from the total bytes already received).
+ *
+ * Returns bytes_null() on a null/empty/odd-length path or arena exhaustion.
+ */
+extern Bytes enip_cip_read_frag(Arena *a, Bytes path, uint16_t count, uint32_t byte_offset);
+
+/*
+ * Encode a CIP WriteTag Fragmented (0x53) request: service(1) +
+ * path_size_words(1) + path(N) + type_header(type_header.len) +
+ * element_count(2) + byte_offset(4) + data. §16a.6: `data` is one aligned
+ * chunk (see the fragment-size formula there), not the whole element;
+ * `byte_offset` is the running cursor from a prior chunk of the same write.
+ *
+ * Returns bytes_null() on a null/empty/odd-length path, a null/empty
+ * type_header or data, or arena exhaustion.
+ */
+extern Bytes enip_cip_write_frag(Arena *a, Bytes path, Bytes type_header, uint16_t count, uint32_t byte_offset, Bytes data);
 
 /*
  * Encode a tag/symbol listing request (CIP 0x55, Get_Instance_Attribute_List)

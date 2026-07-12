@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,46 +40,11 @@
 #include <libplctag/lib/libplctag.h>
 #include "platform.h"
 #include "args.h"
-#include <libplctag/protocols/enip/server/device.h>
-#include <libplctag/protocols/enip/server/device_sim.h>
 
 /* ============================================================================
- * CIP type table
+ * CIP / PCCC type tables — mirrors
+ * protocols/enip/server/eip_server_tag.c's elem_type=/pccc_type= tables.
  * ============================================================================ */
-
-typedef struct {
-    const char *name;
-    tag_type_t  type;
-} cip_type_entry_t;
-
-static const cip_type_entry_t CIP_TYPES[] = {
-    {"BOOL",  TAG_CIP_TYPE_BOOL},
-    {"SINT",  TAG_CIP_TYPE_SINT},
-    {"INT",   TAG_CIP_TYPE_INT},
-    {"DINT",  TAG_CIP_TYPE_DINT},
-    {"LINT",  TAG_CIP_TYPE_LINT},
-    {"REAL",  TAG_CIP_TYPE_REAL},
-    {"LREAL", TAG_CIP_TYPE_LREAL},
-    {NULL,    0},
-};
-
-/* ============================================================================
- * PCCC type table
- * ============================================================================ */
-
-typedef struct {
-    char       letter;
-    tag_type_t type;
-} pccc_type_entry_t;
-
-static const pccc_type_entry_t PCCC_TYPES[] = {
-    {'B', TAG_PCCC_TYPE_BIT},
-    {'N', TAG_PCCC_TYPE_INT},
-    {'L', TAG_PCCC_TYPE_DINT},
-    {'F', TAG_PCCC_TYPE_REAL},
-    {'R', TAG_PCCC_TYPE_REAL},
-    {0,   0},
-};
 
 /* ============================================================================
  * String helpers (no string.h)
@@ -94,14 +60,27 @@ static const char *find_char(const char *s, char c) {
     return *s ? s : NULL;
 }
 
-static bool str_neq_i(const char *a, size_t alen, const char *b, size_t blen) {
-    if(alen != blen) { return false; }
-    for(size_t i = 0; i < alen; i++) {
+static bool str_neq_i_n(const char *a, const char *b, size_t len) {
+    for(size_t i = 0; i < len; i++) {
         char ca = (a[i] >= 'a' && a[i] <= 'z') ? (char)(a[i] - 32) : a[i];
         char cb = (b[i] >= 'a' && b[i] <= 'z') ? (char)(b[i] - 32) : b[i];
         if(ca != cb) { return false; }
     }
     return true;
+}
+
+static const char *const CIP_TYPE_NAMES[] = {"BOOL", "SINT", "INT", "DINT", "LINT", "REAL", "LREAL", NULL};
+
+static bool is_known_cip_type(const char *name, size_t len) {
+    for(const char *const *e = CIP_TYPE_NAMES; *e; e++) {
+        if(str_length(*e) == (int)len && str_neq_i_n(*e, name, len)) { return true; }
+    }
+    return false;
+}
+
+static bool is_known_pccc_letter(char letter) {
+    if(letter >= 'a' && letter <= 'z') { letter = (char)(letter - 32); }
+    return letter == 'B' || letter == 'N' || letter == 'L' || letter == 'F' || letter == 'R';
 }
 
 static bool parse_digits(const char **s, int32_t *out) {
@@ -114,10 +93,6 @@ static bool parse_digits(const char **s, int32_t *out) {
     *out = val;
     return true;
 }
-
-/* ============================================================================
- * Scalar argument parsers
- * ============================================================================ */
 
 static uint16_t parse_uint16_val(const char *s, uint16_t def) {
     if(!s || *s == '\0') { return def; }
@@ -136,35 +111,7 @@ static int32_t parse_int32_val(const char *s, int32_t def) {
 }
 
 /* ============================================================================
- * PLC type parser
- * ============================================================================ */
-
-static enip_plc_type_t parse_plc_type(const char *s) {
-    if(!s || *s == '\0') { return ENIP_PLC_LGX; }
-    if(str_cmp_i(s, "ControlLogix") == 0 || str_cmp_i(s, "logix") == 0 || str_cmp_i(s, "LGX") == 0) {
-        return ENIP_PLC_LGX;
-    }
-    if(str_cmp_i(s, "Micro800") == 0) {
-        return ENIP_PLC_MICRO800;
-    }
-    if(str_cmp_i(s, "Omron") == 0 || str_cmp_i(s, "omron-njnx") == 0 || str_cmp_i(s, "omron_njnx") == 0) {
-        return ENIP_PLC_OMRON_NJNX;
-    }
-    if(str_cmp_i(s, "PLC5") == 0 || str_cmp_i(s, "PLC/5") == 0) {
-        return ENIP_PLC_PLC5;
-    }
-    if(str_cmp_i(s, "SLC") == 0 || str_cmp_i(s, "SLC500") == 0) {
-        return ENIP_PLC_SLC;
-    }
-    if(str_cmp_i(s, "Micrologix") == 0 || str_cmp_i(s, "MicroLogix") == 0) {
-        return ENIP_PLC_MLGX;
-    }
-    fprintf(stderr, "device_sim: unknown PLC type '%s', defaulting to ControlLogix.\n", s);
-    return ENIP_PLC_LGX;
-}
-
-/* ============================================================================
- * Dimension parser
+ * Dimension parser: "[d1]" or "[d1,d2]" or "[d1,d2,d3]"
  * ============================================================================ */
 
 static bool parse_dims(const char *s, uint32_t *num_dim_out, uint32_t dims[3]) {
@@ -200,25 +147,17 @@ static bool parse_dims(const char *s, uint32_t *num_dim_out, uint32_t dims[3]) {
 }
 
 /* ============================================================================
- * Tag spec parsers
+ * Tag spec validation (catches bad --tag= specs at parse time, before any
+ * connection to the library; actual attr-string construction happens later
+ * in args_build_tag_attr_str, once for each spec).
  * ============================================================================ */
 
-static int32_t parse_cip_tag(device_sim_t *sim, const char *spec) {
+static int32_t validate_cip_tag(const char *spec) {
     const char *colon = find_char(spec, ':');
     if(!colon || colon == spec) {
         fprintf(stderr, "device_sim: CIP tag spec '%s' missing name or ':'.\n", spec);
         return PLCTAG_ERR_BAD_PARAM;
     }
-
-    /* Extract name as null-terminated string. */
-    size_t name_len = (size_t)(colon - spec);
-    char name_buf[256];
-    if(name_len >= sizeof(name_buf)) {
-        fprintf(stderr, "device_sim: tag name too long in spec '%s'.\n", spec);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-    mem_copy(name_buf, (void*)spec, (int)name_len);
-    name_buf[name_len] = '\0';
 
     const char *type_start = colon + 1;
     const char *bracket = find_char(type_start, '[');
@@ -228,15 +167,8 @@ static int32_t parse_cip_tag(device_sim_t *sim, const char *spec) {
     }
 
     size_t type_len = (size_t)(bracket - type_start);
-
-    const cip_type_entry_t *entry = CIP_TYPES;
-    while(entry->name) {
-        if(str_neq_i(type_start, type_len, entry->name, (size_t)str_length(entry->name))) { break; }
-        entry++;
-    }
-    if(!entry->name) {
-        fprintf(stderr, "device_sim: unknown CIP type '%.*s' in tag spec '%s'.\n",
-                (int)type_len, type_start, spec);
+    if(!is_known_cip_type(type_start, type_len)) {
+        fprintf(stderr, "device_sim: unknown CIP type '%.*s' in tag spec '%s'.\n", (int)type_len, type_start, spec);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -244,26 +176,16 @@ static int32_t parse_cip_tag(device_sim_t *sim, const char *spec) {
     uint32_t dims[3] = {0, 0, 0};
     if(!parse_dims(bracket, &num_dim, dims)) { return PLCTAG_ERR_BAD_PARAM; }
 
-    return device_sim_add_tag(sim, name_buf, entry->type, dims, num_dim,
-                               NULL, NULL, NULL);
+    return PLCTAG_STATUS_OK;
 }
 
-
-static int32_t parse_pccc_tag(device_sim_t *sim, const char *spec) {
-    const char *s = spec;
-
-    char letter = *s;
-    if(letter >= 'a' && letter <= 'z') { letter = (char)(letter - 32); }
-
-    const pccc_type_entry_t *entry = PCCC_TYPES;
-    while(entry->letter && entry->letter != letter) { entry++; }
-    if(!entry->letter) {
-        fprintf(stderr, "device_sim: unknown PCCC type letter '%c' in tag spec '%s'.\n",
-                *spec, spec);
+static int32_t validate_pccc_tag(const char *spec) {
+    if(!is_known_pccc_letter(*spec)) {
+        fprintf(stderr, "device_sim: unknown PCCC type letter '%c' in tag spec '%s'.\n", *spec, spec);
         return PLCTAG_ERR_BAD_PARAM;
     }
-    s++;
 
+    const char *s = spec + 1;
     int32_t file_num = 0;
     if(!parse_digits(&s, &file_num) || file_num < 0) {
         fprintf(stderr, "device_sim: missing file number in PCCC tag spec '%s'.\n", spec);
@@ -278,31 +200,11 @@ static int32_t parse_pccc_tag(device_sim_t *sim, const char *spec) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* Build name string: letter + file_num (e.g. "B3", "N7"). */
-    char name_buf[32];
-    size_t ni = 0;
-    name_buf[ni++] = *spec;   /* original letter (may be lowercase) */
-    int32_t fn = file_num;
-    if(fn == 0) {
-        name_buf[ni++] = '0';
-    } else {
-        char digits[12];
-        size_t di = 0;
-        while(fn > 0) { digits[di++] = (char)('0' + fn % 10); fn /= 10; }
-        for(size_t r = di; r > 0; r--) { name_buf[ni++] = digits[r - 1]; }
-    }
-    name_buf[ni] = '\0';
-
-    return device_sim_add_pccc_tag(sim, name_buf, entry->type,
-                                    (uint32_t)file_num, dims[0],
-                                    NULL, NULL, NULL);
+    return PLCTAG_STATUS_OK;
 }
 
-
-static int32_t parse_tag_spec(device_sim_t *sim, const char *spec) {
-    return find_char(spec, ':')
-        ? parse_cip_tag(sim, spec)
-        : parse_pccc_tag(sim, spec);
+static int32_t validate_tag_spec(const char *spec) {
+    return find_char(spec, ':') ? validate_cip_tag(spec) : validate_pccc_tag(spec);
 }
 
 /* ============================================================================
@@ -318,12 +220,14 @@ extern void args_print_usage(const char *prog) {
         "  --bind=ADDR      Bind address (default: all interfaces)\n"
         "  --plc=TYPE       PLC personality: ControlLogix, Micro800, Omron,\n"
         "                   PLC5, SLC, Micrologix  (default: ControlLogix)\n"
+        "  --model=NAME     Catalog model within --plc='s family (e.g. NX102 for\n"
+        "                   Omron); default is the family's built-in default\n"
         "  --tag=SPEC       Add a CIP tag:  Name:TYPE[count]  or multi-dim\n"
         "                                   Name:TYPE[d1,d2,d3]\n"
         "                   Add a PCCC tag: B<n>[count]  N<n>[count]\n"
         "                                   L<n>[count]  F<n>[count]\n"
         "                   TYPE: BOOL SINT INT DINT LINT REAL LREAL\n"
-        "                   May be repeated.\n"
+        "                   May be repeated (up to 64 tags).\n"
         "  --delay=MS       Artificial response delay in milliseconds\n"
         "  --debug=N        Debug level 1-5 (default: 2)\n"
         "  --help           Show this message\n"
@@ -334,33 +238,39 @@ extern void args_print_usage(const char *prog) {
         prog, prog, prog);
 }
 
-
-extern int32_t args_parse(int argc, char **argv, device_sim_t **sim_out, int32_t *debug_level_out) {
-    *sim_out         = NULL;
+extern int32_t args_parse(int argc, char **argv, sim_args_t *args_out, int32_t *debug_level_out) {
+    mem_set(args_out, 0, (int)sizeof(*args_out));
+    args_out->port = 44818;
     *debug_level_out = PLCTAG_DEBUG_WARN;
-
-    /* First pass: collect scalar options before creating the sim. */
-    enip_plc_type_t plc_type = ENIP_PLC_LGX;
-    uint16_t    port       = 44818;
-    const char *bind_addr  = NULL;
-    int32_t     delay_ms   = 0;
 
     for(int i = 1; i < argc; i++) {
         const char *arg = argv[i];
         const char *val;
 
         if((val = find_prefix(arg, "--port="))) {
-            port = parse_uint16_val(val, 44818);
+            args_out->port = parse_uint16_val(val, 44818);
         } else if((val = find_prefix(arg, "--bind="))) {
-            bind_addr = val;
+            args_out->bind_addr = val;
         } else if((val = find_prefix(arg, "--plc="))) {
-            plc_type = parse_plc_type(val);
+            args_out->plc_type = val;
+        } else if((val = find_prefix(arg, "--model="))) {
+            args_out->model = val;
         } else if((val = find_prefix(arg, "--delay="))) {
-            delay_ms = parse_int32_val(val, 0);
+            args_out->delay_ms = parse_int32_val(val, 0);
         } else if((val = find_prefix(arg, "--debug="))) {
             *debug_level_out = parse_int32_val(val, PLCTAG_DEBUG_WARN);
         } else if((val = find_prefix(arg, "--tag="))) {
-            (void)val;   /* handled in second pass */
+            if(args_out->num_tags >= (int)(sizeof(args_out->tag_specs) / sizeof(args_out->tag_specs[0]))) {
+                fprintf(stderr, "device_sim: too many --tag= options (max %d).\n",
+                        (int)(sizeof(args_out->tag_specs) / sizeof(args_out->tag_specs[0])));
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+            int32_t rc = validate_tag_spec(val);
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf(stderr, "device_sim: failed to parse --tag='%s'.\n", val);
+                return rc;
+            }
+            args_out->tag_specs[args_out->num_tags++] = val;
         } else if(find_prefix(arg, "--help") == arg + 6 || find_prefix(arg, "-h") == arg + 2) {
             args_print_usage(argv[0]);
             return 1;
@@ -370,28 +280,88 @@ extern int32_t args_parse(int argc, char **argv, device_sim_t **sim_out, int32_t
         }
     }
 
-    device_sim_t *sim = device_sim_create(plc_type, bind_addr, port);
-    if(!sim) {
-        fprintf(stderr, "device_sim: failed to create simulator.\n");
-        return PLCTAG_ERR_NO_MEM;
+    if(args_out->num_tags == 0) {
+        fprintf(stderr, "device_sim: at least one --tag= is required.\n");
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(delay_ms != 0) { device_sim_set_response_delay(sim, (uint32_t)delay_ms); }
-
-    /* Second pass: add tags. */
-    for(int i = 1; i < argc; i++) {
-        const char *arg = argv[i];
-        const char *val;
-        if((val = find_prefix(arg, "--tag="))) {
-            int32_t rc = parse_tag_spec(sim, val);
-            if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "device_sim: failed to parse --tag='%s'.\n", val);
-                device_sim_destroy(sim);
-                return rc;
-            }
-        }
-    }
-
-    *sim_out = sim;
     return PLCTAG_STATUS_OK;
+}
+
+/* ============================================================================
+ * attr-string construction
+ *
+ * attr_create_from_str rejects "key=" with an empty value, so optional
+ * options (bind_addr, model, delay) are appended only when set, via
+ * append_attr rather than baked into one snprintf template.
+ * ============================================================================ */
+
+static bool append_attr(char *out, size_t out_cap, const char *fmt, ...) {
+    size_t used = str_length(out);
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(out + used, out_cap - used, fmt, ap);
+    va_end(ap);
+    return n >= 0 && used + (size_t)n < out_cap;
+}
+
+static bool append_shared_attrs(const sim_args_t *args, char *out, size_t out_cap) {
+    if(!append_attr(out, out_cap, "&port=%u", (unsigned)args->port)) { return false; }
+    if(args->bind_addr && *args->bind_addr && !append_attr(out, out_cap, "&gateway=%s", args->bind_addr)) { return false; }
+    if(args->plc_type && *args->plc_type && !append_attr(out, out_cap, "&plc=%s", args->plc_type)) { return false; }
+    if(args->model && *args->model && !append_attr(out, out_cap, "&model=%s", args->model)) { return false; }
+    if(args->delay_ms != 0 && !append_attr(out, out_cap, "&sim_delay_ms=%d", (int)args->delay_ms)) { return false; }
+    return true;
+}
+
+static int32_t build_cip_tag_attr_str(const sim_args_t *args, const char *spec, char *out, size_t out_cap) {
+    const char *colon = find_char(spec, ':');
+    size_t name_len = (size_t)(colon - spec);
+
+    const char *type_start = colon + 1;
+    const char *bracket = find_char(type_start, '[');
+    size_t type_len = (size_t)(bracket - type_start);
+
+    uint32_t num_dim = 0;
+    uint32_t dims[3] = {0, 0, 0};
+    if(!parse_dims(bracket, &num_dim, dims)) { return PLCTAG_ERR_BAD_PARAM; }
+
+    if(out_cap == 0) { return PLCTAG_ERR_BAD_PARAM; }
+    out[0] = '\0';
+    if(!append_attr(out, out_cap, "protocol=ab-eip&role=server&name=%.*s&elem_type=%.*s&dim0=%u&dim1=%u&dim2=%u",
+                     (int)name_len, spec, (int)type_len, type_start,
+                     (unsigned)dims[0], num_dim >= 2 ? (unsigned)dims[1] : 0u, num_dim >= 3 ? (unsigned)dims[2] : 0u)) {
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+    if(!append_shared_attrs(args, out, out_cap)) { return PLCTAG_ERR_BAD_PARAM; }
+
+    return PLCTAG_STATUS_OK;
+}
+
+static int32_t build_pccc_tag_attr_str(const sim_args_t *args, const char *spec, char *out, size_t out_cap) {
+    char letter = *spec;
+    const char *s = spec + 1;
+    int32_t file_num = 0;
+    parse_digits(&s, &file_num);
+
+    uint32_t num_dim = 0;
+    uint32_t dims[3] = {0, 0, 0};
+    if(!parse_dims(s, &num_dim, dims)) { return PLCTAG_ERR_BAD_PARAM; }
+
+    if(out_cap == 0) { return PLCTAG_ERR_BAD_PARAM; }
+    out[0] = '\0';
+    /* PCCC tags are addressed by (letter,file_num) on the wire, not by name;
+     * name= is required by the constructor but purely cosmetic here. */
+    if(!append_attr(out, out_cap, "protocol=ab-eip&role=server&name=%c%d&pccc_type=%c&pccc_file=%d&elem_count=%u",
+                     letter, (int)file_num, letter, (int)file_num, (unsigned)dims[0])) {
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+    if(!append_shared_attrs(args, out, out_cap)) { return PLCTAG_ERR_BAD_PARAM; }
+
+    return PLCTAG_STATUS_OK;
+}
+
+extern int32_t args_build_tag_attr_str(const sim_args_t *args, const char *spec, char *out, size_t out_cap) {
+    return find_char(spec, ':') ? build_cip_tag_attr_str(args, spec, out, out_cap)
+                                 : build_pccc_tag_attr_str(args, spec, out, out_cap);
 }

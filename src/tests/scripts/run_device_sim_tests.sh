@@ -49,7 +49,7 @@ if [[ ! -d $TEST_DIR ]]; then
     exit 1
 fi
 
-EXECUTABLES="device_sim tag_rw2 thread_stress test_connection_tag test_connection_tag_late_join test_idle_disconnect test_shutdown_cip test_shutdown_restart get_identity scan_eip_network devsim_with_plctag"
+EXECUTABLES="device_sim tag_rw2 thread_stress test_connection_tag test_connection_tag_late_join test_idle_disconnect test_shutdown_cip test_shutdown_restart get_identity scan_eip_network devsim_with_plctag server_tag_basic"
 for EXECUTABLE in $EXECUTABLES; do
     if [[ ! -e "$TEST_DIR/$EXECUTABLE" ]]; then
         echo "$TEST_DIR/$EXECUTABLE not found!"
@@ -95,6 +95,32 @@ echo -n "  Test $TEST: connected DINT read/write... "
 $VALGRIND$TEST_DIR/tag_rw2 --type=sint32 \
     "--tag=${DEVICE_SIM_TAG}&elem_count=1&name=TestDINT" \
     --write=42 --debug=4 > "$LOG_DIR/${TEST}_device_sim_connected_rw.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: basic unconnected large tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 \
+    "--tag=${DEVICE_SIM_TAG}&elem_count=1000&name=TestBigArray&use_connected_msg=0" \
+    --write=1,2,3,4,5,6,7,8,9 --debug=4 > "$LOG_DIR/${TEST}_device_sim_unconnected_large.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: basic connected large tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 \
+    "--tag=${DEVICE_SIM_TAG}&elem_count=1000&name=TestBigArray" \
+    --write=1,2,3,4,5,6,7,8,9 --debug=4 > "$LOG_DIR/${TEST}_device_sim_connected_large.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -234,6 +260,21 @@ let TEST++
 echo -n "  Test $TEST: libdevsim + libplctag in one process (devsim_with_plctag)... "
 $VALGRIND$TEST_DIR/devsim_with_plctag \
     > "$LOG_DIR/${TEST}_devsim_with_plctag.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+# server_tag_basic is self-contained: it creates its own role=server tags on
+# port 44820 (see src/poc/server_tag_basic/server_tag_basic.c), drives client
+# tags against them, and exits. No device_sim instance needed.
+let TEST++
+echo -n "  Test $TEST: role=server tags (server_tag_basic)... "
+$VALGRIND$TEST_DIR/server_tag_basic \
+    > "$LOG_DIR/${TEST}_server_tag_basic.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

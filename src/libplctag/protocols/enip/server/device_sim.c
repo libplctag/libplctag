@@ -155,7 +155,7 @@ static void append_tag(device_t *dev, tag_def_t *tag) {
  * Lifecycle
  * ============================================================================ */
 
-extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *bind_addr, uint16_t port) {
+extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *model, const char *bind_addr, uint16_t port) {
     device_sim_t *sim = (device_sim_t *)mem_alloc((int)sizeof(device_sim_t));
     if(!sim) { return NULL; }
     mem_set(sim, 0, (int)sizeof(device_sim_t));
@@ -181,8 +181,8 @@ extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *bin
     sim->dev.sim = sim;
     atomic_init_bool(&sim->dev.terminate, false);
 
-    /* Seed identity from built-in defaults for the chosen PLC type. */
-    const identity_t *defaults = identity_for_plc_type(plc_type);
+    /* Seed identity from built-in defaults for the chosen PLC type/model. */
+    const identity_t *defaults = identity_for_plc_type_model(plc_type, model);
     sim->dev.identity = *defaults;
 
     if(mutex_create(&sim->dev.identity_mutex) != PLCTAG_STATUS_OK) {

@@ -34,12 +34,15 @@
 #pragma once
 
 /*
- * device_sim.h — public API for the device_sim static library.
+ * device_sim.h — internal endpoint runtime (device_t lifecycle, listener +
+ * discovery threads).  Not a public header: it is not installed, and the
+ * only callers are server/endpoint.c (endpoint_find_or_create/_release) and
+ * server/eip_server_tag.c, which together implement
+ * plc_tag_create("...&role=server&...") — see SERVER_TAGS.md.  External
+ * embedding programs (the device_sim CLI, the devsim_with_plctag POC) go
+ * through role=server, not through this API directly.
  *
- * Embedding programs create one or more device_sim_t instances, add tags,
- * start the simulator, and later stop and destroy it.  Everything that can
- * be done on the CLI is reachable through this API.
- *
+
  * Threading rules:
  *   - All device_sim_add_* calls must complete before device_sim_start().
  *   - After start, only device_sim_tag_get/set, device_sim_get/set_identity,
@@ -157,6 +160,9 @@ typedef int32_t (*device_sim_cip_cb)(device_sim_t *sim, uint8_t service, const u
  * struct — so every FFI layer can call it without replicating struct layout.
  *
  *   plc_type   the PLC dialect to emulate (also seeds the identity defaults).
+ *   model      optional catalog model within plc_type's family (e.g. "NX102"
+ *              for ENIP_PLC_OMRON_NJNX; see common/identity.c's table).
+ *              NULL/"" uses the family's default model.
  *   bind_addr  listen address; NULL = all interfaces.
  *   port       TCP + UDP listen port; 0 = default 44818.
  *
@@ -166,11 +172,11 @@ typedef int32_t (*device_sim_cip_cb)(device_sim_t *sim, uint8_t service, const u
  * replies is computed by the library per request from the arrival path, so it
  * is always one the querying client can connect back to.
  *
- * The identity is seeded from the built-in defaults for plc_type and can be
- * overridden with device_sim_set_identity() before or after start.
+ * The identity is seeded from the built-in defaults for (plc_type, model) and
+ * can be overridden with device_sim_set_identity() before or after start.
  * Returns NULL on allocation failure.
  */
-extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *bind_addr, uint16_t port);
+extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *model, const char *bind_addr, uint16_t port);
 
 /*
  * Optional configuration — all must be called before device_sim_start().

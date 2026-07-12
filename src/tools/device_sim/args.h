@@ -33,21 +33,39 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
-#include <libplctag/protocols/enip/server/device_sim.h>
 
 /*
- * Parse argv into a new device_sim_t and an optional debug level.
- *
- * Returns PLCTAG_STATUS_OK on success (*sim_out is set, caller owns it).
- * Returns 1 if --help was requested (caller should exit(0)).
- * Returns a negative PLCTAG_ERR_* code on bad input (*sim_out is NULL).
- *
- * The returned device_sim_t must be freed with device_sim_destroy().
+ * Parsed CLI options.  Tag specs are borrowed pointers into argv (the string
+ * following each "--tag="), not copied; caller owns argv's lifetime for as
+ * long as sim_args_t is in use.
  */
-extern int32_t args_parse(int argc, char **argv,
-                           device_sim_t **sim_out,
-                           int32_t *debug_level_out);
+typedef struct {
+    const char *plc_type;   /* raw --plc= value, or NULL for the default */
+    const char *model;      /* raw --model= value, or NULL */
+    const char *bind_addr;  /* raw --bind= value, or NULL for all interfaces */
+    uint16_t    port;
+    int32_t     delay_ms;
+    const char *tag_specs[64];
+    int         num_tags;
+} sim_args_t;
+
+/*
+ * Parse argv into a sim_args_t.
+ *
+ * Returns PLCTAG_STATUS_OK on success.
+ * Returns 1 if --help was requested (caller should exit(0)).
+ * Returns a negative PLCTAG_ERR_* code on bad input.
+ */
+extern int32_t args_parse(int argc, char **argv, sim_args_t *args_out, int32_t *debug_level_out);
 
 /* Print usage to stderr. */
 extern void args_print_usage(const char *prog);
+
+/*
+ * Build a plc_tag_create() attribute string for one --tag= spec (CIP:
+ * "Name:TYPE[dims]", or PCCC: "B<n>[count]") plus the shared endpoint
+ * options.  Returns PLCTAG_STATUS_OK or PLCTAG_ERR_BAD_PARAM.
+ */
+extern int32_t args_build_tag_attr_str(const sim_args_t *args, const char *spec, char *out, size_t out_cap);

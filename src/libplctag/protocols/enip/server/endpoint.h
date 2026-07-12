@@ -64,13 +64,14 @@ extern void endpoint_registry_teardown(void);
  * refcount 1. bind_addr may be NULL (any interface); NULL and "0.0.0.0" are
  * treated as the same key.
  *
- * plc_type is only used when creating a new endpoint; if an endpoint already
- * exists at this (bind_addr,port), its original plc_type wins and this
- * parameter is ignored (a server can only be one PLC type per endpoint).
+ * plc_type/model are only used when creating a new endpoint; if an endpoint
+ * already exists at this (bind_addr,port), its original plc_type/model win
+ * and these parameters are ignored (a server can only be one PLC
+ * type/model per endpoint). model may be NULL (family default).
  *
  * Returns NULL on failure (out of memory or thread/socket creation failure).
  */
-extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type);
+extern device_sim_t *endpoint_find_or_create(const char *bind_addr, uint16_t port, enip_plc_type_t plc_type, const char *model);
 
 /*
  * Decrement the refcount of the endpoint owning sim. At zero, stops the

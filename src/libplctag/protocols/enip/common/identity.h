@@ -40,6 +40,12 @@
 /* Return the built-in default identity for a given PLC type (used at create time). */
 extern const identity_t *identity_for_plc_type(enip_plc_type_t pt);
 
+/* Same, but selects a specific catalog model within the family (case-
+ * insensitive; e.g. "NX102" for ENIP_PLC_OMRON_NJNX). NULL/"" behaves like
+ * identity_for_plc_type(); an unrecognized model falls back to the family's
+ * default and logs a warning. */
+extern const identity_t *identity_for_plc_type_model(enip_plc_type_t pt, const char *model);
+
 /*
  * Encode GetAttributesAll body (no CIP response header).
  * Layout: vendor_id(u16LE) device_type(u16LE) product_code(u16LE)

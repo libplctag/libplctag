@@ -163,11 +163,20 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
 extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size) {
     sess->raw_packet_size = raw_packet_size;
 
-    size_t eip_payload = (raw_packet_size > EIP_HEADER_SIZE) ? (size_t)raw_packet_size - EIP_HEADER_SIZE : (size_t)0;
-    sess->max_eip_packet_size = eip_payload;
+    /* Mirrors eip_session_set_connected_sizes below: raw_packet_size is the
+     * data item's own on-wire footprint (item header + payload, no seq num
+     * for unconnected), and the EIP payload adds the CPF framing that comes
+     * before that item (iface_handle+timeout+item_count+null addr item).
+     * Previously this subtracted EIP_HEADER_SIZE (the 24-byte encapsulation
+     * header) instead, which has no basis -- payload_len already excludes
+     * that header by definition -- and undersized max_eip_packet_size by
+     * enough to reject legitimate large unconnected Read/WriteFrag requests
+     * (observed: 506-byte request rejected against a 484-byte cap). */
+    size_t cpf_before_data_item = CPF_HEADER_SIZE + CPF_UNCONNECTED_ADDR_ITEM_SIZE;
+    sess->max_eip_packet_size = cpf_before_data_item + (size_t)raw_packet_size;
 
-    size_t cpf_unc_framing = CPF_HEADER_SIZE + CPF_UNCONNECTED_ADDR_ITEM_SIZE + CPF_UNCONNECTED_DATA_ITEM_SIZE;
-    sess->max_cpf_packet_size = (eip_payload > cpf_unc_framing) ? eip_payload - cpf_unc_framing : (size_t)0;
+    size_t di_overhead = CPF_UNCONNECTED_DATA_ITEM_SIZE;
+    sess->max_cpf_packet_size = (raw_packet_size > di_overhead) ? (size_t)raw_packet_size - di_overhead : (size_t)0;
 
     sess->max_cip_packet_size = sess->max_cpf_packet_size;
 }

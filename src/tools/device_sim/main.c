@@ -40,13 +40,10 @@
 #include <libplctag/lib/libplctag.h>
 #include "platform.h"
 #include "utils/debug.h"
-#include <libplctag/protocols/enip/server/device_sim.h>
 #include "args.h"
 
 /* ============================================================================
  * Signal flag — set by handler, consumed by the main loop.
- * The handler only writes a flag; device_sim_stop (which takes a mutex) is
- * called from the main loop, not from the handler itself.
  * ============================================================================ */
 
 static volatile sig_atomic_t g_signal = 0;
@@ -61,10 +58,10 @@ static void sigint_handler(int sig) {
  * ============================================================================ */
 
 int main(int argc, char **argv) {
-    device_sim_t *sim    = NULL;
-    int32_t       dlvl   = PLCTAG_DEBUG_WARN;
+    sim_args_t args;
+    int32_t    dlvl = PLCTAG_DEBUG_WARN;
 
-    int32_t rc = args_parse(argc, argv, &sim, &dlvl);
+    int32_t rc = args_parse(argc, argv, &args, &dlvl);
     if(rc == 1) { return 0; }          /* --help printed */
     if(rc != PLCTAG_STATUS_OK) {
         args_print_usage(argv[0]);
@@ -80,19 +77,34 @@ int main(int argc, char **argv) {
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    rc = device_sim_start(sim);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "device_sim: failed to start (%d).\n", (int)rc);
-        device_sim_destroy(sim);
-        return 1;
+    int32_t tag_ids[64];
+    for(int i = 0; i < args.num_tags; i++) {
+        char attr_str[512];
+        rc = args_build_tag_attr_str(&args, args.tag_specs[i], attr_str, sizeof(attr_str));
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "device_sim: failed to build attribute string for --tag='%s'.\n", args.tag_specs[i]);
+            for(int j = 0; j < i; j++) { plc_tag_destroy(tag_ids[j]); }
+            return 1;
+        }
+
+        int32_t tag_id = plc_tag_create(attr_str, 5000);
+        if(tag_id < 0) {
+            fprintf(stderr, "device_sim: failed to create tag for --tag='%s': %s.\n",
+                    args.tag_specs[i], plc_tag_decode_error(tag_id));
+            for(int j = 0; j < i; j++) { plc_tag_destroy(tag_ids[j]); }
+            return 1;
+        }
+        tag_ids[i] = tag_id;
     }
+
+    fprintf(stderr, "device_sim: listening on port %u with %d tag(s). Ctrl-C to stop.\n",
+            (unsigned)args.port, args.num_tags);
 
     /* Wait for signal. */
     while(!g_signal) {
         sleep_ms(50);
     }
 
-    device_sim_stop(sim);
-    device_sim_destroy(sim);
+    for(int i = 0; i < args.num_tags; i++) { plc_tag_destroy(tag_ids[i]); }
     return 0;
 }
