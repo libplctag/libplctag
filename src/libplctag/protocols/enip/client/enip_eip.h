@@ -52,9 +52,10 @@
 #define ENIP_EIP_HEADER_SIZE ((size_t)24)
 
 /* EIP command codes */
-#define ENIP_CMD_REGISTER_SESSION ((uint16_t)0x0065)
-#define ENIP_CMD_UNCONNECTED_SEND ((uint16_t)0x006F) /* SendRRData   */
-#define ENIP_CMD_CONNECTED_SEND   ((uint16_t)0x0070) /* SendUnitData */
+#define ENIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
+#define ENIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
+#define ENIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F) /* SendRRData   */
+#define ENIP_CMD_CONNECTED_SEND     ((uint16_t)0x0070) /* SendUnitData */
 
 typedef struct {
     uint16_t command;
@@ -76,6 +77,11 @@ extern bool enip_eip_decode(Bytes in, enip_eip_hdr_t *h, Bytes *payload);
 /* Build a RegisterSession request (command 0x0065, session_handle=0,
  * protocol_version=1, options=0). */
 extern Bytes enip_eip_register_session(Arena *a);
+
+/* Build an UnregisterSession request (command 0x0066, no payload). The target
+ * sends no reply to this command -- fire-and-forget, same as the server's
+ * handle_unregister_session (common/eip.c). */
+extern Bytes enip_eip_unregister_session(Arena *a, uint32_t session_handle);
 
 /* Wrap a CPF frame in a SendRRData request (command 0x006F, unconnected). */
 extern Bytes enip_eip_send_rr_data(Arena *a, uint32_t session_handle, Bytes cpf);

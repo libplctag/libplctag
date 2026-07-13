@@ -2419,12 +2419,33 @@ static void reset_connection(enip_connection_t *c) {
     c->state = CONN_CONNECT;
 }
 
+/* Best-effort UnregisterSession ahead of a graceful idle teardown. The target
+ * sends no reply to this command (common/eip.c's handle_unregister_session
+ * mirrors this), so this is fire-and-forget: a single non-blocking write
+ * attempt, no retry loop, no error handling beyond "did the arena/encode
+ * succeed" -- the socket is about to be closed either way, so a short write
+ * or a send that never reaches the peer changes nothing observable to this
+ * connection. Skipped when there is no session to unregister (session_handle
+ * == 0, e.g. RegisterSession never completed). */
+static void send_unregister_session(enip_connection_t *c) {
+    if(!c->sock || c->session_handle == 0) { return; }
+
+    arena_reset(&c->arena);
+
+    Bytes frame = enip_eip_unregister_session(&c->arena, c->session_handle);
+    if(bytes_is_null(frame)) { return; }
+
+    socket_write(c->sock, frame.data, (int)frame.len, 0);
+}
+
 /* Graceful idle teardown: like reset_connection but driven by the inactivity
  * timer rather than an error, and it parks in CONN_IDLE (no reconnect timer) so
  * the session stays down until a tag is scheduled. Only called when there is no
  * in-flight or batched work, so nothing needs to be completed/aborted. */
 static void idle_disconnect(enip_connection_t *c) {
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Inactivity timeout reached; disconnecting session.");
+
+    send_unregister_session(c);
 
     if(c->sock) { socket_close(c->sock); }
 
