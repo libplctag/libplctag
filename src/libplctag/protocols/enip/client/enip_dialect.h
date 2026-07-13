@@ -79,6 +79,24 @@ typedef struct enip_dialect_t {
      * copy into t->data, set *more for another round trip. Returns a
      * PLCTAG_STATUS or PLCTAG_ERR code. Caller holds t->api_mutex. */
     int32_t (*apply)(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more);
+
+    /* @tags/@udt enumeration (design doc §16a listing subsystem). NULL if this
+     * dialect does not support listing -- build_tag_request rejects
+     * ENIP_OP_LIST/UDT_META/UDT_FIELDS with PLCTAG_ERR_UNSUPPORTED when
+     * build_listing is NULL, so a dialect that sets one of this pair must set
+     * both. Rockwell and OMRON enumerate via different CIP classes/services
+     * (ROCKWELL-SPECIFIC-DESIGN.md vs OMRON-SPECIFIC-DESIGN.md §5) with no
+     * shared wire shape, so unlike `build`/`apply` these are never shared
+     * verbatim between dialects.
+     *
+     * build_listing encodes t's current listing op into a fresh a-backed
+     * allocation (unconnected-sized; wrapped in the same connected CPF as data
+     * ops by the caller). apply_listing parses one already-CPF-unwrapped reply
+     * (the CIP status/data past the reply header), accumulates into t->data,
+     * and sets *more when another request is needed. Caller holds
+     * t->api_mutex for both. */
+    Bytes (*build_listing)(Arena *a, enip_tag_p t);
+    int32_t (*apply_listing)(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
 } enip_dialect_t;
 
 /* Logix/Micro800 symbolic dialect (CIP Read/Write Tag 0x4C/0x4D). The default

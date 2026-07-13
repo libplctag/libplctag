@@ -277,8 +277,8 @@ static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes paylo
 static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
-static Bytes build_listing_request(Arena *a, enip_tag_p t);
-static int32_t apply_listing_reply(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
+static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t);
+static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
 
 /* A tag that issues network ops via pick_batch (vs. the special tags that the
  * service pass handles): a data tag, a PCCC tag, or an @tags/@udt listing tag.
@@ -1183,7 +1183,10 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
             status = (int8_t)PLCTAG_ERR_BAD_REPLY;
         } else if(t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT) {
             /* @tags/@udt: a partial-transfer status (0x06) is continuation, not
-             * an error; apply_listing_reply accumulates and sets more_windows. */
+             * an error; the dialect's apply_listing accumulates and sets
+             * more_windows. build_listing being non-NULL (checked in
+             * build_tag_request before a request for this tag kind is ever
+             * sent) guarantees apply_listing is too. */
             cip_reply_t reply;
             if(!enip_cip_parse_reply(cip, &reply)) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse CIP reply!");
@@ -1193,7 +1196,7 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
                        reply.ext_status);
                 status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
             } else {
-                status = (int8_t)apply_listing_reply(t, reply.status, reply.data, &more_windows);
+                status = (int8_t)c->dialect->apply_listing(t, reply.status, reply.data, &more_windows);
             }
         } else {
             /* data tag: the dialect parses the reply, interprets status, copies
@@ -1579,6 +1582,8 @@ const enip_dialect_t enip_logix_dialect = {
     .max_batch_cap = 0, /* no cap: Multiple Service Packet (0x0A) supported */
     .build = enip_logix_build,
     .apply = enip_logix_apply,
+    .build_listing = enip_logix_build_listing,
+    .apply_listing = enip_logix_apply_listing,
 };
 
 /* OMRON-SPECIFIC-DESIGN.md §6: same build/apply as Logix (§1 -- identical path
@@ -1976,16 +1981,20 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
         case ENIP_OP_LIST:
         case ENIP_OP_UDT_META:
         case ENIP_OP_UDT_FIELDS:
-            /* @tags/@udt are ControlLogix-class only (CIP class 0x6B/0x6C); the
-             * device identity is known by the time pick_batch dispatches (queried
-             * during bring-up before CONN_READY). Reject on anything else. */
-            if(c->plc_type != ENIP_PLC_LGX) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are only supported on ControlLogix-class devices!");
+            /* @tags/@udt enumeration is dialect-specific (Rockwell and OMRON use
+             * different CIP classes/services -- see enip_dialect_t's
+             * build_listing doc). The device identity/dialect is known by the
+             * time pick_batch dispatches (queried during bring-up before
+             * CONN_READY). Reject when the connection's dialect has no listing
+             * support. */
+            if(!c->dialect->build_listing) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are not supported by dialect \"%s\"!",
+                       c->dialect->name);
                 complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
                 c->state = CONN_READY;
                 return PLCTAG_STATUS_OK;
             }
-            req = build_listing_request(&c->arena, t);
+            req = c->dialect->build_listing(&c->arena, t);
             break;
 
         default: break;
@@ -2017,10 +2026,12 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
     return PLCTAG_STATUS_OK;
 }
 
-/* @tags/@udt request for t's current op. read_off is the byte cursor into the
- * accumulated buffer; list_next_id is the symbol instance id (@tags) or template
- * id (@udt); list_total is the @udt field-definition byte target. */
-static Bytes build_listing_request(Arena *a, enip_tag_p t) {
+/* Rockwell (ROCKWELL-SPECIFIC-DESIGN.md): @tags/@udt request for t's current
+ * op, CIP class 0x6B (symbol) / 0x6C (template). read_off is the byte cursor
+ * into the accumulated buffer; list_next_id is the symbol instance id (@tags)
+ * or template id (@udt); list_total is the @udt field-definition byte target.
+ * enip_dialect_t.build_listing for enip_logix_dialect. */
+static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t) {
     switch(t->op) {
         case ENIP_OP_LIST: return enip_cip_list_tags(a, t->path, (uint16_t)t->list_next_id);
 
@@ -2035,10 +2046,11 @@ static Bytes build_listing_request(Arena *a, enip_tag_p t) {
     }
 }
 
-/* Accumulate one @tags/@udt reply into t->data and advance the continuation
- * cursor. Sets *more when another request is needed (FRAG status, or the UDT
- * metadata->fields transition). Caller holds t->api_mutex. */
-static int32_t apply_listing_reply(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
+/* Rockwell: accumulate one @tags/@udt reply into t->data and advance the
+ * continuation cursor. Sets *more when another request is needed (FRAG
+ * status, or the UDT metadata->fields transition). Caller holds t->api_mutex.
+ * enip_dialect_t.apply_listing for enip_logix_dialect. */
+static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
     *more = false;
 
     if(t->op == ENIP_OP_LIST) {
