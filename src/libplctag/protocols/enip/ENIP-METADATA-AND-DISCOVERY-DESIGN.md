@@ -9,8 +9,13 @@ callers. Three pieces:
    demand from raw + a schema. `format` is a runtime parameter, not a
    create-time attribute.
 2. **`enip-udp` discovery and `@identity`/`@listidentity`** (§ intro, below):
-   UDP unicast/broadcast List Identity, sharing the same record model as
-   TCP `enip` `@identity`.
+   UDP unicast/broadcast List Identity. Only the *formatted* (`cbor`/`json`)
+   presentation is shared across sources -- the same "identity" schema field
+   vocabulary, reused for every record regardless of which PLC/transport it
+   came from. The *raw* buffer stays whatever that source's native wire
+   format actually is (UDP List Identity's reply shape for discovery,
+   Get_Attributes_All's shape for TCP `enip` `@identity`) -- no raw-layout
+   unification across transports.
 3. **Incremental record delivery via the event callback** (§1–§10): when an
    event callback is registered, fire it once per newly received record, with
    the raw buffer updated *before* the callback runs. This document decides
@@ -30,7 +35,7 @@ We overload the meaning of the '@identity' tag name.  If the protocol is 'enip-u
 
 To avoid as much surprise as possible, we introduce the '@listidentity' tag name as an alias of '@identity'.  Users who know CIP well can use '@listidentity' to indicate they are interested in the list identity semantics, while others can continue using '@identity'.  Users who are unaware of the distinction can continue using '@identity' without needing to understand the list identity semantics.
 
-In order to make this easier to use, '@identity' (unicast, broadcast, or TCP) must present its records in the exact same model, so the parsing logic is identical regardless of transport. In the native `raw` format that model is bare length-prefixed records concatenated together (no stored header — see §0 and §8); the version + record-count + records envelope exists only in the structured `cbor`/`json` renderings produced on demand by the format/schema API.
+In order to make this easier to use, '@identity' (unicast, broadcast, or TCP) presents its *formatted* (`cbor`/`json`) records in the exact same schema, so parsing structured output is identical regardless of transport -- see §0 and §8. The **raw** buffer is *not* unified: it stays whatever that source's native wire format is (UDP List Identity's own reply shape for `enip-udp`; the existing Get_Attributes_All shape, unchanged, for TCP `enip` `@identity`). Only the schema a caller sees via `PLCTAG_FORMAT_CBOR`/`PLCTAG_FORMAT_JSON` is shared; `PLCTAG_FORMAT_RAW` is whatever each tag's transport actually produced, with no cross-transport rendering step in between.
 
 Note that these changes to '@identity' only affect the new ENIP protocol (both UDP and TCP).  The existing AB and Omron implementations of '@identity' are unchanged; this is only for the new ENIP protocol handling.
 
@@ -321,9 +326,16 @@ Ordering guarantees:
   cleared dedup set) and re-sends the request (broadcast or unicast); the
   sequence in §6 repeats.
 
-## 8. Raw record layout
+## 8. Raw record layout (`enip-udp` discovery only)
 
-The native (`format=raw`) buffer is **bare length-prefixed records
+**Scope correction:** raw layout unification across transports was the
+original plan for this section; it was withdrawn (see §9) -- only the
+*formatted* (CBOR/JSON) presentation is shared across sources. This section
+now describes `enip-udp`'s own native raw buffer only. TCP `enip` `@identity`
+keeps its existing raw format (the unmodified Get_Attributes_All payload) and
+is not discussed further here.
+
+`enip-udp`'s native (`format=raw`) buffer is **bare length-prefixed records
 concatenated together — no stored header**:
 
 ```text
@@ -346,40 +358,42 @@ per record:
 All multi-byte fields LE; `ip[4]` as dotted octets. Records are walked one at a
 time (same as tag-listing data today). The record **count** is *not* in the
 buffer — it is library-tracked and exposed via the `record_count` int
-attribute. Unicast `enip-udp` and TCP `enip` `@identity` produce this identical
-record with `record_count == 1`, so raw-parsing code is the same for all three.
+attribute. A unicast `enip-udp` scan (CIDR `/32` or absent) produces exactly
+one such record (`record_count == 1`); this is a property of that one
+transport's own reply shape, not a claim about any other tag's raw buffer.
 
-The version + `schema` + `schema-version` + `records` envelope lives **only** in
-the `cbor`/`json` renderings from `get_formatted_data` (§0); it is generated
-on demand from these raw records and never stored.
+`enip_identity_write_raw_record`/`enip_identity_raw_record_size`
+(`client/enip_discover.h`) are the encoder for this layout; nothing else
+consumes or produces it today.
 
-## 9. Compatibility: TCP `@identity` return format changes
+## 9. Formatted-only sharing: TCP `@identity` raw stays unchanged
 
-The new-ENIP TCP `enip` `@identity` read currently returns the **raw
-Get_Attributes_All payload** verbatim (`create_identity_tag` /
-`enip_identity_tag_copy`, `client/enip_tag.c`). Under this design its `raw`
-buffer instead holds **one §8 record** (identity fields in the §8 layout), so
-unicast, broadcast, and TCP share one record model; the structured view comes
-from `get_formatted_data(…, PLCTAG_FORMAT_CBOR, …)`.
+**Correction to the original plan.** An earlier draft of this section planned
+to migrate the TCP `enip` `@identity` tag's raw buffer onto the §8 record
+layout, so UDP and TCP would share one *raw* shape. That migration is
+withdrawn: **only the formatted (`PLCTAG_FORMAT_CBOR`/`PLCTAG_FORMAT_JSON`)
+presentation is unified across sources — the raw buffer is not.**
 
-Breaking change to that one tag's buffer layout, scoped to the new ENIP module
-only:
-
-- **AB and OMRON `@identity` are unchanged** (§ intro) — separate
-  implementations, current formats kept.
-- The new ENIP module is behind `LIBPLCTAG_FEATURE_ENIP` (experimental/beta),
-  so the `@identity` buffer layout is not a shipped contract yet — change it
-  now, before it hardens.
-- A caller that previously parsed the raw Get_Attributes_All bytes at offset 0
-  must now read the §8 record layout (or, better, switch to
-  `get_formatted_data(PLCTAG_FORMAT_CBOR)` and stop parsing bytes by hand). Field offsets
-  differ from raw CIP attribute order.
-
-Implementation touch points: `enip_identity_tag_copy` lays the cached payload
-into a §8 record instead of copying it raw; the shared record encoder (the same
-one the UDP worker and the CBOR renderer use) is the single place a record is
-laid out, so TCP, UDP, and the structured view cannot drift; the identity
-built-in schema (§0) drives the CBOR/JSON rendering.
+- TCP `enip` `@identity` (`create_identity_tag` / `enip_identity_tag_copy`,
+  `client/enip_tag.c`) continues to return the **raw Get_Attributes_All
+  payload** verbatim, exactly as before this design doc existed. No change.
+- `enip-udp` discovery uses its own native §8 record layout (§8), because
+  that is what a UDP List Identity reply actually looks like on the wire --
+  not because it was forced to match TCP's shape.
+- What *is* shared: both tags' `PLCTAG_FORMAT_CBOR` rendering uses the same
+  "identity" schema field vocabulary (`vendor_id`, `device_type`,
+  `product_code`, `revision_major`, `revision_minor`, `status`, `serial`,
+  `product_name`) for the fields both sources actually have. `enip-udp`'s
+  CBOR record additionally carries `ip`/`port`/`state`, fields discovery has
+  and a single already-connected TCP `@identity` read does not; TCP's CBOR
+  record does not gain padding/placeholder fields to force an exact match --
+  same vocabulary, not an identical field set, since the two sources
+  genuinely don't carry the same information.
+- Each side's own raw-to-CBOR parsing step is source-specific by necessity
+  (TCP parses Get_Attributes_All bytes; UDP parses §8 records) and shares no
+  code -- the sharing is at the schema/vocabulary level (same field names,
+  same meaning, same built-in `identity` schema name/version), not at the
+  parsing-code level.
 
 ## 10. Open decisions
 

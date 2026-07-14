@@ -82,6 +82,10 @@ struct {
     /* generic ENIP client engine (experimental/beta) */
     {.protocol = "enip-tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
     {.protocol = "enip_tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_tag_create},
+    /* enip-udp: UDP List Identity discovery, "@identity" only for now (see
+     * client/enip_discover.c / ENIP-METADATA-AND-DISCOVERY-DESIGN.md). */
+    {.protocol = "enip-udp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_udp_tag_create},
+    {.protocol = "enip_udp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = enip_udp_tag_create},
 #endif
 #if LIBPLCTAG_FEATURE_MODBUS
     {.protocol = "modbus-tcp", .role = "client", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},

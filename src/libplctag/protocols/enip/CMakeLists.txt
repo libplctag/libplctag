@@ -17,6 +17,8 @@ set(ENIP_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_pccc_addr.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_pccc_addr.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_discover.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_discover.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip.c"
                     PARENT_SCOPE

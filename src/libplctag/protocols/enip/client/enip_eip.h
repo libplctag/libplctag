@@ -52,6 +52,7 @@
 #define ENIP_EIP_HEADER_SIZE ((size_t)24)
 
 /* EIP command codes */
+#define ENIP_CMD_LIST_IDENTITY      ((uint16_t)0x0063)
 #define ENIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
 #define ENIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
 #define ENIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F) /* SendRRData   */
@@ -77,6 +78,11 @@ extern bool enip_eip_decode(Bytes in, enip_eip_hdr_t *h, Bytes *payload);
 /* Build a RegisterSession request (command 0x0065, session_handle=0,
  * protocol_version=1, options=0). */
 extern Bytes enip_eip_register_session(Arena *a);
+
+/* Build a List Identity request (command 0x0063, session_handle=0, empty
+ * payload). Connectionless -- sent over UDP before any session exists
+ * (unicast or broadcast); see client/enip_discover.c. */
+extern Bytes enip_eip_list_identity(Arena *a);
 
 /* Build an UnregisterSession request (command 0x0066, no payload). The target
  * sends no reply to this command -- fire-and-forget, same as the server's

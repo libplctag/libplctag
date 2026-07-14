@@ -99,7 +99,14 @@ typedef enum {
     TAG_PROTOCOL_MB_CONNECTION = 6,
     TAG_PROTOCOL_OMRON_CONNECTION = 7,
     TAG_PROTOCOL_ENIP = 8,
-    TAG_PROTOCOL_ENIP_CONNECTION = 9
+    TAG_PROTOCOL_ENIP_CONNECTION = 9,
+    /* enip-udp discovery tags (client/enip_discover.c): a distinct struct
+     * layout from enip_tag_t (no enip_connection_t; see that file), so this
+     * must never collide with TAG_PROTOCOL_ENIP/_CONNECTION -- code that
+     * reads ((enip_tag_p)src_tag)->conn after matching one of those two
+     * values (e.g. enip_tag_get_conn) would read the wrong struct if an
+     * enip-udp tag matched too. */
+    TAG_PROTOCOL_ENIP_UDP = 10
 } tag_protocol_t;
 
 

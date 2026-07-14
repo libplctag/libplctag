@@ -79,6 +79,21 @@ Bytes enip_eip_register_session(Arena *a) {
     return enip_eip_encode(a, &hdr, payload);
 }
 
+Bytes enip_eip_list_identity(Arena *a) {
+    if(!a) { return bytes_null(); }
+
+    enip_eip_hdr_t hdr = {
+        .command = ENIP_CMD_LIST_IDENTITY,
+        .length = 0,
+        .session_handle = 0,
+        .status = 0,
+        .sender_context = 0,
+        .options = 0,
+    };
+
+    return enip_eip_encode(a, &hdr, bytes_null());
+}
+
 Bytes enip_eip_unregister_session(Arena *a, uint32_t session_handle) {
     if(!a) { return bytes_null(); }
 

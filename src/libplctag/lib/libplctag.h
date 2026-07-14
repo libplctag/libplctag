@@ -356,6 +356,14 @@ typedef enum {
     PLCTAG_EVENT_DESTROYED = 6,       /* Tag destroyed */
     PLCTAG_EVENT_CREATED = 7,         /* Tag created */
 
+    /* Incremental data arrived; the tag's buffer was updated (before this
+     * event fires) and the current read is not yet complete -- more records
+     * may follow, terminated by the usual PLCTAG_EVENT_READ_COMPLETED.
+     * General-purpose, not specific to any one tag kind (see
+     * ENIP-METADATA-AND-DISCOVERY-DESIGN.md); the first user is enip-udp
+     * discovery, firing once per newly received, deduplicated device record. */
+    PLCTAG_EVENT_DATA_RECEIVED = 8,
+
     /* Connection status events */
     PLCTAG_EVENT_CONN_STATUS_OFFSET = 100,        /* Base offset for connection status change events */
     PLCTAG_EVENT_CONN_STATUS_UP = 100,            /* Connected and ready for operations */

@@ -37,6 +37,7 @@
  */
 
 #include <libplctag/protocols/enip/client/enip.h>
+#include <libplctag/protocols/enip/client/enip_discover.h>
 #include <libplctag/protocols/enip/client/enip_session.h>
 #include <libplctag/protocols/enip/client/enip_tag.h>
 #include <utils/debug.h>
@@ -56,4 +57,9 @@ void enip_teardown(void) {
 plc_tag_p enip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                            void *userdata, plc_tag_p src_tag) {
     return enip_tag_create_impl(attribs, tag_callback_func, userdata, src_tag);
+}
+
+plc_tag_p enip_udp_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                              void *userdata, plc_tag_p src_tag) {
+    return enip_udp_tag_create_impl(attribs, tag_callback_func, userdata, src_tag);
 }
