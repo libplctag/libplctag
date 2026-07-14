@@ -126,8 +126,12 @@ endif()
 # Generate files from templates
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
-# where to find include files.
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
+# where to find include files. ${CMAKE_BINARY_DIR}/generated holds headers
+# CONFIGURE_FILE'd at build-config time (e.g. libplctag/lib/plctag_features.h)
+# -- generating into the build tree, not the source tree, keeps multiple build
+# directories against the same checkout from clobbering each other's
+# configured values (each build tree gets its own ${CMAKE_BINARY_DIR}).
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_BINARY_DIR}/generated" "${PLATFORM_SHIM_PATH}")
 
 # build the libplctag library, shared and static
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/libplctag")

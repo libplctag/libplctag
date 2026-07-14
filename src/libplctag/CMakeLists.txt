@@ -4,7 +4,14 @@ message("Building libplctag library.")
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h" @ONLY)
 
 # generate the compile-time feature-gate header (LIBPLCTAG_FEATURE_*).
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h" @ONLY)
+# Written into the build tree (${CMAKE_BINARY_DIR}/generated, added to the
+# include path in the top-level CMakeLists.txt), not the source tree: two
+# build directories configured against the same checkout must not clobber
+# each other's LIBPLCTAG_FEATURE_* values by racing to overwrite one shared
+# file. #include <libplctag/lib/plctag_features.h> resolves here the same way
+# it resolves any other libplctag/... header, just via the generated root
+# instead of the source root.
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h.in" "${CMAKE_BINARY_DIR}/generated/libplctag/lib/plctag_features.h" @ONLY)
 
 # Parse libplctag.h to generate internal debug constants
 # This creates add_custom_command for debug_generated.h and debug_module_names.c
@@ -49,7 +56,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h"
+                     "${CMAKE_BINARY_DIR}/generated/libplctag/lib/plctag_features.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/system.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/system.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/tag.h"
@@ -71,6 +78,8 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/arena.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/bytes.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/bytes.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/cbor.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/cbor.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/macros.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/random_utils.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/random_utils.h"

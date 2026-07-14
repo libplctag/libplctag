@@ -60,6 +60,23 @@ endif()
 # Register the unit test with CTest
 add_test(NAME unit_test_init COMMAND test_init)
 
+# test_cbor: tests utils/cbor.c against RFC 8949 examples (pure, no I/O).
+# Links plctag_static directly (cbor.c is an unconditional utils/ source, not
+# gated by any protocol feature flag) rather than compiling cbor.c a second
+# time, since it has no protocol-specific dependencies to isolate.
+add_executable(test_cbor test_cbor.c)
+
+target_include_directories(test_cbor PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${cmocka_SOURCE_DIR}/include
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_cbor PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+
+add_test(NAME unit_test_cbor COMMAND test_cbor)
+
 # test_enip_type: tests enip_type_decode() (pure, no I/O)
 add_executable(test_enip_type
     test_enip_type.c
@@ -135,7 +152,7 @@ add_test(NAME unit_test_enip_pccc_addr COMMAND test_enip_pccc_addr)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_enip_type test_enip_cip_path test_enip_eip_cpf test_enip_pccc_addr
+    DEPENDS test_init test_cbor test_enip_type test_enip_cip_path test_enip_eip_cpf test_enip_pccc_addr
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

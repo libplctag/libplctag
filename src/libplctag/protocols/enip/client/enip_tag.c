@@ -52,6 +52,7 @@
 #include <utils/arena.h>
 #include <utils/attr.h>
 #include <utils/bytes.h>
+#include <utils/cbor.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 
@@ -388,6 +389,181 @@ static int32_t enip_identity_tag_tickler(plc_tag_p tag) {
     return PLCTAG_STATUS_OK;
 }
 
+/* ============================================================================
+ * @identity structured presentation (format/schema subsystem; design doc
+ * ENIP-METADATA-AND-DISCOVERY-DESIGN.md §0). "cbor" is rendered on demand
+ * from the cached raw Get_Attributes_All payload (tag->data) -- nothing
+ * structured is stored. Read-only: no set_formatted_data/set_schema.
+ * ============================================================================ */
+
+#define ENIP_IDENTITY_SCHEMA_NAME "identity"
+#define ENIP_IDENTITY_SCHEMA_VERSION ((uint64_t)1)
+
+/* CIP SHORT_STRING product names are ASCII, a valid UTF-8 subset, so they can
+ * be written directly as a CBOR text string with no re-encoding. */
+#define CBOR_LIT(s) (s), (sizeof(s) - 1)
+
+/* Parsed view of the raw Get_Attributes_All payload cached in tag->data
+ * (identity_encode_get_attrs_all's layout, common/identity.c). product_name
+ * points directly into tag->data (not NUL-terminated, not copied). Returns
+ * false if the payload is not yet cached or is malformed. */
+typedef struct {
+    uint16_t vendor_id, device_type, product_code, status;
+    uint8_t revision_major, revision_minor;
+    uint32_t serial;
+    const char *product_name;
+    uint8_t product_name_len;
+} enip_identity_fields_t;
+
+static bool enip_identity_parse_fields(plc_tag_p tag, enip_identity_fields_t *out) {
+    if(!tag->data || tag->size < 14) { return false; }
+
+    Bytes raw = bytes_from_buf(tag->data, (size_t)tag->size);
+    uint8_t name_len = 0;
+
+    Bytes rest = bytes_unpack(raw, BYTES_LE, &out->vendor_id, &out->device_type, &out->product_code, &out->revision_major,
+                              &out->revision_minor, &out->status, &out->serial, &name_len);
+    if(bytes_is_null(rest) || rest.len < (size_t)name_len) { return false; }
+
+    out->product_name = (const char *)rest.data;
+    out->product_name_len = name_len;
+
+    return true;
+}
+
+/* record map: 8 string-keyed fields (§0's per-record shape for "identity"). */
+static size_t enip_identity_record_cbor_size(const enip_identity_fields_t *f) {
+    size_t sz = cbor_size_map_header(8);
+    sz += cbor_size_text(sizeof("vendor_id") - 1) + cbor_size_uint(f->vendor_id);
+    sz += cbor_size_text(sizeof("device_type") - 1) + cbor_size_uint(f->device_type);
+    sz += cbor_size_text(sizeof("product_code") - 1) + cbor_size_uint(f->product_code);
+    sz += cbor_size_text(sizeof("revision_major") - 1) + cbor_size_uint(f->revision_major);
+    sz += cbor_size_text(sizeof("revision_minor") - 1) + cbor_size_uint(f->revision_minor);
+    sz += cbor_size_text(sizeof("status") - 1) + cbor_size_uint(f->status);
+    sz += cbor_size_text(sizeof("serial") - 1) + cbor_size_uint(f->serial);
+    sz += cbor_size_text(sizeof("product_name") - 1) + cbor_size_text(f->product_name_len);
+    return sz;
+}
+
+static bool enip_identity_record_cbor_write(Bytes dest, size_t *pos, const enip_identity_fields_t *f) {
+    if(!cbor_write_map_header(dest, pos, 8)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("vendor_id"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->vendor_id)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("device_type"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->device_type)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("product_code"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->product_code)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("revision_major"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->revision_major)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("revision_minor"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->revision_minor)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("status"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->status)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("serial"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->serial)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("product_name"))) { return false; }
+    if(!cbor_write_text(dest, pos, f->product_name, f->product_name_len)) { return false; }
+    return true;
+}
+
+/* top-level envelope: {"schema","schema-version","records":[<one record>]}. */
+static size_t enip_identity_envelope_cbor_size(const enip_identity_fields_t *f) {
+    size_t sz = cbor_size_map_header(3);
+    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_IDENTITY_SCHEMA_NAME) - 1);
+    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_IDENTITY_SCHEMA_VERSION);
+    sz += cbor_size_text(sizeof("records") - 1) + cbor_size_array_header(1);
+    sz += enip_identity_record_cbor_size(f);
+    return sz;
+}
+
+static bool enip_identity_envelope_cbor_write(Bytes dest, size_t *pos, const enip_identity_fields_t *f) {
+    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("schema"))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT(ENIP_IDENTITY_SCHEMA_NAME))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("schema-version"))) { return false; }
+    if(!cbor_write_uint(dest, pos, ENIP_IDENTITY_SCHEMA_VERSION)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("records"))) { return false; }
+    if(!cbor_write_array_header(dest, pos, 1)) { return false; }
+    return enip_identity_record_cbor_write(dest, pos, f);
+}
+
+static int enip_identity_get_formatted_data_size(plc_tag_p tag, const char *format_type) {
+    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    enip_identity_fields_t f;
+    if(!enip_identity_parse_fields(tag, &f)) { return PLCTAG_ERR_NO_DATA; }
+
+    return (int)enip_identity_envelope_cbor_size(&f);
+}
+
+static int enip_identity_get_formatted_data(plc_tag_p tag, const char *format_type, uint8_t *buffer, int buffer_length) {
+    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    enip_identity_fields_t f;
+    if(!enip_identity_parse_fields(tag, &f)) { return PLCTAG_ERR_NO_DATA; }
+
+    if(enip_identity_envelope_cbor_size(&f) > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
+    size_t pos = 0;
+    if(!enip_identity_envelope_cbor_write(dest, &pos, &f)) { return PLCTAG_ERR_TOO_SMALL; }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Field-name reflection of the "identity" schema -- {"schema","schema-version",
+ * "fields":[...]}. Not tag-specific (every @identity tag has the same schema),
+ * so this ignores `tag`. */
+static const char *const ENIP_IDENTITY_FIELD_NAMES[] = {"vendor_id",      "device_type",    "product_code", "revision_major",
+                                                         "revision_minor", "status",         "serial",       "product_name"};
+#define ENIP_IDENTITY_FIELD_COUNT ((size_t)(sizeof(ENIP_IDENTITY_FIELD_NAMES) / sizeof(ENIP_IDENTITY_FIELD_NAMES[0])))
+
+static size_t enip_identity_schema_cbor_size(void) {
+    size_t sz = cbor_size_map_header(3);
+    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_IDENTITY_SCHEMA_NAME) - 1);
+    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_IDENTITY_SCHEMA_VERSION);
+    sz += cbor_size_text(sizeof("fields") - 1) + cbor_size_array_header(ENIP_IDENTITY_FIELD_COUNT);
+    for(size_t i = 0; i < ENIP_IDENTITY_FIELD_COUNT; i++) {
+        sz += cbor_size_text((size_t)str_length(ENIP_IDENTITY_FIELD_NAMES[i]));
+    }
+    return sz;
+}
+
+static bool enip_identity_schema_cbor_write(Bytes dest, size_t *pos) {
+    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("schema"))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT(ENIP_IDENTITY_SCHEMA_NAME))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("schema-version"))) { return false; }
+    if(!cbor_write_uint(dest, pos, ENIP_IDENTITY_SCHEMA_VERSION)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("fields"))) { return false; }
+    if(!cbor_write_array_header(dest, pos, ENIP_IDENTITY_FIELD_COUNT)) { return false; }
+    for(size_t i = 0; i < ENIP_IDENTITY_FIELD_COUNT; i++) {
+        if(!cbor_write_text(dest, pos, ENIP_IDENTITY_FIELD_NAMES[i], (size_t)str_length(ENIP_IDENTITY_FIELD_NAMES[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int enip_identity_get_schema_size(plc_tag_p tag, const char *format_type) {
+    (void)tag;
+    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+    return (int)enip_identity_schema_cbor_size();
+}
+
+static int enip_identity_get_schema(plc_tag_p tag, const char *format_type, uint8_t *buffer, int buffer_length) {
+    (void)tag;
+    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    if(enip_identity_schema_cbor_size() > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
+    size_t pos = 0;
+    if(!enip_identity_schema_cbor_write(dest, &pos)) { return PLCTAG_ERR_TOO_SMALL; }
+
+    return PLCTAG_STATUS_OK;
+}
+
 static struct tag_vtable_t enip_identity_tag_vtable = {
     .abort = enip_identity_tag_abort,
     .read = enip_identity_tag_read,
@@ -399,6 +575,12 @@ static struct tag_vtable_t enip_identity_tag_vtable = {
     .get_int_attrib = NULL,
     .set_int_attrib = NULL,
     .get_byte_array_attrib = NULL,
+    .get_formatted_data_size = enip_identity_get_formatted_data_size,
+    .get_formatted_data = enip_identity_get_formatted_data,
+    .set_formatted_data = NULL, /* read-only tag */
+    .get_schema_size = enip_identity_get_schema_size,
+    .get_schema = enip_identity_get_schema,
+    .set_schema = NULL, /* built-in schema, not user-settable */
 };
 
 /* ============================================================================

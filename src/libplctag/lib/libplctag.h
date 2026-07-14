@@ -634,6 +634,38 @@ LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
 LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, int buffer_length);
 LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, int buffer_length);
 
+/*
+ * Structured data presentation.
+ *
+ * format_type selects the encoding of the bytes a call moves: "raw" (the
+ * tag's native bytes -- always supported, needs no schema, equivalent to
+ * plc_tag_get_raw_bytes/plc_tag_set_raw_bytes at offset 0) or a structured
+ * format such as "cbor" (more formats, e.g. "json", may be added later).
+ * Structured formats are rendered on demand from the tag's native data plus
+ * its schema -- nothing structured is stored. A structured get on a tag with
+ * no schema (built-in or user-supplied via plc_tag_set_schema) fails with
+ * PLCTAG_ERR_UNSUPPORTED. A read-only tag (e.g. identity/tag-listing/
+ * discovery metadata) fails plc_tag_set_formatted_data with PLCTAG_ERR_UNSUPPORTED.
+ *
+ * The _size functions return the required buffer size, or a negative
+ * PLCTAG_ERR_* on failure. The get/set functions return PLCTAG_STATUS_OK, or
+ * a negative PLCTAG_ERR_* -- including PLCTAG_ERR_TOO_SMALL when
+ * buffer_length is too small to hold the result (call the _size function
+ * first, or retry with a larger buffer).
+ *
+ * plc_tag_get_schema_size/get_schema/set_schema use format_type for the
+ * SCHEMA's own encoding (independent of the data's format_type) -- e.g. a
+ * schema stored as JSON can still drive plc_tag_get_formatted_data(tag,
+ * "cbor", ...).
+ */
+LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, const char *format_type);
+LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length);
+
+LIB_EXPORT int plc_tag_get_schema_size(int32_t id, const char *format_type);
+LIB_EXPORT int plc_tag_get_schema(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_schema(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length);
+
 /* string accessors */
 
 LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length);
