@@ -71,20 +71,20 @@ struct tag_vtable_t {
     int (*get_byte_array_attrib)(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 
     /* Structured data presentation (design doc: ENIP-METADATA-AND-DISCOVERY-DESIGN.md
-     * §0). format_type is a runtime string ("cbor", "json", ...); "raw" is
-     * handled generically in lib.c and never reaches these hooks. NULL means
-     * this tag kind has no structured presentation -- callers get
+     * §0). format is a plc_tag_format_type_t; PLCTAG_FORMAT_RAW is handled
+     * generically in lib.c and never reaches these hooks. NULL means this tag
+     * kind has no structured presentation -- callers get
      * PLCTAG_ERR_UNSUPPORTED. A tag that implements get_formatted_data* should
      * also implement get_schema* (its schema is what makes the format
      * meaningful); set_formatted_data/set_schema stay NULL for read-only
      * metadata tags (identity, tag listing, discovery). */
-    int (*get_formatted_data_size)(plc_tag_p tag, const char *format_type);
-    int (*get_formatted_data)(plc_tag_p tag, const char *format_type, uint8_t *buffer, int buffer_length);
-    int (*set_formatted_data)(plc_tag_p tag, const char *format_type, const uint8_t *buffer, int buffer_length);
+    int (*get_formatted_data_size)(plc_tag_p tag, plc_tag_format_type_t format);
+    int (*get_formatted_data)(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
+    int (*set_formatted_data)(plc_tag_p tag, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
 
-    int (*get_schema_size)(plc_tag_p tag, const char *format_type);
-    int (*get_schema)(plc_tag_p tag, const char *format_type, uint8_t *buffer, int buffer_length);
-    int (*set_schema)(plc_tag_p tag, const char *format_type, const uint8_t *buffer, int buffer_length);
+    int (*get_schema_size)(plc_tag_p tag, plc_tag_format_type_t format);
+    int (*get_schema)(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
+    int (*set_schema)(plc_tag_p tag, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;

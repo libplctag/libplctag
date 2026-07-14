@@ -637,15 +637,16 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 /*
  * Structured data presentation.
  *
- * format_type selects the encoding of the bytes a call moves: "raw" (the
- * tag's native bytes -- always supported, needs no schema, equivalent to
+ * format selects the encoding of the bytes a call moves: PLCTAG_FORMAT_RAW
+ * (the tag's native bytes -- always supported, needs no schema, equivalent to
  * plc_tag_get_raw_bytes/plc_tag_set_raw_bytes at offset 0) or a structured
- * format such as "cbor" (more formats, e.g. "json", may be added later).
- * Structured formats are rendered on demand from the tag's native data plus
- * its schema -- nothing structured is stored. A structured get on a tag with
- * no schema (built-in or user-supplied via plc_tag_set_schema) fails with
- * PLCTAG_ERR_UNSUPPORTED. A read-only tag (e.g. identity/tag-listing/
- * discovery metadata) fails plc_tag_set_formatted_data with PLCTAG_ERR_UNSUPPORTED.
+ * format such as PLCTAG_FORMAT_CBOR (more formats, e.g. a future JSON entry,
+ * may be added later). Structured formats are rendered on demand from the
+ * tag's native data plus its schema -- nothing structured is stored. A
+ * structured get on a tag with no schema (built-in or user-supplied via
+ * plc_tag_set_schema) fails with PLCTAG_ERR_UNSUPPORTED. A read-only tag
+ * (e.g. identity/tag-listing/discovery metadata) fails
+ * plc_tag_set_formatted_data with PLCTAG_ERR_UNSUPPORTED.
  *
  * The _size functions return the required buffer size, or a negative
  * PLCTAG_ERR_* on failure. The get/set functions return PLCTAG_STATUS_OK, or
@@ -653,18 +654,27 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
  * buffer_length is too small to hold the result (call the _size function
  * first, or retry with a larger buffer).
  *
- * plc_tag_get_schema_size/get_schema/set_schema use format_type for the
- * SCHEMA's own encoding (independent of the data's format_type) -- e.g. a
- * schema stored as JSON can still drive plc_tag_get_formatted_data(tag,
- * "cbor", ...).
+ * plc_tag_get_schema_size/get_schema/set_schema use format for the SCHEMA's
+ * own encoding (independent of the data's format) -- e.g. a schema stored as
+ * PLCTAG_FORMAT_CBOR can still drive plc_tag_get_formatted_data(tag,
+ * PLCTAG_FORMAT_CBOR, ...) for the data itself; the two format arguments are
+ * independent choices that happen to share a type.
+ *
+ * An enum (not a string) so a typo is a compile error, not a silent
+ * PLCTAG_ERR_UNSUPPORTED at run time.
  */
-LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, const char *format_type);
-LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length);
-LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length);
+typedef enum {
+    PLCTAG_FORMAT_RAW = 0,  /* native tag bytes; always supported, no schema needed */
+    PLCTAG_FORMAT_CBOR = 1, /* RFC 8949 CBOR, rendered from raw data + schema */
+} plc_tag_format_type_t;
 
-LIB_EXPORT int plc_tag_get_schema_size(int32_t id, const char *format_type);
-LIB_EXPORT int plc_tag_get_schema(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length);
-LIB_EXPORT int plc_tag_set_schema(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, plc_tag_format_type_t format);
+LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
+
+LIB_EXPORT int plc_tag_get_schema_size(int32_t id, plc_tag_format_type_t format);
+LIB_EXPORT int plc_tag_get_schema(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_schema(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
 
 /* string accessors */
 

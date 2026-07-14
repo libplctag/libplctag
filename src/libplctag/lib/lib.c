@@ -4158,39 +4158,33 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 #if LIBPLCTAG_FEATURE_ENIP
 
 /*
- * "raw" is handled here, generically, for every tag kind (it is just
- * tag->data/tag->size -- equivalent to plc_tag_get_raw_bytes/
+ * PLCTAG_FORMAT_RAW is handled here, generically, for every tag kind (it is
+ * just tag->data/tag->size -- equivalent to plc_tag_get_raw_bytes/
  * plc_tag_set_raw_bytes at offset 0 covering the whole buffer). Any other
- * format_type dispatches to the tag's vtable, which is NULL (PLCTAG_ERR_UNSUPPORTED)
+ * format dispatches to the tag's vtable, which is NULL (PLCTAG_ERR_UNSUPPORTED)
  * unless that tag kind implements structured presentation (see lib/tag.h).
  */
 
-LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, const char *format_type) {
+LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, plc_tag_format_type_t format) {
     int result = PLCTAG_STATUS_OK;
-    plc_tag_p tag = NULL;
+    plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
 
-    if(!format_type || str_length(format_type) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type must not be null or zero-length!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    tag = lookup_tag(id);
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
     }
 
     critical_block(tag->api_mutex) {
-        if(str_cmp_i(format_type, "raw") == 0) {
+        if(format == PLCTAG_FORMAT_RAW) {
             result = tag->size;
             tag->status = PLCTAG_STATUS_OK;
         } else if(tag->vtable && tag->vtable->get_formatted_data_size) {
-            result = tag->vtable->get_formatted_data_size(tag, format_type);
+            result = tag->vtable->get_formatted_data_size(tag, format);
             tag->status = (result >= 0) ? PLCTAG_STATUS_OK : (int8_t)result;
         } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type \"%s\" is not supported by this tag!", format_type);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format %d is not supported by this tag!", (int)format);
             tag->status = PLCTAG_ERR_UNSUPPORTED;
             result = PLCTAG_ERR_UNSUPPORTED;
         }
@@ -4205,16 +4199,11 @@ LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, const char *format_ty
 }
 
 
-LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
-
-    if(!format_type || str_length(format_type) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type must not be null or zero-length!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
 
     if(!buffer) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Host data buffer pointer must not be null!");
@@ -4233,7 +4222,7 @@ LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, u
     }
 
     critical_block(tag->api_mutex) {
-        if(str_cmp_i(format_type, "raw") == 0) {
+        if(format == PLCTAG_FORMAT_RAW) {
             if(!tag->data) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
                 rc = PLCTAG_ERR_NO_DATA;
@@ -4244,9 +4233,9 @@ LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, u
                 rc = PLCTAG_STATUS_OK;
             }
         } else if(tag->vtable && tag->vtable->get_formatted_data) {
-            rc = tag->vtable->get_formatted_data(tag, format_type, buffer, buffer_length);
+            rc = tag->vtable->get_formatted_data(tag, format, buffer, buffer_length);
         } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type \"%s\" is not supported by this tag!", format_type);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format %d is not supported by this tag!", (int)format);
             rc = PLCTAG_ERR_UNSUPPORTED;
         }
 
@@ -4262,16 +4251,11 @@ LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, u
 }
 
 
-LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
-
-    if(!format_type || str_length(format_type) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type must not be null or zero-length!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
 
     if(!buffer) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Host data buffer pointer must not be null!");
@@ -4290,7 +4274,7 @@ LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, c
     }
 
     critical_block(tag->api_mutex) {
-        if(str_cmp_i(format_type, "raw") == 0) {
+        if(format == PLCTAG_FORMAT_RAW) {
             if(!tag->data) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
                 rc = PLCTAG_ERR_NO_DATA;
@@ -4303,9 +4287,9 @@ LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, c
                 rc = PLCTAG_STATUS_OK;
             }
         } else if(tag->vtable && tag->vtable->set_formatted_data) {
-            rc = tag->vtable->set_formatted_data(tag, format_type, buffer, buffer_length);
+            rc = tag->vtable->set_formatted_data(tag, format, buffer, buffer_length);
         } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type \"%s\" is not settable on this tag!", format_type);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format %d is not settable on this tag!", (int)format);
             rc = PLCTAG_ERR_UNSUPPORTED;
         }
 
@@ -4322,22 +4306,17 @@ LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, c
 
 
 /*
- * Schema accessors: no "raw" special case (a schema describes structure, it
- * is not a view of tag->data), so these always dispatch to the vtable.
+ * Schema accessors: no PLCTAG_FORMAT_RAW special case (a schema describes
+ * structure, it is not a view of tag->data), so these always dispatch to the
+ * vtable.
  */
 
-LIB_EXPORT int plc_tag_get_schema_size(int32_t id, const char *format_type) {
+LIB_EXPORT int plc_tag_get_schema_size(int32_t id, plc_tag_format_type_t format) {
     int result = PLCTAG_STATUS_OK;
-    plc_tag_p tag = NULL;
+    plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
 
-    if(!format_type || str_length(format_type) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type must not be null or zero-length!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    tag = lookup_tag(id);
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
@@ -4345,7 +4324,7 @@ LIB_EXPORT int plc_tag_get_schema_size(int32_t id, const char *format_type) {
 
     critical_block(tag->api_mutex) {
         if(tag->vtable && tag->vtable->get_schema_size) {
-            result = tag->vtable->get_schema_size(tag, format_type);
+            result = tag->vtable->get_schema_size(tag, format);
             tag->status = (result >= 0) ? PLCTAG_STATUS_OK : (int8_t)result;
         } else {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "This tag has no schema.");
@@ -4363,16 +4342,11 @@ LIB_EXPORT int plc_tag_get_schema_size(int32_t id, const char *format_type) {
 }
 
 
-LIB_EXPORT int plc_tag_get_schema(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_get_schema(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
-
-    if(!format_type || str_length(format_type) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type must not be null or zero-length!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
 
     if(!buffer) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Host data buffer pointer must not be null!");
@@ -4392,7 +4366,7 @@ LIB_EXPORT int plc_tag_get_schema(int32_t id, const char *format_type, uint8_t *
 
     critical_block(tag->api_mutex) {
         if(tag->vtable && tag->vtable->get_schema) {
-            rc = tag->vtable->get_schema(tag, format_type, buffer, buffer_length);
+            rc = tag->vtable->get_schema(tag, format, buffer, buffer_length);
         } else {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "This tag has no schema.");
             rc = PLCTAG_ERR_UNSUPPORTED;
@@ -4410,16 +4384,11 @@ LIB_EXPORT int plc_tag_get_schema(int32_t id, const char *format_type, uint8_t *
 }
 
 
-LIB_EXPORT int plc_tag_set_schema(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_set_schema(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
-
-    if(!format_type || str_length(format_type) == 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "format_type must not be null or zero-length!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
 
     if(!buffer) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Host data buffer pointer must not be null!");
@@ -4439,7 +4408,7 @@ LIB_EXPORT int plc_tag_set_schema(int32_t id, const char *format_type, const uin
 
     critical_block(tag->api_mutex) {
         if(tag->vtable && tag->vtable->set_schema) {
-            rc = tag->vtable->set_schema(tag, format_type, buffer, buffer_length);
+            rc = tag->vtable->set_schema(tag, format, buffer, buffer_length);
         } else {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "This tag does not support setting a schema.");
             rc = PLCTAG_ERR_UNSUPPORTED;
@@ -4462,45 +4431,45 @@ LIB_EXPORT int plc_tag_set_schema(int32_t id, const char *format_type, const uin
  * unsupported, matching the "no vtable hook" outcome the full implementation
  * above returns for any tag kind that doesn't implement structured data. */
 
-LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, const char *format_type) {
+LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, plc_tag_format_type_t format) {
     (void)id;
-    (void)format_type;
+    (void)format;
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     (void)id;
-    (void)format_type;
+    (void)format;
     (void)buffer;
     (void)buffer_length;
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length) {
     (void)id;
-    (void)format_type;
+    (void)format;
     (void)buffer;
     (void)buffer_length;
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-LIB_EXPORT int plc_tag_get_schema_size(int32_t id, const char *format_type) {
+LIB_EXPORT int plc_tag_get_schema_size(int32_t id, plc_tag_format_type_t format) {
     (void)id;
-    (void)format_type;
+    (void)format;
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-LIB_EXPORT int plc_tag_get_schema(int32_t id, const char *format_type, uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_get_schema(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     (void)id;
-    (void)format_type;
+    (void)format;
     (void)buffer;
     (void)buffer_length;
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-LIB_EXPORT int plc_tag_set_schema(int32_t id, const char *format_type, const uint8_t *buffer, int buffer_length) {
+LIB_EXPORT int plc_tag_set_schema(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length) {
     (void)id;
-    (void)format_type;
+    (void)format;
     (void)buffer;
     (void)buffer_length;
     return PLCTAG_ERR_UNSUPPORTED;

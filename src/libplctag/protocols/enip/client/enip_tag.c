@@ -487,8 +487,8 @@ static bool enip_identity_envelope_cbor_write(Bytes dest, size_t *pos, const eni
     return enip_identity_record_cbor_write(dest, pos, f);
 }
 
-static int enip_identity_get_formatted_data_size(plc_tag_p tag, const char *format_type) {
-    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+static int enip_identity_get_formatted_data_size(plc_tag_p tag, plc_tag_format_type_t format) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
 
     enip_identity_fields_t f;
     if(!enip_identity_parse_fields(tag, &f)) { return PLCTAG_ERR_NO_DATA; }
@@ -496,8 +496,8 @@ static int enip_identity_get_formatted_data_size(plc_tag_p tag, const char *form
     return (int)enip_identity_envelope_cbor_size(&f);
 }
 
-static int enip_identity_get_formatted_data(plc_tag_p tag, const char *format_type, uint8_t *buffer, int buffer_length) {
-    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+static int enip_identity_get_formatted_data(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
 
     enip_identity_fields_t f;
     if(!enip_identity_parse_fields(tag, &f)) { return PLCTAG_ERR_NO_DATA; }
@@ -545,15 +545,15 @@ static bool enip_identity_schema_cbor_write(Bytes dest, size_t *pos) {
     return true;
 }
 
-static int enip_identity_get_schema_size(plc_tag_p tag, const char *format_type) {
+static int enip_identity_get_schema_size(plc_tag_p tag, plc_tag_format_type_t format) {
     (void)tag;
-    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
     return (int)enip_identity_schema_cbor_size();
 }
 
-static int enip_identity_get_schema(plc_tag_p tag, const char *format_type, uint8_t *buffer, int buffer_length) {
+static int enip_identity_get_schema(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     (void)tag;
-    if(str_cmp_i(format_type, "cbor") != 0) { return PLCTAG_ERR_UNSUPPORTED; }
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
 
     if(enip_identity_schema_cbor_size() > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
 

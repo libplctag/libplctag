@@ -38,24 +38,32 @@ Note that these changes to '@identity' only affect the new ENIP protocol (both U
 
 Format and schema are fundamental enough to be first-class C API, not attributes
 wedged into the create string. `format` is a **runtime parameter** — the same
-tag can be pulled back as `raw`, `cbor`, or (later) `json` on successive calls.
-Path accessors were considered and rejected: with a structured, self-describing
-encoding the wrapper language generates its own idiomatic objects from the
-CBOR/JSON, so C-level field navigation buys nothing.
+tag can be pulled back as `PLCTAG_FORMAT_RAW`, `PLCTAG_FORMAT_CBOR`, or (later)
+a JSON entry on successive calls. It is an **enum, not a string**: a typo in a
+format name is then a compile error, not a silent `PLCTAG_ERR_UNSUPPORTED` at
+run time. Path accessors were considered and rejected: with a structured,
+self-describing encoding the wrapper language generates its own idiomatic
+objects from the CBOR/JSON, so C-level field navigation buys nothing.
 
 ```c
-/* format_type: "raw" (native bytes), "cbor", "json", ...
- * _size returns size-or-negative-error; get/set return PLCTAG_STATUS_OK or
- * negative, with PLCTAG_ERR_TOO_SMALL when buffer_length is short. */
-LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t tag, const char *format_type);
-LIB_EXPORT int plc_tag_get_formatted_data(int32_t tag, const char *format_type, uint8_t *buffer, int buffer_length);
-LIB_EXPORT int plc_tag_set_formatted_data(int32_t tag, const char *format_type, const uint8_t *buffer, int buffer_length);
+typedef enum {
+    PLCTAG_FORMAT_RAW = 0,  /* native tag bytes; always supported, no schema needed */
+    PLCTAG_FORMAT_CBOR = 1, /* RFC 8949 CBOR, rendered from raw data + schema */
+} plc_tag_format_type_t;
 
-/* format_type here = the encoding of the SCHEMA itself, independent of the
- * data's format (store schema as JSON, still fetch data as CBOR). */
-LIB_EXPORT int plc_tag_get_schema_size(int32_t tag, const char *format_type);
-LIB_EXPORT int plc_tag_get_schema(int32_t tag, const char *format_type, uint8_t *buffer, int buffer_length);
-LIB_EXPORT int plc_tag_set_schema(int32_t tag, const char *format_type, const uint8_t *buffer, int buffer_length);
+/* _size returns size-or-negative-error; get/set return PLCTAG_STATUS_OK or
+ * negative, with PLCTAG_ERR_TOO_SMALL when buffer_length is short. */
+LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t tag, plc_tag_format_type_t format);
+LIB_EXPORT int plc_tag_get_formatted_data(int32_t tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_formatted_data(int32_t tag, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
+
+/* format here = the encoding of the SCHEMA itself, independent of the data's
+ * format (a schema stored as PLCTAG_FORMAT_CBOR can still drive
+ * plc_tag_get_formatted_data(tag, PLCTAG_FORMAT_CBOR, ...) for the data --
+ * the two format arguments are independent choices that happen to share a type). */
+LIB_EXPORT int plc_tag_get_schema_size(int32_t tag, plc_tag_format_type_t format);
+LIB_EXPORT int plc_tag_get_schema(int32_t tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_schema(int32_t tag, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
 ```
 
 **Build gating.** This subsystem's only implementation today is the new ENIP
@@ -67,35 +75,35 @@ build-internal generated file, never installed), so the symbols exist in
 every build for ABI stability. With the feature off, `lib.c` compiles a
 `#else` stub for each that returns `PLCTAG_ERR_UNSUPPORTED` unconditionally,
 in place of the generic-raw + vtable-dispatch implementation -- including the
-protocol-agnostic `"raw"` render, which would otherwise work for any tag
-(AB/Modbus/OMRON included) with no ENIP code involved. If a non-ENIP consumer
-of the format/schema API turns up later, split the always-available `"raw"`
-path out from under the gate at that point; until then, one gate covering the
-whole subsystem matches its one real consumer.
+protocol-agnostic `PLCTAG_FORMAT_RAW` render, which would otherwise work for
+any tag (AB/Modbus/OMRON included) with no ENIP code involved. If a non-ENIP
+consumer of the format/schema API turns up later, split the always-available
+raw path out from under the gate at that point; until then, one gate covering
+the whole subsystem matches its one real consumer.
 
-`format_type` is coherent across both families: it always names the encoding of
+`format` is coherent across both families: it always names the encoding of
 the bytes the call moves — the **data** for `_formatted_data`, the **schema
 text** for `_schema`.
 
 **Raw is canonical; structured formats render on demand.** The tag's internal
 buffer holds native bytes (wire data, or concatenated metadata records). A
-`get_formatted_data(tag, "cbor", …)` encodes that raw buffer into CBOR at call
-time, using the tag's schema; `get_formatted_data(tag, "raw", …)` is the
-identity render (overlaps `plc_tag_get_raw_bytes`, intentionally — one uniform
-API for every format, and `raw` needs no schema). Nothing structured is ever
-stored, so there is no dual-format buffer to keep in sync and no in-place CBOR
-mutation to manage.
+`get_formatted_data(tag, PLCTAG_FORMAT_CBOR, …)` encodes that raw buffer into
+CBOR at call time, using the tag's schema; `get_formatted_data(tag,
+PLCTAG_FORMAT_RAW, …)` is the identity render (overlaps
+`plc_tag_get_raw_bytes`, intentionally — one uniform API for every format, and
+raw needs no schema). Nothing structured is ever stored, so there is no
+dual-format buffer to keep in sync and no in-place CBOR mutation to manage.
 
 **Schema source.** The library ships **built-in schemas** for ENIP metadata
 (identity, tag list, UDT); `get_schema` renders them in the requested
-`format_type`, `set_schema` overrides, and a plain data tag with no built-in
+`format`, `set_schema` overrides, and a plain data tag with no built-in
 schema must `set_schema` before any structured `get_formatted_data`. Requesting
 a structured format with no schema is a **call-time error** (not a create-time
 one) — it fails at `get_formatted_data`, the call that actually needs it.
 
-**Symmetry.** `set_formatted_data(…, "cbor", …)` decodes CBOR→raw for the wire,
-so a schema/codec must round-trip both directions. Read-only tags (identity, tag
-list, discovery) reject `set_formatted_data`.
+**Symmetry.** `set_formatted_data(…, PLCTAG_FORMAT_CBOR, …)` decodes CBOR→raw
+for the wire, so a schema/codec must round-trip both directions. Read-only
+tags (identity, tag list, discovery) reject `set_formatted_data`.
 
 **CBOR envelope** (string keys, per decision): a top-level map
 `{ "schema": <string>, "schema-version": <int>, "records": [ … ] }`, one
@@ -317,7 +325,7 @@ Get_Attributes_All payload** verbatim (`create_identity_tag` /
 `enip_identity_tag_copy`, `client/enip_tag.c`). Under this design its `raw`
 buffer instead holds **one §8 record** (identity fields in the §8 layout), so
 unicast, broadcast, and TCP share one record model; the structured view comes
-from `get_formatted_data(…, "cbor", …)`.
+from `get_formatted_data(…, PLCTAG_FORMAT_CBOR, …)`.
 
 Breaking change to that one tag's buffer layout, scoped to the new ENIP module
 only:
@@ -329,7 +337,7 @@ only:
   now, before it hardens.
 - A caller that previously parsed the raw Get_Attributes_All bytes at offset 0
   must now read the §8 record layout (or, better, switch to
-  `get_formatted_data("cbor")` and stop parsing bytes by hand). Field offsets
+  `get_formatted_data(PLCTAG_FORMAT_CBOR)` and stop parsing bytes by hand). Field offsets
   differ from raw CIP attribute order.
 
 Implementation touch points: `enip_identity_tag_copy` lays the cached payload
