@@ -279,6 +279,7 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
 static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
 static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t);
 static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
+static const enip_dialect_t *listing_dialect_for(enip_connection_t *c);
 
 /* A tag that issues network ops via pick_batch (vs. the special tags that the
  * service pass handles): a data tag, a PCCC tag, or an @tags/@udt listing tag.
@@ -795,6 +796,8 @@ bool enip_session_get_identity(enip_connection_t *c, uint8_t **data_out, uint16_
     return true;
 }
 
+enip_plc_type_t enip_session_get_plc_type(enip_connection_t *c) { return c ? c->plc_type : ENIP_PLC_UNKNOWN; }
+
 int enip_session_get_inactivity_timeout(enip_connection_t *c) { return (int)c->inactivity_timeout_ms; }
 
 /* Clamp to [ENIP_MIN, ENIP_MAX]; returns PLCTAG_ERR_OUT_OF_BOUNDS (and still
@@ -1196,7 +1199,7 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
                        reply.ext_status);
                 status = (int8_t)PLCTAG_ERR_REMOTE_ERR;
             } else {
-                status = (int8_t)c->dialect->apply_listing(t, reply.status, reply.data, &more_windows);
+                status = (int8_t)listing_dialect_for(c)->apply_listing(t, reply.status, reply.data, &more_windows);
             }
         } else {
             /* data tag: the dialect parses the reply, interprets status, copies
@@ -1938,13 +1941,140 @@ static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_rep
     return PLCTAG_STATUS_OK;
 }
 
+/* PCCC "@tags" listing (File 0 system directory read). Per a vendor protocol
+ * technical report (not independently verified against real PLC-5/SLC/
+ * MicroLogix hardware in this tree): PCCC has no symbol-object equivalent to
+ * Logix's class 0x6B, but every PCCC family exposes a fixed-width directory
+ * record per data file in "File 0", readable with the ordinary word-range
+ * read used for real data -- PLC-5's 2-address Word Range Read (FNC 0x01),
+ * or SLC/MicroLogix's 3-address Typed Logical Read (FNC 0xA2) addressing
+ * File 0 as an Integer file (0x89, the type code File 0 reports as). This
+ * treats MicroLogix identically to SLC (6-byte records); the report also
+ * describes an extended 8-byte record for specific newer MicroLogix variants
+ * (e.g. 1400-series) that this does not distinguish or support -- a known
+ * limitation, not a silent misread, since enip_plc_type_t has no MicroLogix
+ * sub-family (see plc_type.h).
+ *
+ * Termination is inferred, not signaled: PCCC has no partial-transfer status
+ * (unlike Logix's CIP_STATUS_FRAG), so apply_listing below infers "more"
+ * purely from whether the reply came back exactly full. Both platforms'
+ * record sizes (4 bytes/PLC-5, 6 bytes/SLC+MicroLogix) divide evenly into a
+ * fixed 240-byte page, so one page size works for both with no per-platform
+ * rounding, and it fits under the single-byte transfer-size field both
+ * platforms' read wire format shares (max 255) -- see build below.
+ *
+ * t->list_next_id (reset to 0 by enip_listing_tag_read) is the next 16-bit
+ * WORD offset into File 0; t->read_off is the accumulated raw byte length in
+ * t->data -- both fields shared with Logix's own @tags use of the same
+ * LISTING-kind tag (enip_dialect_t's listing seam, enip_dialect.h). The raw
+ * buffer is bare concatenated native records, no per-record framing (matches
+ * ENIP-METADATA-AND-DISCOVERY-DESIGN.md's raw-is-canonical model); parsed
+ * access is via plc_tag_get_formatted_data(tag, PLCTAG_FORMAT_CBOR, ...)
+ * (enip_tag.c), which knows the record layout from the connection's
+ * identity-classified PLC family. */
+#define PCCC_LISTING_PAGE_BYTES ((size_t)240)
+#define PCCC_LISTING_PAGE_WORDS ((uint16_t)(PCCC_LISTING_PAGE_BYTES / 2))
+
+static Bytes enip_pccc_build_listing(Arena *a, enip_tag_p t) {
+    if(t->op != ENIP_OP_LIST) { return bytes_null(); }
+
+    enip_connection_t *c = t->conn;
+    bool is_plc5 = (c->plc_type == ENIP_PLC_PLC5);
+
+    /* File 0 has no name (it is the system directory itself); the address
+     * encoders below need only file/file_type/element/sub_element, not a
+     * parsed pccc_addr_t from a tag name -- built directly, not from
+     * t->pccc_addr (LISTING-kind tags don't have that union member). */
+    pccc_addr_t addr = {0};
+    addr.file = 0;
+    addr.file_type = PCCC_FILE_INT; /* File 0 reports as Integer-typed on SLC/MicroLogix; unused by the PLC-5 2-address encoder */
+    addr.element = (int32_t)t->list_next_id;
+    addr.sub_element = -1;
+
+    uint8_t addr_buf[32];
+    Bytes encoded = is_plc5 ? enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)))
+                            : enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
+    if(bytes_is_null(encoded) || encoded.len == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC File 0 address!");
+        return bytes_null();
+    }
+
+    size_t need = 13 /* CIP/PCCC header + requestor id, see pccc_write_header */ + (is_plc5 ? 5u : 1u) + encoded.len;
+    uint8_t *buf = (uint8_t *)arena_alloc(a, need);
+    if(!buf) { return bytes_null(); }
+
+    size_t pos = pccc_write_header(buf, (uint16_t)(c->conn_seq + 1), is_plc5 ? PCCC_PLC5_READ_FNC : PCCC_SLC_READ_FNC);
+
+    if(is_plc5) {
+        buf[pos++] = 0x00;
+        buf[pos++] = 0x00; /* byte offset = 0: this is a whole-word range read, not a fragmented single element */
+        buf[pos++] = (uint8_t)(PCCC_LISTING_PAGE_WORDS & 0xFFu);
+        buf[pos++] = (uint8_t)(PCCC_LISTING_PAGE_WORDS >> 8);
+        memcpy(buf + pos, encoded.data, encoded.len);
+        pos += encoded.len;
+        buf[pos++] = (uint8_t)PCCC_LISTING_PAGE_BYTES; /* PLC-5 read appends total byte size (fits: 240 <= 255) */
+    } else {
+        buf[pos++] = (uint8_t)PCCC_LISTING_PAGE_BYTES; /* transfer size in bytes (fits: 240 <= 255) */
+        memcpy(buf + pos, encoded.data, encoded.len);
+        pos += encoded.len;
+    }
+
+    return bytes_from_buf(buf, pos);
+}
+
+static int32_t enip_pccc_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
+    (void)cip_status; /* PCCC replies carry no CIP-level partial-transfer status */
+    *more = false;
+
+    if(data.len < PCCC_REPLY_HDR) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC File 0 reply too short (%zu bytes)!", data.len);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    uint8_t pccc_sts = data.data[PCCC_REPLY_STS_OFF];
+    if(pccc_sts != 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC File 0 read status error 0x%02X.", pccc_sts);
+        return PLCTAG_ERR_REMOTE_ERR;
+    }
+
+    size_t payload_len = data.len - PCCC_REPLY_HDR;
+
+    if(payload_len > 0) {
+        size_t need = (size_t)t->read_off + payload_len;
+        uint8_t *buf = mem_realloc(t->data, (int)need);
+        if(!buf) { return PLCTAG_ERR_NO_MEM; }
+        t->data = buf;
+        memcpy(t->data + t->read_off, data.data + PCCC_REPLY_HDR, payload_len);
+        t->read_off = (uint32_t)need;
+        t->size = (int32_t)need;
+        t->list_next_id += (uint32_t)(payload_len / 2); /* advance the word cursor */
+    }
+
+    /* No PCCC partial-transfer signal exists (unlike Logix's CIP_STATUS_FRAG):
+     * a full page means "maybe more"; a short page is the last one. */
+    if(payload_len >= PCCC_LISTING_PAGE_BYTES) { *more = true; }
+
+    return PLCTAG_STATUS_OK;
+}
+
 const enip_dialect_t enip_pccc_dialect = {
     .name = "pccc",
     .requested_cip_size = 0,
     .max_batch_cap = 1, /* single in-flight: no Multiple Service (0x0A) packing */
     .build = enip_pccc_build,
     .apply = enip_pccc_apply,
+    .build_listing = enip_pccc_build_listing,
+    .apply_listing = enip_pccc_apply_listing,
 };
+
+/* @tags/@udt listing dialect for the connection: PCCC families (PLC-5/SLC/
+ * MicroLogix) enumerate via File 0 (enip_pccc_dialect, above) rather than
+ * c->dialect's regular symbolic build_listing/apply_listing -- independent
+ * of c->dialect itself, which stays Logix-shaped for every connection (PCCC
+ * data ops are selected per-tag, not per-connection; see enip_dialect.h). */
+static const enip_dialect_t *listing_dialect_for(enip_connection_t *c) {
+    return enip_plc_is_pccc(c->plc_type) ? &enip_pccc_dialect : c->dialect;
+}
 
 /* Allocate a CIP-payload-budget dest from c->arena and ask the dialect to
  * encode t's current request into it (the dialect owns no buffer; the caller
@@ -1987,14 +2117,17 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
              * time pick_batch dispatches (queried during bring-up before
              * CONN_READY). Reject when the connection's dialect has no listing
              * support. */
-            if(!c->dialect->build_listing) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are not supported by dialect \"%s\"!",
-                       c->dialect->name);
-                complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
-                c->state = CONN_READY;
-                return PLCTAG_STATUS_OK;
+            {
+                const enip_dialect_t *ld = listing_dialect_for(c);
+                if(!ld->build_listing) {
+                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are not supported by dialect \"%s\"!",
+                           ld->name);
+                    complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
+                    c->state = CONN_READY;
+                    return PLCTAG_STATUS_OK;
+                }
+                req = ld->build_listing(&c->arena, t);
             }
-            req = c->dialect->build_listing(&c->arena, t);
             break;
 
         default: break;

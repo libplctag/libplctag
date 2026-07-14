@@ -43,6 +43,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <libplctag/protocols/enip/common/plc_type.h>
 #include <utils/attr.h>
 
 typedef struct enip_connection_t enip_connection_t;
@@ -87,6 +88,12 @@ extern bool enip_session_next_conn_status(enip_connection_t *c, int32_t *read_id
 /* Cached CIP Identity payload (raw Get_Attributes_All response), queried once
  * during bring-up. Returns false until that query completes. */
 extern bool enip_session_get_identity(enip_connection_t *c, uint8_t **data_out, uint16_t *len_out);
+
+/* Identity-classified PLC family (ENIP_PLC_UNKNOWN before bring-up completes).
+ * Used by enip_tag.c's @tags listing codec to pick the right record layout
+ * (enip_connection_t is opaque outside enip_session.c, so this is the only
+ * way to reach it). */
+extern enip_plc_type_t enip_session_get_plc_type(enip_connection_t *c);
 
 /* registry lifecycle (called once from enip_init()/enip_teardown()). */
 extern int32_t enip_session_module_init(void);

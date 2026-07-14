@@ -616,6 +616,371 @@ static int32_t enip_listing_tag_read(plc_tag_p tag) {
     return enip_session_schedule(t->conn, t, op, time_ms());
 }
 
+/* ============================================================================
+ * @tags PCCC File 0 listing: structured presentation (format/schema
+ * subsystem; design doc ENIP-METADATA-AND-DISCOVERY-DESIGN.md §0). Rendered
+ * on demand from the raw concatenated File 0 records accumulated by
+ * enip_pccc_apply_listing (client/enip_session.c) -- record width depends on
+ * the connection's identity-classified PLC family (4 bytes/PLC-5, 6 bytes/
+ * SLC+MicroLogix; see that function's doc comment for the provenance and
+ * known limitations of this record layout). Read-only, like @identity.
+ * Rockwell/OMRON @tags and @udt have no CBOR schema yet (a future task);
+ * PLCTAG_FORMAT_CBOR on those returns PLCTAG_ERR_UNSUPPORTED, same as today.
+ * ============================================================================ */
+
+#define PCCC_LISTING_SCHEMA_NAME "pccc-file-list"
+#define PCCC_LISTING_SCHEMA_VERSION ((uint64_t)1)
+
+static const char *pccc_file_type_name(uint8_t code) {
+    switch((pccc_file_t)code) {
+        case PCCC_FILE_BIT: return "BIT";
+        case PCCC_FILE_TIMER: return "TIMER";
+        case PCCC_FILE_COUNTER: return "COUNTER";
+        case PCCC_FILE_CONTROL: return "CONTROL";
+        case PCCC_FILE_INT: return "INT";
+        case PCCC_FILE_FLOAT: return "FLOAT";
+        case PCCC_FILE_OUTPUT: return "OUTPUT";
+        case PCCC_FILE_INPUT: return "INPUT";
+        case PCCC_FILE_STATUS: return "STATUS";
+        case PCCC_FILE_ASCII: return "ASCII";
+        case PCCC_FILE_BCD: return "BCD";
+        case PCCC_FILE_STRING: return "STRING";
+        case PCCC_FILE_LONG_INT: return "LONG_INT";
+        case PCCC_FILE_MESSAGE: return "MESSAGE";
+        case PCCC_FILE_PID: return "PID";
+        default: return "UNKNOWN";
+    }
+}
+
+/* tag->kind == ENIP_TAG_KIND_LISTING and its connection is a PCCC family --
+ * the only case this codec handles. Sets *is_plc5_out; used by every getter
+ * below to avoid repeating the connection lookup. */
+static bool pccc_listing_is_pccc(plc_tag_p tag, bool *is_plc5_out) {
+    enip_tag_p t = (enip_tag_p)tag;
+    if(t->kind != ENIP_TAG_KIND_LISTING || !t->conn) { return false; }
+
+    enip_plc_type_t pt = enip_session_get_plc_type(t->conn);
+    if(!enip_plc_is_pccc(pt)) { return false; }
+
+    *is_plc5_out = (pt == ENIP_PLC_PLC5);
+    return true;
+}
+
+/* PLC-5 File 0 record decode (4 bytes: attribute(1), file_number(1),
+ * total_words(2 LE)), per a vendor protocol technical report (not
+ * independently verified against real hardware in this tree). The PLC-5 has
+ * no explicit type-ID byte; type is inferred from a fixed file-number
+ * convention (0/1/2) plus the attribute byte's structure-class nibble
+ * (bits 0-3) and radix bits (bits 4-5), corroborated by dividing total_words
+ * by the resolved structure's word footprint. The resolved type is expressed
+ * as a pccc_file_t code -- the same vocabulary enip_pccc_addr.c already uses
+ * to parse logical addresses like N7:0 -- so the public per-record schema
+ * (below) is identical for PLC-5 and SLC/MicroLogix: both report "what PCCC
+ * file type is this", just decoded from a different wire shape. This does
+ * lose PLC-5's own inactive-vs-unrecognized-structure distinction (both
+ * collapse to PCCC_FILE_UNKNOWN, same as SLC/MicroLogix's one generic
+ * "unknown"); a caller that needs that distinction back can inspect the
+ * record's "raw" bytes (attribute byte bit 6) itself.
+ *
+ * Deviation from the report's own reference pseudo-code: its Python divides
+ * unconditionally (`total_words // 3` etc.) with no remainder check, but its
+ * prose separately calls this a "Validation Rule" ("if total words mod words
+ * per element != 0, flag ... mark the file as an unrecognized custom data
+ * structure"). Silently keeping a resolved class label next to a fractional
+ * element count would be worse than useless -- it looks precise and isn't --
+ * so this follows the prose: a non-divisible word count degrades file_type to
+ * PCCC_FILE_UNKNOWN and omits element_count, rather than trusting the class
+ * nibble over the arithmetic. */
+typedef struct {
+    uint8_t file_number;
+    uint16_t total_words;
+    uint8_t file_type; /* pccc_file_t code */
+    bool has_elements;
+    uint32_t element_count;
+} pccc_plc5_file_decode_t;
+
+static pccc_plc5_file_decode_t pccc_decode_plc5_file_record(const uint8_t *rec) {
+    pccc_plc5_file_decode_t d = {0};
+    uint8_t attr_byte = rec[0];
+    d.file_number = rec[1];
+    d.total_words = (uint16_t)(rec[2] | ((uint16_t)rec[3] << 8));
+
+    /* Step 1: hardcoded default system files -- checked before, and instead
+     * of, the attribute byte. */
+    if(d.file_number == 0) {
+        d.file_type = (uint8_t)PCCC_FILE_OUTPUT;
+        d.has_elements = true;
+        d.element_count = d.total_words;
+        return d;
+    }
+    if(d.file_number == 1) {
+        d.file_type = (uint8_t)PCCC_FILE_INPUT;
+        d.has_elements = true;
+        d.element_count = d.total_words;
+        return d;
+    }
+    if(d.file_number == 2) {
+        d.file_type = (uint8_t)PCCC_FILE_STATUS;
+        d.has_elements = true;
+        d.element_count = d.total_words;
+        return d;
+    }
+
+    bool active = (attr_byte & 0x40) != 0;
+    if(!active) {
+        d.file_type = (uint8_t)PCCC_FILE_UNKNOWN;
+        return d;
+    }
+
+    uint8_t radix_bits = (uint8_t)((attr_byte >> 4) & 0x03);
+    uint8_t class_nibble = (uint8_t)(attr_byte & 0x0Fu);
+
+    switch(class_nibble) {
+        case 0x00: /* Simple Word Struct -- disambiguated by radix bits */
+            d.has_elements = true;
+            d.element_count = d.total_words;
+            if(radix_bits == 0x00) { d.file_type = (uint8_t)PCCC_FILE_BIT; }       /* "Binary" */
+            else if(radix_bits == 0x01) { d.file_type = (uint8_t)PCCC_FILE_INT; }  /* "Integer" */
+            else if(radix_bits == 0x02) { d.file_type = (uint8_t)PCCC_FILE_ASCII; }
+            else { /* radix 0x03: not assigned a meaning by the report for class 0 */
+                d.file_type = (uint8_t)PCCC_FILE_UNKNOWN;
+                d.has_elements = false;
+            }
+            break;
+
+        case 0x01: /* Float, 2 words/element */
+            if(d.total_words % 2 == 0) {
+                d.file_type = (uint8_t)PCCC_FILE_FLOAT;
+                d.has_elements = true;
+                d.element_count = (uint32_t)(d.total_words / 2);
+            } else {
+                d.file_type = (uint8_t)PCCC_FILE_UNKNOWN; /* validation rule: footprint mismatch */
+            }
+            break;
+
+        case 0x03: /* Timer, 3 words/element */
+            if(d.total_words % 3 == 0) {
+                d.file_type = (uint8_t)PCCC_FILE_TIMER;
+                d.has_elements = true;
+                d.element_count = (uint32_t)(d.total_words / 3);
+            } else {
+                d.file_type = (uint8_t)PCCC_FILE_UNKNOWN;
+            }
+            break;
+
+        case 0x04: /* Counter, 3 words/element */
+            if(d.total_words % 3 == 0) {
+                d.file_type = (uint8_t)PCCC_FILE_COUNTER;
+                d.has_elements = true;
+                d.element_count = (uint32_t)(d.total_words / 3);
+            } else {
+                d.file_type = (uint8_t)PCCC_FILE_UNKNOWN;
+            }
+            break;
+
+        case 0x05: /* Control, 3 words/element */
+            if(d.total_words % 3 == 0) {
+                d.file_type = (uint8_t)PCCC_FILE_CONTROL;
+                d.has_elements = true;
+                d.element_count = (uint32_t)(d.total_words / 3);
+            } else {
+                d.file_type = (uint8_t)PCCC_FILE_UNKNOWN;
+            }
+            break;
+
+        case 0x07: /* String, 42 words/element */
+            if(d.total_words % 42 == 0) {
+                d.file_type = (uint8_t)PCCC_FILE_STRING;
+                d.has_elements = true;
+                d.element_count = (uint32_t)(d.total_words / 42);
+            } else {
+                d.file_type = (uint8_t)PCCC_FILE_UNKNOWN;
+            }
+            break;
+
+        default: d.file_type = (uint8_t)PCCC_FILE_UNKNOWN; break; /* unassigned structure class */
+    }
+
+    return d;
+}
+
+/* One CBOR map per record -- the SAME shape for every PCCC platform
+ * (PLC-5/SLC/MicroLogix): file_number, file_type (pccc_file_t code),
+ * file_type_name (decoded via the shared pccc_file_type_name() lookup),
+ * element_count when known, and raw (the untouched native record bytes, so
+ * platform-specific extras this schema doesn't name -- PLC-5's attribute
+ * byte, SLC/MicroLogix's unexplained trailing "reserved" field -- are not
+ * lost, just not individually decoded). PLC-5 records are decoded first via
+ * pccc_decode_plc5_file_record(); SLC/MicroLogix records already carry
+ * file_number/file_type/element_count directly on the wire (see
+ * enip_pccc_apply_listing in client/enip_session.c). */
+static size_t pccc_listing_record_cbor_size(bool is_plc5, const uint8_t *rec, size_t record_bytes) {
+    uint8_t file_number, file_type;
+    bool has_elements;
+    uint32_t element_count = 0;
+
+    if(is_plc5) {
+        pccc_plc5_file_decode_t d = pccc_decode_plc5_file_record(rec);
+        file_number = d.file_number;
+        file_type = d.file_type;
+        has_elements = d.has_elements;
+        element_count = d.element_count;
+    } else {
+        file_number = rec[0];
+        file_type = rec[1];
+        has_elements = true;
+        element_count = (uint32_t)(rec[2] | ((uint16_t)rec[3] << 8));
+    }
+
+    const char *type_name = pccc_file_type_name(file_type);
+    size_t sz = cbor_size_map_header(has_elements ? 5 : 4);
+    sz += cbor_size_text(sizeof("file_number") - 1) + cbor_size_uint(file_number);
+    sz += cbor_size_text(sizeof("file_type") - 1) + cbor_size_uint(file_type);
+    sz += cbor_size_text(sizeof("file_type_name") - 1) + cbor_size_text((size_t)str_length(type_name));
+    sz += cbor_size_text(sizeof("raw") - 1) + cbor_size_bytes(record_bytes);
+    if(has_elements) { sz += cbor_size_text(sizeof("element_count") - 1) + cbor_size_uint(element_count); }
+    return sz;
+}
+
+static bool pccc_listing_record_cbor_write(Bytes dest, size_t *pos, bool is_plc5, const uint8_t *rec, size_t record_bytes) {
+    uint8_t file_number, file_type;
+    bool has_elements;
+    uint32_t element_count = 0;
+
+    if(is_plc5) {
+        pccc_plc5_file_decode_t d = pccc_decode_plc5_file_record(rec);
+        file_number = d.file_number;
+        file_type = d.file_type;
+        has_elements = d.has_elements;
+        element_count = d.element_count;
+    } else {
+        file_number = rec[0];
+        file_type = rec[1];
+        has_elements = true;
+        element_count = (uint32_t)(rec[2] | ((uint16_t)rec[3] << 8));
+    }
+
+    const char *type_name = pccc_file_type_name(file_type);
+    if(!cbor_write_map_header(dest, pos, has_elements ? 5 : 4)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("file_number"))) { return false; }
+    if(!cbor_write_uint(dest, pos, file_number)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("file_type"))) { return false; }
+    if(!cbor_write_uint(dest, pos, file_type)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("file_type_name"))) { return false; }
+    if(!cbor_write_text(dest, pos, type_name, (size_t)str_length(type_name))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("raw"))) { return false; }
+    if(!cbor_write_bytes(dest, pos, rec, record_bytes)) { return false; }
+    if(has_elements) {
+        if(!cbor_write_text(dest, pos, CBOR_LIT("element_count"))) { return false; }
+        if(!cbor_write_uint(dest, pos, element_count)) { return false; }
+    }
+    return true;
+}
+
+static int enip_pccc_listing_get_formatted_data_size(plc_tag_p tag, plc_tag_format_type_t format) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    bool is_plc5;
+    if(!pccc_listing_is_pccc(tag, &is_plc5)) { return PLCTAG_ERR_UNSUPPORTED; }
+    if(!tag->data) { return PLCTAG_ERR_NO_DATA; }
+
+    size_t record_bytes = is_plc5 ? 4u : 6u;
+    size_t record_count = (size_t)tag->size / record_bytes;
+
+    size_t sz = cbor_size_map_header(3);
+    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(PCCC_LISTING_SCHEMA_NAME) - 1);
+    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(PCCC_LISTING_SCHEMA_VERSION);
+    sz += cbor_size_text(sizeof("records") - 1) + cbor_size_array_header(record_count);
+    for(size_t i = 0; i < record_count; i++) {
+        sz += pccc_listing_record_cbor_size(is_plc5, tag->data + i * record_bytes, record_bytes);
+    }
+
+    return (int)sz;
+}
+
+static int enip_pccc_listing_get_formatted_data(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer,
+                                                 int buffer_length) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    bool is_plc5;
+    if(!pccc_listing_is_pccc(tag, &is_plc5)) { return PLCTAG_ERR_UNSUPPORTED; }
+    if(!tag->data) { return PLCTAG_ERR_NO_DATA; }
+
+    size_t record_bytes = is_plc5 ? 4u : 6u;
+    size_t record_count = (size_t)tag->size / record_bytes;
+
+    Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
+    size_t pos = 0;
+
+    if(!cbor_write_map_header(dest, &pos, 3)) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_write_text(dest, &pos, CBOR_LIT("schema"))) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_write_text(dest, &pos, CBOR_LIT(PCCC_LISTING_SCHEMA_NAME))) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_write_text(dest, &pos, CBOR_LIT("schema-version"))) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_write_uint(dest, &pos, PCCC_LISTING_SCHEMA_VERSION)) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_write_text(dest, &pos, CBOR_LIT("records"))) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_write_array_header(dest, &pos, record_count)) { return PLCTAG_ERR_TOO_SMALL; }
+    for(size_t i = 0; i < record_count; i++) {
+        if(!pccc_listing_record_cbor_write(dest, &pos, is_plc5, tag->data + i * record_bytes, record_bytes)) {
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Field-name reflection of the schema (matches @identity's get_schema
+ * pattern). One field list for every PCCC platform, matching the unified
+ * per-record shape above -- unlike the earlier per-platform design, this no
+ * longer depends on is_plc5, only on PCCC-connection eligibility. */
+static const char *const PCCC_LISTING_FIELDS[] = {"file_number", "file_type", "file_type_name", "element_count", "raw"};
+#define PCCC_LISTING_FIELD_COUNT ((size_t)(sizeof(PCCC_LISTING_FIELDS) / sizeof(PCCC_LISTING_FIELDS[0])))
+
+static size_t pccc_listing_schema_cbor_size(void) {
+    size_t sz = cbor_size_map_header(3);
+    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(PCCC_LISTING_SCHEMA_NAME) - 1);
+    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(PCCC_LISTING_SCHEMA_VERSION);
+    sz += cbor_size_text(sizeof("fields") - 1) + cbor_size_array_header(PCCC_LISTING_FIELD_COUNT);
+    for(size_t i = 0; i < PCCC_LISTING_FIELD_COUNT; i++) { sz += cbor_size_text((size_t)str_length(PCCC_LISTING_FIELDS[i])); }
+    return sz;
+}
+
+static bool pccc_listing_schema_cbor_write(Bytes dest, size_t *pos) {
+    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("schema"))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT(PCCC_LISTING_SCHEMA_NAME))) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("schema-version"))) { return false; }
+    if(!cbor_write_uint(dest, pos, PCCC_LISTING_SCHEMA_VERSION)) { return false; }
+    if(!cbor_write_text(dest, pos, CBOR_LIT("fields"))) { return false; }
+    if(!cbor_write_array_header(dest, pos, PCCC_LISTING_FIELD_COUNT)) { return false; }
+    for(size_t i = 0; i < PCCC_LISTING_FIELD_COUNT; i++) {
+        if(!cbor_write_text(dest, pos, PCCC_LISTING_FIELDS[i], (size_t)str_length(PCCC_LISTING_FIELDS[i]))) { return false; }
+    }
+    return true;
+}
+
+static int enip_pccc_listing_get_schema_size(plc_tag_p tag, plc_tag_format_type_t format) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+    bool is_plc5;
+    if(!pccc_listing_is_pccc(tag, &is_plc5)) { return PLCTAG_ERR_UNSUPPORTED; }
+    (void)is_plc5; /* eligibility only -- the schema no longer varies by platform */
+    return (int)pccc_listing_schema_cbor_size();
+}
+
+static int enip_pccc_listing_get_schema(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+    bool is_plc5;
+    if(!pccc_listing_is_pccc(tag, &is_plc5)) { return PLCTAG_ERR_UNSUPPORTED; }
+    (void)is_plc5; /* eligibility only -- the schema no longer varies by platform */
+
+    if(pccc_listing_schema_cbor_size() > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
+    size_t pos = 0;
+    if(!pccc_listing_schema_cbor_write(dest, &pos)) { return PLCTAG_ERR_TOO_SMALL; }
+
+    return PLCTAG_STATUS_OK;
+}
+
 static struct tag_vtable_t enip_listing_tag_vtable = {
     .abort = enip_tag_abort,
     .read = enip_listing_tag_read,
@@ -627,6 +992,12 @@ static struct tag_vtable_t enip_listing_tag_vtable = {
     .get_int_attrib = NULL,
     .set_int_attrib = NULL,
     .get_byte_array_attrib = NULL,
+    .get_formatted_data_size = enip_pccc_listing_get_formatted_data_size,
+    .get_formatted_data = enip_pccc_listing_get_formatted_data,
+    .set_formatted_data = NULL, /* read-only tag */
+    .get_schema_size = enip_pccc_listing_get_schema_size,
+    .get_schema = enip_pccc_listing_get_schema,
+    .set_schema = NULL, /* built-in schema, not user-settable */
 };
 
 static int32_t enip_tag_data_written(plc_tag_p tag) {

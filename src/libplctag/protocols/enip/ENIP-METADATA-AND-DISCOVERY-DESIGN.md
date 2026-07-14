@@ -101,6 +101,41 @@ schema must `set_schema` before any structured `get_formatted_data`. Requesting
 a structured format with no schema is a **call-time error** (not a create-time
 one) — it fails at `get_formatted_data`, the call that actually needs it.
 
+**Built-in schemas shipped so far:** `identity` (§9) and `pccc-file-list` --
+`@tags` against a PLC-5/SLC/MicroLogix connection, covering client PCCC
+support. PCCC has no symbol-object equivalent to Logix's class 0x6B; instead
+it reads the File 0 system directory with an ordinary PCCC word-range read,
+per a vendor protocol technical report not independently verified against
+real hardware in this tree (see `enip_pccc_build_listing`'s doc comment in
+`client/enip_session.c` for the full wire-format reasoning and known
+limitations -- notably, MicroLogix is treated uniformly with SLC's 6-byte
+directory record; the report's extended 8-byte record for specific newer
+MicroLogix variants is not distinguished or supported).
+
+`pccc-file-list` is deliberately **one record shape for every PCCC platform**
+(`client/enip_tag.c`'s `pccc_listing_record_cbor_size`/`_write`): `file_number`,
+`file_type` (a `pccc_file_t` code -- the same vocabulary
+`enip_pccc_addr.c` already uses to parse logical addresses like `N7:0`),
+`file_type_name`, `element_count` (when known), and `raw` (the untouched
+native record bytes, the escape hatch for platform-specific extras this
+schema doesn't name -- PLC-5's attribute byte, SLC/MicroLogix's unexplained
+trailing "reserved" field). SLC/MicroLogix carry `file_type` directly on the
+wire; PLC-5 has no type-ID byte at all, so its records are decoded first
+(`pccc_decode_plc5_file_record`: file-number convention for files 0-2, then
+the attribute byte's structure-class nibble + radix bits, corroborated by
+word-count divisibility) and mapped onto the same `pccc_file_t` codes before
+either platform's record is emitted -- so a caller reading `@tags` against a
+PLC-5 and an SLC never sees a different field name for "what type is this
+file". One known loss from unifying: PLC-5's own inactive-vs-
+unrecognized-structure distinction collapses into the same generic
+`PCCC_FILE_UNKNOWN` both platforms already share for "not resolvable"; a
+caller that needs that distinction back decodes `raw`'s attribute byte
+(bit 6) itself.
+
+Rockwell `@tags`/`@udt` (class 0x6B/0x6C) and OMRON's own enumeration (§7/§8
+tasks) do not have CBOR schemas yet -- `PLCTAG_FORMAT_CBOR` on those still
+returns `PLCTAG_ERR_UNSUPPORTED`; only `PLCTAG_FORMAT_RAW` works today.
+
 **Symmetry.** `set_formatted_data(…, PLCTAG_FORMAT_CBOR, …)` decodes CBOR→raw
 for the wire, so a schema/codec must round-trip both directions. Read-only
 tags (identity, tag list, discovery) reject `set_formatted_data`.

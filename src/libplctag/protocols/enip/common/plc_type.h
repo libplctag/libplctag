@@ -72,3 +72,17 @@ static inline bool bytes_has_prefix(Bytes name, const char *prefix) {
     size_t prefix_len = str_length(prefix) < 0 ? 0 : (size_t)str_length(prefix);
     return name.data && name.len >= prefix_len && mem_cmp(name.data, (int)prefix_len, (void *)prefix, (int)prefix_len) == 0;
 }
+
+/* True for the PCCC families (Execute-PCCC, CIP service 0x4B) -- PLC-5, SLC
+ * 500, MicroLogix -- as opposed to the symbolic families (Logix/Micro800,
+ * OMRON NJ/NX) that use CIP Read/Write Tag. Used to select the PCCC dialect
+ * for @tags listing (PCCC has no equivalent to Logix's class 0x6B symbol
+ * object; its own analogous mechanism is the File 0 system directory, a
+ * plain PCCC word-range read -- see enip_pccc_build_listing in
+ * enip_session.c) independently of the connection's regular data-path
+ * dialect, which stays Logix-shaped (enip_dialect_select never returns
+ * enip_pccc_dialect at the connection level; PCCC data ops are selected
+ * per-tag, not per-connection -- see enip_dialect.h). */
+static inline bool enip_plc_is_pccc(enip_plc_type_t pt) {
+    return pt == ENIP_PLC_PLC5 || pt == ENIP_PLC_SLC || pt == ENIP_PLC_MLGX;
+}
