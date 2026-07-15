@@ -54,6 +54,20 @@ typedef struct cip_obj_entry_s {
 } cip_obj_entry_t;
 
 /* ============================================================================
+ * udt_template_t — one per registered UDT/structure type (device_sim_add_udt_type)
+ * ============================================================================ */
+
+typedef struct udt_template_s {
+    struct udt_template_s *next;
+    uint16_t     template_id;    /* low 12 bits of a structure tag's symbol type; class 0x6C instance id */
+    uint16_t     handle;         /* structure "CRC" handle, attribute 1 */
+    uint32_t     instance_size;  /* bytes, attribute 5 */
+    uint16_t     num_members;    /* attribute 2 */
+    uint8_t     *definition;     /* pre-encoded member-info array + NUL-delimited name blob (class 0x6C service 0x4C) */
+    uint32_t     definition_len;
+} udt_template_t;
+
+/* ============================================================================
  * tag_def_t — one per configured tag
  * ============================================================================ */
 
@@ -155,6 +169,12 @@ typedef struct {
     tag_def_t   *tags_tail;
     mutex_p      tags_mutex;
 
+    /* UDT/structure template registry (device_sim_add_udt_type). Built once
+     * before device_sim_start() like cip_objects below -- read-only after,
+     * so no lock needed by the class 0x6C handler's lookups. */
+    udt_template_t *udt_templates;
+    uint16_t         next_template_id;
+
     /* Back-pointer to the owning device_sim_t — set once at create, never changes.
      * Lets protocol handlers pass the public handle to tag callbacks without
      * knowing the full struct layout. */
@@ -231,3 +251,9 @@ extern device_t *device_sim_get_device(device_sim_t *sim);
  * device_tags_append() above. NULL on invalid args or allocation failure. */
 extern tag_def_t *device_tag_alloc(const char *name, tag_type_t type, size_t elem_size, size_t elem_count,
                                    device_sim_tag_cb read_cb, device_sim_tag_cb write_cb, void *user_data);
+
+/* Look up a registered UDT template by id (the low 12 bits of a structure
+ * tag's symbol type / the class 0x6C instance id). NULL if not found.
+ * Read-only after device_sim_start(), so no lock needed -- see
+ * device_t.udt_templates above. Used by dialects/rockwell/ab_listing.c. */
+extern udt_template_t *device_udt_find(device_t *dev, uint16_t template_id);

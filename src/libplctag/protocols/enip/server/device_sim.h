@@ -230,6 +230,44 @@ extern int32_t device_sim_add_pccc_tag(device_sim_t *sim, const char *name, tag_
                                        device_sim_tag_cb read_cb, device_sim_tag_cb write_cb, void *user_data);
 
 /* ============================================================================
+ * UDT/structure template registration (must be called before device_sim_start)
+ *
+ * Registers a CIP class 0x6C template so that a tag using
+ * DEVICE_SIM_STRUCTURE_TYPE(template_id) as its type (in device_sim_add_tag)
+ * enumerates correctly under `@tags`/`@udt` (ROCKWELL-SPECIFIC-DESIGN.md §5).
+ * The simulator does not otherwise interpret member layout -- tag data is
+ * still a flat byte buffer accessed via device_sim_tag_get/set exactly as for
+ * any other tag; `members` only feeds the template *definition* served over
+ * class 0x6C service 0x4C so a real client's UDT decoder can parse it.
+ * ============================================================================ */
+
+/* One member of a UDT template definition, in declaration order. type is an
+ * atomic tag_type_t (e.g. TAG_CIP_TYPE_DINT) or another template's
+ * DEVICE_SIM_STRUCTURE_TYPE(id) for a nested UDT member. array_count 0 or 1
+ * means scalar. offset is the member's byte offset within one instance. */
+typedef struct {
+    const char  *name;
+    tag_type_t   type;
+    uint32_t     array_count;
+    uint32_t     offset;
+} udt_member_t;
+
+/* Structure/UDT symbol type: set as a tag's tag_type (device_sim_add_tag) to
+ * mark it as an instance of the template registered with this id. */
+#define DEVICE_SIM_STRUCTURE_TYPE(template_id) ((tag_type_t)(0x8000u | ((template_id) & 0x0FFFu)))
+
+/*
+ * Register a UDT template. instance_size is the total byte size of one
+ * instance (the caller computes any padding a real controller would add;
+ * the simulator does not infer it from members). Returns the assigned
+ * template id (1..0x0FFF) via *template_id_out and PLCTAG_STATUS_OK, or a
+ * negative PLCTAG_ERR_* code. members may be NULL/num_members 0 for a
+ * template with no published field layout (definition reads return 0 bytes).
+ */
+extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_name, uint32_t instance_size,
+                                       const udt_member_t *members, uint32_t num_members, uint16_t *template_id_out);
+
+/* ============================================================================
  * Identity access (thread-safe; may be called before or after start)
  * ============================================================================ */
 

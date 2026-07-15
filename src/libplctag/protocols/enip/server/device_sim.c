@@ -101,6 +101,15 @@ static void free_cip_objects(cip_obj_entry_t *entry) {
     }
 }
 
+static void free_udt_templates(udt_template_t *tmpl) {
+    while(tmpl) {
+        udt_template_t *next = tmpl->next;
+        if(tmpl->definition) { mem_free(tmpl->definition); }
+        mem_free(tmpl);
+        tmpl = next;
+    }
+}
+
 static void free_tags(tag_def_t *tag) {
     while(tag) {
         tag_def_t *next = tag->next_tag;
@@ -299,6 +308,7 @@ extern void device_sim_destroy(device_sim_t *sim) {
     /* Single-threaded here: listener/discovery threads are already joined,
      * so no lock is needed for this final walk-and-free. */
     free_tags(sim->dev.tags);
+    free_udt_templates(sim->dev.udt_templates);
     if(sim->dev.bind_addr) { mem_free(sim->dev.bind_addr); }
     mutex_destroy(&sim->dev.tags_mutex);
     mutex_destroy(&sim->dev.identity_mutex);
@@ -319,7 +329,21 @@ extern int32_t device_sim_add_tag(device_sim_t *sim,
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    size_t elem_size = elem_size_for_type(type);
+    size_t elem_size;
+    if(type & 0x8000u) {
+        /* Structure-typed tag (DEVICE_SIM_STRUCTURE_TYPE): element size comes
+         * from the referenced UDT template's registered instance size, not
+         * elem_size_for_type (which only knows atomic CIP/PCCC types). */
+        udt_template_t *tmpl = device_udt_find(&sim->dev, (uint16_t)(type & 0x0FFFu));
+        if(!tmpl) {
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
+                   "device_sim_add_tag: unknown UDT template id %u for tag '%s'.", (unsigned)(type & 0x0FFFu), name);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+        elem_size = tmpl->instance_size;
+    } else {
+        elem_size = elem_size_for_type(type);
+    }
     if(elem_size == 0) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
                "device_sim_add_tag: unknown type 0x%04x for tag '%s'.", (unsigned)type, name);
@@ -372,6 +396,99 @@ extern int32_t device_sim_add_pccc_tag(device_sim_t *sim,
 
     pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
            "Added PCCC tag '%s' file=%u elems=%u.", name, (unsigned)file_num, (unsigned)elem_count);
+    return PLCTAG_STATUS_OK;
+}
+
+/* ============================================================================
+ * UDT/structure template registry
+ * ============================================================================ */
+
+extern udt_template_t *device_udt_find(device_t *dev, uint16_t template_id) {
+    udt_template_t *tmpl = dev->udt_templates;
+    while(tmpl) {
+        if(tmpl->template_id == template_id) { return tmpl; }
+        tmpl = tmpl->next;
+    }
+    return NULL;
+}
+
+/* Encode the class 0x6C service 0x4C definition blob: a fixed 8-byte member
+ * entry per member (type(u16), info(u16), offset(u32)) -- see udt_member_t --
+ * then a NUL-delimited name blob: "<struct_name>;\0" followed by each member
+ * name, NUL-terminated (ROCKWELL-SPECIFIC-DESIGN.md §5.2). Returns the
+ * allocated buffer (caller frees) and its length via *len_out, or NULL on
+ * allocation failure. */
+static uint8_t *encode_udt_definition(const char *struct_name, const udt_member_t *members, uint32_t num_members,
+                                      uint32_t *len_out) {
+    uint32_t total = num_members * 8u + (uint32_t)str_length(struct_name) + 2u;
+    for(uint32_t i = 0; i < num_members; i++) { total += (uint32_t)str_length(members[i].name) + 1u; }
+
+    uint8_t *def = (uint8_t *)mem_alloc((int)total);
+    if(!def) { return NULL; }
+
+    uint32_t pos = 0;
+    for(uint32_t i = 0; i < num_members; i++) {
+        uint16_t type = members[i].type;
+        uint16_t info = (members[i].array_count > 1) ? (uint16_t)members[i].array_count : (uint16_t)1;
+        def[pos++] = (uint8_t)(type & 0xFFu);
+        def[pos++] = (uint8_t)((type >> 8) & 0xFFu);
+        def[pos++] = (uint8_t)(info & 0xFFu);
+        def[pos++] = (uint8_t)((info >> 8) & 0xFFu);
+        def[pos++] = (uint8_t)(members[i].offset & 0xFFu);
+        def[pos++] = (uint8_t)((members[i].offset >> 8) & 0xFFu);
+        def[pos++] = (uint8_t)((members[i].offset >> 16) & 0xFFu);
+        def[pos++] = (uint8_t)((members[i].offset >> 24) & 0xFFu);
+    }
+
+    int32_t sn_len = str_length(struct_name);
+    mem_copy(def + pos, (void *)struct_name, sn_len);
+    pos += (uint32_t)sn_len;
+    def[pos++] = ';';
+    def[pos++] = '\0';
+
+    for(uint32_t i = 0; i < num_members; i++) {
+        int32_t mn_len = str_length(members[i].name);
+        mem_copy(def + pos, (void *)members[i].name, mn_len);
+        pos += (uint32_t)mn_len;
+        def[pos++] = '\0';
+    }
+
+    *len_out = pos;
+    return def;
+}
+
+extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_name, uint32_t instance_size,
+                                       const udt_member_t *members, uint32_t num_members, uint16_t *template_id_out) {
+    if(!sim || !struct_name || instance_size == 0) { return PLCTAG_ERR_BAD_PARAM; }
+    if(num_members > 0 && !members) { return PLCTAG_ERR_BAD_PARAM; }
+    if(sim->dev.next_template_id >= 0x0FFFu) { return PLCTAG_ERR_TOO_LARGE; }
+
+    uint32_t def_len = 0;
+    uint8_t *def = encode_udt_definition(struct_name, members, num_members, &def_len);
+    if(!def) { return PLCTAG_ERR_NO_MEM; }
+
+    udt_template_t *tmpl = (udt_template_t *)mem_alloc((int)sizeof(udt_template_t));
+    if(!tmpl) { mem_free(def); return PLCTAG_ERR_NO_MEM; }
+    mem_set(tmpl, 0, (int)sizeof(udt_template_t));
+
+    tmpl->template_id = ++sim->dev.next_template_id;
+    /* ponytail: not a real CRC-16 -- Rockwell's structure-handle CRC algorithm
+     * isn't documented and nothing in this codebase parses this value back;
+     * it only needs to be a stable per-template number a client can echo. */
+    tmpl->handle = (uint16_t)(tmpl->template_id * 2654435761u);
+    tmpl->instance_size = instance_size;
+    tmpl->num_members = (uint16_t)num_members;
+    tmpl->definition = def;
+    tmpl->definition_len = def_len;
+
+    tmpl->next = sim->dev.udt_templates;
+    sim->dev.udt_templates = tmpl;
+
+    if(template_id_out) { *template_id_out = tmpl->template_id; }
+
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0,
+           "Added UDT template '%s' id=%u size=%u members=%u.", struct_name, (unsigned)tmpl->template_id,
+           (unsigned)instance_size, (unsigned)num_members);
     return PLCTAG_STATUS_OK;
 }
 

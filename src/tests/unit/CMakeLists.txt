@@ -150,9 +150,35 @@ target_link_libraries(test_enip_pccc_addr PRIVATE cmocka plctag_static ${EXTRA_L
 
 add_test(NAME unit_test_enip_pccc_addr COMMAND test_enip_pccc_addr)
 
+# test_udt_template: tests the class 0x6C UDT template registry
+# (device_sim_add_udt_type/device_udt_find, pure logic, no sockets). Needs
+# device_sim.c and friends actually compiled into plctag_static, which only
+# happens under LIBPLCTAG_FEATURE_SERVER + LIBPLCTAG_FEATURE_ENIP -- unlike
+# the enip client-side tests above, this one is not self-contained enough to
+# compile its target sources directly, so it is gated to when those features
+# are on (mirrors the top-level CMakeLists.txt LIBPLCTAG_FEATURE_SERVER guard).
+set(UNIT_TESTS_LIST test_init test_cbor test_enip_type test_enip_cip_path test_enip_eip_cpf test_enip_pccc_addr)
+
+if(LIBPLCTAG_FEATURE_SERVER AND LIBPLCTAG_FEATURE_ENIP)
+    add_executable(test_udt_template test_udt_template.c)
+
+    target_include_directories(test_udt_template PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+        ${cmocka_SOURCE_DIR}/include
+        ${PLATFORM_SHIM_PATH}
+    )
+
+    target_link_libraries(test_udt_template PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+
+    add_test(NAME unit_test_udt_template COMMAND test_udt_template)
+
+    list(APPEND UNIT_TESTS_LIST test_udt_template)
+endif()
+
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_cbor test_enip_type test_enip_cip_path test_enip_eip_cpf test_enip_pccc_addr
+    DEPENDS ${UNIT_TESTS_LIST}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

@@ -62,6 +62,15 @@
 /* Size of one fixed-width tag entry before the variable-length name */
 #define TAG_ENTRY_FIXED_SIZE ((uint32_t)22)
 
+/* CIP service codes for class 0x6C (Template object), ROCKWELL-SPECIFIC-DESIGN.md §5.2 */
+#define CIP_SRV_GET_ATTR_LIST ((uint8_t)0x03)   /* template attributes: desc size, instance size, member count, handle */
+#define CIP_SRV_READ_TEMPLATE ((uint8_t)0x4C)   /* template definition bytes, offset/count, fragmented like a tag read */
+
+/* Fixed reply layout for CIP_SRV_GET_ATTR_LIST: count(2) then 4 entries of
+ * id(2)+status(2)+value, values sized 4/4/2/2 -- matches enip_logix_apply_listing's
+ * (client/enip_session.c) fixed offsets 6/14/22/28 for attrs 4,5,2,1 in that order. */
+#define TEMPLATE_ATTR_REPLY_SIZE ((uint32_t)30)
+
 /* ============================================================================
  * Forward declarations
  * ============================================================================ */
@@ -151,15 +160,16 @@ static void parse_start_instance(const uint8_t *path, uint32_t path_len,
 /*
  * Build the 2-byte CIP symbol type field from a tag_def_t.
  *
- * Bit 15: structure flag (0 for all atomic types registered here)
+ * Bit 15: structure flag (set when tag_type carries DEVICE_SIM_STRUCTURE_TYPE)
  * Bits 14-13: dimension count (0=scalar, 1=1D, 2=2D, 3=3D)
  * Bit 12: system flag (0 for user-defined tags)
- * Bits 11-0: CIP type ID
+ * Bits 11-0: CIP type ID, or (for a structure) the template instance id
  */
 static uint16_t compute_symbol_type(tag_def_t *tag) {
+    uint16_t struct_bit = (uint16_t)(tag->tag_type & 0x8000u);
     uint16_t type_id  = (uint16_t)(tag->tag_type & 0x0FFFu);
     uint16_t dim_bits = (uint16_t)((tag->num_dimensions & 3u) << 13);
-    return dim_bits | type_id;
+    return struct_bit | dim_bits | type_id;
 }
 
 
@@ -279,26 +289,114 @@ static int32_t handle_symbol_list(device_sim_t *sim, uint8_t service, const uint
 
 
 /*
- * handle_template — catch-all for class 0x6C (Template/UDT object).
+ * handle_template_attrs — service 0x03 (Get_Attribute_List) on class 0x6C.
  *
- * UDT template support is deferred to a later phase.  Returning
- * PLCTAG_ERR_UNSUPPORTED causes try_cip_object to send a CIP "service
- * unsupported" (0x08) error, which is the correct response when no UDT
- * definitions have been registered.
+ * Always replies with the fixed 4-attribute set our own client requests (§5.2:
+ * attrs 4, 5, 2, 1 in that order) regardless of which attribute ids the
+ * request actually listed -- this dialect only needs to interoperate with the
+ * client half already built in this tree, which never asks for anything else.
+ * Reply: count(u16)=4, then per attribute {id(u16), status(u16)=0, value}:
+ *   attr 4: object definition size in 32-bit words (u32) -- derived from
+ *           tmpl->definition_len so client/enip_session.c's
+ *           `(4*desc_words - 23)` recovery formula yields >= definition_len.
+ *   attr 5: instance size in bytes (u32)
+ *   attr 2: member count (u16)
+ *   attr 1: structure handle (u16)
+ */
+static int32_t handle_template_attrs(udt_template_t *tmpl, uint8_t *resp, uint32_t resp_cap, uint32_t *resp_len) {
+    if(TEMPLATE_ATTR_REPLY_SIZE > resp_cap) { return PLCTAG_ERR_TOO_LARGE; }
+
+    /* Inverse of the client's `(4*desc_words - 23)` recovery: generous
+     * rounding so the recovered byte count is always >= definition_len. */
+    uint32_t desc_words = (tmpl->definition_len + 23u + 3u) / 4u;
+
+    uint8_t *p = resp;
+    p[0] = 4; p[1] = 0; /* attribute count */
+
+    p[2] = 0x04; p[3] = 0x00; p[4] = 0x00; p[5] = 0x00; /* attr 4, status 0 */
+    p[6] = (uint8_t)(desc_words & 0xFFu);
+    p[7] = (uint8_t)((desc_words >> 8) & 0xFFu);
+    p[8] = (uint8_t)((desc_words >> 16) & 0xFFu);
+    p[9] = (uint8_t)((desc_words >> 24) & 0xFFu);
+
+    p[10] = 0x05; p[11] = 0x00; p[12] = 0x00; p[13] = 0x00; /* attr 5, status 0 */
+    p[14] = (uint8_t)(tmpl->instance_size & 0xFFu);
+    p[15] = (uint8_t)((tmpl->instance_size >> 8) & 0xFFu);
+    p[16] = (uint8_t)((tmpl->instance_size >> 16) & 0xFFu);
+    p[17] = (uint8_t)((tmpl->instance_size >> 24) & 0xFFu);
+
+    p[18] = 0x02; p[19] = 0x00; p[20] = 0x00; p[21] = 0x00; /* attr 2, status 0 */
+    p[22] = (uint8_t)(tmpl->num_members & 0xFFu);
+    p[23] = (uint8_t)((tmpl->num_members >> 8) & 0xFFu);
+
+    p[24] = 0x01; p[25] = 0x00; p[26] = 0x00; p[27] = 0x00; /* attr 1, status 0 */
+    p[28] = (uint8_t)(tmpl->handle & 0xFFu);
+    p[29] = (uint8_t)((tmpl->handle >> 8) & 0xFFu);
+
+    *resp_len = TEMPLATE_ATTR_REPLY_SIZE;
+    return PLCTAG_STATUS_OK;
+}
+
+/*
+ * handle_template_read — service 0x4C (Read Template) on class 0x6C.
+ *
+ * Request body: offset(u32 LE) + byte_count(u16 LE). Replies with
+ * min(byte_count, definition_len - offset) raw definition bytes; signals
+ * DEVICE_SIM_MORE_DATA (-> CIP status 0x06, FRAG) when bytes remain past this
+ * response, matching client/enip_session.c's enip_logix_apply_listing FRAG
+ * check for ENIP_OP_UDT_FIELDS.
+ */
+static int32_t handle_template_read(udt_template_t *tmpl, const uint8_t *req, uint32_t req_len, uint8_t *resp,
+                                    uint32_t resp_cap, uint32_t *resp_len) {
+    if(req_len < 6) { return PLCTAG_ERR_TOO_SMALL; }
+
+    uint32_t offset = (uint32_t)req[0] | ((uint32_t)req[1] << 8) | ((uint32_t)req[2] << 16) | ((uint32_t)req[3] << 24);
+    uint16_t byte_count = (uint16_t)req[4] | (uint16_t)((uint16_t)req[5] << 8);
+
+    if(offset > tmpl->definition_len) { return PLCTAG_ERR_OUT_OF_BOUNDS; }
+
+    uint32_t avail = tmpl->definition_len - offset;
+    uint32_t n = (avail < (uint32_t)byte_count) ? avail : (uint32_t)byte_count;
+    if(n > resp_cap) { n = resp_cap; }
+
+    mem_copy(resp, tmpl->definition + offset, (int)n);
+    *resp_len = n;
+
+    return (offset + n < tmpl->definition_len) ? DEVICE_SIM_MORE_DATA : PLCTAG_STATUS_OK;
+}
+
+/*
+ * handle_template — class 0x6C (Template/UDT object) dispatch.
+ *
+ * Serves templates registered via device_sim_add_udt_type. Returns CIP
+ * "service unsupported" for an unknown template id or service, which is also
+ * the correct response when no UDT templates have been registered at all.
  */
 static int32_t handle_template(device_sim_t *sim, uint8_t service,
                                const uint8_t *path, uint32_t path_len,
                                const uint8_t *req, uint32_t req_len,
                                uint8_t *resp, uint32_t resp_cap,
                                uint32_t *resp_len, void *user_data) {
-    (void)sim; (void)path; (void)path_len; (void)req; (void)req_len;
-    (void)resp; (void)resp_cap; (void)user_data;
+    device_t *dev = (device_t *)user_data;
+    (void)sim;
 
-    /* ponytail: UDT template not yet implemented; no UDT-typed tags in the
-     * listing so the client will not query class 0x6C in practice. */
+    uint32_t template_id = 0;
+    parse_start_instance(path, path_len, &template_id);
+
+    udt_template_t *tmpl = device_udt_find(dev, (uint16_t)template_id);
+    if(!tmpl) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "ab_listing: class 0x6C unknown template id %u.",
+               (unsigned)template_id);
+        *resp_len = 0;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
     *resp_len = 0;
-    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
-           "ab_listing: class 0x6C service 0x%02x not yet supported (UDT/template).",
+
+    if(service == CIP_SRV_GET_ATTR_LIST) { return handle_template_attrs(tmpl, resp, resp_cap, resp_len); }
+    if(service == CIP_SRV_READ_TEMPLATE) { return handle_template_read(tmpl, req, req_len, resp, resp_cap, resp_len); }
+
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "ab_listing: class 0x6C does not support service 0x%02x.",
            (unsigned)service);
     return PLCTAG_ERR_UNSUPPORTED;
 }
