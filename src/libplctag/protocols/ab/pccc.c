@@ -851,7 +851,6 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address) {
 
         case 'O':
         case 'o': /* Output */
-            /* FIXME - Check if 0x82 is correct instead of 0x8b */
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Found Output file.");
             address->file_type = PCCC_FILE_OUTPUT;
             address->element_size_bytes = 2;
