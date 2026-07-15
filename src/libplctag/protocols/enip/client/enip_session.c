@@ -1714,6 +1714,15 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
 #define PCCC_REPLY_HDR ((size_t)11)
 #define PCCC_REPLY_STS_OFF ((size_t)8)
 
+/* PCCC has no fragmentation status (unlike Logix's CIP_STATUS_FRAG), so every
+ * read/write/@tags-listing round trip is capped at a fixed page that fits
+ * comfortably under the single-byte SLC transfer-size field (max 255) and
+ * typical DF1/EtherNet-IP embedded-packet limits. Data ops chunk across
+ * multiple round trips by walking the element cursor (t->read_off); the
+ * File-0 listing chunks by word offset (t->list_next_id) -- see below. */
+#define PCCC_MAX_TRANSFER_BYTES ((size_t)240)
+#define PCCC_MAX_TRANSFER_WORDS ((uint16_t)(PCCC_MAX_TRANSFER_BYTES / 2))
+
 /* Write the CIP/PCCC header + requestor id shared by every Execute-PCCC
  * request (13 bytes), then the PCCC command fields up to and including FNC.
  * Returns the new position. */
@@ -1836,17 +1845,24 @@ static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
     }
 
     bool is_write = (t->op == ENIP_OP_WRITE);
-    size_t data_len = is_write ? (size_t)t->size : 0;
 
-    /* SLC/MicroLogix carry the transfer size in a single byte. */
-    if(!t->pccc_plc5 && (size_t)t->size > 0xFFu) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC SLC transfer size %d exceeds 255 bytes!", (int)t->size);
-        return bytes_null();
-    }
+    /* Chunk to <=PCCC_MAX_TRANSFER_BYTES per round trip: PCCC has no
+     * CIP_STATUS_FRAG equivalent, so a large array tag is walked one element
+     * chunk at a time via the element cursor t->read_off (reset to 0 for a
+     * fresh op in enip_tag_read/write), each chunk addressed by advancing the
+     * PCCC logical address's element field -- see apply() below for the other
+     * half of the loop. */
+    uint32_t remaining_elems = t->elem_count - t->read_off;
+    uint32_t max_elems = (uint32_t)(PCCC_MAX_TRANSFER_BYTES / (size_t)t->elem_size);
+    if(max_elems == 0) { max_elems = 1; }
+    uint32_t chunk_elems = (remaining_elems < max_elems) ? remaining_elems : max_elems;
+    size_t chunk_bytes = (size_t)chunk_elems * (size_t)t->elem_size;
+    size_t data_len = is_write ? chunk_bytes : 0;
 
-    /* Encode the logical address with the family encoder (copy: it may adjust). */
+    /* Encode the logical address with the family encoder (copy: it may adjust), advanced to this chunk's starting element. */
     uint8_t addr_buf[32];
     pccc_addr_t addr = t->pccc_addr;
+    addr.element += (int32_t)t->read_off;
     Bytes encoded = t->pccc_plc5 ? enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)))
                                  : enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
     if(bytes_is_null(encoded) || encoded.len == 0) {
@@ -1883,22 +1899,22 @@ static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
 
     if(t->pccc_plc5) {
         p[pos++] = is_write ? PCCC_PLC5_WRITE_FNC : PCCC_PLC5_READ_FNC;
-        p[pos++] = 0x00; p[pos++] = 0x00;                   /* offset = 0 */
-        uint16_t words = (uint16_t)((size_t)t->size / 2u);  /* transfer size in words */
+        p[pos++] = 0x00; p[pos++] = 0x00;                    /* offset = 0: each chunk uses its own address instead */
+        uint16_t words = (uint16_t)(chunk_bytes / 2u);       /* transfer size in words, this chunk only */
         p[pos++] = (uint8_t)(words & 0xFFu);
         p[pos++] = (uint8_t)(words >> 8);
         memcpy(p + pos, addr_buf, (size_t)addr_len);
         pos += (size_t)addr_len;
-        if(!is_write) { p[pos++] = (uint8_t)t->size; } /* PLC-5 read appends total byte size */
+        if(!is_write) { p[pos++] = (uint8_t)chunk_bytes; } /* PLC-5 read appends this chunk's byte size */
     } else {
         p[pos++] = is_write ? PCCC_SLC_WRITE_FNC : PCCC_SLC_READ_FNC;
-        p[pos++] = (uint8_t)t->size; /* transfer size in bytes */
+        p[pos++] = (uint8_t)chunk_bytes; /* transfer size in bytes, this chunk only (<=240, fits the byte field) */
         memcpy(p + pos, addr_buf, (size_t)addr_len);
         pos += (size_t)addr_len;
     }
 
     if(is_write) {
-        memcpy(p + pos, t->data, data_len);
+        memcpy(p + pos, t->data + (size_t)t->read_off * (size_t)t->elem_size, data_len);
         pos += data_len;
     }
 
@@ -1907,7 +1923,7 @@ static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
 
 static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
     (void)c;
-    *more = false; /* PCCC has no fragmentation: one round trip per op. */
+    *more = false;
 
     cip_reply_t reply;
     if(!enip_cip_parse_reply(cip_reply, &reply)) {
@@ -1933,11 +1949,26 @@ static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_rep
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    if(t->op == ENIP_OP_WRITE) { return PLCTAG_STATUS_OK; }
+    /* Same chunk-size formula as build() above, recomputed from the cursor
+     * build() used for this round trip (unchanged since then -- one round
+     * trip in flight at a time). */
+    uint32_t remaining_elems = t->elem_count - t->read_off;
+    uint32_t max_elems = (uint32_t)(PCCC_MAX_TRANSFER_BYTES / (size_t)t->elem_size);
+    if(max_elems == 0) { max_elems = 1; }
+    uint32_t chunk_elems = (remaining_elems < max_elems) ? remaining_elems : max_elems;
+
+    if(t->op == ENIP_OP_WRITE) {
+        t->read_off += chunk_elems;
+        if(t->read_off < t->elem_count) { *more = true; }
+        return PLCTAG_STATUS_OK;
+    }
 
     size_t avail = reply.data.len - PCCC_REPLY_HDR;
-    size_t n = (avail < (size_t)t->size) ? avail : (size_t)t->size;
-    memcpy(t->data, reply.data.data + PCCC_REPLY_HDR, n);
+    size_t chunk_bytes = (size_t)chunk_elems * (size_t)t->elem_size;
+    size_t n = (avail < chunk_bytes) ? avail : chunk_bytes;
+    memcpy(t->data + (size_t)t->read_off * (size_t)t->elem_size, reply.data.data + PCCC_REPLY_HDR, n);
+    t->read_off += (uint32_t)(n / (size_t)t->elem_size);
+    if(t->read_off < t->elem_count) { *more = true; }
     return PLCTAG_STATUS_OK;
 }
 
@@ -1972,8 +2003,6 @@ static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_rep
  * access is via plc_tag_get_formatted_data(tag, PLCTAG_FORMAT_CBOR, ...)
  * (enip_tag.c), which knows the record layout from the connection's
  * identity-classified PLC family. */
-#define PCCC_LISTING_PAGE_BYTES ((size_t)240)
-#define PCCC_LISTING_PAGE_WORDS ((uint16_t)(PCCC_LISTING_PAGE_BYTES / 2))
 
 static Bytes enip_pccc_build_listing(Arena *a, enip_tag_p t) {
     if(t->op != ENIP_OP_LIST) { return bytes_null(); }
@@ -2008,13 +2037,13 @@ static Bytes enip_pccc_build_listing(Arena *a, enip_tag_p t) {
     if(is_plc5) {
         buf[pos++] = 0x00;
         buf[pos++] = 0x00; /* byte offset = 0: this is a whole-word range read, not a fragmented single element */
-        buf[pos++] = (uint8_t)(PCCC_LISTING_PAGE_WORDS & 0xFFu);
-        buf[pos++] = (uint8_t)(PCCC_LISTING_PAGE_WORDS >> 8);
+        buf[pos++] = (uint8_t)(PCCC_MAX_TRANSFER_WORDS & 0xFFu);
+        buf[pos++] = (uint8_t)(PCCC_MAX_TRANSFER_WORDS >> 8);
         memcpy(buf + pos, encoded.data, encoded.len);
         pos += encoded.len;
-        buf[pos++] = (uint8_t)PCCC_LISTING_PAGE_BYTES; /* PLC-5 read appends total byte size (fits: 240 <= 255) */
+        buf[pos++] = (uint8_t)PCCC_MAX_TRANSFER_BYTES; /* PLC-5 read appends total byte size (fits: 240 <= 255) */
     } else {
-        buf[pos++] = (uint8_t)PCCC_LISTING_PAGE_BYTES; /* transfer size in bytes (fits: 240 <= 255) */
+        buf[pos++] = (uint8_t)PCCC_MAX_TRANSFER_BYTES; /* transfer size in bytes (fits: 240 <= 255) */
         memcpy(buf + pos, encoded.data, encoded.len);
         pos += encoded.len;
     }
@@ -2052,7 +2081,7 @@ static int32_t enip_pccc_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes d
 
     /* No PCCC partial-transfer signal exists (unlike Logix's CIP_STATUS_FRAG):
      * a full page means "maybe more"; a short page is the last one. */
-    if(payload_len >= PCCC_LISTING_PAGE_BYTES) { *more = true; }
+    if(payload_len >= PCCC_MAX_TRANSFER_BYTES) { *more = true; }
 
     return PLCTAG_STATUS_OK;
 }

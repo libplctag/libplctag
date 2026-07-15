@@ -126,7 +126,7 @@ static int32_t enip_tag_read(plc_tag_p tag) {
 
     t->read_complete = 0;
 
-    if(t->elem_count > 1) { t->read_off = 0; }
+    if(t->elem_count > 1 || t->kind == ENIP_TAG_KIND_PCCC) { t->read_off = 0; }
     if(t->fragmented_elem) { t->frag_offset = 0; } /* §16a.6: fresh fragment cursor for this read */
 
     tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, (int8_t)PLCTAG_STATUS_OK);
@@ -150,7 +150,7 @@ static int32_t enip_tag_write(plc_tag_p tag) {
 
     t->write_complete = 0;
 
-    if(t->elem_count > 1) { t->read_off = 0; }
+    if(t->elem_count > 1 || t->kind == ENIP_TAG_KIND_PCCC) { t->read_off = 0; }
     if(t->fragmented_elem) { t->frag_offset = 0; } /* §16a.6: fresh fragment cursor for this write */
 
     tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, (int8_t)PLCTAG_STATUS_OK);
@@ -1342,7 +1342,12 @@ static plc_tag_p create_pccc_tag(attr attribs, const pccc_addr_t *addr,
         return NULL;
     }
     tag->size = (int32_t)total_size;
-    tag->window_elems = tag->elem_count;       /* PCCC has no fragmentation: whole tag in one shot */
+    /* window_elems/write_window_elems only gate Logix's batch-eligibility check
+     * (is_batch_eligible, enip_session.c) and PCCC tags are never batch-eligible
+     * (ENIP_TAG_KIND_PCCC), so these values are unused; set to the full tag for
+     * consistency. Chunking a large PCCC op across multiple round trips is a
+     * separate mechanism -- see the PCCC dialect's build/apply in enip_session.c. */
+    tag->window_elems = tag->elem_count;
     tag->write_window_elems = tag->elem_count;
     tag->ready = 1; /* no OPEN_PROBE; a read/write goes straight to its PCCC op */
 
