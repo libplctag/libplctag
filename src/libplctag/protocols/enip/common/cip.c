@@ -499,65 +499,60 @@ static bool parse_class_instance_path_wide(Bytes path, uint32_t *class_id,
 
     bool got_class    = false;
     bool got_instance = false;
-    size_t off = 0;
+    Bytes rest = path;
 
-    while(off < path.len) {
-        uint8_t seg = path.data[off++];
+    while(rest.len > 0) {
+        uint8_t seg = 0;
+        Bytes next = bytes_unpack(rest, BYTES_LE, &seg);
+        if(bytes_is_null(next)) { return false; }
+        rest = next;
 
-        /* 8-bit class */
-        if(seg == 0x20) {
-            if(off >= path.len) { return false; }
-            *class_id = path.data[off++];
+        if(seg == 0x20) { /* 8-bit class */
+            uint8_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, &v))) { return false; }
+            rest = next;
+            *class_id = v;
             got_class = true;
-        /* 16-bit class */
-        } else if(seg == 0x21) {
-            if(off + 3 > path.len) { return false; }
-            off++; /* pad */
-            *class_id = (uint32_t)path.data[off] | ((uint32_t)path.data[off + 1] << 8);
-            off += 2;
+        } else if(seg == 0x21) { /* 16-bit class */
+            uint16_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
+            rest = next;
+            *class_id = v;
             got_class = true;
-        /* 32-bit class */
-        } else if(seg == 0x22) {
-            if(off + 5 > path.len) { return false; }
-            off++; /* pad */
-            *class_id = (uint32_t)path.data[off]
-                      | ((uint32_t)path.data[off + 1] << 8)
-                      | ((uint32_t)path.data[off + 2] << 16)
-                      | ((uint32_t)path.data[off + 3] << 24);
-            off += 4;
+        } else if(seg == 0x22) { /* 32-bit class */
+            uint32_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
+            rest = next;
+            *class_id = v;
             got_class = true;
-        /* 8-bit instance */
-        } else if(seg == 0x24) {
-            if(off >= path.len) { return false; }
-            *instance_id = path.data[off++];
+        } else if(seg == 0x24) { /* 8-bit instance */
+            uint8_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, &v))) { return false; }
+            rest = next;
+            *instance_id = v;
             got_instance = true;
-        /* 16-bit instance */
-        } else if(seg == 0x25) {
-            if(off + 3 > path.len) { return false; }
-            off++; /* pad */
-            *instance_id = (uint32_t)path.data[off] | ((uint32_t)path.data[off + 1] << 8);
-            off += 2;
+        } else if(seg == 0x25) { /* 16-bit instance */
+            uint16_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
+            rest = next;
+            *instance_id = v;
             got_instance = true;
-        /* 32-bit instance */
-        } else if(seg == 0x26) {
-            if(off + 5 > path.len) { return false; }
-            off++; /* pad */
-            *instance_id = (uint32_t)path.data[off]
-                         | ((uint32_t)path.data[off + 1] << 8)
-                         | ((uint32_t)path.data[off + 2] << 16)
-                         | ((uint32_t)path.data[off + 3] << 24);
-            off += 4;
+        } else if(seg == 0x26) { /* 32-bit instance */
+            uint32_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
+            rest = next;
+            *instance_id = v;
             got_instance = true;
-        /* 8-bit attribute */
-        } else if(seg == 0x30) {
-            if(off >= path.len) { return false; }
-            *attr_id = path.data[off++];
-        /* 16-bit attribute */
-        } else if(seg == 0x31) {
-            if(off + 3 > path.len) { return false; }
-            off++; /* pad */
-            *attr_id = (uint32_t)path.data[off] | ((uint32_t)path.data[off + 1] << 8);
-            off += 2;
+        } else if(seg == 0x30) { /* 8-bit attribute */
+            uint8_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, &v))) { return false; }
+            rest = next;
+            *attr_id = v;
+        } else if(seg == 0x31) { /* 16-bit attribute */
+            uint16_t v = 0;
+            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
+            rest = next;
+            *attr_id = v;
         } else {
             return false;
         }
@@ -877,7 +872,7 @@ static Bytes handle_read(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payloa
     }
 
     mutex_lock(tag->data_mutex);
-    mem_copy(data_buf.data, tag->data + byte_start, (int)copy_len);
+    bytes_pack_into(data_buf, BYTES_LE, bytes_from_buf(tag->data + byte_start, copy_len));
     /* Server-tag (role=server) event delivery: only on the final fragment of
      * a (possibly multi-request) read, so the owning plc_tag's tickler fires
      * READ_COMPLETED once per logical read, not once per wire fragment. No
@@ -959,7 +954,7 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
     }
 
     mutex_lock(tag->data_mutex);
-    mem_copy(tag->data + byte_start, rest.data, (int)write_len);
+    bytes_pack_into(bytes_from_buf(tag->data + byte_start, write_len), BYTES_LE, rest);
     /* Server-tag (role=server) event delivery — see the matching comment in
      * handle_read(). Known limitation: unlike reads, this write path has no
      * server-side fragmentation state, so a multi-request WriteFrag sequence
@@ -982,17 +977,18 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
 static bool parse_class_instance_path(Bytes path, uint8_t *class_id, uint8_t *instance_id,
                                        uint8_t *attr_id) {
     *attr_id = 0;
-    if(path.len < 4) { return false; }
-    /* Logical class segment 8-bit: 0x20 + class_id */
-    if(path.data[0] != 0x20) { return false; }
-    *class_id = path.data[1];
-    /* Logical instance segment 8-bit: 0x24 + instance_id */
-    if(path.data[2] != 0x24) { return false; }
-    *instance_id = path.data[3];
+
+    /* Logical class segment 8-bit: 0x20 + class_id; instance segment 8-bit: 0x24 + instance_id. */
+    uint8_t class_seg = 0, instance_seg = 0;
+    Bytes rest = bytes_unpack(path, BYTES_LE, &class_seg, class_id, &instance_seg, instance_id);
+    if(bytes_is_null(rest) || class_seg != 0x20 || instance_seg != 0x24) { return false; }
+
     /* Optional logical attribute segment 8-bit: 0x30 + attr_id */
-    if(path.len >= 6 && path.data[4] == 0x30) {
-        *attr_id = path.data[5];
+    uint8_t attr_seg = 0, attr_val = 0;
+    if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, &attr_seg, &attr_val)) && attr_seg == 0x30) {
+        *attr_id = attr_val;
     }
+
     return true;
 }
 
@@ -1150,10 +1146,7 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
     rest = bytes_pack_into(rest, BYTES_LE, BYTES_ARRAY(response_offsets, (size_t)svc_count));
 
     for(uint16_t i = 0; i < svc_count; i++) {
-        if(sub_responses[i].len > 0) {
-            mem_copy(rest.data, sub_responses[i].data, (int)sub_responses[i].len);
-            rest = bytes_slice(rest, sub_responses[i].len, rest.len - sub_responses[i].len);
-        }
+        if(sub_responses[i].len > 0) { rest = bytes_pack_into(rest, BYTES_LE, sub_responses[i]); }
     }
 
     return result;

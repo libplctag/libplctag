@@ -146,7 +146,8 @@ extern tag_def_t *device_tag_alloc(const char *name, tag_type_t type, size_t ele
 
     tag->name = (char *)mem_alloc(name_len + 1);
     if(!tag->name) { mem_free(tag); return NULL; }
-    mem_copy(tag->name, (void*)name, name_len);
+    bytes_pack_into(bytes_from_buf((uint8_t *)tag->name, (size_t)name_len), BYTES_LE,
+                   bytes_from_buf((const uint8_t *)name, (size_t)name_len));
     tag->name[name_len] = '\0';
 
     tag->tag_type   = type;
@@ -602,7 +603,7 @@ extern int32_t device_sim_tag_get(device_sim_t *sim, const char *name,
     size_t copy_len = (len < avail) ? len : avail;
 
     mutex_lock(tag->data_mutex);
-    mem_copy(dst, tag->data + offset, (int)copy_len);
+    bytes_pack_into(bytes_from_buf((uint8_t *)dst, copy_len), BYTES_LE, bytes_from_buf(tag->data + offset, copy_len));
     mutex_unlock(tag->data_mutex);
 
     return PLCTAG_STATUS_OK;
@@ -623,7 +624,7 @@ extern int32_t device_sim_tag_set(device_sim_t *sim, const char *name,
     size_t copy_len = (len < avail) ? len : avail;
 
     mutex_lock(tag->data_mutex);
-    mem_copy(tag->data + offset, (void*)src, (int)copy_len);
+    bytes_pack_into(bytes_from_buf(tag->data + offset, copy_len), BYTES_LE, bytes_from_buf((const uint8_t *)src, copy_len));
     mutex_unlock(tag->data_mutex);
 
     return PLCTAG_STATUS_OK;

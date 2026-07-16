@@ -75,28 +75,19 @@ static size_t enip_cip_parse_array_index(const char *str, size_t pos, uint32_t *
 static size_t enip_cip_encode_array_index(uint32_t index, uint8_t *buf, size_t buf_size) {
     if(!buf || buf_size == 0) { return 0; }
 
+    Bytes dest = bytes_from_buf(buf, buf_size);
+    Bytes rest;
+
     if(index <= 0xFFu) {
-        if(buf_size < 2) { return 0; }
-        buf[0] = 0x28;
-        buf[1] = (uint8_t)index;
-        return 2;
+        rest = bytes_pack_into(dest, BYTES_LE, (uint8_t)0x28, (uint8_t)index);
     } else if(index <= 0xFFFFu) {
-        if(buf_size < 4) { return 0; }
-        buf[0] = 0x29;
-        buf[1] = 0x00; /* reserved */
-        buf[2] = (uint8_t)(index & 0xFFu);
-        buf[3] = (uint8_t)((index >> 8) & 0xFFu);
-        return 4;
+        rest = bytes_pack_into(dest, BYTES_LE, (uint8_t)0x29, (uint8_t)0x00 /* reserved */, (uint16_t)index);
     } else {
-        if(buf_size < 6) { return 0; }
-        buf[0] = 0x2A;
-        buf[1] = 0x00; /* reserved */
-        buf[2] = (uint8_t)(index & 0xFFu);
-        buf[3] = (uint8_t)((index >> 8) & 0xFFu);
-        buf[4] = (uint8_t)((index >> 16) & 0xFFu);
-        buf[5] = (uint8_t)((index >> 24) & 0xFFu);
-        return 6;
+        rest = bytes_pack_into(dest, BYTES_LE, (uint8_t)0x2A, (uint8_t)0x00 /* reserved */, index);
     }
+
+    if(bytes_is_null(rest)) { return 0; }
+    return dest.len - rest.len;
 }
 
 /* Encode tag_name into buf[buf_size] in ANSI CIP Extended Symbol format.
@@ -105,7 +96,8 @@ static size_t enip_cip_encode_array_index(uint32_t index, uint8_t *buf, size_t b
 static size_t enip_cip_encode_tag_path(const char *tag_name, uint8_t *buf, size_t buf_size) {
     if(!tag_name || !buf) { return 0; }
 
-    size_t total = 0;
+    Bytes start = bytes_from_buf(buf, buf_size);
+    Bytes rest = start;
     size_t pos = 0;
 
     while(tag_name[pos] != '\0') {
@@ -130,20 +122,15 @@ static size_t enip_cip_encode_tag_path(const char *tag_name, uint8_t *buf, size_
             return 0;
         }
 
-        uint8_t pad = (uint8_t)(name_len & 1u);
-        size_t symbol_size = 2 + name_len + pad;
-
-        if(total + symbol_size > buf_size) {
+        bool pad = (name_len & 1u) != 0;
+        Bytes next = bytes_pack_into(rest, BYTES_LE, (uint8_t)0x91, (uint8_t)name_len,
+                                     bytes_from_buf((const uint8_t *)&tag_name[pos], name_len));
+        if(!bytes_is_null(next) && pad) { next = bytes_pack_into(next, BYTES_LE, (uint8_t)0x00); }
+        if(bytes_is_null(next)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: buffer too small for symbol.");
             return 0;
         }
-
-        buf[total] = 0x91;
-        buf[total + 1] = (uint8_t)name_len;
-        memcpy(&buf[total + 2], &tag_name[pos], name_len);
-        if(pad) { buf[total + 2 + name_len] = 0x00; }
-
-        total += symbol_size;
+        rest = next;
         pos += name_len;
 
         while(tag_name[pos] == '[') {
@@ -155,13 +142,13 @@ static size_t enip_cip_encode_tag_path(const char *tag_name, uint8_t *buf, size_
                 return 0;
             }
 
-            size_t idx_size = enip_cip_encode_array_index(index, &buf[total], buf_size - total);
+            size_t idx_size = enip_cip_encode_array_index(index, rest.data, rest.len);
             if(idx_size == 0) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: failed to encode array index %" PRIu32 ".", index);
                 return 0;
             }
 
-            total += idx_size;
+            rest = bytes_slice(rest, idx_size, rest.len - idx_size);
             pos = new_pos;
         }
 
@@ -171,6 +158,7 @@ static size_t enip_cip_encode_tag_path(const char *tag_name, uint8_t *buf, size_
         }
     }
 
+    size_t total = start.len - rest.len;
     if(total == 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: empty tag path.");
         return 0;
@@ -187,12 +175,7 @@ Bytes enip_cip_encode_path(Arena *a, const char *name) {
     size_t len = enip_cip_encode_tag_path(name, tmp, sizeof(tmp));
     if(len == 0) { return bytes_null(); }
 
-    Bytes out = bytes_alloc(a, len);
-    if(bytes_is_null(out)) { return bytes_null(); }
-
-    memcpy(out.data, tmp, len);
-
-    return out;
+    return bytes_pack(a, BYTES_LE, bytes_from_buf(tmp, len));
 }
 
 Bytes enip_cip_encode_path_at(Arena *a, Bytes base_path, uint32_t index) {
@@ -202,10 +185,8 @@ Bytes enip_cip_encode_path_at(Arena *a, Bytes base_path, uint32_t index) {
     size_t idx_len = enip_cip_encode_array_index(index, idx_buf, sizeof(idx_buf));
     if(idx_len == 0) { return bytes_null(); }
 
-    Bytes idx_bytes = bytes_alloc(a, idx_len);
+    Bytes idx_bytes = bytes_pack(a, BYTES_LE, bytes_from_buf(idx_buf, idx_len));
     if(bytes_is_null(idx_bytes)) { return bytes_null(); }
-
-    memcpy(idx_bytes.data, idx_buf, idx_len);
 
     return bytes_concat(a, base_path, idx_bytes);
 }
@@ -224,7 +205,8 @@ Bytes enip_cip_encode_route(Arena *a, const char *route) {
     if(!route || route[0] == '\0') { return bytes_alloc(a, 0); }
 
     uint8_t tmp[ENIP_CIP_PATH_MAX_LEN];
-    size_t total = 0;
+    Bytes start = bytes_from_buf(tmp, sizeof(tmp));
+    Bytes rest = start;
     size_t pos = 0;
 
     while(route[pos] != '\0') {
@@ -233,24 +215,17 @@ Bytes enip_cip_encode_route(Arena *a, const char *route) {
             return bytes_null();
         }
 
-        uint32_t value = 0;
+        uint32_t port_value = 0;
         while(route[pos] >= '0' && route[pos] <= '9') {
-            value = value * 10 + (uint32_t)(route[pos] - '0');
-            if(value > 0xFF) {
+            port_value = port_value * 10 + (uint32_t)(route[pos] - '0');
+            if(port_value > 0xFF) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: route element out of range (0-255) in \"%s\".", route);
                 return bytes_null();
             }
             pos++;
         }
 
-        if(total + 2 > sizeof(tmp)) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: route \"%s\" is too long.", route);
-            return bytes_null();
-        }
-
-        tmp[total++] = (uint8_t)value;
-        tmp[total++] = 0; /* link address; filled by the next element below */
-
+        uint32_t link_value = 0; /* link address; 0 unless a comma-separated element follows */
         if(route[pos] == ',') {
             pos++;
 
@@ -259,30 +234,30 @@ Bytes enip_cip_encode_route(Arena *a, const char *route) {
                 return bytes_null();
             }
 
-            value = 0;
             while(route[pos] >= '0' && route[pos] <= '9') {
-                value = value * 10 + (uint32_t)(route[pos] - '0');
-                if(value > 0xFF) {
+                link_value = link_value * 10 + (uint32_t)(route[pos] - '0');
+                if(link_value > 0xFF) {
                     pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: route element out of range (0-255) in \"%s\".", route);
                     return bytes_null();
                 }
                 pos++;
             }
 
-            tmp[total - 1] = (uint8_t)value;
-
             if(route[pos] == ',') { pos++; }
         }
+
+        Bytes next = bytes_pack_into(rest, BYTES_LE, (uint8_t)port_value, (uint8_t)link_value);
+        if(bytes_is_null(next)) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: route \"%s\" is too long.", route);
+            return bytes_null();
+        }
+        rest = next;
     }
 
+    size_t total = start.len - rest.len;
     if(total == 0) { return bytes_null(); }
 
-    Bytes out = bytes_alloc(a, total);
-    if(bytes_is_null(out)) { return bytes_null(); }
-
-    memcpy(out.data, tmp, total);
-
-    return out;
+    return bytes_pack(a, BYTES_LE, bytes_from_buf(tmp, total));
 }
 
 /* ============================================================================
@@ -465,7 +440,8 @@ bool enip_cip_parse_multi_service_reply(Bytes data, uint16_t *count_out,
      * Offsets are from the start of the offset array (data.data + 2). */
     if(!count_out || !sub_replies || bytes_is_null(data) || data.len < 2) { return false; }
 
-    uint16_t count = (uint16_t)((uint16_t)data.data[0] | (uint16_t)((uint16_t)data.data[1] << 8));
+    uint16_t count = 0;
+    if(bytes_is_null(bytes_unpack(data, BYTES_LE, &count))) { return false; }
     if(count == 0 || count > max_count) { return false; }
     if(data.len < (size_t)2 + (size_t)2 * count) { return false; }
 
@@ -473,12 +449,15 @@ bool enip_cip_parse_multi_service_reply(Bytes data, uint16_t *count_out,
 
     for(uint16_t i = 0; i < count; i++) {
         size_t tbl = (size_t)2 + (size_t)2 * i;
-        uint16_t start_off = (uint16_t)((uint16_t)data.data[tbl] | (uint16_t)((uint16_t)data.data[tbl + 1] << 8));
-        uint16_t end_off;
+        uint16_t start_off = 0;
+        if(bytes_is_null(bytes_unpack(bytes_slice(data, tbl, data.len - tbl), BYTES_LE, &start_off))) { return false; }
 
+        uint16_t end_off;
         if(i + 1 < count) {
-            size_t tbl_next = (size_t)2 + (size_t)2 * (i + 1);
-            end_off = (uint16_t)((uint16_t)data.data[tbl_next] | (uint16_t)((uint16_t)data.data[tbl_next + 1] << 8));
+            size_t tbl_next = tbl + 2;
+            if(bytes_is_null(bytes_unpack(bytes_slice(data, tbl_next, data.len - tbl_next), BYTES_LE, &end_off))) {
+                return false;
+            }
         } else {
             /* Last sub-reply: extends to the end of data. */
             end_off = (uint16_t)data.len;
@@ -488,7 +467,7 @@ bool enip_cip_parse_multi_service_reply(Bytes data, uint16_t *count_out,
         if((size_t)end_off > data.len) { return false; }
 
         /* Offsets are from Number_of_Services start (= data.data[0]). */
-        sub_replies[i] = bytes_from_buf(data.data + start_off, (size_t)(end_off - start_off));
+        sub_replies[i] = bytes_slice(data, start_off, (size_t)(end_off - start_off));
     }
 
     return true;

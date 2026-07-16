@@ -64,7 +64,7 @@ static int32_t parse_pccc_subelem(const char **str, pccc_addr_t *address);
 static int32_t parse_pccc_subelem_num(const char **str, pccc_addr_t *address);
 static int32_t parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address);
 static int32_t parse_pccc_bit_num(const char **str, pccc_addr_t *address);
-static void encode_data(uint8_t *data, size_t *index, int32_t val);
+static bool encode_data(Bytes *cursor, int32_t val);
 
 /* file type                    field   size    subelem is_bit  bit_num */
 static pccc_subelem_row_t sub_element_lookup[] = {
@@ -247,7 +247,6 @@ int32_t enip_pccc_parse_logical_address(const char *file_address, pccc_addr_t *a
 
 Bytes enip_pccc_encode_plc5_address(pccc_addr_t *address, Bytes dest) {
     uint8_t level_byte = 0;
-    size_t index = 0;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "Starting.");
 
@@ -263,33 +262,35 @@ Bytes enip_pccc_encode_plc5_address(pccc_addr_t *address, Bytes dest) {
     }
 
     /* reserve the level byte at index 0; encode levels after it. */
-    index = 1;
+    Bytes cursor = bytes_slice(dest, 1, dest.len - 1);
 
     /* do the required levels.  Remember we start at the low bit! */
     level_byte = 0x06; /* level one and two */
 
     /* add in the data file number. */
-    encode_data(dest.data, &index, address->file);
+    if(!encode_data(&cursor, address->file)) { return bytes_null(); }
 
     /* add in the element number */
-    encode_data(dest.data, &index, address->element);
+    if(!encode_data(&cursor, address->element)) { return bytes_null(); }
 
     /* check to see if we need to put in a subelement. */
     if(address->sub_element >= 0) {
         level_byte |= 0x08;
 
-        encode_data(dest.data, &index, address->sub_element);
+        if(!encode_data(&cursor, address->sub_element)) { return bytes_null(); }
     }
 
     /* store the encoded levels. */
     dest.data[0] = level_byte;
 
+    size_t total = dest.len - cursor.len;
+
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "PLC/5 encoded address:");
-    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, dest.data, (int)index);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, dest.data, (int)total);
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "Done.");
 
-    return bytes_from_buf(dest.data, index);
+    return bytes_from_buf(dest.data, total);
 }
 
 
@@ -304,8 +305,6 @@ Bytes enip_pccc_encode_plc5_address(pccc_addr_t *address, Bytes dest) {
  */
 
 Bytes enip_pccc_encode_slc_address(pccc_addr_t *address, Bytes dest) {
-    size_t index = 0;
-
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "Starting.");
 
     if(!address || bytes_is_null(dest)) {
@@ -324,24 +323,28 @@ Bytes enip_pccc_encode_slc_address(pccc_addr_t *address, Bytes dest) {
         return bytes_null();
     }
 
+    Bytes cursor = dest;
+
     /* encode the file number */
-    encode_data(dest.data, &index, address->file);
+    if(!encode_data(&cursor, address->file)) { return bytes_null(); }
 
     /* encode the data file type. */
-    encode_data(dest.data, &index, (int32_t)address->file_type);
+    if(!encode_data(&cursor, (int32_t)address->file_type)) { return bytes_null(); }
 
     /* add in the element number */
-    encode_data(dest.data, &index, address->element);
+    if(!encode_data(&cursor, address->element)) { return bytes_null(); }
 
     /* add in the sub-element number */
-    encode_data(dest.data, &index, (address->sub_element < 0 ? 0 : address->sub_element));
+    if(!encode_data(&cursor, (address->sub_element < 0 ? 0 : address->sub_element))) { return bytes_null(); }
+
+    size_t total = dest.len - cursor.len;
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "SLC/Micrologix encoded address:");
-    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, dest.data, (int)index);
+    pdebug_dump_bytes(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, dest.data, (int)total);
 
     pdebug(DEBUG_MODULE_ENIP, DEBUG_DETAIL, 0, "Done.");
 
-    return bytes_from_buf(dest.data, index);
+    return bytes_from_buf(dest.data, total);
 }
 
 
@@ -794,14 +797,13 @@ static int32_t parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
 }
 
 
-static void encode_data(uint8_t *data, size_t *index, int32_t val) {
-    if(val <= 254) {
-        data[*index] = (uint8_t)val;
-        *index = *index + 1;
-    } else {
-        data[*index] = (uint8_t)0xff;
-        data[*index + 1] = (uint8_t)(val & 0xff);
-        data[*index + 2] = (uint8_t)((val >> 8) & 0xff);
-        *index = *index + 3;
-    }
+/* Encode one PCCC address level (a byte, or 0xFF + a u16le for a value that
+ * does not fit a byte), advancing *cursor to the unfilled remainder. Returns
+ * false (leaving *cursor unchanged) if *cursor has no room. */
+static bool encode_data(Bytes *cursor, int32_t val) {
+    Bytes next = (val <= 254) ? bytes_pack_into(*cursor, BYTES_LE, (uint8_t)val)
+                              : bytes_pack_into(*cursor, BYTES_LE, (uint8_t)0xFF, (uint16_t)val);
+    if(bytes_is_null(next)) { return false; }
+    *cursor = next;
+    return true;
 }

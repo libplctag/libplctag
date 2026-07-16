@@ -96,10 +96,11 @@ static Bytes extract_product_name(Bytes reply_data) {
     Bytes rest = bytes_slice(reply_data, CIP_IDENTITY_FIXED_PREFIX_LEN, reply_data.len - CIP_IDENTITY_FIXED_PREFIX_LEN);
     if(bytes_is_null(rest) || rest.len < 1) { return bytes_null(); }
 
-    uint8_t name_len = rest.data[0];
-    if((size_t)name_len > rest.len - 1) { return bytes_null(); }
+    uint8_t name_len = 0;
+    Bytes name_rest = bytes_unpack(rest, BYTES_LE, &name_len);
+    if(bytes_is_null(name_rest) || (size_t)name_len > name_rest.len) { return bytes_null(); }
 
-    return bytes_slice(rest, 1, name_len);
+    return bytes_slice(name_rest, 0, name_len);
 }
 
 extern enip_plc_type_t enip_classify_plc(uint16_t vendor_id, Bytes reply_data) {

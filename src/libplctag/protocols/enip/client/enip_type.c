@@ -78,7 +78,8 @@ bool enip_type_decode(Bytes reply_data, uint8_t *header_len_out, uint32_t *elem_
         return false;
     }
 
-    uint16_t type_code = (uint16_t)((uint16_t)reply_data.data[0] | (uint16_t)((uint16_t)reply_data.data[1] << 8));
+    uint16_t type_code = 0;
+    bytes_unpack(reply_data, BYTES_LE, &type_code);
 
     if(type_code == CIP_TYPE_STRUCT_HEADER) {
         if(reply_data.len < ENIP_TYPE_HEADER_LEN_STRUCT) {

@@ -1022,7 +1022,8 @@ static int32_t step_waiting(enip_connection_t *c) {
     if(c->rx_len < ENIP_EIP_HEADER_SIZE) {
         needed = ENIP_EIP_HEADER_SIZE - c->rx_len;
     } else {
-        uint16_t plen = (uint16_t)((uint16_t)c->rx_buf[2] | (uint16_t)((uint16_t)c->rx_buf[3] << 8));
+        uint16_t plen = 0;
+        bytes_unpack(bytes_from_buf(c->rx_buf, c->rx_len), BYTES_LE, BYTES_SKIP(2), &plen);
         size_t total = ENIP_EIP_HEADER_SIZE + plen;
 
         if(total > c->rx_cap) {
@@ -1051,7 +1052,8 @@ static int32_t step_waiting(enip_connection_t *c) {
         if(c->rx_len < ENIP_EIP_HEADER_SIZE) { return PLCTAG_STATUS_PENDING; }
     }
 
-    uint16_t plen = (uint16_t)((uint16_t)c->rx_buf[2] | (uint16_t)((uint16_t)c->rx_buf[3] << 8));
+    uint16_t plen = 0;
+    bytes_unpack(bytes_from_buf(c->rx_buf, c->rx_len), BYTES_LE, BYTES_SKIP(2), &plen);
     size_t total = ENIP_EIP_HEADER_SIZE + plen;
 
     if(c->rx_len < total) { return PLCTAG_STATUS_PENDING; }
@@ -1265,7 +1267,8 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
             return PLCTAG_ERR_BAD_REPLY;
         }
 
-        memcpy(t->type_header, data.data, header_len);
+        bytes_pack_into(bytes_from_buf(t->type_header, sizeof(t->type_header)), BYTES_LE,
+                       bytes_from_buf(data.data, header_len));
         t->type_header_len = header_len;
 
         uint32_t chunk = (uint32_t)(data.len - (size_t)header_len);
@@ -1291,7 +1294,7 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
 
             t->data = buf;
             t->size = (int32_t)chunk;
-            memcpy(t->data, data.data + header_len, chunk);
+            bytes_pack_into(bytes_from_buf(t->data, (size_t)chunk), BYTES_LE, bytes_from_buf(data.data + header_len, chunk));
 
             t->frag_offset = chunk;
             t->frag_more = true;
@@ -1317,7 +1320,7 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
         t->data = buf;
         t->size = (int32_t)total_size;
 
-        memcpy(t->data, data.data + header_len, elem_size);
+        bytes_pack_into(bytes_from_buf(t->data, (size_t)total_size), BYTES_LE, bytes_from_buf(data.data + header_len, elem_size));
 
         /* §11.3: window = clamp((cap - overhead - header_len) / elem_size, 1, elem_count) */
         uint32_t window = (uint32_t)((c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - CIP_READ_REPLY_OVERHEAD
@@ -1377,7 +1380,8 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
             return PLCTAG_ERR_NO_MEM;
         }
 
-        memcpy(buf + t->size, data.data + t->type_header_len, chunk);
+        bytes_pack_into(bytes_from_buf(buf + t->size, (size_t)chunk), BYTES_LE,
+                       bytes_from_buf(data.data + t->type_header_len, chunk));
         t->data = buf;
         t->size = (int32_t)new_size;
         t->frag_offset += chunk;
@@ -1434,7 +1438,8 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
         size_t copy_bytes = returned * (size_t)t->elem_size;
         size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
 
-        memcpy(t->data + dest_off, data.data + t->type_header_len, copy_bytes);
+        bytes_pack_into(bytes_from_buf(t->data + dest_off, copy_bytes), BYTES_LE,
+                       bytes_from_buf(data.data + t->type_header_len, copy_bytes));
 
         t->read_off += (uint32_t)returned;
 
@@ -1465,7 +1470,8 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
                 t->elem_size = (uint32_t)needed;
             }
 
-            memcpy(t->data + dest_off, data.data + t->type_header_len, chunk);
+            bytes_pack_into(bytes_from_buf(t->data + dest_off, (size_t)chunk), BYTES_LE,
+                           bytes_from_buf(data.data + t->type_header_len, chunk));
             t->frag_offset += chunk;
 
             if(status == CIP_STATUS_FRAG) {
@@ -1481,7 +1487,7 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
             size_t copy_len = data.len - (size_t)t->type_header_len;
             if(copy_len > (size_t)t->size) { copy_len = (size_t)t->size; }
 
-            memcpy(t->data, data.data + t->type_header_len, copy_len);
+            bytes_pack_into(bytes_from_buf(t->data, copy_len), BYTES_LE, bytes_from_buf(data.data + t->type_header_len, copy_len));
 
             return PLCTAG_STATUS_OK;
         }
@@ -1501,7 +1507,8 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
         size_t copy_bytes = returned * (size_t)t->elem_size;
         size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
 
-        memcpy(t->data + dest_off, data.data + t->type_header_len, copy_bytes);
+        bytes_pack_into(bytes_from_buf(t->data + dest_off, copy_bytes), BYTES_LE,
+                       bytes_from_buf(data.data + t->type_header_len, copy_bytes));
 
         t->read_off += (uint32_t)returned;
 
@@ -1692,9 +1699,9 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
         default: return bytes_null();
     }
 
-    if(bytes_is_null(req) || req.len > dest.len) { return bytes_null(); }
+    if(bytes_is_null(req)) { return bytes_null(); }
 
-    memcpy(dest.data, req.data, req.len);
+    if(bytes_is_null(bytes_pack_into(dest, BYTES_LE, req))) { return bytes_null(); }
     return bytes_from_buf(dest.data, req.len);
 }
 
@@ -1729,25 +1736,16 @@ static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
 
 /* Write the CIP/PCCC header + requestor id shared by every Execute-PCCC
  * request (13 bytes), then the PCCC command fields up to and including FNC.
- * Returns the new position. */
-static size_t pccc_write_header(uint8_t *p, uint16_t tns, uint8_t fnc) {
-    size_t pos = 0;
-    p[pos++] = PCCC_EXECUTE_SVC;
-    p[pos++] = 0x02; /* path size in 16-bit words */
-    p[pos++] = 0x20; p[pos++] = 0x67; p[pos++] = 0x24; p[pos++] = 0x01; /* PCCC object 0x67 inst 1 */
-    p[pos++] = 0x07; /* requestor id size = vendor_id(2) + serial(4) + this byte */
-    p[pos++] = (uint8_t)(PCCC_VENDOR_ID & 0xFFu);
-    p[pos++] = (uint8_t)(PCCC_VENDOR_ID >> 8);
-    p[pos++] = (uint8_t)(PCCC_VENDOR_SN & 0xFFu);
-    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 8) & 0xFFu);
-    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 16) & 0xFFu);
-    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 24) & 0xFFu);
-    p[pos++] = PCCC_TYPED_CMD;
-    p[pos++] = 0x00;
-    p[pos++] = (uint8_t)(tns & 0xFFu);
-    p[pos++] = (uint8_t)(tns >> 8);
-    p[pos++] = fnc;
-    return pos;
+ * Returns the unfilled remainder of dest (bytes_null() if dest was too
+ * small), so callers thread it as their write cursor for the rest of the
+ * request. */
+static Bytes pccc_write_header(Bytes dest, uint16_t tns, uint8_t fnc) {
+    return bytes_pack_into(dest, BYTES_LE,
+                           (uint8_t)PCCC_EXECUTE_SVC, (uint8_t)0x02 /* path size in 16-bit words */,
+                           (uint8_t)0x20, (uint8_t)0x67, (uint8_t)0x24, (uint8_t)0x01 /* PCCC object 0x67 inst 1 */,
+                           (uint8_t)0x07 /* requestor id size = vendor_id(2) + serial(4) + this byte */,
+                           (uint16_t)PCCC_VENDOR_ID, (uint32_t)PCCC_VENDOR_SN,
+                           (uint8_t)PCCC_TYPED_CMD, (uint8_t)0x00, tns, fnc);
 }
 
 /* PLC-5 masked bit write (Execute-PCCC function 0x26, "Protected Typed Logical
@@ -1765,27 +1763,25 @@ static Bytes enip_pccc_build_plc5_bit_write(enip_connection_t *c, enip_tag_p t, 
         return bytes_null();
     }
 
-    size_t need = 13 + 5 + encoded.len + 2u * (size_t)t->elem_size;
-    if(need > dest.len) { return bytes_null(); }
-
-    uint8_t *p = dest.data;
-    size_t pos = pccc_write_header(p, (uint16_t)(c->conn_seq + 1), PCCC_PLC5_RMW_FNC);
-
-    memcpy(p + pos, encoded.data, encoded.len);
-    pos += encoded.len;
+    Bytes rest = pccc_write_header(dest, (uint16_t)(c->conn_seq + 1), PCCC_PLC5_RMW_FNC);
+    rest = bytes_pack_into(rest, BYTES_LE, encoded);
+    if(bytes_is_null(rest)) { return bytes_null(); }
 
     size_t byte_idx = (size_t)(t->bit / 8);
     uint8_t bit_mask = (uint8_t)(1u << (t->bit % 8));
     bool bit_set = (t->data[byte_idx] & bit_mask) != 0;
 
-    for(uint32_t i = 0; i < t->elem_size; i++) {
-        p[pos++] = ((size_t)i == byte_idx) ? (bit_set ? (uint8_t)0xFF : (uint8_t)~bit_mask) : (uint8_t)0xFF;
+    for(uint32_t i = 0; i < t->elem_size && !bytes_is_null(rest); i++) {
+        uint8_t and_mask = ((size_t)i == byte_idx) ? (bit_set ? (uint8_t)0xFF : (uint8_t)~bit_mask) : (uint8_t)0xFF;
+        rest = bytes_pack_into(rest, BYTES_LE, and_mask);
     }
-    for(uint32_t i = 0; i < t->elem_size; i++) {
-        p[pos++] = ((size_t)i == byte_idx) ? (bit_set ? bit_mask : (uint8_t)0x00) : (uint8_t)0x00;
+    for(uint32_t i = 0; i < t->elem_size && !bytes_is_null(rest); i++) {
+        uint8_t or_mask = ((size_t)i == byte_idx) ? (bit_set ? bit_mask : (uint8_t)0x00) : (uint8_t)0x00;
+        rest = bytes_pack_into(rest, BYTES_LE, or_mask);
     }
+    if(bytes_is_null(rest)) { return bytes_null(); }
 
-    return bytes_from_buf(dest.data, pos);
+    return bytes_from_buf(dest.data, dest.len - rest.len);
 }
 
 /* SLC/MicroLogix masked bit write (Execute-PCCC function 0xAB, "SLC Range
@@ -1811,28 +1807,19 @@ static Bytes enip_pccc_build_slc_bit_write(enip_connection_t *c, enip_tag_p t, B
         return bytes_null();
     }
 
-    size_t need = 13 + 5 + 1 + encoded.len + 2 + 2;
-    if(need > dest.len) { return bytes_null(); }
-
-    uint8_t *p = dest.data;
-    size_t pos = pccc_write_header(p, (uint16_t)(c->conn_seq + 1), PCCC_SLC_RMW_FNC);
-
-    p[pos++] = (uint8_t)t->size; /* transfer size in bytes, fixed at 2 */
-
-    memcpy(p + pos, encoded.data, encoded.len);
-    pos += encoded.len;
+    Bytes rest = pccc_write_header(dest, (uint16_t)(c->conn_seq + 1), PCCC_SLC_RMW_FNC);
+    rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)t->size /* transfer size in bytes, fixed at 2 */, encoded);
+    if(bytes_is_null(rest)) { return bytes_null(); }
 
     uint8_t mask[2] = {0, 0};
     mask[t->bit / 8] = (uint8_t)(1u << (t->bit % 8));
-    memcpy(p + pos, mask, 2);
-    pos += 2;
 
     /* set bytes: only the masked bit is honored remotely, so t->data's other
      * bits (whatever they happen to hold locally) are harmless. */
-    memcpy(p + pos, t->data, 2);
-    pos += 2;
+    rest = bytes_pack_into(rest, BYTES_LE, bytes_from_buf(mask, sizeof(mask)), bytes_from_buf(t->data, 2));
+    if(bytes_is_null(rest)) { return bytes_null(); }
 
-    return bytes_from_buf(dest.data, pos);
+    return bytes_from_buf(dest.data, dest.len - rest.len);
 }
 
 static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
@@ -1873,56 +1860,31 @@ static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
         return bytes_null();
     }
-    size_t addr_len = encoded.len;
-
-    /* CIP/PCCC header(13) + PCCC cmd fixed(plc5:9, slc:6) + addr + [plc5 read size byte] + write data. */
-    size_t need = 13 + (t->pccc_plc5 ? 9u : 6u) + addr_len + (t->pccc_plc5 && !is_write ? 1u : 0u) + data_len;
-    if(need > dest.len) { return bytes_null(); }
 
     uint16_t tns = (uint16_t)(c->conn_seq + 1);
-    uint8_t *p = dest.data;
-    size_t pos = 0;
-
-    /* CIP Execute-PCCC header + requestor id. */
-    p[pos++] = PCCC_EXECUTE_SVC;
-    p[pos++] = 0x02; /* path size in 16-bit words */
-    p[pos++] = 0x20; p[pos++] = 0x67; p[pos++] = 0x24; p[pos++] = 0x01; /* PCCC object 0x67 inst 1 */
-    p[pos++] = 0x07; /* requestor id size = vendor_id(2) + serial(4) + this byte */
-    p[pos++] = (uint8_t)(PCCC_VENDOR_ID & 0xFFu);
-    p[pos++] = (uint8_t)(PCCC_VENDOR_ID >> 8);
-    p[pos++] = (uint8_t)(PCCC_VENDOR_SN & 0xFFu);
-    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 8) & 0xFFu);
-    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 16) & 0xFFu);
-    p[pos++] = (uint8_t)((PCCC_VENDOR_SN >> 24) & 0xFFu);
-
-    /* PCCC command: CMD, STS=0, TNS, FNC, ... */
-    p[pos++] = PCCC_TYPED_CMD;
-    p[pos++] = 0x00;
-    p[pos++] = (uint8_t)(tns & 0xFFu);
-    p[pos++] = (uint8_t)(tns >> 8);
+    uint8_t fnc = t->pccc_plc5 ? (is_write ? PCCC_PLC5_WRITE_FNC : PCCC_PLC5_READ_FNC)
+                               : (is_write ? PCCC_SLC_WRITE_FNC : PCCC_SLC_READ_FNC);
+    Bytes rest = pccc_write_header(dest, tns, fnc);
 
     if(t->pccc_plc5) {
-        p[pos++] = is_write ? PCCC_PLC5_WRITE_FNC : PCCC_PLC5_READ_FNC;
-        p[pos++] = 0x00; p[pos++] = 0x00;                    /* offset = 0: each chunk uses its own address instead */
-        uint16_t words = (uint16_t)(chunk_bytes / 2u);       /* transfer size in words, this chunk only */
-        p[pos++] = (uint8_t)(words & 0xFFu);
-        p[pos++] = (uint8_t)(words >> 8);
-        memcpy(p + pos, addr_buf, (size_t)addr_len);
-        pos += (size_t)addr_len;
-        if(!is_write) { p[pos++] = (uint8_t)chunk_bytes; } /* PLC-5 read appends this chunk's byte size */
+        uint16_t words = (uint16_t)(chunk_bytes / 2u); /* transfer size in words, this chunk only */
+        rest = bytes_pack_into(rest, BYTES_LE, (uint16_t)0x0000 /* offset=0: each chunk uses its own address instead */,
+                               words, encoded);
+        if(!is_write && !bytes_is_null(rest)) {
+            rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)chunk_bytes); /* PLC-5 read appends this chunk's byte size */
+        }
     } else {
-        p[pos++] = is_write ? PCCC_SLC_WRITE_FNC : PCCC_SLC_READ_FNC;
-        p[pos++] = (uint8_t)chunk_bytes; /* transfer size in bytes, this chunk only (<=240, fits the byte field) */
-        memcpy(p + pos, addr_buf, (size_t)addr_len);
-        pos += (size_t)addr_len;
+        rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)chunk_bytes /* transfer size in bytes, this chunk only (<=240) */,
+                               encoded);
     }
+    if(bytes_is_null(rest)) { return bytes_null(); }
 
     if(is_write) {
-        memcpy(p + pos, t->data + (size_t)t->read_off * (size_t)t->elem_size, data_len);
-        pos += data_len;
+        rest = bytes_pack_into(rest, BYTES_LE, bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, data_len));
+        if(bytes_is_null(rest)) { return bytes_null(); }
     }
 
-    return bytes_from_buf(dest.data, pos);
+    return bytes_from_buf(dest.data, dest.len - rest.len);
 }
 
 static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
@@ -1970,7 +1932,8 @@ static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_rep
     size_t avail = reply.data.len - PCCC_REPLY_HDR;
     size_t chunk_bytes = (size_t)chunk_elems * (size_t)t->elem_size;
     size_t n = (avail < chunk_bytes) ? avail : chunk_bytes;
-    memcpy(t->data + (size_t)t->read_off * (size_t)t->elem_size, reply.data.data + PCCC_REPLY_HDR, n);
+    bytes_pack_into(bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, n), BYTES_LE,
+                   bytes_from_buf(reply.data.data + PCCC_REPLY_HDR, n));
     t->read_off += (uint32_t)(n / (size_t)t->elem_size);
     if(t->read_off < t->elem_count) { *more = true; }
     return PLCTAG_STATUS_OK;
@@ -2033,26 +1996,26 @@ static Bytes enip_pccc_build_listing(Arena *a, enip_tag_p t) {
     }
 
     size_t need = 13 /* CIP/PCCC header + requestor id, see pccc_write_header */ + (is_plc5 ? 5u : 1u) + encoded.len;
-    uint8_t *buf = (uint8_t *)arena_alloc(a, need);
-    if(!buf) { return bytes_null(); }
+    Bytes dest = bytes_alloc(a, need);
+    if(bytes_is_null(dest)) { return bytes_null(); }
 
-    size_t pos = pccc_write_header(buf, (uint16_t)(c->conn_seq + 1), is_plc5 ? PCCC_PLC5_READ_FNC : PCCC_SLC_READ_FNC);
+    Bytes rest = pccc_write_header(dest, (uint16_t)(c->conn_seq + 1), is_plc5 ? PCCC_PLC5_READ_FNC : PCCC_SLC_READ_FNC);
 
     if(is_plc5) {
-        buf[pos++] = 0x00;
-        buf[pos++] = 0x00; /* byte offset = 0: this is a whole-word range read, not a fragmented single element */
-        buf[pos++] = (uint8_t)(PCCC_MAX_TRANSFER_WORDS & 0xFFu);
-        buf[pos++] = (uint8_t)(PCCC_MAX_TRANSFER_WORDS >> 8);
-        memcpy(buf + pos, encoded.data, encoded.len);
-        pos += encoded.len;
-        buf[pos++] = (uint8_t)PCCC_MAX_TRANSFER_BYTES; /* PLC-5 read appends total byte size (fits: 240 <= 255) */
+        rest = bytes_pack_into(rest, BYTES_LE,
+                               (uint16_t)0x0000 /* byte offset = 0: whole-word range read, not a fragmented single element */,
+                               PCCC_MAX_TRANSFER_WORDS, encoded);
+        if(!bytes_is_null(rest)) {
+            rest = bytes_pack_into(rest, BYTES_LE,
+                                   (uint8_t)PCCC_MAX_TRANSFER_BYTES); /* PLC-5 read appends total byte size (fits: 240<=255) */
+        }
     } else {
-        buf[pos++] = (uint8_t)PCCC_MAX_TRANSFER_BYTES; /* transfer size in bytes (fits: 240 <= 255) */
-        memcpy(buf + pos, encoded.data, encoded.len);
-        pos += encoded.len;
+        rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)PCCC_MAX_TRANSFER_BYTES /* transfer size in bytes (fits: 240<=255) */,
+                               encoded);
     }
+    if(bytes_is_null(rest)) { return bytes_null(); }
 
-    return bytes_from_buf(buf, pos);
+    return bytes_from_buf(dest.data, dest.len - rest.len);
 }
 
 static int32_t enip_pccc_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
@@ -2077,7 +2040,8 @@ static int32_t enip_pccc_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes d
         uint8_t *buf = mem_realloc(t->data, (int)need);
         if(!buf) { return PLCTAG_ERR_NO_MEM; }
         t->data = buf;
-        memcpy(t->data + t->read_off, data.data + PCCC_REPLY_HDR, payload_len);
+        bytes_pack_into(bytes_from_buf(t->data + t->read_off, payload_len), BYTES_LE,
+                       bytes_from_buf(data.data + PCCC_REPLY_HDR, payload_len));
         t->read_off = (uint32_t)need;
         t->size = (int32_t)need;
         t->list_next_id += (uint32_t)(payload_len / 2); /* advance the word cursor */
@@ -2225,7 +2189,7 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
             uint8_t *buf = mem_realloc(t->data, (int)need);
             if(!buf) { return PLCTAG_ERR_NO_MEM; }
             t->data = buf;
-            memcpy(t->data + t->read_off, data.data, data.len);
+            bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
             t->read_off = (uint32_t)need;
             t->size = (int32_t)need;
 
@@ -2287,7 +2251,7 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
             uint8_t *buf = mem_realloc(t->data, (int)need);
             if(!buf) { return PLCTAG_ERR_NO_MEM; }
             t->data = buf;
-            memcpy(t->data + 14 + t->read_off, data.data, data.len);
+            bytes_pack_into(bytes_from_buf(t->data + 14 + t->read_off, data.len), BYTES_LE, data);
             t->read_off += (uint32_t)data.len;
             t->size = (int32_t)need;
         }
@@ -2343,7 +2307,7 @@ static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
         uint8_t *buf = mem_realloc(t->data, (int)need);
         if(!buf) { return PLCTAG_ERR_NO_MEM; }
         t->data = buf;
-        memcpy(t->data + t->read_off, data.data, data.len);
+        bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
         t->read_off = (uint32_t)need;
         t->size = (int32_t)need;
 
@@ -2359,7 +2323,7 @@ static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
             uint8_t *buf = mem_realloc(t->data, (int)need);
             if(!buf) { return PLCTAG_ERR_NO_MEM; }
             t->data = buf;
-            memcpy(t->data + t->read_off, data.data, data.len);
+            bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
             t->read_off = (uint32_t)need;
             t->size = (int32_t)need;
         }
@@ -2411,8 +2375,7 @@ static int32_t build_batch_request(enip_connection_t *c) {
     for(uint16_t i = 0; build_ok && i < c->batch_count; i++) {
         /* offset[i] is relative to the Number_of_Services field at buf[6]. */
         uint16_t off = (uint16_t)(cursor - 6);
-        ms_buf[8 + (size_t)2 * i]     = (uint8_t)(off & 0xFFu);
-        ms_buf[8 + (size_t)2 * i + 1] = (uint8_t)(off >> 8);
+        bytes_pack_into(bytes_from_buf(ms_buf + 8 + (size_t)2 * i, 2), BYTES_LE, off);
 
         Bytes used = c->dialect->build(c, t, bytes_from_buf(ms_buf + cursor, budget - cursor));
         if(bytes_is_null(used)) {
@@ -2427,10 +2390,8 @@ static int32_t build_batch_request(enip_connection_t *c) {
     Bytes frame = bytes_null();
     if(build_ok) {
         /* Multiple Service header: service + Message Router path + count. */
-        ms_buf[0] = CIP_MULTI_SVC;
-        ms_buf[1] = 0x02; ms_buf[2] = 0x20; ms_buf[3] = 0x02; ms_buf[4] = 0x24; ms_buf[5] = 0x01;
-        ms_buf[6] = (uint8_t)(c->batch_count & 0xFFu);
-        ms_buf[7] = (uint8_t)(c->batch_count >> 8);
+        bytes_pack_into(bytes_from_buf(ms_buf, ENIP_MS_REQ_FIXED), BYTES_LE, (uint8_t)CIP_MULTI_SVC, (uint8_t)0x02,
+                       (uint8_t)0x20, (uint8_t)0x02, (uint8_t)0x24, (uint8_t)0x01, c->batch_count);
 
         Bytes ms = bytes_from_buf(ms_buf, cursor);
         Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
@@ -2962,7 +2923,7 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
         return;
     }
 
-    mem_copy(buf, reply.data.data, (int)reply.data.len);
+    bytes_pack_into(bytes_from_buf(buf, reply.data.len), BYTES_LE, reply.data);
 
     if(c->identity_data) { mem_free(c->identity_data); }
     c->identity_data = buf;

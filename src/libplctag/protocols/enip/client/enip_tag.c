@@ -241,7 +241,8 @@ static int enip_tag_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    memcpy(buffer, t->type_header, t->type_header_len);
+    bytes_pack_into(bytes_from_buf(buffer, (size_t)buffer_length), BYTES_LE,
+                   bytes_from_buf(t->type_header, t->type_header_len));
     tag->status = (int8_t)PLCTAG_STATUS_OK;
 
     return (int)t->type_header_len;
@@ -343,7 +344,7 @@ static int32_t enip_identity_tag_copy(plc_tag_p tag) {
 
     tag->data = buf;
     tag->size = (int)len;
-    mem_copy(tag->data, data, (int)len);
+    bytes_pack_into(bytes_from_buf(tag->data, (size_t)len), BYTES_LE, bytes_from_buf(data, len));
 
     return PLCTAG_STATUS_OK;
 }
@@ -699,11 +700,10 @@ typedef struct {
     uint32_t element_count;
 } pccc_plc5_file_decode_t;
 
-static pccc_plc5_file_decode_t pccc_decode_plc5_file_record(const uint8_t *rec) {
+static pccc_plc5_file_decode_t pccc_decode_plc5_file_record(Bytes rec) {
     pccc_plc5_file_decode_t d = {0};
-    uint8_t attr_byte = rec[0];
-    d.file_number = rec[1];
-    d.total_words = (uint16_t)(rec[2] | ((uint16_t)rec[3] << 8));
+    uint8_t attr_byte = 0;
+    bytes_unpack(rec, BYTES_LE, &attr_byte, &d.file_number, &d.total_words);
 
     /* Step 1: hardcoded default system files -- checked before, and instead
      * of, the attribute byte. */
@@ -814,7 +814,7 @@ static pccc_plc5_file_decode_t pccc_decode_plc5_file_record(const uint8_t *rec) 
  * pccc_decode_plc5_file_record(); SLC/MicroLogix records already carry
  * file_number/file_type/element_count directly on the wire (see
  * enip_pccc_apply_listing in client/enip_session.c). */
-static size_t pccc_listing_record_cbor_size(bool is_plc5, const uint8_t *rec, size_t record_bytes) {
+static size_t pccc_listing_record_cbor_size(bool is_plc5, Bytes rec) {
     uint8_t file_number, file_type;
     bool has_elements;
     uint32_t element_count = 0;
@@ -826,10 +826,10 @@ static size_t pccc_listing_record_cbor_size(bool is_plc5, const uint8_t *rec, si
         has_elements = d.has_elements;
         element_count = d.element_count;
     } else {
-        file_number = rec[0];
-        file_type = rec[1];
+        uint16_t elem_count16 = 0;
+        bytes_unpack(rec, BYTES_LE, &file_number, &file_type, &elem_count16);
         has_elements = true;
-        element_count = (uint32_t)(rec[2] | ((uint16_t)rec[3] << 8));
+        element_count = elem_count16;
     }
 
     const char *type_name = pccc_file_type_name(file_type);
@@ -837,12 +837,12 @@ static size_t pccc_listing_record_cbor_size(bool is_plc5, const uint8_t *rec, si
     sz += cbor_size_text(sizeof("file_number") - 1) + cbor_size_uint(file_number);
     sz += cbor_size_text(sizeof("file_type") - 1) + cbor_size_uint(file_type);
     sz += cbor_size_text(sizeof("file_type_name") - 1) + cbor_size_text((size_t)str_length(type_name));
-    sz += cbor_size_text(sizeof("raw") - 1) + cbor_size_bytes(record_bytes);
+    sz += cbor_size_text(sizeof("raw") - 1) + cbor_size_bytes(rec.len);
     if(has_elements) { sz += cbor_size_text(sizeof("element_count") - 1) + cbor_size_uint(element_count); }
     return sz;
 }
 
-static bool pccc_listing_record_cbor_write(Bytes dest, size_t *pos, bool is_plc5, const uint8_t *rec, size_t record_bytes) {
+static bool pccc_listing_record_cbor_write(Bytes dest, size_t *pos, bool is_plc5, Bytes rec) {
     uint8_t file_number, file_type;
     bool has_elements;
     uint32_t element_count = 0;
@@ -854,10 +854,10 @@ static bool pccc_listing_record_cbor_write(Bytes dest, size_t *pos, bool is_plc5
         has_elements = d.has_elements;
         element_count = d.element_count;
     } else {
-        file_number = rec[0];
-        file_type = rec[1];
+        uint16_t elem_count16 = 0;
+        bytes_unpack(rec, BYTES_LE, &file_number, &file_type, &elem_count16);
         has_elements = true;
-        element_count = (uint32_t)(rec[2] | ((uint16_t)rec[3] << 8));
+        element_count = elem_count16;
     }
 
     const char *type_name = pccc_file_type_name(file_type);
@@ -869,7 +869,7 @@ static bool pccc_listing_record_cbor_write(Bytes dest, size_t *pos, bool is_plc5
     if(!cbor_write_text(dest, pos, CBOR_LIT("file_type_name"))) { return false; }
     if(!cbor_write_text(dest, pos, type_name, (size_t)str_length(type_name))) { return false; }
     if(!cbor_write_text(dest, pos, CBOR_LIT("raw"))) { return false; }
-    if(!cbor_write_bytes(dest, pos, rec, record_bytes)) { return false; }
+    if(!cbor_write_bytes(dest, pos, rec.data, rec.len)) { return false; }
     if(has_elements) {
         if(!cbor_write_text(dest, pos, CBOR_LIT("element_count"))) { return false; }
         if(!cbor_write_uint(dest, pos, element_count)) { return false; }
@@ -892,7 +892,7 @@ static int enip_pccc_listing_get_formatted_data_size(plc_tag_p tag, plc_tag_form
     sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(PCCC_LISTING_SCHEMA_VERSION);
     sz += cbor_size_text(sizeof("records") - 1) + cbor_size_array_header(record_count);
     for(size_t i = 0; i < record_count; i++) {
-        sz += pccc_listing_record_cbor_size(is_plc5, tag->data + i * record_bytes, record_bytes);
+        sz += pccc_listing_record_cbor_size(is_plc5, bytes_from_buf(tag->data + i * record_bytes, record_bytes));
     }
 
     return (int)sz;
@@ -920,7 +920,7 @@ static int enip_pccc_listing_get_formatted_data(plc_tag_p tag, plc_tag_format_ty
     if(!cbor_write_text(dest, &pos, CBOR_LIT("records"))) { return PLCTAG_ERR_TOO_SMALL; }
     if(!cbor_write_array_header(dest, &pos, record_count)) { return PLCTAG_ERR_TOO_SMALL; }
     for(size_t i = 0; i < record_count; i++) {
-        if(!pccc_listing_record_cbor_write(dest, &pos, is_plc5, tag->data + i * record_bytes, record_bytes)) {
+        if(!pccc_listing_record_cbor_write(dest, &pos, is_plc5, bytes_from_buf(tag->data + i * record_bytes, record_bytes))) {
             return PLCTAG_ERR_TOO_SMALL;
         }
     }
@@ -1083,7 +1083,7 @@ static enip_tag_p create_tag_object(attr attribs) {
         arena_free(&scratch);
         return NULL;
     }
-    memcpy(name_buf.data, raw_name, name_len);
+    bytes_pack_into(name_buf, BYTES_LE, bytes_from_buf((const uint8_t *)raw_name, name_len));
     name_buf.data[name_len] = '\0';
     const char *tag_name = (const char *)name_buf.data;
 
@@ -1105,10 +1105,11 @@ static enip_tag_p create_tag_object(attr attribs) {
 
     uint8_t *tail = (uint8_t *)(tag + 1);
 
-    memcpy(tail, tag_name, name_len + 1);
+    Bytes tail_rest = bytes_pack_into(bytes_from_buf(tail, tail_size), BYTES_LE,
+                                      bytes_from_buf((const uint8_t *)tag_name, name_len + 1));
     tag->tag_name = (char *)tail;
 
-    memcpy(tail + name_len + 1, encoded.data, encoded.len);
+    bytes_pack_into(tail_rest, BYTES_LE, encoded);
     tag->path = bytes_from_buf(tail + name_len + 1, encoded.len);
 
     arena_free(&scratch);

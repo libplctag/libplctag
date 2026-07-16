@@ -38,6 +38,7 @@
 #include <libplctag/lib/tag.h>
 #include "platform.h"
 #include "utils/attr.h"
+#include "utils/bytes.h"
 #include "utils/debug.h"
 #include "utils/rc.h"
 #include "device.h"
@@ -187,7 +188,7 @@ static int eip_server_tag_read(plc_tag_p ptag) {
     size_t total = td->elem_count * td->elem_size;
 
     mutex_lock(td->data_mutex);
-    mem_copy(ptag->data, td->data, (int)total);
+    bytes_pack_into(bytes_from_buf(ptag->data, total), BYTES_LE, bytes_from_buf(td->data, total));
     mutex_unlock(td->data_mutex);
 
     tag_raise_event(ptag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
@@ -205,7 +206,7 @@ static int eip_server_tag_write(plc_tag_p ptag) {
     size_t total = td->elem_count * td->elem_size;
 
     mutex_lock(td->data_mutex);
-    mem_copy(td->data, ptag->data, (int)total);
+    bytes_pack_into(bytes_from_buf(td->data, total), BYTES_LE, bytes_from_buf(ptag->data, total));
     mutex_unlock(td->data_mutex);
 
     tag_raise_event(ptag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_STATUS_OK);
@@ -241,7 +242,8 @@ static int eip_server_tag_tickler(plc_tag_p ptag) {
 
     mutex_lock(td->data_mutex);
     if(td->pending_read_event || td->pending_write_event) {
-        mem_copy(ptag->data, td->data, (int)(td->elem_count * td->elem_size));
+        size_t tag_size = td->elem_count * td->elem_size;
+        bytes_pack_into(bytes_from_buf(ptag->data, tag_size), BYTES_LE, bytes_from_buf(td->data, tag_size));
     }
     if(td->pending_read_event) {
         td->pending_read_event = false;
