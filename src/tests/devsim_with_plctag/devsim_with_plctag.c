@@ -53,7 +53,7 @@
 int main(void) {
     /* --- server tag: the backing store served over the wire --- */
     int32_t server_tag = plc_tag_create(
-        "protocol=ab-eip&role=server&gateway=127.0.0.1&port=44818&plc=ControlLogix"
+        "protocol=ab-eip&role=server&gateway=127.0.0.1:44818&plc=ControlLogix"
         "&name=TestDINT&elem_type=DINT&elem_count=1",
         5000);
     if(plc_tag_status(server_tag) != PLCTAG_STATUS_OK) {

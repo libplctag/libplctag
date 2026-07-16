@@ -1,4 +1,4 @@
-message("Building devsim_with_plctag POC.")
+message("Building devsim_with_plctag test.")
 
 add_executable(devsim_with_plctag ${CMAKE_CURRENT_SOURCE_DIR}/devsim_with_plctag.c)
 

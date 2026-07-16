@@ -262,8 +262,8 @@ Discovery logs under `PLCTAG_MODULE_SERVER` (not its own module — see §2).
 
 ## 9. Testing
 
-As-built (`src/poc/server_tag_basic/server_tag_basic.c`, wired into the CMake
-build via `src/poc/CMakeLists.txt`, run manually — not yet ported into the
+As-built (`src/tests/server_tag_basic/server_tag_basic.c`, wired into the CMake
+build via `src/tests/CMakeLists.txt`, run manually — not yet ported into the
 CTest-driven part of the harness): a single localhost-socket process exercises
 `role=server` tags entirely through `plc_tag_*`, no `device_sim_*`:
 

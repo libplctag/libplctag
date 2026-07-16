@@ -1,4 +1,4 @@
-message("Building server_tag_basic POC.")
+message("Building server_tag_basic test.")
 
 add_executable(server_tag_basic ${CMAKE_CURRENT_SOURCE_DIR}/server_tag_basic.c)
 

@@ -641,7 +641,7 @@ entirely different mechanisms, so neither shares the other's code path.
 Post-Phase-9 hardening (not in the original table, **done**):
 
 - `libdevsim` is a top-level static build product parallel to `libplctag`, with a
-  thin `device_sim` CLI on top; `src/poc/devsim_with_plctag` proves one executable
+  thin `device_sim` CLI on top; `src/tests/devsim_with_plctag` proves one executable
   can link both APIs.
 - Public header (`device_sim.h`) made FFI-clean: fixed-width types only
   (`uint32_t`, no `size_t`), no structs passed by value/pointer — scalar
@@ -710,7 +710,7 @@ refcount = live server-role tags at that endpoint; last destroy tears it down.
 
 ```c
 int32_t t = plc_tag_create(
-    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "protocol=ab-eip&role=server&gateway=0.0.0.0:44818"
     "&name=PumpSpeed&elem_type=DINT&elem_count=1", 0);
 plc_tag_set_int32(t, 0, 1234);   /* seed the simulated value */
 ```
@@ -776,7 +776,7 @@ and identity knobs; everything else is the grammar clients already use.
 ```c
 /* role=server auto-starts the backing server on bind_addr:port. */
 int32_t srv = plc_tag_create(
-    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "protocol=ab-eip&role=server&gateway=0.0.0.0:44818"
     "&name=PumpSpeed&elem_type=DINT&elem_count=1", 1000);
 if(srv < 0) { /* handle error */ }
 
@@ -795,7 +795,7 @@ plc_tag_destroy(srv);                     /* last server-role tag → server sto
 **B. Several tags on one device (same endpoint = same server)**
 
 ```c
-const char *base = "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818";
+const char *base = "protocol=ab-eip&role=server&gateway=0.0.0.0:44818";
 char attr[256];
 
 snprintf(attr, sizeof(attr), "%s&name=Flags&elem_type=BOOL&elem_count=32", base);
@@ -814,7 +814,7 @@ int32_t setpoint = plc_tag_create(attr, 1000);
 ```c
 /* 2x3 DINT array — same dims grammar the client uses to address it. */
 int32_t grid = plc_tag_create(
-    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "protocol=ab-eip&role=server&gateway=0.0.0.0:44818"
     "&name=Grid&elem_type=DINT&dimensions=2,3", 1000);
 ```
 
@@ -822,7 +822,7 @@ int32_t grid = plc_tag_create(
 
 ```c
 int32_t srv = plc_tag_create(
-    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "protocol=ab-eip&role=server&gateway=0.0.0.0:44818"
     "&make=Rockwell&model=1756-L83E&serial=0x00C0FFEE"
     "&sim_delay_ms=50"          /* every response delayed 50 ms              */
     "&sim_max_packet=508"       /* force fragmentation / partial transfer    */
@@ -835,7 +835,7 @@ int32_t srv = plc_tag_create(
 
 ```c
 int32_t srv = plc_tag_create(
-    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "protocol=ab-eip&role=server&gateway=0.0.0.0:44818"
     "&make=Omron&model=NX102&name=Tank.Level&elem_type=REAL&elem_count=1", 1000);
 ```
 
@@ -874,7 +874,7 @@ void on_event(int32_t tag, int32_t event, int32_t status, void *udata) {
 }
 
 int32_t srv = plc_tag_create(
-    "protocol=ab-eip&role=server&gateway=0.0.0.0&port=44818"
+    "protocol=ab-eip&role=server&gateway=0.0.0.0:44818"
     "&name=Setpoint&elem_type=DINT&elem_count=1", 1000);
 plc_tag_register_callback(srv, on_event);
 ```

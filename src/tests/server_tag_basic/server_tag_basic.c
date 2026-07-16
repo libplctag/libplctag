@@ -83,7 +83,7 @@ int main(void) {
     printf("=== Test 1: basic round trip ===\n");
 
     snprintf(attr, sizeof(attr),
-             "protocol=ab-eip&role=server&gateway=0.0.0.0&port=%d&name=TestDINT&elem_type=DINT&elem_count=1", TEST_PORT);
+             "protocol=ab-eip&role=server&gateway=0.0.0.0:%d&name=TestDINT&elem_type=DINT&elem_count=1", TEST_PORT);
     int32_t srv1 = plc_tag_create(attr, TIMEOUT_MS);
     CHECK(srv1 >= 0, "create server tag 1");
 
@@ -100,7 +100,7 @@ int main(void) {
     printf("\n=== Test 2: second server tag on the same endpoint ===\n");
 
     snprintf(attr, sizeof(attr),
-             "protocol=ab-eip&role=server&gateway=0.0.0.0&port=%d&name=TestDINT2&elem_type=DINT&elem_count=1", TEST_PORT);
+             "protocol=ab-eip&role=server&gateway=0.0.0.0:%d&name=TestDINT2&elem_type=DINT&elem_count=1", TEST_PORT);
     int32_t srv2 = plc_tag_create(attr, TIMEOUT_MS);
     CHECK(srv2 >= 0, "create server tag 2 (joins existing endpoint)");
     CHECK(plc_tag_set_int32(srv2, 0, 42) == PLCTAG_STATUS_OK, "seed server tag 2 locally");
@@ -157,7 +157,7 @@ int main(void) {
     printf("\n=== Test 5: sim_fault forces a CIP error status ===\n");
 
     snprintf(attr, sizeof(attr),
-             "protocol=ab-eip&role=server&gateway=0.0.0.0&port=%d&name=TestFault&elem_type=DINT&elem_count=1&sim_fault=0x05",
+             "protocol=ab-eip&role=server&gateway=0.0.0.0:%d&name=TestFault&elem_type=DINT&elem_count=1&sim_fault=0x05",
              TEST_PORT);
     int32_t srv3 = plc_tag_create(attr, TIMEOUT_MS);
     CHECK(srv3 >= 0, "create fault-injecting server tag");

@@ -53,4 +53,12 @@ add_subdirectory("thread_stress")
 add_subdirectory("trigger_double_free")
 add_subdirectory("perf_benchmark")
 
+# These exercise the device_sim_*/eip_server_tag_create server paths (built
+# only under LIBPLCTAG_FEATURE_SERVER), not just the ordinary client API.
+if(LIBPLCTAG_FEATURE_SERVER)
+    add_subdirectory("devsim_with_plctag")
+    add_subdirectory("server_tag_basic")
+    add_subdirectory("omron_udt_walk")
+endif()
+
 
