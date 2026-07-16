@@ -60,6 +60,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
 #include <utils/bytes.h>
+#include <utils/cbor.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 
@@ -124,41 +125,22 @@ bool enip_identity_write_raw_record(Bytes dest, size_t *pos, uint32_t ip_host, u
                                     uint16_t device_type, uint16_t product_code, uint8_t revision_major,
                                     uint8_t revision_minor, uint16_t status, uint32_t serial, uint8_t state,
                                     const uint8_t *product_name, uint8_t name_len) {
-    size_t need = enip_identity_raw_record_size(name_len);
-    if(*pos + need > dest.len) { return false; }
+    Bytes remaining = bytes_slice(dest, *pos, dest.len - *pos);
+    if(bytes_is_null(remaining)) { return false; }
 
-    uint8_t *p = dest.data + *pos;
     uint16_t record_len = (uint16_t)(22 + name_len);
-    size_t i = 0;
 
-    p[i++] = (uint8_t)(record_len & 0xFFu);
-    p[i++] = (uint8_t)(record_len >> 8);
-    p[i++] = (uint8_t)((ip_host >> 24) & 0xFFu);
-    p[i++] = (uint8_t)((ip_host >> 16) & 0xFFu);
-    p[i++] = (uint8_t)((ip_host >> 8) & 0xFFu);
-    p[i++] = (uint8_t)(ip_host & 0xFFu);
-    p[i++] = (uint8_t)(port_host & 0xFFu);
-    p[i++] = (uint8_t)(port_host >> 8);
-    p[i++] = (uint8_t)(vendor_id & 0xFFu);
-    p[i++] = (uint8_t)(vendor_id >> 8);
-    p[i++] = (uint8_t)(device_type & 0xFFu);
-    p[i++] = (uint8_t)(device_type >> 8);
-    p[i++] = (uint8_t)(product_code & 0xFFu);
-    p[i++] = (uint8_t)(product_code >> 8);
-    p[i++] = revision_major;
-    p[i++] = revision_minor;
-    p[i++] = (uint8_t)(status & 0xFFu);
-    p[i++] = (uint8_t)(status >> 8);
-    p[i++] = (uint8_t)(serial & 0xFFu);
-    p[i++] = (uint8_t)((serial >> 8) & 0xFFu);
-    p[i++] = (uint8_t)((serial >> 16) & 0xFFu);
-    p[i++] = (uint8_t)((serial >> 24) & 0xFFu);
-    p[i++] = state;
-    p[i++] = name_len;
-    if(name_len > 0) { memcpy(p + i, product_name, name_len); }
-    i += name_len;
+    /* ip_host is written in network byte order (big-endian); every other
+     * field is little-endian, matching the CIP List Identity reply itself. */
+    Bytes rest = bytes_pack_into(remaining, BYTES_LE, record_len);
+    if(bytes_is_null(rest)) { return false; }
+    rest = bytes_pack_into(rest, BYTES_BE, ip_host);
+    if(bytes_is_null(rest)) { return false; }
+    rest = bytes_pack_into(rest, BYTES_LE, port_host, vendor_id, device_type, product_code, revision_major, revision_minor,
+                           status, serial, state, name_len, bytes_from_buf(product_name, name_len));
+    if(bytes_is_null(rest)) { return false; }
 
-    *pos += i;
+    *pos = dest.len - rest.len;
     return true;
 }
 
@@ -546,10 +528,236 @@ static int enip_discover_get_int_attrib(plc_tag_p tag, const char *attrib_name, 
     return default_value;
 }
 
-/* format/schema: PLCTAG_FORMAT_RAW works for this tag with no vtable hook at
- * all (lib.c handles it generically from tag->data/tag->size); a
- * PLCTAG_FORMAT_CBOR renderer walking the shared raw records (mirroring
- * client/enip_tag.c's @identity/PCCC codecs) is deferred, not yet built. */
+/* ============================================================================
+ * @identity structured presentation (format/schema subsystem; design doc
+ * ENIP-METADATA-AND-DISCOVERY-DESIGN.md §0/§8). "cbor" is rendered on demand
+ * by walking the raw records accumulated in tag->data (enip_identity_write_
+ * raw_record's layout, above) -- nothing structured is cached. Reuses the
+ * TCP @identity codec's field vocabulary (client/enip_tag.c's "identity"
+ * schema) plus ip/port/state, which only exist for a UDP discovery scan.
+ * Read-only: no set_formatted_data/set_schema.
+ * ============================================================================ */
+
+#define ENIP_UDP_SCHEMA_NAME "enip-udp-identity"
+#define ENIP_UDP_SCHEMA_VERSION ((uint64_t)1)
+
+/* Same rationale as client/enip_tag.c's CBOR_LIT: CIP SHORT_STRING product
+ * names are ASCII, valid UTF-8, and can be written as CBOR text as-is. */
+#define ENIP_UDP_CBOR_LIT(s) (s), (sizeof(s) - 1)
+
+typedef struct {
+    uint32_t ip_host;
+    uint16_t port, vendor_id, device_type, product_code, status;
+    uint8_t revision_major, revision_minor, state;
+    uint32_t serial;
+    const char *product_name;
+    uint8_t product_name_len;
+} enip_udp_record_fields_t;
+
+/* Parse one raw record starting at tag->data[off] (pointing at the record's
+ * own u16LE length prefix, enip_identity_write_raw_record's layout). Returns
+ * the offset of the next record, or 0 on end-of-data/malformed trailing
+ * bytes (0 is never a valid "next" offset since every record is >= 24
+ * bytes). *ok_out is only meaningful when a nonzero offset is returned. */
+static size_t enip_udp_parse_record_at(plc_tag_p tag, size_t off, enip_udp_record_fields_t *out) {
+    Bytes data = bytes_from_buf(tag->data, (size_t)tag->size);
+    Bytes at = bytes_slice(data, off, data.len - off);
+    if(bytes_is_null(at)) { return 0; }
+
+    uint16_t record_len = 0;
+    Bytes rest = bytes_unpack(at, BYTES_LE, &record_len);
+    if(bytes_is_null(rest) || record_len < 22) { return 0; }
+
+    Bytes payload = bytes_slice(rest, 0, record_len);
+    if(bytes_is_null(payload)) { return 0; }
+
+    uint32_t ip_be = 0;
+    Bytes r2 = bytes_unpack(payload, BYTES_BE, &ip_be);
+    if(bytes_is_null(r2)) { return 0; }
+    out->ip_host = ip_be;
+
+    r2 = bytes_unpack(r2, BYTES_LE, &out->port, &out->vendor_id, &out->device_type, &out->product_code,
+                      &out->revision_major, &out->revision_minor, &out->status, &out->serial, &out->state,
+                      &out->product_name_len);
+    if(bytes_is_null(r2) || r2.len < out->product_name_len) { return 0; }
+    out->product_name = (const char *)r2.data;
+
+    return off + 2 + record_len;
+}
+
+/* record map: identity's 8 fields + ip/port/state (11 total). ip is a dotted
+ * quad string, matching the "gateway" attribute's own notation. */
+static size_t enip_udp_record_cbor_size(const enip_udp_record_fields_t *f) {
+    char ip_buf[16];
+    enip_discover_format_ipv4(f->ip_host, ip_buf, sizeof(ip_buf));
+
+    size_t sz = cbor_size_map_header(11);
+    sz += cbor_size_text(sizeof("ip") - 1) + cbor_size_text((size_t)str_length(ip_buf));
+    sz += cbor_size_text(sizeof("port") - 1) + cbor_size_uint(f->port);
+    sz += cbor_size_text(sizeof("vendor_id") - 1) + cbor_size_uint(f->vendor_id);
+    sz += cbor_size_text(sizeof("device_type") - 1) + cbor_size_uint(f->device_type);
+    sz += cbor_size_text(sizeof("product_code") - 1) + cbor_size_uint(f->product_code);
+    sz += cbor_size_text(sizeof("revision_major") - 1) + cbor_size_uint(f->revision_major);
+    sz += cbor_size_text(sizeof("revision_minor") - 1) + cbor_size_uint(f->revision_minor);
+    sz += cbor_size_text(sizeof("status") - 1) + cbor_size_uint(f->status);
+    sz += cbor_size_text(sizeof("serial") - 1) + cbor_size_uint(f->serial);
+    sz += cbor_size_text(sizeof("state") - 1) + cbor_size_uint(f->state);
+    sz += cbor_size_text(sizeof("product_name") - 1) + cbor_size_text(f->product_name_len);
+    return sz;
+}
+
+static bool enip_udp_record_cbor_write(Bytes dest, size_t *pos, const enip_udp_record_fields_t *f) {
+    char ip_buf[16];
+    enip_discover_format_ipv4(f->ip_host, ip_buf, sizeof(ip_buf));
+
+    if(!cbor_write_map_header(dest, pos, 11)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("ip"))) { return false; }
+    if(!cbor_write_text(dest, pos, ip_buf, (size_t)str_length(ip_buf))) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("port"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->port)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("vendor_id"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->vendor_id)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("device_type"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->device_type)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("product_code"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->product_code)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("revision_major"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->revision_major)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("revision_minor"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->revision_minor)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("status"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->status)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("serial"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->serial)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("state"))) { return false; }
+    if(!cbor_write_uint(dest, pos, f->state)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("product_name"))) { return false; }
+    if(!cbor_write_text(dest, pos, f->product_name, f->product_name_len)) { return false; }
+    return true;
+}
+
+/* Two-pass envelope size/write: pass 1 walks tag->data to get the true
+ * record count (not t->record_count -- that's the scan's own running
+ * counter; recomputing from the data itself avoids ever mismatching what
+ * this function can actually parse) and total size; pass 2 (write only)
+ * walks again and encodes each record. Stops early, not erroring, on a
+ * malformed trailing record -- the same defensive stance as any other
+ * accumulated-buffer parse in this dialect. */
+static bool enip_udp_envelope_cbor_size(plc_tag_p tag, size_t *record_count_out, size_t *size_out) {
+    size_t count = 0;
+    size_t records_size = 0;
+    size_t off = 0;
+
+    while((size_t)tag->size > off) {
+        enip_udp_record_fields_t f;
+        size_t next = enip_udp_parse_record_at(tag, off, &f);
+        if(next == 0) { break; }
+        records_size += enip_udp_record_cbor_size(&f);
+        count++;
+        off = next;
+    }
+
+    size_t sz = cbor_size_map_header(3);
+    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_UDP_SCHEMA_NAME) - 1);
+    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_UDP_SCHEMA_VERSION);
+    sz += cbor_size_text(sizeof("records") - 1) + cbor_size_array_header(count) + records_size;
+
+    *record_count_out = count;
+    *size_out = sz;
+    return true;
+}
+
+static bool enip_udp_envelope_cbor_write(plc_tag_p tag, size_t record_count, Bytes dest, size_t *pos) {
+    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema"))) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT(ENIP_UDP_SCHEMA_NAME))) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema-version"))) { return false; }
+    if(!cbor_write_uint(dest, pos, ENIP_UDP_SCHEMA_VERSION)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("records"))) { return false; }
+    if(!cbor_write_array_header(dest, pos, record_count)) { return false; }
+
+    size_t off = 0;
+    for(size_t i = 0; i < record_count; i++) {
+        enip_udp_record_fields_t f;
+        size_t next = enip_udp_parse_record_at(tag, off, &f);
+        if(next == 0) { return false; } /* record count changed since the size pass -- shouldn't happen, no concurrent writer */
+        if(!enip_udp_record_cbor_write(dest, pos, &f)) { return false; }
+        off = next;
+    }
+    return true;
+}
+
+static int enip_discover_get_formatted_data_size(plc_tag_p tag, plc_tag_format_type_t format) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    size_t count = 0, size = 0;
+    if(!enip_udp_envelope_cbor_size(tag, &count, &size)) { return PLCTAG_ERR_BAD_DATA; }
+
+    return (int)size;
+}
+
+static int enip_discover_get_formatted_data(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+
+    size_t count = 0, size = 0;
+    if(!enip_udp_envelope_cbor_size(tag, &count, &size)) { return PLCTAG_ERR_BAD_DATA; }
+    if(size > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
+    size_t pos = 0;
+    if(!enip_udp_envelope_cbor_write(tag, count, dest, &pos)) { return PLCTAG_ERR_TOO_SMALL; }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Field-name reflection of the "enip-udp-identity" schema. Not tag-specific
+ * (every enip-udp @identity tag has the same schema), so this ignores `tag`. */
+static const char *const ENIP_UDP_FIELD_NAMES[] = {"ip",  "port",           "vendor_id",      "device_type",
+                                                    "product_code", "revision_major", "revision_minor", "status",
+                                                    "serial", "state", "product_name"};
+#define ENIP_UDP_FIELD_COUNT ((size_t)(sizeof(ENIP_UDP_FIELD_NAMES) / sizeof(ENIP_UDP_FIELD_NAMES[0])))
+
+static size_t enip_udp_schema_cbor_size(void) {
+    size_t sz = cbor_size_map_header(3);
+    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_UDP_SCHEMA_NAME) - 1);
+    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_UDP_SCHEMA_VERSION);
+    sz += cbor_size_text(sizeof("fields") - 1) + cbor_size_array_header(ENIP_UDP_FIELD_COUNT);
+    for(size_t i = 0; i < ENIP_UDP_FIELD_COUNT; i++) { sz += cbor_size_text((size_t)str_length(ENIP_UDP_FIELD_NAMES[i])); }
+    return sz;
+}
+
+static bool enip_udp_schema_cbor_write(Bytes dest, size_t *pos) {
+    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema"))) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT(ENIP_UDP_SCHEMA_NAME))) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema-version"))) { return false; }
+    if(!cbor_write_uint(dest, pos, ENIP_UDP_SCHEMA_VERSION)) { return false; }
+    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("fields"))) { return false; }
+    if(!cbor_write_array_header(dest, pos, ENIP_UDP_FIELD_COUNT)) { return false; }
+    for(size_t i = 0; i < ENIP_UDP_FIELD_COUNT; i++) {
+        if(!cbor_write_text(dest, pos, ENIP_UDP_FIELD_NAMES[i], (size_t)str_length(ENIP_UDP_FIELD_NAMES[i]))) { return false; }
+    }
+    return true;
+}
+
+static int enip_discover_get_schema_size(plc_tag_p tag, plc_tag_format_type_t format) {
+    (void)tag;
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+    return (int)enip_udp_schema_cbor_size();
+}
+
+static int enip_discover_get_schema(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
+    (void)tag;
+    if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
+    if(enip_udp_schema_cbor_size() > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
+    size_t pos = 0;
+    if(!enip_udp_schema_cbor_write(dest, &pos)) { return PLCTAG_ERR_TOO_SMALL; }
+
+    return PLCTAG_STATUS_OK;
+}
+
 static struct tag_vtable_t enip_discover_tag_vtable = {
     .abort = enip_discover_tag_abort,
     .read = enip_discover_tag_read,
@@ -561,6 +769,12 @@ static struct tag_vtable_t enip_discover_tag_vtable = {
     .get_int_attrib = enip_discover_get_int_attrib,
     .set_int_attrib = NULL,
     .get_byte_array_attrib = NULL,
+    .get_formatted_data_size = enip_discover_get_formatted_data_size,
+    .get_formatted_data = enip_discover_get_formatted_data,
+    .set_formatted_data = NULL, /* read-only tag */
+    .get_schema_size = enip_discover_get_schema_size,
+    .get_schema = enip_discover_get_schema,
+    .set_schema = NULL, /* built-in schema, not user-settable */
 };
 
 /* ============================================================================

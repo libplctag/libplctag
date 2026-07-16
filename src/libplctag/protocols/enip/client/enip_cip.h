@@ -57,6 +57,8 @@
 #define CIP_MULTI_SVC   ((uint8_t)0x0A) /* Multiple Service Packet */
 #define CIP_LIST_TAGS   ((uint8_t)0x55) /* Get_Instance_Attribute_List (tag/symbol listing) */
 #define CIP_GET_ATTR_LIST ((uint8_t)0x03) /* Get_Attribute_List (UDT template metadata) */
+#define CIP_GET_ATTR_ALL ((uint8_t)0x01) /* Get_Attribute_All (OMRON class 0x6A/0x6C listing) */
+#define CIP_GET_INSTANCE_LIST_EX2 ((uint8_t)0x5F) /* OMRON class 0x6A variable name server */
 
 /* CIP general status: partial transfer ("too much data"); reissue from the
  * next instance id / byte offset until a non-FRAG status is returned. */
@@ -210,6 +212,27 @@ extern Bytes enip_cip_udt_meta(Arena *a, uint16_t udt_id);
  * is CIP_STATUS_FRAG.
  */
 extern Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t total);
+
+/*
+ * OMRON NJ/NX @tags listing (OMRON-SPECIFIC-DESIGN.md §5.1): CIP 0x5F
+ * (Get_Instance_List_Ex2) on the Tag Name Server class (0x6A), instance 0.
+ * Requests up to `count` variable-name-server instances starting at
+ * `start_instance`, of `kind` (2 = user variables, 1 = system variables).
+ * Continuation: reissue with start_instance += the reply's instance_count
+ * while the reply's status byte is nonzero.
+ */
+extern Bytes enip_cip_omron_list_tags(Arena *a, uint32_t start_instance, uint32_t count, uint16_t kind);
+
+/*
+ * OMRON NJ/NX @udt request (OMRON-SPECIFIC-DESIGN.md §5.3): CIP 0x01
+ * (Get_Attribute_All) on the Variable Type Object class (0x6C), instance
+ * `type_instance_id` (the `variable_type_instance_id` recovered from the
+ * owning variable's class-0x6B Get_Attribute_All reply). Unlike Rockwell's
+ * split metadata/field-definition services, one reply carries the whole
+ * definition; reissue identically while the reply status is CIP_STATUS_FRAG
+ * (ordinary CIP fragmentation, not an offset-addressed continuation).
+ */
+extern Bytes enip_cip_omron_udt_get_all(Arena *a, uint16_t type_instance_id);
 
 /*
  * Split a CIP reply into its header fields and trailing data.

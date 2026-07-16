@@ -95,14 +95,23 @@ typedef struct {
 } cip_type_entry_t;
 
 static const cip_type_entry_t CIP_TYPES[] = {
-    {"BOOL",  TAG_CIP_TYPE_BOOL,  1},
-    {"SINT",  TAG_CIP_TYPE_SINT,  1},
-    {"INT",   TAG_CIP_TYPE_INT,   2},
-    {"DINT",  TAG_CIP_TYPE_DINT,  4},
-    {"LINT",  TAG_CIP_TYPE_LINT,  8},
-    {"REAL",  TAG_CIP_TYPE_REAL,  4},
-    {"LREAL", TAG_CIP_TYPE_LREAL, 8},
-    {NULL,    0,                  0},
+    {"BOOL",   TAG_CIP_TYPE_BOOL,   1},
+    {"SINT",   TAG_CIP_TYPE_SINT,   1},
+    {"INT",    TAG_CIP_TYPE_INT,    2},
+    {"DINT",   TAG_CIP_TYPE_DINT,   4},
+    {"LINT",   TAG_CIP_TYPE_LINT,   8},
+    {"USINT",  TAG_CIP_TYPE_USINT,  1},
+    {"UINT",   TAG_CIP_TYPE_UINT,   2},
+    {"UDINT",  TAG_CIP_TYPE_UDINT,  4},
+    {"ULINT",  TAG_CIP_TYPE_ULINT,  8},
+    {"REAL",   TAG_CIP_TYPE_REAL,   4},
+    {"LREAL",  TAG_CIP_TYPE_LREAL,  8},
+    {"BYTE",   TAG_CIP_TYPE_BYTE,   1},
+    {"WORD",   TAG_CIP_TYPE_WORD,   2},
+    {"DWORD",  TAG_CIP_TYPE_DWORD,  4},
+    {"LWORD",  TAG_CIP_TYPE_LWORD,  8},
+    {"STRING", TAG_CIP_TYPE_STRING, TAG_CIP_STRING_SIZE},
+    {NULL,     0,                   0},
 };
 
 static bool lookup_cip_type(const char *name, tag_type_t *type_out, size_t *elem_size_out) {
@@ -116,14 +125,15 @@ static bool lookup_cip_type(const char *name, tag_type_t *type_out, size_t *elem
     return false;
 }
 
-/* pccc_type= letter, matching args.c's PCCC_TYPES table (B/N/L/F/R). */
+/* pccc_type= letter, matching Allen-Bradley PLC-5/SLC file-type letters. */
 static const cip_type_entry_t PCCC_TYPES[] = {
-    {"B", TAG_PCCC_TYPE_BIT,  2},
-    {"N", TAG_PCCC_TYPE_INT,  2},
-    {"L", TAG_PCCC_TYPE_DINT, 4},
-    {"F", TAG_PCCC_TYPE_REAL, 4},
-    {"R", TAG_PCCC_TYPE_REAL, 4},
-    {NULL, 0,                 0},
+    {"B",  TAG_PCCC_TYPE_BIT,    2},
+    {"N",  TAG_PCCC_TYPE_INT,    2},
+    {"L",  TAG_PCCC_TYPE_DINT,   4},
+    {"F",  TAG_PCCC_TYPE_REAL,   4},
+    {"R",  TAG_PCCC_TYPE_REAL,   4},
+    {"ST", TAG_PCCC_TYPE_STRING, TAG_PCCC_STRING_SIZE},
+    {NULL, 0,                    0},
 };
 
 static bool lookup_pccc_type(const char *letter, tag_type_t *type_out, size_t *elem_size_out) {
@@ -320,7 +330,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     if(!type_ok) {
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
                "eip_server_tag_create: %s is required and must be one of %s (got \"%s\").",
-               is_pccc ? "pccc_type=" : "elem_type=", is_pccc ? "B/N/L/F/R" : "BOOL/SINT/INT/DINT/LINT/REAL/LREAL",
+               is_pccc ? "pccc_type=" : "elem_type=", is_pccc ? "B/N/L/F/R/ST" : "BOOL/SINT/INT/DINT/LINT/USINT/UINT/UDINT/ULINT/REAL/LREAL/BYTE/WORD/DWORD/LWORD/STRING",
                type_str ? type_str : "(none)");
         return PLC_TAG_P_NULL;
     }

@@ -77,15 +77,31 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_TYPE_INT ((tag_type_t)0x00C3)
 #define TAG_CIP_TYPE_DINT ((tag_type_t)0x00C4)
 #define TAG_CIP_TYPE_LINT ((tag_type_t)0x00C5)
+#define TAG_CIP_TYPE_USINT ((tag_type_t)0x00C6)
+#define TAG_CIP_TYPE_UINT ((tag_type_t)0x00C7)
+#define TAG_CIP_TYPE_UDINT ((tag_type_t)0x00C8)
+#define TAG_CIP_TYPE_ULINT ((tag_type_t)0x00C9)
 #define TAG_CIP_TYPE_REAL ((tag_type_t)0x00CA)
 #define TAG_CIP_TYPE_LREAL ((tag_type_t)0x00CB)
 #define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0)
+#define TAG_CIP_TYPE_BYTE ((tag_type_t)0x00D1)
+#define TAG_CIP_TYPE_WORD ((tag_type_t)0x00D2)
+#define TAG_CIP_TYPE_DWORD ((tag_type_t)0x00D3)
+#define TAG_CIP_TYPE_LWORD ((tag_type_t)0x00D4)
+
+/* Logix STRING is a structure (DINT length + SINT data[82], padded to a
+ * 4-byte boundary) -- device_sim doesn't interpret member layout, so it's
+ * just given a fixed instance size matching the real wire structure. */
+#define TAG_CIP_STRING_SIZE ((size_t)88)
 
 #define TAG_PCCC_TYPE_BIT ((tag_type_t)0x0085)
 #define TAG_PCCC_TYPE_INT ((tag_type_t)0x0089)
 #define TAG_PCCC_TYPE_DINT ((tag_type_t)0x0091)
 #define TAG_PCCC_TYPE_REAL ((tag_type_t)0x008A)
 #define TAG_PCCC_TYPE_STRING ((tag_type_t)0x008D)
+
+/* PCCC ST string file element: 2-byte length + 82-byte data. */
+#define TAG_PCCC_STRING_SIZE ((size_t)84)
 
 /* ============================================================================
  * Identity object (CIP class 0x01, instance 1)

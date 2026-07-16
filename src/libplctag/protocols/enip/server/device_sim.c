@@ -36,6 +36,7 @@
 
 #include <libplctag/lib/libplctag.h>
 #include "platform.h"
+#include "utils/bytes.h"
 #include "utils/debug.h"
 #include "device.h"
 #include "device_sim.h"
@@ -43,6 +44,7 @@
 #include "server.h"
 #include "discovery.h"
 #include <libplctag/protocols/enip/dialects/rockwell/ab_listing.h>
+#include <libplctag/protocols/enip/dialects/omron/omron_listing.h>
 
 
 /* ============================================================================
@@ -65,14 +67,24 @@ static size_t elem_size_for_type(tag_type_t t) {
         case TAG_CIP_TYPE_BOOL:
         case TAG_CIP_TYPE_SINT:    return 1;
         case TAG_CIP_TYPE_INT:     return 2;
+        case TAG_CIP_TYPE_USINT:   return 1;
         case TAG_CIP_TYPE_DINT:
-        case TAG_CIP_TYPE_REAL:    return 4;
+        case TAG_CIP_TYPE_UDINT:
+        case TAG_CIP_TYPE_REAL:
+        case TAG_CIP_TYPE_DWORD:   return 4;
+        case TAG_CIP_TYPE_UINT:
+        case TAG_CIP_TYPE_WORD:    return 2;
         case TAG_CIP_TYPE_LINT:
-        case TAG_CIP_TYPE_LREAL:   return 8;
+        case TAG_CIP_TYPE_ULINT:
+        case TAG_CIP_TYPE_LREAL:
+        case TAG_CIP_TYPE_LWORD:   return 8;
+        case TAG_CIP_TYPE_BYTE:    return 1;
+        case TAG_CIP_TYPE_STRING:  return TAG_CIP_STRING_SIZE;
         case TAG_PCCC_TYPE_BIT:
         case TAG_PCCC_TYPE_INT:    return 2;
         case TAG_PCCC_TYPE_DINT:
         case TAG_PCCC_TYPE_REAL:   return 4;
+        case TAG_PCCC_TYPE_STRING: return TAG_PCCC_STRING_SIZE;
         default:                   return 0;
     }
 }
@@ -218,6 +230,11 @@ extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *mod
         if(ab_listing_register(sim, &sim->dev) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                    "device_sim_create: ab_listing_register failed (tag listing will not work).");
+        }
+    } else if(plc_type == ENIP_PLC_OMRON_NJNX) {
+        if(omron_listing_register(sim, &sim->dev) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
+                   "device_sim_create: omron_listing_register failed (tag listing will not work).");
         }
     }
 
@@ -426,34 +443,26 @@ static uint8_t *encode_udt_definition(const char *struct_name, const udt_member_
     uint8_t *def = (uint8_t *)mem_alloc((int)total);
     if(!def) { return NULL; }
 
-    uint32_t pos = 0;
-    for(uint32_t i = 0; i < num_members; i++) {
-        uint16_t type = members[i].type;
+    Bytes rest = bytes_from_buf(def, total);
+    for(uint32_t i = 0; i < num_members && !bytes_is_null(rest); i++) {
         uint16_t info = (members[i].array_count > 1) ? (uint16_t)members[i].array_count : (uint16_t)1;
-        def[pos++] = (uint8_t)(type & 0xFFu);
-        def[pos++] = (uint8_t)((type >> 8) & 0xFFu);
-        def[pos++] = (uint8_t)(info & 0xFFu);
-        def[pos++] = (uint8_t)((info >> 8) & 0xFFu);
-        def[pos++] = (uint8_t)(members[i].offset & 0xFFu);
-        def[pos++] = (uint8_t)((members[i].offset >> 8) & 0xFFu);
-        def[pos++] = (uint8_t)((members[i].offset >> 16) & 0xFFu);
-        def[pos++] = (uint8_t)((members[i].offset >> 24) & 0xFFu);
+        rest = bytes_pack_into(rest, BYTES_LE, members[i].type, info, (uint32_t)members[i].offset);
     }
 
-    int32_t sn_len = str_length(struct_name);
-    mem_copy(def + pos, (void *)struct_name, sn_len);
-    pos += (uint32_t)sn_len;
-    def[pos++] = ';';
-    def[pos++] = '\0';
-
-    for(uint32_t i = 0; i < num_members; i++) {
-        int32_t mn_len = str_length(members[i].name);
-        mem_copy(def + pos, (void *)members[i].name, mn_len);
-        pos += (uint32_t)mn_len;
-        def[pos++] = '\0';
+    if(!bytes_is_null(rest)) {
+        rest = bytes_pack_into(rest, BYTES_LE,
+                               bytes_from_buf((const uint8_t *)struct_name, (size_t)str_length(struct_name)),
+                               (uint8_t)';', (uint8_t)'\0');
     }
 
-    *len_out = pos;
+    for(uint32_t i = 0; i < num_members && !bytes_is_null(rest); i++) {
+        rest = bytes_pack_into(rest, BYTES_LE, bytes_from_buf((const uint8_t *)members[i].name, (size_t)str_length(members[i].name)),
+                               (uint8_t)'\0');
+    }
+
+    if(bytes_is_null(rest)) { mem_free(def); return NULL; }
+
+    *len_out = (uint32_t)(total - rest.len);
     return def;
 }
 

@@ -426,6 +426,33 @@ Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t t
     return bytes_concat(a, header, path, body);
 }
 
+Bytes enip_cip_omron_list_tags(Arena *a, uint32_t start_instance, uint32_t count, uint16_t kind) {
+    if(!a) { return bytes_null(); }
+
+    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6A, (uint16_t)0);
+    if(bytes_is_null(path)) { return bytes_null(); }
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_INSTANCE_LIST_EX2, (uint8_t)(path.len / 2));
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    Bytes body = bytes_pack(a, BYTES_LE, (uint32_t)start_instance, (uint32_t)count, (uint16_t)kind);
+    if(bytes_is_null(body)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path, body);
+}
+
+Bytes enip_cip_omron_udt_get_all(Arena *a, uint16_t type_instance_id) {
+    if(!a) { return bytes_null(); }
+
+    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, type_instance_id);
+    if(bytes_is_null(path)) { return bytes_null(); }
+
+    Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_ATTR_ALL, (uint8_t)(path.len / 2));
+    if(bytes_is_null(header)) { return bytes_null(); }
+
+    return bytes_concat(a, header, path);
+}
+
 
 /* ============================================================================
  * CIP Multiple Service Packet reply parser

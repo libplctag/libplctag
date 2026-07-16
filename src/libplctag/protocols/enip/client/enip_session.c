@@ -279,6 +279,8 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
 static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
 static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t);
 static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
+static Bytes enip_omron_build_listing(Arena *a, enip_tag_p t);
+static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
 static const enip_dialect_t *listing_dialect_for(enip_connection_t *c);
 
 /* A tag that issues network ops via pick_batch (vs. the special tags that the
@@ -1612,6 +1614,8 @@ const enip_dialect_t enip_omron_dialect = {
     .max_batch_cap = 0,
     .build = enip_logix_build,
     .apply = enip_logix_apply,
+    .build_listing = enip_omron_build_listing,
+    .apply_listing = enip_omron_apply_listing,
 };
 
 /* §16a.4 dialect selection from the classified PLC family. PCCC families are
@@ -2285,6 +2289,78 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
             t->data = buf;
             memcpy(t->data + 14 + t->read_off, data.data, data.len);
             t->read_off += (uint32_t)data.len;
+            t->size = (int32_t)need;
+        }
+
+        if(cip_status == CIP_STATUS_FRAG) { *more = true; }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+/* OMRON (OMRON-SPECIFIC-DESIGN.md §5): @tags/@udt request for t's current op.
+ * @tags walks the Tag Name Server (class 0x6A, Get_Instance_List_Ex2) in
+ * pages of OMRON_LIST_PAGE; @udt is a single Get_Attribute_All on the
+ * Variable Type Object (class 0x6C) -- list_next_id is the
+ * variable_type_instance_id, set at tag create (same list_next_id/udt_id
+ * convention Rockwell uses; see enip_tag.c). Unlike Rockwell there is no
+ * separate metadata/field-definition split: one class-0x6C reply carries the
+ * whole definition (fragmented, if needed, via ordinary CIP status 0x06).
+ * enip_dialect_t.build_listing for enip_omron_dialect. */
+#define OMRON_LIST_PAGE ((uint32_t)100)
+#define OMRON_LIST_KIND_USER ((uint16_t)2)
+
+static Bytes enip_omron_build_listing(Arena *a, enip_tag_p t) {
+    switch(t->op) {
+        case ENIP_OP_LIST: return enip_cip_omron_list_tags(a, t->list_next_id, OMRON_LIST_PAGE, OMRON_LIST_KIND_USER);
+
+        case ENIP_OP_UDT_META: return enip_cip_omron_udt_get_all(a, (uint16_t)t->list_next_id);
+
+        default: return bytes_null();
+    }
+}
+
+/* OMRON: accumulate one @tags/@udt reply into t->data verbatim (no synthetic
+ * header -- @tags/@udt have no CBOR schema yet on any dialect, see
+ * enip_tag.c's ENIP_TAG_KIND_LISTING/UDT doc comment, so raw bytes are all a
+ * caller can get today). @tags advances list_next_id by the reply's own
+ * instance_count and continues while its status byte is nonzero (§5.1); @udt
+ * continues on ordinary CIP_STATUS_FRAG. Caller holds t->api_mutex.
+ * enip_dialect_t.apply_listing for enip_omron_dialect. */
+static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
+    *more = false;
+
+    if(t->op == ENIP_OP_LIST) {
+        if(data.len < 4) { return (data.len == 0) ? PLCTAG_STATUS_OK : PLCTAG_ERR_BAD_REPLY; }
+
+        uint16_t instance_count = 0;
+        uint8_t status_byte = 0;
+        bytes_unpack(data, BYTES_LE, &instance_count, &status_byte);
+
+        size_t need = (size_t)t->read_off + data.len;
+        uint8_t *buf = mem_realloc(t->data, (int)need);
+        if(!buf) { return PLCTAG_ERR_NO_MEM; }
+        t->data = buf;
+        memcpy(t->data + t->read_off, data.data, data.len);
+        t->read_off = (uint32_t)need;
+        t->size = (int32_t)need;
+
+        t->list_next_id += instance_count;
+        if(status_byte != 0 && instance_count > 0) { *more = true; }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(t->op == ENIP_OP_UDT_META) {
+        if(data.len > 0) {
+            size_t need = (size_t)t->read_off + data.len;
+            uint8_t *buf = mem_realloc(t->data, (int)need);
+            if(!buf) { return PLCTAG_ERR_NO_MEM; }
+            t->data = buf;
+            memcpy(t->data + t->read_off, data.data, data.len);
+            t->read_off = (uint32_t)need;
             t->size = (int32_t)need;
         }
 

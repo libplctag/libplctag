@@ -51,6 +51,8 @@ set(ENIP_SERVER_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/eip_server_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/dialects/rockwell/ab_listing.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/dialects/rockwell/ab_listing.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/dialects/omron/omron_listing.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/dialects/omron/omron_listing.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/dialects/pccc/pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/dialects/pccc/pccc.c"
                     PARENT_SCOPE

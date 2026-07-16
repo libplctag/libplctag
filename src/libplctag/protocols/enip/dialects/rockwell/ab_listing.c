@@ -50,6 +50,7 @@
 #include <stdint.h>
 
 #include "platform.h"
+#include "utils/bytes.h"
 #include "utils/debug.h"
 #include <libplctag/protocols/enip/server/device.h>
 #include <libplctag/protocols/enip/server/device_sim.h>
@@ -58,9 +59,6 @@
 
 /* CIP service code for GetInstanceAttributeList */
 #define CIP_SRV_GET_INSTANCE_ATTR_LIST ((uint8_t)0x55)
-
-/* Size of one fixed-width tag entry before the variable-length name */
-#define TAG_ENTRY_FIXED_SIZE ((uint32_t)22)
 
 /* CIP service codes for class 0x6C (Template object), ROCKWELL-SPECIFIC-DESIGN.md §5.2 */
 #define CIP_SRV_GET_ATTR_LIST ((uint8_t)0x03)   /* template attributes: desc size, instance size, member count, handle */
@@ -129,26 +127,31 @@ extern int32_t ab_listing_register(device_sim_t *sim, device_t *dev) {
  */
 static void parse_start_instance(const uint8_t *path, uint32_t path_len,
                                  uint32_t *inst_out) {
-    uint32_t off = 0;
-
+    Bytes rest = bytes_from_buf(path, path_len);
     *inst_out = 0;
 
-    while(off < path_len) {
-        uint8_t seg = path[off++];
+    while(rest.len > 0) {
+        uint8_t seg = 0;
+        Bytes next = bytes_unpack(rest, BYTES_LE, &seg);
+        if(bytes_is_null(next)) { return; }
+        rest = next;
 
         if(seg == 0x20) {          /* 8-bit class segment */
-            if(off < path_len) { off++; }
-        } else if(seg == 0x21) {   /* 16-bit class segment */
-            /* pad byte + 2 data bytes */
-            if(off + 2 < path_len) { off += 3; }
+            uint8_t class_id = 0;
+            next = bytes_unpack(rest, BYTES_LE, &class_id);
+            if(bytes_is_null(next)) { return; }
+            rest = next;
+        } else if(seg == 0x21) {   /* 16-bit class segment: pad byte + 2 data bytes */
+            next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(3));
+            if(bytes_is_null(next)) { return; }
+            rest = next;
         } else if(seg == 0x24) {   /* 8-bit instance segment */
-            if(off < path_len) { *inst_out = path[off]; }
+            uint8_t inst8 = 0;
+            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, &inst8))) { *inst_out = inst8; }
             return;
-        } else if(seg == 0x25) {   /* 16-bit instance segment */
-            if(off + 2 < path_len) {
-                off++;  /* reserved pad */
-                *inst_out = (uint32_t)path[off] | ((uint32_t)path[off + 1] << 8);
-            }
+        } else if(seg == 0x25) {   /* 16-bit instance segment: reserved pad + u16 */
+            uint16_t inst16 = 0;
+            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1), &inst16))) { *inst_out = inst16; }
             return;
         } else {
             return;
@@ -203,7 +206,7 @@ static int32_t handle_symbol_list(device_sim_t *sim, uint8_t service, const uint
 
     uint32_t instance_id = 0;
     int32_t rc = PLCTAG_STATUS_OK;
-    *resp_len = 0;
+    Bytes body = bytes_from_buf(resp, resp_cap);
 
     /* The whole walk runs under dev->tags_mutex: safe even while a
      * role=server tag is concurrently appended/removed on another
@@ -222,57 +225,24 @@ static int32_t handle_symbol_list(device_sim_t *sim, uint8_t service, const uint
                 continue;
             }
 
-            uint32_t name_len = (uint32_t)str_length(tag->name);
-            uint32_t entry_size = TAG_ENTRY_FIXED_SIZE + name_len;
-
-            /* No room for this entry: truncate and signal more data. */
-            if(*resp_len + entry_size > resp_cap) {
-                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "ab_listing: truncating at instance %u; cap=%u used=%u.",
-                       (unsigned)instance_id, (unsigned)resp_cap, (unsigned)*resp_len);
-                rc = DEVICE_SIM_MORE_DATA;
-                break;
-            }
-
-            uint8_t *p = resp + *resp_len;
+            uint16_t name_len = (uint16_t)str_length(tag->name);
             uint16_t sym_type = compute_symbol_type(tag);
             uint16_t elem_len = (uint16_t)tag->elem_size;
             uint32_t dim0 = (tag->num_dimensions >= 1) ? (uint32_t)tag->dimensions[0] : 0u;
             uint32_t dim1 = (tag->num_dimensions >= 2) ? (uint32_t)tag->dimensions[1] : 0u;
             uint32_t dim2 = (tag->num_dimensions >= 3) ? (uint32_t)tag->dimensions[2] : 0u;
 
-            /* Pack little-endian: instance_id(u32) */
-            p[0] = (uint8_t)(instance_id & 0xFFu);
-            p[1] = (uint8_t)((instance_id >> 8) & 0xFFu);
-            p[2] = (uint8_t)((instance_id >> 16) & 0xFFu);
-            p[3] = (uint8_t)((instance_id >> 24) & 0xFFu);
-            /* sym_type(u16) */
-            p[4] = (uint8_t)(sym_type & 0xFFu);
-            p[5] = (uint8_t)((sym_type >> 8) & 0xFFu);
-            /* elem_len(u16) */
-            p[6] = (uint8_t)(elem_len & 0xFFu);
-            p[7] = (uint8_t)((elem_len >> 8) & 0xFFu);
-            /* dim[0](u32) */
-            p[8] = (uint8_t)(dim0 & 0xFFu);
-            p[9] = (uint8_t)((dim0 >> 8) & 0xFFu);
-            p[10] = (uint8_t)((dim0 >> 16) & 0xFFu);
-            p[11] = (uint8_t)((dim0 >> 24) & 0xFFu);
-            /* dim[1](u32) */
-            p[12] = (uint8_t)(dim1 & 0xFFu);
-            p[13] = (uint8_t)((dim1 >> 8) & 0xFFu);
-            p[14] = (uint8_t)((dim1 >> 16) & 0xFFu);
-            p[15] = (uint8_t)((dim1 >> 24) & 0xFFu);
-            /* dim[2](u32) */
-            p[16] = (uint8_t)(dim2 & 0xFFu);
-            p[17] = (uint8_t)((dim2 >> 8) & 0xFFu);
-            p[18] = (uint8_t)((dim2 >> 16) & 0xFFu);
-            p[19] = (uint8_t)((dim2 >> 24) & 0xFFu);
-            /* name_len(u16) */
-            p[20] = (uint8_t)(name_len & 0xFFu);
-            p[21] = (uint8_t)((name_len >> 8) & 0xFFu);
-            /* name bytes (not null-terminated) */
-            mem_copy(p + 22, tag->name, (int)name_len);
+            Bytes next = bytes_pack_into(body, BYTES_LE, instance_id, sym_type, elem_len, dim0, dim1, dim2, name_len,
+                                         bytes_from_buf((const uint8_t *)tag->name, name_len));
 
-            *resp_len += entry_size;
+            /* No room for this entry: truncate and signal more data. */
+            if(bytes_is_null(next)) {
+                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0, "ab_listing: truncating at instance %u; cap=%u used=%zu.",
+                       (unsigned)instance_id, (unsigned)resp_cap, (size_t)(resp_cap - body.len));
+                rc = DEVICE_SIM_MORE_DATA;
+                break;
+            }
+            body = next;
 
             pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_SPEW, 0, "ab_listing: packed instance %u '%s' sym_type=0x%04x.", (unsigned)instance_id,
                    tag->name, (unsigned)sym_type);
@@ -280,6 +250,8 @@ static int32_t handle_symbol_list(device_sim_t *sim, uint8_t service, const uint
             tag = tag->next_tag;
         }
     }
+
+    *resp_len = (uint32_t)(resp_cap - body.len);
 
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
@@ -310,28 +282,13 @@ static int32_t handle_template_attrs(udt_template_t *tmpl, uint8_t *resp, uint32
      * rounding so the recovered byte count is always >= definition_len. */
     uint32_t desc_words = (tmpl->definition_len + 23u + 3u) / 4u;
 
-    uint8_t *p = resp;
-    p[0] = 4; p[1] = 0; /* attribute count */
-
-    p[2] = 0x04; p[3] = 0x00; p[4] = 0x00; p[5] = 0x00; /* attr 4, status 0 */
-    p[6] = (uint8_t)(desc_words & 0xFFu);
-    p[7] = (uint8_t)((desc_words >> 8) & 0xFFu);
-    p[8] = (uint8_t)((desc_words >> 16) & 0xFFu);
-    p[9] = (uint8_t)((desc_words >> 24) & 0xFFu);
-
-    p[10] = 0x05; p[11] = 0x00; p[12] = 0x00; p[13] = 0x00; /* attr 5, status 0 */
-    p[14] = (uint8_t)(tmpl->instance_size & 0xFFu);
-    p[15] = (uint8_t)((tmpl->instance_size >> 8) & 0xFFu);
-    p[16] = (uint8_t)((tmpl->instance_size >> 16) & 0xFFu);
-    p[17] = (uint8_t)((tmpl->instance_size >> 24) & 0xFFu);
-
-    p[18] = 0x02; p[19] = 0x00; p[20] = 0x00; p[21] = 0x00; /* attr 2, status 0 */
-    p[22] = (uint8_t)(tmpl->num_members & 0xFFu);
-    p[23] = (uint8_t)((tmpl->num_members >> 8) & 0xFFu);
-
-    p[24] = 0x01; p[25] = 0x00; p[26] = 0x00; p[27] = 0x00; /* attr 1, status 0 */
-    p[28] = (uint8_t)(tmpl->handle & 0xFFu);
-    p[29] = (uint8_t)((tmpl->handle >> 8) & 0xFFu);
+    Bytes rest = bytes_pack_into(bytes_from_buf(resp, resp_cap), BYTES_LE,
+                                 (uint16_t)4 /* attribute count */,
+                                 (uint16_t)0x04, (uint16_t)0 /* attr 4, status 0 */, desc_words,
+                                 (uint16_t)0x05, (uint16_t)0 /* attr 5, status 0 */, (uint32_t)tmpl->instance_size,
+                                 (uint16_t)0x02, (uint16_t)0 /* attr 2, status 0 */, tmpl->num_members,
+                                 (uint16_t)0x01, (uint16_t)0 /* attr 1, status 0 */, tmpl->handle);
+    if(bytes_is_null(rest)) { return PLCTAG_ERR_TOO_LARGE; }
 
     *resp_len = TEMPLATE_ATTR_REPLY_SIZE;
     return PLCTAG_STATUS_OK;
@@ -348,10 +305,11 @@ static int32_t handle_template_attrs(udt_template_t *tmpl, uint8_t *resp, uint32
  */
 static int32_t handle_template_read(udt_template_t *tmpl, const uint8_t *req, uint32_t req_len, uint8_t *resp,
                                     uint32_t resp_cap, uint32_t *resp_len) {
-    if(req_len < 6) { return PLCTAG_ERR_TOO_SMALL; }
-
-    uint32_t offset = (uint32_t)req[0] | ((uint32_t)req[1] << 8) | ((uint32_t)req[2] << 16) | ((uint32_t)req[3] << 24);
-    uint16_t byte_count = (uint16_t)req[4] | (uint16_t)((uint16_t)req[5] << 8);
+    uint32_t offset = 0;
+    uint16_t byte_count = 0;
+    if(bytes_is_null(bytes_unpack(bytes_from_buf(req, req_len), BYTES_LE, &offset, &byte_count))) {
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
     if(offset > tmpl->definition_len) { return PLCTAG_ERR_OUT_OF_BOUNDS; }
 
@@ -359,7 +317,8 @@ static int32_t handle_template_read(udt_template_t *tmpl, const uint8_t *req, ui
     uint32_t n = (avail < (uint32_t)byte_count) ? avail : (uint32_t)byte_count;
     if(n > resp_cap) { n = resp_cap; }
 
-    mem_copy(resp, tmpl->definition + offset, (int)n);
+    Bytes chunk = bytes_from_buf(tmpl->definition + offset, n);
+    if(bytes_is_null(bytes_pack_into(bytes_from_buf(resp, resp_cap), BYTES_LE, chunk))) { return PLCTAG_ERR_TOO_SMALL; }
     *resp_len = n;
 
     return (offset + n < tmpl->definition_len) ? DEVICE_SIM_MORE_DATA : PLCTAG_STATUS_OK;
