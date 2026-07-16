@@ -232,7 +232,7 @@ extern Bytes enip_cip_omron_list_tags(Arena *a, uint32_t start_instance, uint32_
  * definition; reissue identically while the reply status is CIP_STATUS_FRAG
  * (ordinary CIP fragmentation, not an offset-addressed continuation).
  */
-extern Bytes enip_cip_omron_udt_get_all(Arena *a, uint16_t type_instance_id);
+extern Bytes enip_cip_omron_udt_get_all(Arena *a, uint32_t type_instance_id);
 
 /*
  * Split a CIP reply into its header fields and trailing data.

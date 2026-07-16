@@ -378,7 +378,7 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
 }
 
 enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
-    const char *gateway = attr_get_str(attribs, "gateway", NULL);
+    const char *gateway_raw = attr_get_str(attribs, "gateway", NULL);
     /* "path" is optional: a device reachable directly over Ethernet (no
      * backplane/DH+ bridging hop -- the common case for a MicroLogix/SLC/PLC-5
      * with its own Ethernet port) needs no CIP route. enip_cip_encode_route
@@ -389,12 +389,29 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
      * an existing connection at this (gateway,path,port) keeps whatever its
      * first tag set, same as path/gateway themselves. */
     const char *model = attr_get_str(attribs, "model", NULL);
-    int port = attr_get_int(attribs, "port", ENIP_DEFAULT_PORT);
 
     if(is_new_out) { *is_new_out = false; }
 
-    if(!gateway || str_length(gateway) == 0) {
+    if(!gateway_raw || str_length(gateway_raw) == 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Missing required \"gateway\" attribute.");
+        return NULL;
+    }
+
+    /* No separate "port" attribute: gateway is "host" or "host:port" (same
+     * convention as protocols/ab/session.c's server_port split), the only
+     * place a non-default port is ever specified. */
+    char **host_port = str_split(gateway_raw, ":");
+    if(!host_port || !host_port[0]) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Malformed \"gateway\" attribute \"%s\".", gateway_raw);
+        if(host_port) { mem_free(host_port); }
+        return NULL;
+    }
+
+    const char *gateway = host_port[0];
+    int port = ENIP_DEFAULT_PORT;
+    if(host_port[1] && str_to_int(host_port[1], &port) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to extract port number from gateway string \"%s\".", gateway_raw);
+        mem_free(host_port);
         return NULL;
     }
 
@@ -416,6 +433,8 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
             if(result && is_new_out) { *is_new_out = true; }
         }
     }
+
+    mem_free(host_port);
 
     return result;
 }
@@ -2075,10 +2094,12 @@ static const enip_dialect_t *listing_dialect_for(enip_connection_t *c) {
 
 /* Allocate a CIP-payload-budget dest from c->arena and ask the dialect to
  * encode t's current request into it (the dialect owns no buffer; the caller
- * does). `budget` bounds one sub-request: the full CIP payload for a single op,
- * or the space the 0x0A packer has left. Returns the used slice or null.
- * ponytail: batch passes the full budget per sub (count-limited by pick_batch);
- * a size-greedy 0x0A packer can pass the true remaining space later. */
+ * does). Only used by build_tag_request's single-op path (batch_count < 2),
+ * so `budget` is always the full per-connection CIP payload -- there is no
+ * other sub-request to share it with. build_batch_request (below) does its
+ * own inline dialect->build() per sub-request with the true remaining space
+ * (budget - cursor), so the 0x0A packer already size-greedy-budgets each
+ * sub; this helper never needs to. Returns the used slice or null. */
 static Bytes dialect_build(enip_connection_t *c, enip_tag_p t, size_t budget) {
     /* PCCC is selected per-tag (see enip_dialect.h); everything else uses the
      * connection's identity-selected dialect. */
@@ -2280,19 +2301,58 @@ static Bytes enip_omron_build_listing(Arena *a, enip_tag_p t) {
     switch(t->op) {
         case ENIP_OP_LIST: return enip_cip_omron_list_tags(a, t->list_next_id, OMRON_LIST_PAGE, OMRON_LIST_KIND_USER);
 
-        case ENIP_OP_UDT_META: return enip_cip_omron_udt_get_all(a, (uint16_t)t->list_next_id);
+        case ENIP_OP_UDT_META: return enip_cip_omron_udt_get_all(a, t->list_next_id);
 
         default: return bytes_null();
     }
 }
 
+/* Extract next_instance_id/nesting_variable_type_instance_id from one
+ * complete (non-fragmented) §5.3 Variable Type Object GetAttributeAll reply,
+ * so enip_omron_apply_listing can walk the member-sibling chain and recurse
+ * into nested UDTs. Parses array_dimension generically and skips past its
+ * number_of_elements array rather than assuming it is 0, since this runs
+ * against real OMRON firmware, not just device_sim (which does always send
+ * 0 today). Returns false if data is too short to hold either field. */
+static bool omron_udt_reply_links(Bytes data, uint32_t *next_instance_id_out, uint32_t *nesting_instance_id_out) {
+    uint8_t array_dimension = 0;
+    Bytes rest = bytes_unpack(data, BYTES_LE, BYTES_SKIP(7) /* size_in_memory, reserved, cip_data_type(_array) */,
+                              &array_dimension);
+    if(bytes_is_null(rest)) { return false; }
+
+    rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP((size_t)array_dimension * 4u));
+    if(bytes_is_null(rest)) { return false; }
+
+    uint8_t name_len = 0;
+    rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(2) /* num_members */, BYTES_SKIP(4) /* reserved */,
+                        BYTES_SKIP(2) /* crc */, &name_len);
+    if(bytes_is_null(rest)) { return false; }
+
+    bool pad = (name_len % 2u) == 0u;
+    rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP((size_t)name_len + (pad ? 1u : 0u)));
+    if(bytes_is_null(rest)) { return false; }
+
+    return !bytes_is_null(bytes_unpack(rest, BYTES_LE, next_instance_id_out, nesting_instance_id_out));
+}
+
+/* Push id onto t's pending class-0x6C instance queue (dropped silently if
+ * full or 0 -- 0 means "no more", not a real instance id). */
+static void omron_udt_walk_push(enip_tag_p t, uint32_t id) {
+    if(id == 0 || t->udt_walk_pending_count >= (sizeof(t->udt_walk_pending) / sizeof(t->udt_walk_pending[0]))) { return; }
+    t->udt_walk_pending[t->udt_walk_pending_count++] = id;
+}
+
 /* OMRON: accumulate one @tags/@udt reply into t->data verbatim (no synthetic
  * header -- @tags/@udt have no CBOR schema yet on any dialect, see
  * enip_tag.c's ENIP_TAG_KIND_LISTING/UDT doc comment, so raw bytes are all a
- * caller can get today). @tags advances list_next_id by the reply's own
- * instance_count and continues while its status byte is nonzero (§5.1); @udt
- * continues on ordinary CIP_STATUS_FRAG. Caller holds t->api_mutex.
- * enip_dialect_t.apply_listing for enip_omron_dialect. */
+ * caller can get today; every reply visited by the @udt member-sibling walk
+ * below is appended in visitation order). @tags advances list_next_id by the
+ * reply's own instance_count and continues while its status byte is nonzero
+ * (§5.1). @udt continues on ordinary CIP_STATUS_FRAG while one instance's
+ * reply is still being assembled; once complete, next_instance_id/
+ * nesting_variable_type_instance_id (§5.3) are queued and the walk continues
+ * until the pending queue (udt_walk_pending) empties. Caller holds
+ * t->api_mutex. enip_dialect_t.apply_listing for enip_omron_dialect. */
 static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
     *more = false;
 
@@ -2328,7 +2388,21 @@ static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
             t->size = (int32_t)need;
         }
 
-        if(cip_status == CIP_STATUS_FRAG) { *more = true; }
+        if(cip_status == CIP_STATUS_FRAG) {
+            *more = true; /* this instance's reply is still being assembled */
+            return PLCTAG_STATUS_OK;
+        }
+
+        uint32_t next_id = 0, nesting_id = 0;
+        if(omron_udt_reply_links(data, &next_id, &nesting_id)) {
+            omron_udt_walk_push(t, nesting_id); /* recurse into a nested UDT member first (order is arbitrary) */
+            omron_udt_walk_push(t, next_id);    /* then this template's next sibling member */
+        }
+
+        if(t->udt_walk_pending_count > 0) {
+            t->list_next_id = t->udt_walk_pending[--t->udt_walk_pending_count];
+            *more = true;
+        }
 
         return PLCTAG_STATUS_OK;
     }
@@ -2553,11 +2627,13 @@ static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status) {
 
         if(t->op == ENIP_OP_OPEN_PROBE || t->op == ENIP_OP_OPEN_PROBE_FRAG || t->op == ENIP_OP_OPEN_BULK) {
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_CREATED, status);
-        } else if(t->op == ENIP_OP_READ || t->op == ENIP_OP_LIST || t->op == ENIP_OP_UDT_FIELDS) {
+        } else if(t->op == ENIP_OP_READ || t->op == ENIP_OP_LIST || t->op == ENIP_OP_UDT_FIELDS || t->op == ENIP_OP_UDT_META) {
             /* Clear read_in_flight here (the global tickler used to do it via the
              * read_complete handshake, but ENIP tags skip that tickler). Without
              * this, generic_tickler's !read_in_flight guard blocks every later
-             * auto-sync read. (@tags/@udt complete on their terminal op.) */
+             * auto-sync read. (@tags/@udt complete on their terminal op --
+             * Rockwell's is UDT_FIELDS, OMRON's stays UDT_META the whole walk,
+             * §5.3, since it has no separate metadata/field-definition split.) */
             t->read_complete = 1;
             t->read_in_flight = 0;
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_READ_COMPLETED, status);

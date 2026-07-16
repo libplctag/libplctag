@@ -62,7 +62,7 @@ struct device_sim_s {
  * Internal helpers
  * ============================================================================ */
 
-static size_t elem_size_for_type(tag_type_t t) {
+extern size_t device_elem_size_for_type(tag_type_t t) {
     switch(t) {
         case TAG_CIP_TYPE_BOOL:
         case TAG_CIP_TYPE_SINT:    return 1;
@@ -351,7 +351,7 @@ extern int32_t device_sim_add_tag(device_sim_t *sim,
     if(type & 0x8000u) {
         /* Structure-typed tag (DEVICE_SIM_STRUCTURE_TYPE): element size comes
          * from the referenced UDT template's registered instance size, not
-         * elem_size_for_type (which only knows atomic CIP/PCCC types). */
+         * device_elem_size_for_type (which only knows atomic CIP/PCCC types). */
         udt_template_t *tmpl = device_udt_find(&sim->dev, (uint16_t)(type & 0x0FFFu));
         if(!tmpl) {
             pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
@@ -360,7 +360,7 @@ extern int32_t device_sim_add_tag(device_sim_t *sim,
         }
         elem_size = tmpl->instance_size;
     } else {
-        elem_size = elem_size_for_type(type);
+        elem_size = device_elem_size_for_type(type);
     }
     if(elem_size == 0) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
@@ -396,7 +396,7 @@ extern int32_t device_sim_add_pccc_tag(device_sim_t *sim,
                                         void *user_data) {
     if(!sim || !name || elem_count == 0) { return PLCTAG_ERR_BAD_PARAM; }
 
-    size_t elem_size = elem_size_for_type(type);
+    size_t elem_size = device_elem_size_for_type(type);
     if(elem_size == 0) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0,
                "device_sim_add_pccc_tag: unknown type 0x%04x for tag '%s'.", (unsigned)type, name);
@@ -467,6 +467,22 @@ static uint8_t *encode_udt_definition(const char *struct_name, const udt_member_
     return def;
 }
 
+/* CRC-16/ARC (poly 0xA001, init 0) over the template definition bytes.
+ * Rockwell's own structure-handle algorithm is undocumented and not this;
+ * nothing in this codebase parses the handle back (see below), so a real,
+ * standard CRC-16 is used to give a stable, collision-resistant per-template
+ * value rather than a hash pretending to be Rockwell's private one. */
+static uint16_t crc16_arc(const uint8_t *data, size_t len) {
+    uint16_t crc = 0;
+    for(size_t i = 0; i < len; i++) {
+        crc = (uint16_t)(crc ^ data[i]);
+        for(int bit = 0; bit < 8; bit++) {
+            crc = (uint16_t)((crc & 1) ? (crc >> 1) ^ 0xA001u : (crc >> 1));
+        }
+    }
+    return crc;
+}
+
 extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_name, uint32_t instance_size,
                                        const udt_member_t *members, uint32_t num_members, uint16_t *template_id_out) {
     if(!sim || !struct_name || instance_size == 0) { return PLCTAG_ERR_BAD_PARAM; }
@@ -482,10 +498,7 @@ extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_nam
     mem_set(tmpl, 0, (int)sizeof(udt_template_t));
 
     tmpl->template_id = ++sim->dev.next_template_id;
-    /* ponytail: not a real CRC-16 -- Rockwell's structure-handle CRC algorithm
-     * isn't documented and nothing in this codebase parses this value back;
-     * it only needs to be a stable per-template number a client can echo. */
-    tmpl->handle = (uint16_t)(tmpl->template_id * 2654435761u);
+    tmpl->handle = crc16_arc(def, def_len);
     tmpl->instance_size = instance_size;
     tmpl->num_members = (uint16_t)num_members;
     tmpl->definition = def;

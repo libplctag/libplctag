@@ -363,8 +363,33 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     }
     size_t elem_count = (size_t)dims[0] * (size_t)dims[1] * (size_t)dims[2];
 
-    const char *bind_addr = attr_get_str(attribs, "gateway", NULL);
-    uint16_t port = (uint16_t)attr_get_int(attribs, "port", 44818);
+    /* No separate "port" attribute: gateway is "addr" or "addr:port" (same
+     * convention as the client's enip_session_create), the only place a
+     * non-default port is ever specified. */
+    const char *gateway_raw = attr_get_str(attribs, "gateway", NULL);
+    const char *bind_addr = NULL;
+    uint16_t port = 44818;
+    char **addr_port = NULL;
+    if(gateway_raw && str_length(gateway_raw) > 0) {
+        addr_port = str_split(gateway_raw, ":");
+        if(!addr_port || !addr_port[0]) {
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: malformed \"gateway\" attribute \"%s\".",
+                   gateway_raw);
+            if(addr_port) { mem_free(addr_port); }
+            return PLC_TAG_P_NULL;
+        }
+        bind_addr = addr_port[0];
+        if(addr_port[1]) {
+            int port_val = 0;
+            if(str_to_int(addr_port[1], &port_val) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+                       "eip_server_tag_create: unable to extract port number from gateway string \"%s\".", gateway_raw);
+                mem_free(addr_port);
+                return PLC_TAG_P_NULL;
+            }
+            port = (uint16_t)port_val;
+        }
+    }
     enip_plc_type_t plc_type = parse_plc_type(attr_get_str(attribs, "plc", NULL));
     const char *model = attr_get_str(attribs, "model", NULL);
 
@@ -374,6 +399,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     eip_server_tag_p tag = (eip_server_tag_p)rc_alloc((int)sizeof(struct eip_server_tag_t), eip_server_tag_destroy);
     if(!tag) {
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: rc_alloc failed.");
+        if(addr_port) { mem_free(addr_port); }
         return PLC_TAG_P_NULL;
     }
 
@@ -386,6 +412,7 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: plc_tag_generic_init_tag failed: %s.",
                plc_tag_decode_error(rc));
         rc_dec(tag);
+        if(addr_port) { mem_free(addr_port); }
         return PLC_TAG_P_NULL;
     }
 
@@ -397,11 +424,13 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: failed to allocate %zu bytes of tag data.",
                total_size);
         rc_dec(tag);
+        if(addr_port) { mem_free(addr_port); }
         return PLC_TAG_P_NULL;
     }
     ptag->size = (int)total_size;
 
     tag->sim = endpoint_find_or_create(bind_addr, port, plc_type, model);
+    if(addr_port) { mem_free(addr_port); }
     if(!tag->sim) {
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: endpoint_find_or_create failed.");
         rc_dec(tag);

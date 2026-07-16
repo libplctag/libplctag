@@ -292,8 +292,8 @@ extern int32_t args_parse(int argc, char **argv, sim_args_t *args_out, int32_t *
  * attr-string construction
  *
  * attr_create_from_str rejects "key=" with an empty value, so optional
- * options (bind_addr, model, delay) are appended only when set, via
- * append_attr rather than baked into one snprintf template.
+ * options (model, delay) are appended only when set, via append_attr rather
+ * than baked into one snprintf template.
  * ============================================================================ */
 
 static bool append_attr(char *out, size_t out_cap, const char *fmt, ...) {
@@ -306,8 +306,11 @@ static bool append_attr(char *out, size_t out_cap, const char *fmt, ...) {
 }
 
 static bool append_shared_attrs(const sim_args_t *args, char *out, size_t out_cap) {
-    if(!append_attr(out, out_cap, "&port=%u", (unsigned)args->port)) { return false; }
-    if(args->bind_addr && *args->bind_addr && !append_attr(out, out_cap, "&gateway=%s", args->bind_addr)) { return false; }
+    /* No separate "port" attribute in the ENIP code: gateway is "addr:port"
+     * (see eip_server_tag.c). --bind= with no value means "all interfaces",
+     * i.e. gateway="0.0.0.0". */
+    const char *bind_addr = (args->bind_addr && *args->bind_addr) ? args->bind_addr : "0.0.0.0";
+    if(!append_attr(out, out_cap, "&gateway=%s:%u", bind_addr, (unsigned)args->port)) { return false; }
     if(args->plc_type && *args->plc_type && !append_attr(out, out_cap, "&plc=%s", args->plc_type)) { return false; }
     if(args->model && *args->model && !append_attr(out, out_cap, "&model=%s", args->model)) { return false; }
     if(args->delay_ms != 0 && !append_attr(out, out_cap, "&sim_delay_ms=%d", (int)args->delay_ms)) { return false; }

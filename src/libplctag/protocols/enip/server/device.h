@@ -257,3 +257,8 @@ extern tag_def_t *device_tag_alloc(const char *name, tag_type_t type, size_t ele
  * Read-only after device_sim_start(), so no lock needed -- see
  * device_t.udt_templates above. Used by dialects/rockwell/ab_listing.c. */
 extern udt_template_t *device_udt_find(device_t *dev, uint16_t template_id);
+
+/* Byte size of one element of an atomic CIP/PCCC tag_type_t (0 if t is a
+ * structure type or unknown). Used by dialects/omron/omron_listing.c to
+ * report a UDT member's size_in_memory without duplicating the type table. */
+extern size_t device_elem_size_for_type(tag_type_t t);

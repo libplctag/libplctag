@@ -416,10 +416,19 @@ Bytes enip_cip_omron_list_tags(Arena *a, uint32_t start_instance, uint32_t count
     return bytes_concat(a, header, path, body);
 }
 
-Bytes enip_cip_omron_udt_get_all(Arena *a, uint16_t type_instance_id) {
+Bytes enip_cip_omron_udt_get_all(Arena *a, uint32_t type_instance_id) {
     if(!a) { return bytes_null(); }
 
-    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, type_instance_id);
+    /* Real template ids stay in the existing 16-bit (0x25) form (unchanged
+     * wire bytes for every pre-existing top-level request); the synthetic
+     * member ids omron_listing.c hands back via next_instance_id are always
+     * > 0xFFFF (see its member_id_encode) and need the 32-bit (0x26) form. */
+    Bytes path;
+    if(type_instance_id <= 0xFFFFu) {
+        path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, (uint16_t)type_instance_id);
+    } else {
+        path = bytes_pack(a, BYTES_LE, (uint8_t)0x20, (uint8_t)0x6C, (uint8_t)0x26, (uint8_t)0x00, type_instance_id);
+    }
     if(bytes_is_null(path)) { return bytes_null(); }
 
     Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_ATTR_ALL, (uint8_t)(path.len / 2));

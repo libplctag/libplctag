@@ -96,9 +96,22 @@ struct enip_tag_t {
             uint32_t frag_offset;
             uint32_t frag_write_chunk;
             /* @tags/@udt only (ENIP_TAG_KIND_LISTING/UDT): list_next_id is the
-             * next symbol instance id for @tags, or the fixed template id for
-             * @udt; list_total is the @udt field-definition byte target. */
+             * next symbol instance id for @tags; for @udt it is the instance
+             * id of the class-0x6C reply currently being fetched (the
+             * template id for the first request, then whatever
+             * next_instance_id/nesting_variable_type_instance_id supplies --
+             * OMRON-SPECIFIC-DESIGN.md §5.3). list_total is the Rockwell @udt
+             * field-definition byte target. */
             uint32_t list_next_id, list_total;
+            /* OMRON @udt only: pending class-0x6C instance ids still to fetch
+             * after the current one (sibling members queued by
+             * next_instance_id, nested UDTs queued by
+             * nesting_variable_type_instance_id -- order doesn't matter, the
+             * client only accumulates raw reply bytes today, see
+             * enip_omron_apply_listing). Bounded: ids beyond this are
+             * dropped, not grown -- generous for any realistic UDT. */
+            uint32_t udt_walk_pending[32];
+            uint8_t udt_walk_pending_count;
             /* PCCC only (ENIP_TAG_KIND_PCCC): the parsed logical address (N7:0,
              * F8:0, ...) and which encoder/function family to use. Filled at
              * create; the probe is skipped (elem_size comes from the address). */
