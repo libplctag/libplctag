@@ -37,8 +37,9 @@
  * Listens on UDP 44818 for List Identity (0x0063), List Services (0x0004),
  * and List Interfaces (0x0064) broadcasts/unicasts and replies appropriately.
  *
- * TCP port 44818 is already bound by server_listener; TCP and UDP share the
- * port number space independently, so SO_REUSEADDR lets both bind to 44818.
+ * TCP port 44818 is already bound by the EIP listener (eip_server.c, over
+ * net/tcp_server.c); TCP and UDP share the port number space
+ * independently, so SO_REUSEADDR lets both bind to 44818.
  */
 
 #include <stddef.h>

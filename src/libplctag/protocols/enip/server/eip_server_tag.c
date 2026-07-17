@@ -33,6 +33,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
@@ -158,6 +159,152 @@ static enip_plc_type_t parse_plc_type(const char *s) {
     if(str_cmp_i(s, "Micrologix") == 0) { return ENIP_PLC_MLGX; }
     pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_WARN, 0, "eip_server_tag_create: unknown plc=\"%s\", defaulting to ControlLogix.", s);
     return ENIP_PLC_LGX;
+}
+
+/* ============================================================================
+ * udt= / elem_type=@<name> — UDT template registration and instantiation via
+ * role=server attribute strings (ENIP-UPDATES-PLAN.md item 2). The internal
+ * C API (device_sim_add_udt_type/udt_member_t) stays unexported; FFI callers
+ * reach it only through these two attributes.
+ * ============================================================================ */
+
+/* Split "udt" attribute value "<name>:<member>,<member>,..." on the first
+ * colon only (member specs have their own colons). *name_out is a fresh
+ * mem_alloc'd copy the caller frees; *members_out points into udt_attr
+ * itself (no member list is a bare "<name>", valid for a zero-member
+ * template). Returns false only on allocation failure. */
+static bool split_udt_attr(const char *udt_attr, char **name_out, const char **members_out) {
+    const char *colon = strchr(udt_attr, ':');
+    if(!colon) {
+        *name_out = str_dup(udt_attr);
+        *members_out = NULL;
+        return *name_out != NULL;
+    }
+
+    int name_len = (int)(colon - udt_attr);
+    char *name = (char *)mem_alloc(name_len + 1);
+    if(!name) { return false; }
+    mem_copy(name, (void *)(uintptr_t)udt_attr, name_len);
+    name[name_len] = '\0';
+
+    *name_out = name;
+    *members_out = colon + 1;
+    return true;
+}
+
+/* Parse one "mname:mtype[:count]" member spec into *out, resolving mtype
+ * against CIP_TYPES or -- for "@<udtname>" -- an already-registered template
+ * on this endpoint (nesting; the referenced UDT must have been declared by an
+ * earlier tag on the same endpoint). Assigns out->offset from *offset_io
+ * using natural alignment (member size, capped at 4 bytes -- BOOL members are
+ * NOT bit-packed the way a real Logix UDT would; ponytail: full-byte BOOL is
+ * the simplification, bit-packing is the upgrade path if a test ever needs
+ * wire-exact BOOL member offsets), then advances *offset_io past it. Returns
+ * false on any parse/lookup failure (out->name may be partially set; caller
+ * discards on failure, so no cleanup here beyond the split array). */
+static bool parse_udt_member(device_t *dev, const char *member_str, udt_member_t *out, uint32_t *offset_io,
+                             uint32_t *max_align_io) {
+    char **parts = str_split(member_str, ":");
+    if(!parts || !parts[0] || !parts[1]) {
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+               "eip_server_tag_create: malformed udt= member \"%s\" (want name:type[:count]).", member_str);
+        if(parts) { mem_free(parts); }
+        return false;
+    }
+
+    uint32_t count = 1;
+    if(parts[2]) {
+        int count_val = 0;
+        if(str_to_int(parts[2], &count_val) != PLCTAG_STATUS_OK || count_val < 1) {
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+                   "eip_server_tag_create: udt= member \"%s\" has a bad count.", member_str);
+            mem_free(parts);
+            return false;
+        }
+        count = (uint32_t)count_val;
+    }
+
+    tag_type_t mtype = 0;
+    size_t melem_size = 0;
+    if(parts[1][0] == '@') {
+        udt_template_t *nested = device_udt_find_by_name(dev, parts[1] + 1);
+        if(!nested) {
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+                   "eip_server_tag_create: udt= member \"%s\" references unknown nested UDT \"%s\".", member_str, parts[1] + 1);
+            mem_free(parts);
+            return false;
+        }
+        mtype = DEVICE_SIM_STRUCTURE_TYPE(nested->template_id);
+        melem_size = nested->instance_size;
+    } else if(!lookup_cip_type(parts[1], &mtype, &melem_size)) {
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+               "eip_server_tag_create: udt= member \"%s\" has an unknown type.", member_str);
+        mem_free(parts);
+        return false;
+    }
+
+    uint32_t align = (uint32_t)((melem_size < 4) ? melem_size : 4);
+    if(align == 0) { align = 1; }
+    uint32_t offset = (*offset_io + (align - 1)) / align * align;
+
+    out->name = str_dup(parts[0]);
+    out->type = mtype;
+    out->array_count = count;
+    out->offset = offset;
+
+    *offset_io = offset + (uint32_t)melem_size * count;
+    if(align > *max_align_io) { *max_align_io = align; }
+
+    mem_free(parts);
+    return out->name != NULL;
+}
+
+/* Find an existing template named struct_name on dev, or parse
+ * member_list_str ("m1:t1[:c1],m2:t2[:c2],...", possibly NULL/empty for a
+ * zero-member template) and register a new one. Returns NULL on any parse or
+ * registration failure. */
+static udt_template_t *resolve_or_register_udt(device_sim_t *sim, device_t *dev, const char *struct_name,
+                                               const char *member_list_str) {
+    udt_template_t *existing = device_udt_find_by_name(dev, struct_name);
+    if(existing) { return existing; }
+
+    char **member_toks = (member_list_str && *member_list_str) ? str_split(member_list_str, ",") : NULL;
+    uint32_t num_members = 0;
+    if(member_toks) { while(member_toks[num_members]) { num_members++; } }
+
+    udt_member_t *members = NULL;
+    if(num_members > 0) {
+        members = (udt_member_t *)mem_alloc((int)(num_members * sizeof(udt_member_t)));
+        if(!members) {
+            if(member_toks) { mem_free(member_toks); }
+            return NULL;
+        }
+        mem_set(members, 0, (int)(num_members * sizeof(udt_member_t)));
+    }
+
+    uint32_t offset = 0;
+    uint32_t max_align = 1;
+    bool ok = true;
+    for(uint32_t i = 0; i < num_members && ok; i++) {
+        ok = parse_udt_member(dev, member_toks[i], &members[i], &offset, &max_align);
+    }
+
+    udt_template_t *result = NULL;
+    if(ok) {
+        uint32_t instance_size = (offset > 0) ? (offset + (max_align - 1)) / max_align * max_align : (uint32_t)1;
+        uint16_t template_id = 0;
+        if(device_sim_add_udt_type(sim, struct_name, instance_size, members, num_members, &template_id) == PLCTAG_STATUS_OK) {
+            result = device_udt_find(dev, template_id);
+        }
+    }
+
+    for(uint32_t i = 0; i < num_members; i++) {
+        if(members[i].name) { mem_free((void *)members[i].name); }
+    }
+    if(members) { mem_free(members); }
+    if(member_toks) { mem_free(member_toks); }
+
+    return result;
 }
 
 /* ============================================================================
@@ -321,48 +468,6 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
         return PLC_TAG_P_NULL;
     }
 
-    const char *pccc_type_str = attr_get_str(attribs, "pccc_type", NULL);
-    bool is_pccc = pccc_type_str && str_length(pccc_type_str) > 0;
-
-    const char *type_str = is_pccc ? pccc_type_str : attr_get_str(attribs, "elem_type", NULL);
-    tag_type_t tag_type = 0;
-    size_t elem_size = 0;
-    bool type_ok = type_str && (is_pccc ? lookup_pccc_type(type_str, &tag_type, &elem_size)
-                                         : lookup_cip_type(type_str, &tag_type, &elem_size));
-    if(!type_ok) {
-        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
-               "eip_server_tag_create: %s is required and must be one of %s (got \"%s\").",
-               is_pccc ? "pccc_type=" : "elem_type=", is_pccc ? "B/N/L/F/R/ST" : "BOOL/SINT/INT/DINT/LINT/USINT/UINT/UDINT/ULINT/REAL/LREAL/BYTE/WORD/DWORD/LWORD/STRING",
-               type_str ? type_str : "(none)");
-        return PLC_TAG_P_NULL;
-    }
-
-    /* dim0/dim1/dim2 (CIP only) describe a multi-dimensional array for
-     * wire-level indexed addressing (common/cip.c) and @tags dimension
-     * reporting (dialects/rockwell/ab_listing.c); PCCC tags stay 1D. When
-     * unset, elem_count= gives a flat 1D array (the common case). */
-    uint32_t num_dims = 1;
-    uint32_t dims[3] = {1, 1, 1};
-    if(!is_pccc && attr_get_int(attribs, "dim0", 0) > 0) {
-        dims[0] = (uint32_t)attr_get_int(attribs, "dim0", 0);
-        if(attr_get_int(attribs, "dim1", 0) > 0) {
-            num_dims = 2;
-            dims[1] = (uint32_t)attr_get_int(attribs, "dim1", 0);
-            if(attr_get_int(attribs, "dim2", 0) > 0) {
-                num_dims = 3;
-                dims[2] = (uint32_t)attr_get_int(attribs, "dim2", 0);
-            }
-        }
-    } else {
-        int elem_count_attr = attr_get_int(attribs, "elem_count", 1);
-        if(elem_count_attr < 1) {
-            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_count= must be >= 1.");
-            return PLC_TAG_P_NULL;
-        }
-        dims[0] = (uint32_t)elem_count_attr;
-    }
-    size_t elem_count = (size_t)dims[0] * (size_t)dims[1] * (size_t)dims[2];
-
     /* No separate "port" attribute: gateway is "addr" or "addr:port" (same
      * convention as the client's enip_session_create), the only place a
      * non-default port is ever specified. */
@@ -393,13 +498,112 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     enip_plc_type_t plc_type = parse_plc_type(attr_get_str(attribs, "plc", NULL));
     const char *model = attr_get_str(attribs, "model", NULL);
 
+    /* bind_addr points into addr_port's single allocation, freed right below
+     * -- copy it out first since the info log further down (after type
+     * resolution) still wants it for the gateway=%s message. */
+    char bind_addr_buf[64];
+    str_copy(bind_addr_buf, (int)sizeof(bind_addr_buf), bind_addr ? bind_addr : "0.0.0.0");
+
+    /* Endpoint (and its listener thread) is resolved up front -- before type
+     * resolution -- because udt=/elem_type=@name (below) need to look up or
+     * register a UDT template on this specific endpoint's device_t. Every
+     * failure path from here on must endpoint_release(sim) until tag->sim
+     * takes over that ownership (right after rc_alloc succeeds). */
+    device_sim_t *sim = endpoint_find_or_create(bind_addr, port, plc_type, model);
+    if(addr_port) { mem_free(addr_port); }
+    bind_addr = NULL; /* dangling now; use bind_addr_buf below */
+    if(!sim) {
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: endpoint_find_or_create failed.");
+        return PLC_TAG_P_NULL;
+    }
+    device_t *dev = device_sim_get_device(sim);
+
+    const char *pccc_type_str = attr_get_str(attribs, "pccc_type", NULL);
+    bool is_pccc = pccc_type_str && str_length(pccc_type_str) > 0;
+
+    const char *udt_attr = !is_pccc ? attr_get_str(attribs, "udt", NULL) : NULL;
+    const char *elem_type_str = is_pccc ? pccc_type_str : attr_get_str(attribs, "elem_type", NULL);
+
+    tag_type_t tag_type = 0;
+    size_t elem_size = 0;
+    bool type_ok = false;
+    const char *type_desc = elem_type_str; /* for the "type=%s" info log below */
+
+    if(is_pccc) {
+        type_ok = elem_type_str && lookup_pccc_type(elem_type_str, &tag_type, &elem_size);
+    } else if(udt_attr && str_length(udt_attr) > 0) {
+        char *struct_name = NULL;
+        const char *member_list = NULL;
+        if(split_udt_attr(udt_attr, &struct_name, &member_list)) {
+            udt_template_t *tmpl = resolve_or_register_udt(sim, dev, struct_name, member_list);
+            if(tmpl) {
+                tag_type = DEVICE_SIM_STRUCTURE_TYPE(tmpl->template_id);
+                elem_size = tmpl->instance_size;
+                type_ok = true;
+            } else {
+                pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+                       "eip_server_tag_create: udt=\"%s\" failed to parse or register.", udt_attr);
+            }
+            mem_free(struct_name);
+        }
+        type_desc = udt_attr;
+    } else if(elem_type_str && elem_type_str[0] == '@') {
+        udt_template_t *tmpl = device_udt_find_by_name(dev, elem_type_str + 1);
+        if(tmpl) {
+            tag_type = DEVICE_SIM_STRUCTURE_TYPE(tmpl->template_id);
+            elem_size = tmpl->instance_size;
+            type_ok = true;
+        } else {
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+                   "eip_server_tag_create: elem_type=%s references a UDT not yet declared on this endpoint.", elem_type_str);
+        }
+    } else {
+        type_ok = elem_type_str && lookup_cip_type(elem_type_str, &tag_type, &elem_size);
+    }
+
+    if(!type_ok) {
+        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0,
+               "eip_server_tag_create: %s is required and must be one of %s, udt=<name>[:members], or elem_type=@<udtname> (got \"%s\").",
+               is_pccc ? "pccc_type=" : "elem_type=", is_pccc ? "B/N/L/F/R/ST" : "BOOL/SINT/INT/DINT/LINT/USINT/UINT/UDINT/ULINT/REAL/LREAL/BYTE/WORD/DWORD/LWORD/STRING",
+               elem_type_str ? elem_type_str : (udt_attr ? udt_attr : "(none)"));
+        endpoint_release(sim);
+        return PLC_TAG_P_NULL;
+    }
+
+    /* dim0/dim1/dim2 (CIP only) describe a multi-dimensional array for
+     * wire-level indexed addressing (common/cip.c) and @tags dimension
+     * reporting (dialects/rockwell/ab_listing.c); PCCC tags stay 1D. When
+     * unset, elem_count= gives a flat 1D array (the common case). */
+    uint32_t num_dims = 1;
+    uint32_t dims[3] = {1, 1, 1};
+    if(!is_pccc && attr_get_int(attribs, "dim0", 0) > 0) {
+        dims[0] = (uint32_t)attr_get_int(attribs, "dim0", 0);
+        if(attr_get_int(attribs, "dim1", 0) > 0) {
+            num_dims = 2;
+            dims[1] = (uint32_t)attr_get_int(attribs, "dim1", 0);
+            if(attr_get_int(attribs, "dim2", 0) > 0) {
+                num_dims = 3;
+                dims[2] = (uint32_t)attr_get_int(attribs, "dim2", 0);
+            }
+        }
+    } else {
+        int elem_count_attr = attr_get_int(attribs, "elem_count", 1);
+        if(elem_count_attr < 1) {
+            pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: elem_count= must be >= 1.");
+            endpoint_release(sim);
+            return PLC_TAG_P_NULL;
+        }
+        dims[0] = (uint32_t)elem_count_attr;
+    }
+    size_t elem_count = (size_t)dims[0] * (size_t)dims[1] * (size_t)dims[2];
+
     pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_INFO, 0, "eip_server_tag_create: name=\"%s\" type=%s elem_count=%zu gateway=%s port=%u.",
-           name, type_str, elem_count, bind_addr ? bind_addr : "0.0.0.0", (unsigned)port);
+           name, type_desc ? type_desc : "(udt)", elem_count, bind_addr_buf, (unsigned)port);
 
     eip_server_tag_p tag = (eip_server_tag_p)rc_alloc((int)sizeof(struct eip_server_tag_t), eip_server_tag_destroy);
     if(!tag) {
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: rc_alloc failed.");
-        if(addr_port) { mem_free(addr_port); }
+        endpoint_release(sim);
         return PLC_TAG_P_NULL;
     }
 
@@ -407,12 +611,15 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
     ptag->vtable = &eip_server_tag_vtable;
     ptag->protocol_type = TAG_PROTOCOL_ENIP;
 
+    /* Ownership of sim transfers to tag from here on: eip_server_tag_destroy
+     * (rc_dec below on any later failure) calls endpoint_release(tag->sim). */
+    tag->sim = sim;
+
     int rc = plc_tag_generic_init_tag(ptag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: plc_tag_generic_init_tag failed: %s.",
                plc_tag_decode_error(rc));
         rc_dec(tag);
-        if(addr_port) { mem_free(addr_port); }
         return PLC_TAG_P_NULL;
     }
 
@@ -424,20 +631,9 @@ extern plc_tag_p eip_server_tag_create(attr attribs,
         pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: failed to allocate %zu bytes of tag data.",
                total_size);
         rc_dec(tag);
-        if(addr_port) { mem_free(addr_port); }
         return PLC_TAG_P_NULL;
     }
     ptag->size = (int)total_size;
-
-    tag->sim = endpoint_find_or_create(bind_addr, port, plc_type, model);
-    if(addr_port) { mem_free(addr_port); }
-    if(!tag->sim) {
-        pdebug(DEBUG_MODULE_SERVER, PLCTAG_DEBUG_ERROR, 0, "eip_server_tag_create: endpoint_find_or_create failed.");
-        rc_dec(tag);
-        return PLC_TAG_P_NULL;
-    }
-
-    device_t *dev = device_sim_get_device(tag->sim);
 
     tag->tag_def = device_tag_alloc(name, tag_type, elem_size, elem_count, NULL, NULL, NULL);
     if(!tag->tag_def) {

@@ -117,6 +117,7 @@ static void free_udt_templates(udt_template_t *tmpl) {
     while(tmpl) {
         udt_template_t *next = tmpl->next;
         if(tmpl->definition) { mem_free(tmpl->definition); }
+        if(tmpl->name)       { mem_free(tmpl->name); }
         mem_free(tmpl);
         tmpl = next;
     }
@@ -416,12 +417,25 @@ extern int32_t device_sim_add_pccc_tag(device_sim_t *sim,
  * ============================================================================ */
 
 extern udt_template_t *device_udt_find(device_t *dev, uint16_t template_id) {
-    udt_template_t *tmpl = dev->udt_templates;
-    while(tmpl) {
-        if(tmpl->template_id == template_id) { return tmpl; }
-        tmpl = tmpl->next;
+    udt_template_t *found = NULL;
+    critical_block(dev->tags_mutex) {
+        for(udt_template_t *tmpl = dev->udt_templates; tmpl; tmpl = tmpl->next) {
+            if(tmpl->template_id == template_id) { found = tmpl; break; }
+        }
     }
-    return NULL;
+    return found;
+}
+
+
+extern udt_template_t *device_udt_find_by_name(device_t *dev, const char *struct_name) {
+    udt_template_t *found = NULL;
+    if(!struct_name) { return NULL; }
+    critical_block(dev->tags_mutex) {
+        for(udt_template_t *tmpl = dev->udt_templates; tmpl; tmpl = tmpl->next) {
+            if(tmpl->name && str_cmp(tmpl->name, struct_name) == 0) { found = tmpl; break; }
+        }
+    }
+    return found;
 }
 
 /* Encode the class 0x6C service 0x4C definition blob: a fixed 8-byte member
@@ -481,7 +495,6 @@ extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_nam
                                        const udt_member_t *members, uint32_t num_members, uint16_t *template_id_out) {
     if(!sim || !struct_name || instance_size == 0) { return PLCTAG_ERR_BAD_PARAM; }
     if(num_members > 0 && !members) { return PLCTAG_ERR_BAD_PARAM; }
-    if(sim->dev.next_template_id >= 0x0FFFu) { return PLCTAG_ERR_TOO_LARGE; }
 
     uint32_t def_len = 0;
     uint8_t *def = encode_udt_definition(struct_name, members, num_members, &def_len);
@@ -491,15 +504,36 @@ extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_nam
     if(!tmpl) { mem_free(def); return PLCTAG_ERR_NO_MEM; }
     mem_set(tmpl, 0, (int)sizeof(udt_template_t));
 
-    tmpl->template_id = ++sim->dev.next_template_id;
+    tmpl->name = str_dup(struct_name);
+    if(!tmpl->name) { mem_free(def); mem_free(tmpl); return PLCTAG_ERR_NO_MEM; }
     tmpl->handle = crc16_arc(def, def_len);
     tmpl->instance_size = instance_size;
     tmpl->num_members = (uint16_t)num_members;
     tmpl->definition = def;
     tmpl->definition_len = def_len;
 
-    tmpl->next = sim->dev.udt_templates;
-    sim->dev.udt_templates = tmpl;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    /* Mutates the same shared list device_udt_find(_by_name) walks; role=server
+     * tags can add a template to an already-running endpoint (see device.h's
+     * device_udt_find comment), so this needs the same lock they take, not
+     * just the "before device_sim_start()" convention the C API documents. */
+    critical_block(sim->dev.tags_mutex) {
+        if(sim->dev.next_template_id >= 0x0FFFu) {
+            rc = PLCTAG_ERR_TOO_LARGE;
+        } else {
+            tmpl->template_id = ++sim->dev.next_template_id;
+            tmpl->next = sim->dev.udt_templates;
+            sim->dev.udt_templates = tmpl;
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        mem_free(tmpl->name);
+        mem_free(def);
+        mem_free(tmpl);
+        return rc;
+    }
 
     if(template_id_out) { *template_id_out = tmpl->template_id; }
 

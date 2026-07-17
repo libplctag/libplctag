@@ -59,6 +59,7 @@ typedef struct cip_obj_entry_s {
 
 typedef struct udt_template_s {
     struct udt_template_s *next;
+    char        *name;           /* owned copy of struct_name; used by role=server's udt=/elem_type=@name lookup */
     uint16_t     template_id;    /* low 12 bits of a structure tag's symbol type; class 0x6C instance id */
     uint16_t     handle;         /* structure "CRC" handle, attribute 1 */
     uint32_t     instance_size;  /* bytes, attribute 5 */
@@ -253,10 +254,15 @@ extern tag_def_t *device_tag_alloc(const char *name, tag_type_t type, size_t ele
                                    device_sim_tag_cb read_cb, device_sim_tag_cb write_cb, void *user_data);
 
 /* Look up a registered UDT template by id (the low 12 bits of a structure
- * tag's symbol type / the class 0x6C instance id). NULL if not found.
- * Read-only after device_sim_start(), so no lock needed -- see
- * device_t.udt_templates above. Used by dialects/rockwell/ab_listing.c. */
+ * tag's symbol type / the class 0x6C instance id), or by struct_name (for
+ * role=server's udt=/elem_type=@name attributes -- ENIP-UPDATES-PLAN.md item
+ * 2). Both take dev->tags_mutex: unlike the C API (device_sim_add_udt_type),
+ * which is documented pre-start-only, role=server tags can add a UDT template
+ * to an already-running endpoint, so a concurrent class 0x6C reader on
+ * another connection is a real possibility, not just a documented misuse.
+ * NULL if not found. */
 extern udt_template_t *device_udt_find(device_t *dev, uint16_t template_id);
+extern udt_template_t *device_udt_find_by_name(device_t *dev, const char *struct_name);
 
 /* Byte size of one element of an atomic CIP/PCCC tag_type_t (0 if t is a
  * structure type or unknown). Used by dialects/omron/omron_listing.c to

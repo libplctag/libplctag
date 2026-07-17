@@ -58,6 +58,7 @@ add_subdirectory("perf_benchmark")
 if(LIBPLCTAG_FEATURE_SERVER)
     add_subdirectory("devsim_with_plctag")
     add_subdirectory("server_tag_basic")
+    add_subdirectory("server_udt")
     add_subdirectory("omron_udt_walk")
 endif()
 
