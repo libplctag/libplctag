@@ -1003,6 +1003,28 @@ static int32_t step_close(enip_connection_t *c) {
     return PLCTAG_STATUS_OK;
 }
 
+/* Fire PLCTAG_EVENT_DATA_SENT once per tag whose op is riding this tx
+ * (single in_flight tag, or every member of a batch_head chain). Direct
+ * tag->callback call, not tag_raise_event: like DATA_RECEIVED, this must
+ * fire once per packet actually sent, not be coalesced by the generic
+ * once-per-tickler-pass latch. Best-effort api_mutex, same as the rest of
+ * the batch code -- a concurrent plc_tag_destroy skips, doesn't block. */
+static void raise_data_sent(enip_connection_t *c) {
+    enip_tag_p t = (c->batch_count >= 2) ? c->batch_head : c->in_flight;
+
+    while(t != NULL) {
+        enip_tag_p next = (c->batch_count >= 2) ? t->batch_next : NULL;
+
+        if(mutex_try_lock(t->api_mutex) == PLCTAG_STATUS_OK) {
+            plc_tag_p tag = (plc_tag_p)t;
+            if(tag->callback) { tag->callback(tag->tag_id, PLCTAG_EVENT_DATA_SENT, PLCTAG_STATUS_OK, tag->userdata); }
+            mutex_unlock(t->api_mutex);
+        }
+
+        t = next;
+    }
+}
+
 static int32_t step_sending(enip_connection_t *c) {
     int rc = socket_write(c->sock, c->tx_buf + c->tx_off, (int)(c->tx_len - c->tx_off), 0);
 
@@ -1017,6 +1039,8 @@ static int32_t step_sending(enip_connection_t *c) {
     c->tx_off += (size_t)rc;
 
     if(c->tx_off < c->tx_len) { return PLCTAG_STATUS_PENDING; }
+
+    raise_data_sent(c);
 
     arena_reset(&c->arena);
 

@@ -369,6 +369,13 @@ typedef enum {
      * discovery, firing once per newly received, deduplicated device record. */
     PLCTAG_EVENT_DATA_RECEIVED = 8,
 
+    /* Outbound mirror of DATA_RECEIVED: fired once per EIP packet actually
+     * transmitted on the wire, zero or more times before the op's
+     * READ_COMPLETED/WRITE_COMPLETED. Covers both single-tag and batched
+     * (CIP Multiple Service Packet) sends -- one event per packet, not per
+     * sub-request. */
+    PLCTAG_EVENT_DATA_SENT = 9,
+
     /* Connection status events */
     PLCTAG_EVENT_CONN_STATUS_OFFSET = 100,        /* Base offset for connection status change events */
     PLCTAG_EVENT_CONN_STATUS_UP = 100,            /* Connected and ready for operations */
