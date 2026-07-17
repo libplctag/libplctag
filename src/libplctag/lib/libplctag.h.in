@@ -35,6 +35,11 @@
 
 #include <stdint.h>
 
+/* GENERATED from libplctag.h.in by CMake -- do not edit the generated copy.
+ * Stamped so the structured-data API below is physically absent from this
+ * header (not stubbed) when the ENIP module isn't built. */
+#cmakedefine01 LIBPLCTAG_FEATURE_ENIP
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -670,7 +675,14 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
  *
  * An enum (not a string) so a typo is a compile error, not a silent
  * PLCTAG_ERR_UNSUPPORTED at run time.
+ *
+ * This whole API is gated behind LIBPLCTAG_FEATURE_ENIP: it does not exist in
+ * a build with the ENIP module off, rather than existing and returning
+ * PLCTAG_ERR_UNSUPPORTED -- an ENIP-off build gets a compile error on these
+ * symbols, not a silently-always-failing stub.
  */
+#if LIBPLCTAG_FEATURE_ENIP
+
 typedef enum {
     PLCTAG_FORMAT_RAW = 0,  /* native tag bytes; always supported, no schema needed */
     PLCTAG_FORMAT_CBOR = 1, /* RFC 8949 CBOR, rendered from raw data + schema */
@@ -683,6 +695,8 @@ LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, plc_tag_format_type_t form
 LIB_EXPORT int plc_tag_get_schema_size(int32_t id, plc_tag_format_type_t format);
 LIB_EXPORT int plc_tag_get_schema(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
 LIB_EXPORT int plc_tag_set_schema(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
+
+#endif /* LIBPLCTAG_FEATURE_ENIP */
 
 /* string accessors */
 

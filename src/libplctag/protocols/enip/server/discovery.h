@@ -52,8 +52,8 @@
  * ============================================================================ */
 
 typedef struct {
-    device_t   *device;
-    registry_t *registry;
+    device_t       *device;
+    tcp_registry_t *registry;
 } discovery_ctx_t;
 
 /* UDP listener thread — started from main.c, runs until g_terminate. */

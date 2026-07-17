@@ -36,6 +36,7 @@
 
 
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/plctag_features.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
@@ -70,6 +71,7 @@ struct tag_vtable_t {
 
     int (*get_byte_array_attrib)(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 
+#if LIBPLCTAG_FEATURE_ENIP
     /* Structured data presentation (design doc: ENIP-METADATA-AND-DISCOVERY-DESIGN.md
      * §0). format is a plc_tag_format_type_t; PLCTAG_FORMAT_RAW is handled
      * generically in lib.c and never reaches these hooks. NULL means this tag
@@ -77,7 +79,10 @@ struct tag_vtable_t {
      * PLCTAG_ERR_UNSUPPORTED. A tag that implements get_formatted_data* should
      * also implement get_schema* (its schema is what makes the format
      * meaningful); set_formatted_data/set_schema stay NULL for read-only
-     * metadata tags (identity, tag listing, discovery). */
+     * metadata tags (identity, tag listing, discovery).
+     *
+     * plc_tag_format_type_t itself only exists in libplctag.h when
+     * LIBPLCTAG_FEATURE_ENIP is on, so these fields are gated the same way. */
     int (*get_formatted_data_size)(plc_tag_p tag, plc_tag_format_type_t format);
     int (*get_formatted_data)(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
     int (*set_formatted_data)(plc_tag_p tag, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
@@ -85,6 +90,7 @@ struct tag_vtable_t {
     int (*get_schema_size)(plc_tag_p tag, plc_tag_format_type_t format);
     int (*get_schema)(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length);
     int (*set_schema)(plc_tag_p tag, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length);
+#endif /* LIBPLCTAG_FEATURE_ENIP */
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;

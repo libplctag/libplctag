@@ -33,37 +33,19 @@
 
 #pragma once
 
-#include <stdint.h>
+/*
+ * The TCP listener + connection registry are now the protocol-agnostic
+ * net/tcp_server.{c,h} (ENIP-UPDATES-PLAN.md items 3.4/3.5); this header
+ * just exposes the EIP-specific listener entry point (eip_server.c) that
+ * plugs EIP framing/dispatch into it. tcp_registry_t is what device_sim.c
+ * and discovery.c share for the live-socket registry.
+ */
 
 #include "platform.h"
+#include "net/tcp_server.h"
 #include "device.h"
 
-/* ============================================================================
- * Live-socket registry — mutex-protected array of all active sockets.
- * The signal handler sets g_terminate; main then calls registry_wake_all()
- * with the mutex to unblock every blocking operation.
- * ============================================================================ */
-
-#define REGISTRY_MAX 64
-
-typedef struct {
-    mutex_p mutex;
-    sock_p  socks[REGISTRY_MAX];
-} registry_t;
-
-extern registry_t *registry_create(void);
-extern void        registry_destroy(registry_t *reg);
-extern void        registry_add(registry_t *reg, sock_p sock);
-extern void        registry_remove(registry_t *reg, sock_p sock);
-extern void        registry_wake_all(registry_t *reg);
-
-/* ============================================================================
- * Listener thread context and entry point.
- * ============================================================================ */
-
-typedef struct {
-    device_t   *device;
-    registry_t *registry;
-} listener_ctx_t;
-
-extern THREAD_FUNC(server_listener);
+/* Allocate a tcp_server_config_t for EIP, start the listener thread on
+ * device->bind_addr:device->port, and hand back its thread_p (join/destroy
+ * it like any other thread_create() result). */
+extern int32_t eip_server_start_listener(device_t *device, tcp_registry_t *registry, thread_p *out_thread);

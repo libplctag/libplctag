@@ -146,7 +146,7 @@ extern Bytes discovery_list_interfaces_cpf(Arena *a) {
 extern THREAD_FUNC(discovery_thread) {
     discovery_ctx_t *dctx  = (discovery_ctx_t *)arg;
     device_t        *dev   = dctx->device;
-    registry_t      *reg   = dctx->registry;
+    tcp_registry_t  *reg   = dctx->registry;
 
     sock_p  udp = NULL;
     int32_t rc;
@@ -169,11 +169,11 @@ extern THREAD_FUNC(discovery_thread) {
         THREAD_RETURN(0);
     }
 
-    registry_add(reg, udp);
+    tcp_registry_add(reg, udp);
 
     if(arena_init(&arena, DISC_ARENA_SIZE) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "Discovery: arena_init failed.");
-        registry_remove(reg, udp);
+        tcp_registry_remove(reg, udp);
         socket_close(udp);
         socket_destroy(&udp);
         THREAD_RETURN(0);
@@ -260,7 +260,7 @@ extern THREAD_FUNC(discovery_thread) {
     pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_INFO, 0, "Discovery thread stopping.");
 
     arena_free(&arena);
-    registry_remove(reg, udp);
+    tcp_registry_remove(reg, udp);
     socket_close(udp);
     socket_destroy(&udp);
 

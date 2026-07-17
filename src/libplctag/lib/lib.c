@@ -4146,14 +4146,13 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
  * The format/schema subsystem (ENIP-METADATA-AND-DISCOVERY-DESIGN.md §0) is
  * introduced alongside, and its only implementation today is the new ENIP
  * module's built-in schemas (e.g. @identity's "cbor" rendering) -- so the
- * whole six-function API surface is gated behind LIBPLCTAG_FEATURE_ENIP,
- * the same experimental/beta gate that module builds behind (see
- * lib/plctag_features.h). libplctag.h always declares these six functions
- * (that header has no access to plctag_features.h -- it is the only
- * installed public header, see src/libplctag/CMakeLists.txt's install()),
- * so the symbols exist in every build; with the feature off, the #else stubs
- * below return PLCTAG_ERR_UNSUPPORTED unconditionally instead of the full
- * generic-raw + vtable-dispatch implementation.
+ * whole six-function API surface is gated behind LIBPLCTAG_FEATURE_ENIP, the
+ * same experimental/beta gate that module builds behind (see
+ * lib/plctag_features.h). libplctag.h is now generated from libplctag.h.in
+ * (see src/libplctag/CMakeLists.txt) and declares these six functions only
+ * when LIBPLCTAG_FEATURE_ENIP is on, so with the feature off the symbols do
+ * not exist at all -- no stub, no PLCTAG_ERR_UNSUPPORTED fallback to keep in
+ * sync with the real implementation.
  */
 #if LIBPLCTAG_FEATURE_ENIP
 
@@ -4423,56 +4422,6 @@ LIB_EXPORT int plc_tag_set_schema(int32_t id, plc_tag_format_type_t format, cons
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Done.");
 
     return rc;
-}
-
-#else /* !LIBPLCTAG_FEATURE_ENIP */
-
-/* Feature not built: no tag lookup, no format/schema logic -- just report
- * unsupported, matching the "no vtable hook" outcome the full implementation
- * above returns for any tag kind that doesn't implement structured data. */
-
-LIB_EXPORT int plc_tag_get_formatted_data_size(int32_t id, plc_tag_format_type_t format) {
-    (void)id;
-    (void)format;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-LIB_EXPORT int plc_tag_get_formatted_data(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
-    (void)id;
-    (void)format;
-    (void)buffer;
-    (void)buffer_length;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-LIB_EXPORT int plc_tag_set_formatted_data(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length) {
-    (void)id;
-    (void)format;
-    (void)buffer;
-    (void)buffer_length;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-LIB_EXPORT int plc_tag_get_schema_size(int32_t id, plc_tag_format_type_t format) {
-    (void)id;
-    (void)format;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-LIB_EXPORT int plc_tag_get_schema(int32_t id, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
-    (void)id;
-    (void)format;
-    (void)buffer;
-    (void)buffer_length;
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-LIB_EXPORT int plc_tag_set_schema(int32_t id, plc_tag_format_type_t format, const uint8_t *buffer, int buffer_length) {
-    (void)id;
-    (void)format;
-    (void)buffer;
-    (void)buffer_length;
-    return PLCTAG_ERR_UNSUPPORTED;
 }
 
 #endif /* LIBPLCTAG_FEATURE_ENIP */

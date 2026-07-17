@@ -52,10 +52,10 @@
  * ============================================================================ */
 
 struct device_sim_s {
-    device_t    dev;
-    registry_t *registry;
-    thread_p    listener_thread;
-    thread_p    discovery_thread;
+    device_t        dev;
+    tcp_registry_t *registry;
+    thread_p        listener_thread;
+    thread_p        discovery_thread;
 };
 
 /* ============================================================================
@@ -218,7 +218,7 @@ extern device_sim_t *device_sim_create(enip_plc_type_t plc_type, const char *mod
         return NULL;
     }
 
-    sim->registry = registry_create();
+    sim->registry = tcp_registry_create();
     if(!sim->registry) {
         mutex_destroy(&sim->dev.tags_mutex);
         mutex_destroy(&sim->dev.identity_mutex);
@@ -264,13 +264,7 @@ extern int32_t device_sim_set_max_packet(device_sim_t *sim, uint32_t client_to_s
 extern int32_t device_sim_start(device_sim_t *sim) {
     if(!sim) { return PLCTAG_ERR_NULL_PTR; }
 
-    listener_ctx_t *lctx = (listener_ctx_t *)mem_alloc((int)sizeof(listener_ctx_t));
-    if(!lctx) { return PLCTAG_ERR_NO_MEM; }
-    lctx->device   = &sim->dev;
-    lctx->registry = sim->registry;
-
-    if(thread_create(&sim->listener_thread, server_listener, 131072, lctx) != PLCTAG_STATUS_OK) {
-        mem_free(lctx);
+    if(eip_server_start_listener(&sim->dev, sim->registry, &sim->listener_thread) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_ERROR, 0, "device_sim_start: listener thread create failed.");
         return PLCTAG_ERR_THREAD_CREATE;
     }
@@ -302,7 +296,7 @@ extern int32_t device_sim_start(device_sim_t *sim) {
 extern int32_t device_sim_stop(device_sim_t *sim) {
     if(!sim) { return PLCTAG_ERR_NULL_PTR; }
     atomic_set_bool(&sim->dev.terminate, true);
-    registry_wake_all(sim->registry);
+    tcp_registry_wake_all(sim->registry);
     return PLCTAG_STATUS_OK;
 }
 
@@ -321,7 +315,7 @@ extern void device_sim_destroy(device_sim_t *sim) {
         thread_destroy(&sim->discovery_thread);
     }
 
-    registry_destroy(sim->registry);
+    tcp_registry_destroy(sim->registry);
     free_cip_objects(sim->dev.cip_objects);
     /* Single-threaded here: listener/discovery threads are already joined,
      * so no lock is needed for this final walk-and-free. */

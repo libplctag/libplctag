@@ -13,12 +13,19 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_S
 # instead of the source root.
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/plctag_features.h.in" "${CMAKE_BINARY_DIR}/generated/libplctag/lib/plctag_features.h" @ONLY)
 
+# Generate the public header itself, so the structured-data API (item 4,
+# ENIP-UPDATES-PLAN.md) is physically absent -- not stubbed -- when
+# LIBPLCTAG_FEATURE_ENIP is off. Written into the build tree, same reasoning
+# as plctag_features.h.in above: two build dirs against one checkout must not
+# race to overwrite a shared source-tree file.
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h.in" "${CMAKE_BINARY_DIR}/generated/libplctag/lib/libplctag.h" @ONLY)
+
 # Parse libplctag.h to generate internal debug constants
 # This creates add_custom_command for debug_generated.h and debug_module_names.c
 # The .c file is included in libplctag_SRCS below, so CMake tracks the dependency automatically
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ParseLibplctagHeader.cmake")
 parse_libplctag_header(
-    "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
+    "${CMAKE_BINARY_DIR}/generated/libplctag/lib/libplctag.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_generated.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
 )
@@ -51,7 +58,7 @@ endif()
 # set up the library sources
 set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
+                     "${CMAKE_BINARY_DIR}/generated/libplctag/lib/libplctag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/lib.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
@@ -220,14 +227,15 @@ if(LIBPLCTAG_ENABLE_COVERAGE)
     endif()
 endif()
 
-# make sure the .h file is in the output directory
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+# make sure the generated .h file is in the output directory too (bin_dist
+# convenience copy for out-of-tree examples/tools)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" @ONLY)
 
 install(TARGETS plctag_static
     ARCHIVE DESTINATION lib${LIB_SUFFIX}
     COMPONENT devel)
 
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
+install(FILES "${CMAKE_BINARY_DIR}/generated/libplctag/lib/libplctag.h"
     DESTINATION include
     COMPONENT devel)
 
