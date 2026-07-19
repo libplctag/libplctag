@@ -48,32 +48,19 @@
 #include <stdint.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
+#include <libplctag/protocols/enip/common/eip.h>
 
-#define ENIP_EIP_HEADER_SIZE ((size_t)24)
+/* Header struct + encode/decode + command constants live in common/eip.h
+ * (single codec shared with the server's eip_dispatch). This alias keeps
+ * the client's well-known type name at its many call sites. */
+typedef eip_hdr_t enip_eip_hdr_t;
 
-/* EIP command codes */
-#define ENIP_CMD_LIST_IDENTITY      ((uint16_t)0x0063)
-#define ENIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
-#define ENIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
-#define ENIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F) /* SendRRData   */
-#define ENIP_CMD_CONNECTED_SEND     ((uint16_t)0x0070) /* SendUnitData */
-
-typedef struct {
-    uint16_t command;
-    uint16_t length;
-    uint32_t session_handle;
-    uint32_t status;
-    uint64_t sender_context;
-    uint32_t options;
-} enip_eip_hdr_t;
-
-/* Encode header + payload into a single arena-allocated frame.  h->length is
- * overwritten with payload.len.  Returns bytes_null() on arena exhaustion. */
-extern Bytes enip_eip_encode(Arena *a, enip_eip_hdr_t *h, Bytes payload);
-
-/* Split a received frame into its header and payload (zero-copy slice of
- * `in`).  Returns false if in.len < 24 or in.len < 24 + h->length. */
-extern bool enip_eip_decode(Bytes in, enip_eip_hdr_t *h, Bytes *payload);
+#define ENIP_EIP_HEADER_SIZE        EIP_HEADER_SIZE
+#define ENIP_CMD_LIST_IDENTITY      EIP_CMD_LIST_IDENTITY
+#define ENIP_CMD_REGISTER_SESSION   EIP_CMD_REGISTER_SESSION
+#define ENIP_CMD_UNREGISTER_SESSION EIP_CMD_UNREGISTER_SESSION
+#define ENIP_CMD_UNCONNECTED_SEND   EIP_CMD_UNCONNECTED_SEND /* SendRRData   */
+#define ENIP_CMD_CONNECTED_SEND     EIP_CMD_CONNECTED_SEND   /* SendUnitData */
 
 /* Build a RegisterSession request (command 0x0065, session_handle=0,
  * protocol_version=1, options=0). */

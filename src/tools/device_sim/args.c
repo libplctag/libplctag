@@ -51,7 +51,10 @@
  * ============================================================================ */
 
 static const char *find_prefix(const char *arg, const char *prefix) {
-    while(*prefix && *arg == *prefix) { arg++; prefix++; }
+    while(*prefix && *arg == *prefix) {
+        arg++;
+        prefix++;
+    }
     return (*prefix == '\0') ? arg : NULL;
 }
 
@@ -134,7 +137,10 @@ static bool parse_dims(const char *s, uint32_t *num_dim_out, uint32_t dims[3]) {
         (*num_dim_out)++;
 
         if(*s == ']') { break; }
-        if(*s == ',') { s++; continue; }
+        if(*s == ',') {
+            s++;
+            continue;
+        }
         fprintf(stderr, "device_sim: expected ',' or ']' in tag spec, got '%c'.\n", *s);
         return false;
     }
@@ -213,29 +219,29 @@ static int32_t validate_tag_spec(const char *spec) {
 
 extern void args_print_usage(const char *prog) {
     fprintf(stderr,
-        "Usage: %s [OPTIONS]\n"
-        "\n"
-        "Options:\n"
-        "  --port=N         TCP port to listen on (default: 44818)\n"
-        "  --bind=ADDR      Bind address (default: all interfaces)\n"
-        "  --plc=TYPE       PLC personality: ControlLogix, Micro800, Omron,\n"
-        "                   PLC5, SLC, Micrologix  (default: ControlLogix)\n"
-        "  --model=NAME     Catalog model within --plc='s family (e.g. NX102 for\n"
-        "                   Omron); default is the family's built-in default\n"
-        "  --tag=SPEC       Add a CIP tag:  Name:TYPE[count]  or multi-dim\n"
-        "                                   Name:TYPE[d1,d2,d3]\n"
-        "                   Add a PCCC tag: B<n>[count]  N<n>[count]\n"
-        "                                   L<n>[count]  F<n>[count]\n"
-        "                   TYPE: BOOL SINT INT DINT LINT REAL LREAL\n"
-        "                   May be repeated (up to 64 tags).\n"
-        "  --delay=MS       Artificial response delay in milliseconds\n"
-        "  --debug=N        Debug level 1-5 (default: 2)\n"
-        "  --help           Show this message\n"
-        "\n"
-        "Examples:\n"
-        "  %s --tag=MyDINT:DINT[1] --tag=MyArray:DINT[100]\n"
-        "  %s --plc=Micrologix --tag=B3[10] --tag=N7[10]\n",
-        prog, prog, prog);
+            "Usage: %s [OPTIONS]\n"
+            "\n"
+            "Options:\n"
+            "  --port=N         TCP port to listen on (default: 44818)\n"
+            "  --bind=ADDR      Bind address (default: all interfaces)\n"
+            "  --plc=TYPE       PLC personality: ControlLogix, Micro800, Omron,\n"
+            "                   PLC5, SLC, Micrologix  (default: ControlLogix)\n"
+            "  --model=NAME     Catalog model within --plc='s family (e.g. NX102 for\n"
+            "                   Omron); default is the family's built-in default\n"
+            "  --tag=SPEC       Add a CIP tag:  Name:TYPE[count]  or multi-dim\n"
+            "                                   Name:TYPE[d1,d2,d3]\n"
+            "                   Add a PCCC tag: B<n>[count]  N<n>[count]\n"
+            "                                   L<n>[count]  F<n>[count]\n"
+            "                   TYPE: BOOL SINT INT DINT LINT REAL LREAL\n"
+            "                   May be repeated (up to 64 tags).\n"
+            "  --delay=MS       Artificial response delay in milliseconds\n"
+            "  --debug=N        Debug level 1-5 (default: 2)\n"
+            "  --help           Show this message\n"
+            "\n"
+            "Examples:\n"
+            "  %s --tag=MyDINT:DINT[1] --tag=MyArray:DINT[100]\n"
+            "  %s --plc=Micrologix --tag=B3[10] --tag=N7[10]\n",
+            prog, prog, prog);
 }
 
 extern int32_t args_parse(int argc, char **argv, sim_args_t *args_out, int32_t *debug_level_out) {
@@ -297,7 +303,7 @@ extern int32_t args_parse(int argc, char **argv, sim_args_t *args_out, int32_t *
  * ============================================================================ */
 
 static bool append_attr(char *out, size_t out_cap, const char *fmt, ...) {
-    size_t used = str_length(out);
+    size_t used = (size_t)(unsigned int)str_length(out); /* FIXME - the results should be checked */
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf(out + used, out_cap - used, fmt, ap);
@@ -331,9 +337,9 @@ static int32_t build_cip_tag_attr_str(const sim_args_t *args, const char *spec, 
 
     if(out_cap == 0) { return PLCTAG_ERR_BAD_PARAM; }
     out[0] = '\0';
-    if(!append_attr(out, out_cap, "protocol=ab-eip&role=server&name=%.*s&elem_type=%.*s&dim0=%u&dim1=%u&dim2=%u",
-                     (int)name_len, spec, (int)type_len, type_start,
-                     (unsigned)dims[0], num_dim >= 2 ? (unsigned)dims[1] : 0u, num_dim >= 3 ? (unsigned)dims[2] : 0u)) {
+    if(!append_attr(out, out_cap, "protocol=ab-eip&role=server&name=%.*s&elem_type=%.*s&dim0=%u&dim1=%u&dim2=%u", (int)name_len,
+                    spec, (int)type_len, type_start, (unsigned)dims[0], num_dim >= 2 ? (unsigned)dims[1] : 0u,
+                    num_dim >= 3 ? (unsigned)dims[2] : 0u)) {
         return PLCTAG_ERR_BAD_PARAM;
     }
     if(!append_shared_attrs(args, out, out_cap)) { return PLCTAG_ERR_BAD_PARAM; }
@@ -355,8 +361,8 @@ static int32_t build_pccc_tag_attr_str(const sim_args_t *args, const char *spec,
     out[0] = '\0';
     /* PCCC tags are addressed by (letter,file_num) on the wire, not by name;
      * name= is required by the constructor but purely cosmetic here. */
-    if(!append_attr(out, out_cap, "protocol=ab-eip&role=server&name=%c%d&pccc_type=%c&pccc_file=%d&elem_count=%u",
-                     letter, (int)file_num, letter, (int)file_num, (unsigned)dims[0])) {
+    if(!append_attr(out, out_cap, "protocol=ab-eip&role=server&name=%c%d&pccc_type=%c&pccc_file=%d&elem_count=%u", letter,
+                    (int)file_num, letter, (int)file_num, (unsigned)dims[0])) {
         return PLCTAG_ERR_BAD_PARAM;
     }
     if(!append_shared_attrs(args, out, out_cap)) { return PLCTAG_ERR_BAD_PARAM; }
@@ -365,6 +371,6 @@ static int32_t build_pccc_tag_attr_str(const sim_args_t *args, const char *spec,
 }
 
 extern int32_t args_build_tag_attr_str(const sim_args_t *args, const char *spec, char *out, size_t out_cap) {
-    return find_char(spec, ':') ? build_cip_tag_attr_str(args, spec, out, out_cap)
-                                 : build_pccc_tag_attr_str(args, spec, out, out_cap);
+    return find_char(spec, ':') ? build_cip_tag_attr_str(args, spec, out, out_cap) :
+                                  build_pccc_tag_attr_str(args, spec, out, out_cap);
 }

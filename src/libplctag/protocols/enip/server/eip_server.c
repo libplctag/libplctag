@@ -49,10 +49,9 @@
 #include "utils/bytes.h"
 #include "net/tcp_server.h"
 #include "device_sim.h"
-#include <libplctag/protocols/enip/common/eip.h>
+#include <libplctag/protocols/enip/server/eip_dispatch.h>
 #include "server.h"
 
-#define EIP_HEADER_SIZE ((size_t)24)
 #define CLIENT_ARENA_SIZE ((size_t)65536)
 #define ACCEPT_TIMEOUT_MS ((int32_t)1000)
 #define IO_TIMEOUT_MS     ((int32_t)30000)

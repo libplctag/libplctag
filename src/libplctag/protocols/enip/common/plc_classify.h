@@ -75,3 +75,7 @@ extern enip_plc_type_t enip_classify_plc(uint16_t vendor_id, Bytes reply_data);
  * as given). Returns ENIP_PLC_UNKNOWN if name matches no known prefix.
  */
 extern enip_plc_type_t enip_classify_plc_by_name(const char *name);
+
+/* Human-readable family name for logging (e.g. "ControlLogix-class",
+ * "MicroLogix"). Never returns NULL. */
+extern const char *plc_classify_name(enip_plc_type_t plc_type);

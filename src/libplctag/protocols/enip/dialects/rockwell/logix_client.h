@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -32,75 +34,17 @@
  ***************************************************************************/
 
 /*
- * eip.c — EIP (Ethernet/IP) encapsulation header codec. Direction-agnostic:
- * no device_t, no eip_session_t, no I/O. Used by both the client
- * (client/enip_eip.c's request builders, client/enip_session.c's decode of
- * replies) and the server (server/eip_dispatch.c).
- *
- * EIP header layout (all little-endian):
- *   offset 0  uint16  command
- *   offset 2  uint16  payload length
- *   offset 4  uint32  session handle
- *   offset 8  uint32  status
- *   offset 12 uint64  sender context
- *   offset 20 uint32  options
+ * logix_client.h — Logix/Micro800 client dialect (3.d, moved out of
+ * enip_session.c). Reached through enip_dialect_t (enip_logix_dialect,
+ * declared in client/enip_dialect.h). enip_logix_build/enip_logix_apply are
+ * also reused directly by dialects/omron/omron_client.c's enip_omron_dialect
+ * (identical path encoding and CIP Common Format reply framing; only the
+ * listing pair and Forward Open size differ).
  */
 
 #include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <utils/bytes.h>
+#include <libplctag/protocols/enip/client/enip_connection_internal.h>
 
-#include "utils/arena.h"
-#include "utils/bytes.h"
-#include "utils/debug.h"
-#include "eip.h"
-
-extern bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr) {
-    if(!hdr) { return false; }
-
-    Bytes rest = bytes_unpack(hdr_buf, BYTES_LE,
-                              &hdr->cmd, &hdr->payload_len, &hdr->session_handle,
-                              &hdr->status, &hdr->sender_context, &hdr->options);
-    if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "eip_parse_hdr: header unpack failed.");
-        return false;
-    }
-    return true;
-}
-
-
-extern Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr) {
-    if(!a || !hdr) { return bytes_null(); }
-
-    return bytes_pack(a, BYTES_LE,
-                      hdr->cmd, hdr->payload_len, hdr->session_handle,
-                      hdr->status, hdr->sender_context, hdr->options);
-}
-
-
-extern Bytes eip_encode(Arena *a, eip_hdr_t *hdr, Bytes payload) {
-    if(!a || !hdr) { return bytes_null(); }
-
-    hdr->payload_len = (uint16_t)payload.len;
-
-    Bytes hdr_bytes = eip_encode_hdr(a, hdr);
-    if(bytes_is_null(hdr_bytes)) { return bytes_null(); }
-
-    if(bytes_is_null(payload) || payload.len == 0) { return hdr_bytes; }
-
-    return bytes_concat(a, hdr_bytes, payload);
-}
-
-
-extern bool eip_decode(Bytes in, eip_hdr_t *hdr, Bytes *payload) {
-    if(bytes_is_null(in) || in.len < EIP_HEADER_SIZE || !hdr || !payload) { return false; }
-
-    if(!eip_parse_hdr(in, hdr)) { return false; }
-
-    Bytes rest = bytes_slice(in, EIP_HEADER_SIZE, in.len - EIP_HEADER_SIZE);
-    if(rest.len < hdr->payload_len) { return false; }
-
-    *payload = bytes_slice(rest, 0, hdr->payload_len);
-
-    return true;
-}
+extern Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest);
+extern int32_t enip_logix_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more);

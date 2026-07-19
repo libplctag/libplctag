@@ -65,6 +65,7 @@
 #include "platform.h"
 #include "utils/bytes.h"
 #include "utils/debug.h"
+#include <libplctag/protocols/enip/common/cip_path.h>
 #include <libplctag/protocols/enip/server/device.h>
 #include <libplctag/protocols/enip/server/device_sim.h>
 #include "omron_listing.h"
@@ -117,42 +118,12 @@ extern int32_t omron_listing_register(device_sim_t *sim, device_t *dev) {
     return PLCTAG_STATUS_OK;
 }
 
-/* Walk logical CIP path bytes and extract the instance_id (8-bit 0x24 or
- * 16-bit 0x25 instance segment, after an 8-bit 0x20 class segment). Local
- * copy of the same small parse used by dialects/rockwell/ab_listing.c --
- * each dialect owns its own path parsing rather than sharing a helper across
- * vendor modules. */
+/* Walk logical CIP path bytes and extract the instance_id, via the shared
+ * cip_path_parse codec (common/cip_path.c). Best-effort like the original:
+ * *inst_out stays 0 on any malformed/unsupported path rather than erroring. */
 static void parse_instance(const uint8_t *path, uint32_t path_len, uint32_t *inst_out) {
-    Bytes rest = bytes_from_buf(path, path_len);
-    *inst_out = 0;
-
-    while(rest.len > 0) {
-        uint8_t seg = 0;
-        Bytes next = bytes_unpack(rest, BYTES_LE, &seg);
-        if(bytes_is_null(next)) { return; }
-        rest = next;
-
-        if(seg == 0x20) {
-            uint8_t class_id = 0;
-            next = bytes_unpack(rest, BYTES_LE, &class_id);
-            if(bytes_is_null(next)) { return; }
-            rest = next;
-        } else if(seg == 0x24) {
-            uint8_t inst8 = 0;
-            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, &inst8))) { *inst_out = inst8; }
-            return;
-        } else if(seg == 0x25) {
-            uint16_t inst16 = 0;
-            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1), &inst16))) { *inst_out = inst16; }
-            return;
-        } else if(seg == 0x26) {
-            uint32_t inst32 = 0;
-            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1), &inst32))) { *inst_out = inst32; }
-            return;
-        } else {
-            return;
-        }
-    }
+    cip_path_ids_t ids;
+    *inst_out = cip_path_parse(bytes_from_buf(path, path_len), &ids) ? ids.instance_id : 0;
 }
 
 /*

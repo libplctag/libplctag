@@ -55,6 +55,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/enip/client/enip_discover.h>
 #include <libplctag/protocols/enip/client/enip_eip.h>
+#include <libplctag/protocols/enip/common/identity.h>
 #include <platform.h>
 #include <utils/arena.h>
 #include <utils/atomic_utils.h>
@@ -314,8 +315,8 @@ static void enip_discover_handle_datagram(enip_discover_tag_p t, Bytes payload, 
     enip_eip_hdr_t hdr;
     Bytes eip_payload;
 
-    if(!enip_eip_decode(payload, &hdr, &eip_payload)) { return; }
-    if(hdr.command != ENIP_CMD_LIST_IDENTITY || hdr.status != 0) { return; }
+    if(!eip_decode(payload, &hdr, &eip_payload)) { return; }
+    if(hdr.cmd != ENIP_CMD_LIST_IDENTITY || hdr.status != 0) { return; }
 
     /* CPF body: item_count(u16LE), item_type(u16LE), item_len(u16LE), item body.
      * List Identity always answers with exactly one type-0x000C item. */
@@ -341,23 +342,17 @@ static void enip_discover_handle_datagram(enip_discover_tag_p t, Bytes payload, 
     Bytes after_reserved = bytes_unpack(after_saddr, BYTES_LE, BYTES_SKIP(8));
     if(bytes_is_null(after_reserved)) { return; }
 
-    uint16_t vendor_id = 0, device_type = 0, product_code = 0, status = 0;
-    uint8_t rev_major = 0, rev_minor = 0, name_len = 0;
-    uint32_t serial = 0;
-    Bytes after_id = bytes_unpack(after_reserved, BYTES_LE, &vendor_id, &device_type, &product_code, &rev_major, &rev_minor,
-                                  &status, &serial, &name_len);
-    if(bytes_is_null(after_id) || after_id.len < (size_t)name_len + 1) { return; } /* +1: trailing state byte */
-
-    const uint8_t *name_bytes = after_id.data;
-    Bytes after_name = bytes_slice(after_id, name_len, after_id.len - name_len);
-    if(bytes_is_null(after_name) || after_name.len < 1) { return; }
+    identity_t id = {0};
+    Bytes after_name = {0};
+    if(!identity_decode(after_reserved, &id, &after_name) || after_name.len < 1) { return; } /* 1: trailing state byte */
     uint8_t state = after_name.data[0];
 
     uint32_t src_ip_host = 0;
     if(enip_discover_parse_ipv4(src_host, (size_t)str_length(src_host), &src_ip_host) == 0) { return; }
 
-    enip_discover_add_record(t, src_ip_host, reply_port, vendor_id, device_type, product_code, rev_major, rev_minor, status,
-                             serial, state, name_bytes, name_len);
+    enip_discover_add_record(t, src_ip_host, reply_port, id.vendor_id, id.device_type, id.product_code, id.revision_major,
+                             id.revision_minor, id.status, id.serial, state, (const uint8_t *)id.product_name,
+                             (uint8_t)str_length(id.product_name));
 }
 
 /* ============================================================================

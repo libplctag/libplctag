@@ -32,75 +32,65 @@
  ***************************************************************************/
 
 /*
- * eip.c — EIP (Ethernet/IP) encapsulation header codec. Direction-agnostic:
- * no device_t, no eip_session_t, no I/O. Used by both the client
- * (client/enip_eip.c's request builders, client/enip_session.c's decode of
- * replies) and the server (server/eip_dispatch.c).
- *
- * EIP header layout (all little-endian):
- *   offset 0  uint16  command
- *   offset 2  uint16  payload length
- *   offset 4  uint32  session handle
- *   offset 8  uint32  status
- *   offset 12 uint64  sender context
- *   offset 20 uint32  options
+ * cpf_dispatch.c — server-side CPF request handlers. Split out of
+ * common/cpf.c (3.a) so the direction-agnostic codec (common/cpf.c) has no
+ * device_t/eip_session_t dependency and can be built unconditionally with
+ * ENIP, while this file (needing device_t, cip dispatch) stays server-only.
  */
 
-#include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
 #include "utils/debug.h"
-#include "eip.h"
+#include <libplctag/protocols/enip/common/cip.h>
+#include <libplctag/protocols/enip/common/cpf.h>
+#include "cpf_dispatch.h"
 
-extern bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr) {
-    if(!hdr) { return false; }
+extern Bytes cpf_handle_unconnected(Arena *a, Bytes payload, eip_session_t *sess, device_t *dev) {
+    uint16_t seq = 0;
+    Bytes cip_data = {0};
 
-    Bytes rest = bytes_unpack(hdr_buf, BYTES_LE,
-                              &hdr->cmd, &hdr->payload_len, &hdr->session_handle,
-                              &hdr->status, &hdr->sender_context, &hdr->options);
-    if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "eip_parse_hdr: header unpack failed.");
-        return false;
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
+           "cpf_handle_unconnected: payload len=%zu.", payload.len);
+
+    if(!cpf_unwrap(payload, false, NULL, &seq, &cip_data)) { return (Bytes){0}; }
+
+    Bytes cip_response = cip_dispatch_unconnected(a, cip_data, sess, dev);
+    if(bytes_is_null(cip_response)) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "CPF unconnected: CIP dispatch returned null.");
+        return (Bytes){0};
     }
-    return true;
+
+    return cpf_wrap_unconnected(a, cip_response);
 }
 
 
-extern Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr) {
-    if(!a || !hdr) { return bytes_null(); }
+extern Bytes cpf_handle_connected(Arena *a, Bytes payload, eip_session_t *sess, device_t *dev) {
+    uint32_t conn_id = 0;
+    uint16_t seq = 0;
+    Bytes cip_data = {0};
 
-    return bytes_pack(a, BYTES_LE,
-                      hdr->cmd, hdr->payload_len, hdr->session_handle,
-                      hdr->status, hdr->sender_context, hdr->options);
-}
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
+           "cpf_handle_connected: payload len=%zu.", payload.len);
 
+    if(!cpf_unwrap(payload, true, &conn_id, &seq, &cip_data)) { return (Bytes){0}; }
 
-extern Bytes eip_encode(Arena *a, eip_hdr_t *hdr, Bytes payload) {
-    if(!a || !hdr) { return bytes_null(); }
+    if(conn_id != sess->server_connection_id) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
+               "CPF connected: connection ID mismatch: got 0x%08x expected 0x%08x.",
+               (unsigned)conn_id, (unsigned)sess->server_connection_id);
+        return (Bytes){0};
+    }
 
-    hdr->payload_len = (uint16_t)payload.len;
+    sess->client_connection_seq = seq;
+    sess->server_connection_seq++;
 
-    Bytes hdr_bytes = eip_encode_hdr(a, hdr);
-    if(bytes_is_null(hdr_bytes)) { return bytes_null(); }
+    Bytes cip_response = cip_dispatch_connected(a, cip_data, sess, dev, sess->max_cip_packet_size);
+    if(bytes_is_null(cip_response)) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "CPF connected: CIP dispatch returned null.");
+        return (Bytes){0};
+    }
 
-    if(bytes_is_null(payload) || payload.len == 0) { return hdr_bytes; }
-
-    return bytes_concat(a, hdr_bytes, payload);
-}
-
-
-extern bool eip_decode(Bytes in, eip_hdr_t *hdr, Bytes *payload) {
-    if(bytes_is_null(in) || in.len < EIP_HEADER_SIZE || !hdr || !payload) { return false; }
-
-    if(!eip_parse_hdr(in, hdr)) { return false; }
-
-    Bytes rest = bytes_slice(in, EIP_HEADER_SIZE, in.len - EIP_HEADER_SIZE);
-    if(rest.len < hdr->payload_len) { return false; }
-
-    *payload = bytes_slice(rest, 0, hdr->payload_len);
-
-    return true;
+    return cpf_wrap_connected(a, sess->server_connection_id, sess->server_connection_seq, cip_response);
 }

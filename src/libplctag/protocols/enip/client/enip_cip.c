@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include <libplctag/protocols/enip/client/enip_cip.h>
+#include <libplctag/protocols/enip/common/cip_path.h>
 #include <inttypes.h>
 #include <utils/debug.h>
 #include <string.h>
@@ -68,26 +69,6 @@ static size_t enip_cip_parse_array_index(const char *str, size_t pos, uint32_t *
 
     *index_out = index;
     return pos + 1;
-}
-
-/* Encode one array index segment (0x28/0x29/0x2A) into buf[buf_size].
- * Returns bytes written, or 0 if buf_size is too small. */
-static size_t enip_cip_encode_array_index(uint32_t index, uint8_t *buf, size_t buf_size) {
-    if(!buf || buf_size == 0) { return 0; }
-
-    Bytes dest = bytes_from_buf(buf, buf_size);
-    Bytes rest;
-
-    if(index <= 0xFFu) {
-        rest = bytes_pack_into(dest, BYTES_LE, (uint8_t)0x28, (uint8_t)index);
-    } else if(index <= 0xFFFFu) {
-        rest = bytes_pack_into(dest, BYTES_LE, (uint8_t)0x29, (uint8_t)0x00 /* reserved */, (uint16_t)index);
-    } else {
-        rest = bytes_pack_into(dest, BYTES_LE, (uint8_t)0x2A, (uint8_t)0x00 /* reserved */, index);
-    }
-
-    if(bytes_is_null(rest)) { return 0; }
-    return dest.len - rest.len;
 }
 
 /* Encode tag_name into buf[buf_size] in ANSI CIP Extended Symbol format.
@@ -142,7 +123,7 @@ static size_t enip_cip_encode_tag_path(const char *tag_name, uint8_t *buf, size_
                 return 0;
             }
 
-            size_t idx_size = enip_cip_encode_array_index(index, rest.data, rest.len);
+            size_t idx_size = cip_path_encode_index_into(index, rest.data, rest.len);
             if(idx_size == 0) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "CIP: failed to encode array index %" PRIu32 ".", index);
                 return 0;
@@ -182,7 +163,7 @@ Bytes enip_cip_encode_path_at(Arena *a, Bytes base_path, uint32_t index) {
     if(!a || bytes_is_null(base_path)) { return bytes_null(); }
 
     uint8_t idx_buf[6];
-    size_t idx_len = enip_cip_encode_array_index(index, idx_buf, sizeof(idx_buf));
+    size_t idx_len = cip_path_encode_index_into(index, idx_buf, sizeof(idx_buf));
     if(idx_len == 0) { return bytes_null(); }
 
     Bytes idx_bytes = bytes_pack(a, BYTES_LE, bytes_from_buf(idx_buf, idx_len));
@@ -340,22 +321,10 @@ Bytes enip_cip_write_frag(Arena *a, Bytes path, Bytes type_header, uint16_t coun
  * CIP tag/UDT listing requests (class 0x6B / 0x6C)
  * ============================================================================ */
 
-/* Build a class/instance logical path: 0x20 <class> 0x25 0x00 <inst_lo> <inst_hi>,
- * optionally prefixed by an already-encoded symbolic segment.  Always even. */
-static Bytes cip_class_inst_path(Arena *a, Bytes prefix, uint8_t class_id, uint16_t instance) {
-    Bytes hdr = bytes_pack(a, BYTES_LE, (uint8_t)0x20, class_id, (uint8_t)0x25, (uint8_t)0x00, (uint16_t)instance);
-    if(bytes_is_null(hdr)) { return bytes_null(); }
-
-    if(bytes_is_null(prefix) || prefix.len == 0) { return hdr; }
-    if((prefix.len % 2) != 0) { return bytes_null(); }
-
-    return bytes_concat(a, prefix, hdr);
-}
-
 Bytes enip_cip_list_tags(Arena *a, Bytes prefix, uint16_t instance_id) {
     if(!a) { return bytes_null(); }
 
-    Bytes path = cip_class_inst_path(a, prefix, (uint8_t)0x6B, instance_id);
+    Bytes path = cip_path_encode(a, prefix, (uint8_t)0x6B, instance_id, -1);
     if(bytes_is_null(path) || path.len > 0xFF * 2) { return bytes_null(); }
 
     Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_LIST_TAGS, (uint8_t)(path.len / 2));
@@ -372,7 +341,7 @@ Bytes enip_cip_list_tags(Arena *a, Bytes prefix, uint16_t instance_id) {
 Bytes enip_cip_udt_meta(Arena *a, uint16_t udt_id) {
     if(!a) { return bytes_null(); }
 
-    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, udt_id);
+    Bytes path = cip_path_encode(a, bytes_null(), (uint8_t)0x6C, udt_id, -1);
     if(bytes_is_null(path)) { return bytes_null(); }
 
     Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_ATTR_LIST, (uint8_t)(path.len / 2));
@@ -389,7 +358,7 @@ Bytes enip_cip_udt_meta(Arena *a, uint16_t udt_id) {
 Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t total) {
     if(!a) { return bytes_null(); }
 
-    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, udt_id);
+    Bytes path = cip_path_encode(a, bytes_null(), (uint8_t)0x6C, udt_id, -1);
     if(bytes_is_null(path)) { return bytes_null(); }
 
     Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_READ, (uint8_t)(path.len / 2));
@@ -404,7 +373,7 @@ Bytes enip_cip_udt_fields(Arena *a, uint16_t udt_id, uint32_t offset, uint16_t t
 Bytes enip_cip_omron_list_tags(Arena *a, uint32_t start_instance, uint32_t count, uint16_t kind) {
     if(!a) { return bytes_null(); }
 
-    Bytes path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6A, (uint16_t)0);
+    Bytes path = cip_path_encode(a, bytes_null(), (uint8_t)0x6A, 0, -1);
     if(bytes_is_null(path)) { return bytes_null(); }
 
     Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_INSTANCE_LIST_EX2, (uint8_t)(path.len / 2));
@@ -422,13 +391,10 @@ Bytes enip_cip_omron_udt_get_all(Arena *a, uint32_t type_instance_id) {
     /* Real template ids stay in the existing 16-bit (0x25) form (unchanged
      * wire bytes for every pre-existing top-level request); the synthetic
      * member ids omron_listing.c hands back via next_instance_id are always
-     * > 0xFFFF (see its member_id_encode) and need the 32-bit (0x26) form. */
-    Bytes path;
-    if(type_instance_id <= 0xFFFFu) {
-        path = cip_class_inst_path(a, bytes_null(), (uint8_t)0x6C, (uint16_t)type_instance_id);
-    } else {
-        path = bytes_pack(a, BYTES_LE, (uint8_t)0x20, (uint8_t)0x6C, (uint8_t)0x26, (uint8_t)0x00, type_instance_id);
-    }
+     * > 0xFFFF (see its member_id_encode) and get the 32-bit (0x26) form --
+     * cip_path_encode already floors instance encoding at 16-bit and only
+     * widens past 0xFFFF, so no special case is needed here. */
+    Bytes path = cip_path_encode(a, bytes_null(), (uint8_t)0x6C, type_instance_id, -1);
     if(bytes_is_null(path)) { return bytes_null(); }
 
     Bytes header = bytes_pack(a, BYTES_LE, (uint8_t)CIP_GET_ATTR_ALL, (uint8_t)(path.len / 2));

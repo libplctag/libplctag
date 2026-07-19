@@ -67,7 +67,7 @@
 /* service+reserved+status+ext_size, present in every CIP reply (§11.3) */
 #define CIP_READ_REPLY_OVERHEAD ((size_t)4)
 
-/* Connected Data Item header (enip_cpf_wrap_connected): item type(2) +
+/* Connected Data Item header (cpf_wrap_connected): item type(2) +
  * item length(2) + connection sequence count(2) = 6 bytes. The negotiated
  * ForwardOpen connection size (conn->max_cip_packet_size) bounds this whole
  * item, so the CIP reply (CIP_READ_REPLY_OVERHEAD + header_len + elem_size)

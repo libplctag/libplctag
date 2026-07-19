@@ -52,6 +52,7 @@
 #include "platform.h"
 #include "utils/bytes.h"
 #include "utils/debug.h"
+#include <libplctag/protocols/enip/common/cip_path.h>
 #include <libplctag/protocols/enip/server/device.h>
 #include <libplctag/protocols/enip/server/device_sim.h>
 #include "ab_listing.h"
@@ -122,41 +123,14 @@ extern int32_t ab_listing_register(device_sim_t *sim, device_t *dev) {
  * ============================================================================ */
 
 /*
- * Walk logical CIP path bytes and extract the instance_id.
- * Handles 8-bit class (0x20) and 8-bit (0x24) or 16-bit (0x25) instance.
+ * Walk logical CIP path bytes and extract the instance_id, via the shared
+ * cip_path_parse codec (common/cip_path.c). Best-effort like the original:
+ * *inst_out stays 0 on any malformed/unsupported path rather than erroring.
  */
 static void parse_start_instance(const uint8_t *path, uint32_t path_len,
                                  uint32_t *inst_out) {
-    Bytes rest = bytes_from_buf(path, path_len);
-    *inst_out = 0;
-
-    while(rest.len > 0) {
-        uint8_t seg = 0;
-        Bytes next = bytes_unpack(rest, BYTES_LE, &seg);
-        if(bytes_is_null(next)) { return; }
-        rest = next;
-
-        if(seg == 0x20) {          /* 8-bit class segment */
-            uint8_t class_id = 0;
-            next = bytes_unpack(rest, BYTES_LE, &class_id);
-            if(bytes_is_null(next)) { return; }
-            rest = next;
-        } else if(seg == 0x21) {   /* 16-bit class segment: pad byte + 2 data bytes */
-            next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(3));
-            if(bytes_is_null(next)) { return; }
-            rest = next;
-        } else if(seg == 0x24) {   /* 8-bit instance segment */
-            uint8_t inst8 = 0;
-            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, &inst8))) { *inst_out = inst8; }
-            return;
-        } else if(seg == 0x25) {   /* 16-bit instance segment: reserved pad + u16 */
-            uint16_t inst16 = 0;
-            if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1), &inst16))) { *inst_out = inst16; }
-            return;
-        } else {
-            return;
-        }
-    }
+    cip_path_ids_t ids;
+    *inst_out = cip_path_parse(bytes_from_buf(path, path_len), &ids) ? ids.instance_id : 0;
 }
 
 

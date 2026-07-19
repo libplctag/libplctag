@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,76 +33,19 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/*
- * eip.c — EIP (Ethernet/IP) encapsulation header codec. Direction-agnostic:
- * no device_t, no eip_session_t, no I/O. Used by both the client
- * (client/enip_eip.c's request builders, client/enip_session.c's decode of
- * replies) and the server (server/eip_dispatch.c).
- *
- * EIP header layout (all little-endian):
- *   offset 0  uint16  command
- *   offset 2  uint16  payload length
- *   offset 4  uint32  session handle
- *   offset 8  uint32  status
- *   offset 12 uint64  sender context
- *   offset 20 uint32  options
- */
-
-#include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
-#include "utils/debug.h"
-#include "eip.h"
+#include <libplctag/protocols/enip/common/eip.h>
+#include <libplctag/protocols/enip/server/device.h>
 
-extern bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr) {
-    if(!hdr) { return false; }
+/*
+ * Parse EIP header, dispatch command, return complete EIP response (header + payload).
+ * hdr must be exactly EIP_HEADER_SIZE bytes; payload may be empty.
+ * Returns {NULL,0} on UnregisterSession or fatal error — caller should close.
+ */
+extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, device_t *dev);
 
-    Bytes rest = bytes_unpack(hdr_buf, BYTES_LE,
-                              &hdr->cmd, &hdr->payload_len, &hdr->session_handle,
-                              &hdr->status, &hdr->sender_context, &hdr->options);
-    if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "eip_parse_hdr: header unpack failed.");
-        return false;
-    }
-    return true;
-}
-
-
-extern Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr) {
-    if(!a || !hdr) { return bytes_null(); }
-
-    return bytes_pack(a, BYTES_LE,
-                      hdr->cmd, hdr->payload_len, hdr->session_handle,
-                      hdr->status, hdr->sender_context, hdr->options);
-}
-
-
-extern Bytes eip_encode(Arena *a, eip_hdr_t *hdr, Bytes payload) {
-    if(!a || !hdr) { return bytes_null(); }
-
-    hdr->payload_len = (uint16_t)payload.len;
-
-    Bytes hdr_bytes = eip_encode_hdr(a, hdr);
-    if(bytes_is_null(hdr_bytes)) { return bytes_null(); }
-
-    if(bytes_is_null(payload) || payload.len == 0) { return hdr_bytes; }
-
-    return bytes_concat(a, hdr_bytes, payload);
-}
-
-
-extern bool eip_decode(Bytes in, eip_hdr_t *hdr, Bytes *payload) {
-    if(bytes_is_null(in) || in.len < EIP_HEADER_SIZE || !hdr || !payload) { return false; }
-
-    if(!eip_parse_hdr(in, hdr)) { return false; }
-
-    Bytes rest = bytes_slice(in, EIP_HEADER_SIZE, in.len - EIP_HEADER_SIZE);
-    if(rest.len < hdr->payload_len) { return false; }
-
-    *payload = bytes_slice(rest, 0, hdr->payload_len);
-
-    return true;
-}
+extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);

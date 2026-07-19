@@ -33,12 +33,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
-#include <libplctag/protocols/enip/server/device.h>
 
 /* ============================================================================
  * EIP command codes
@@ -53,15 +53,39 @@
 #define EIP_CMD_CONNECTED_SEND     ((uint16_t)0x0070)
 
 /* ============================================================================
- * Public API
+ * EIP encapsulation header codec — single source of truth for both the
+ * client (session.c) and the server (this file's eip_dispatch). 24-byte
+ * little-endian header: cmd(2) payload_len(2) session_handle(4) status(4)
+ * sender_context(8) options(4).
  * ============================================================================ */
 
-/*
- * Parse EIP header, dispatch command, return complete EIP response (header + payload).
- * hdr must be exactly EIP_HEADER_SIZE bytes; payload may be empty.
- * Returns {NULL,0} on UnregisterSession or fatal error — caller should close.
- */
-extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *sess, device_t *dev);
+typedef struct {
+    uint16_t cmd;
+    uint16_t payload_len;
+    uint32_t session_handle;
+    uint32_t status;
+    uint64_t sender_context;
+    uint32_t options;
+} eip_hdr_t;
 
-extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
-extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+/* Parse a header-only buffer (exactly EIP_HEADER_SIZE bytes, no payload
+ * length validation against a companion buffer -- used when the caller
+ * already has header and payload as separate slices, e.g. the server). */
+extern bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr);
+
+/* Encode just the 24-byte header (no payload appended). */
+extern Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr);
+
+/* Encode header + payload into one arena-allocated frame. hdr->payload_len
+ * is overwritten with payload.len. Returns bytes_null() on arena exhaustion. */
+extern Bytes eip_encode(Arena *a, eip_hdr_t *hdr, Bytes payload);
+
+/* Split a received frame into header and payload (zero-copy slice of `in`).
+ * Returns false if in.len < EIP_HEADER_SIZE or in.len < EIP_HEADER_SIZE +
+ * hdr->payload_len. */
+extern bool eip_decode(Bytes in, eip_hdr_t *hdr, Bytes *payload);
+
+/* Server-side dispatch (eip_dispatch, eip_session_set_*_sizes) lives in
+ * server/eip_dispatch.h -- this file is the direction-agnostic codec only,
+ * built whenever ENIP is (client needs it too), with no device_t/
+ * eip_session_t dependency. */

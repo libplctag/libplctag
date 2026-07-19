@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -32,75 +34,33 @@
  ***************************************************************************/
 
 /*
- * eip.c — EIP (Ethernet/IP) encapsulation header codec. Direction-agnostic:
- * no device_t, no eip_session_t, no I/O. Used by both the client
- * (client/enip_eip.c's request builders, client/enip_session.c's decode of
- * replies) and the server (server/eip_dispatch.c).
- *
- * EIP header layout (all little-endian):
- *   offset 0  uint16  command
- *   offset 2  uint16  payload length
- *   offset 4  uint32  session handle
- *   offset 8  uint32  status
- *   offset 12 uint64  sender context
- *   offset 20 uint32  options
+ * pccc_defs.h — PCCC (Execute-PCCC, CIP service 0x4B) wire constants shared
+ * by both halves of the dialect: dialects/pccc/pccc.c (server) and
+ * dialects/pccc/pccc_client.c (client, PLC-5/SLC500/MicroLogix). Previously
+ * duplicated as two independently-named copies (client/enip_session.c's
+ * PCCC_PLC5_READ_FNC etc. vs this file's PLC5_CMD_READ etc.) with identical
+ * values (3.d).
  */
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "utils/arena.h"
-#include "utils/bytes.h"
-#include "utils/debug.h"
-#include "eip.h"
+#define PCCC_EXECUTE_SVC ((uint8_t)0x4B)
+#define PCCC_TYPED_CMD   ((uint8_t)0x0F)
 
-extern bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr) {
-    if(!hdr) { return false; }
+#define PCCC_PLC5_READ_FNC  ((uint8_t)0x01)
+#define PCCC_PLC5_WRITE_FNC ((uint8_t)0x00)
+#define PCCC_PLC5_RMW_FNC   ((uint8_t)0x26)
+#define PCCC_SLC_READ_FNC   ((uint8_t)0xA2)
+#define PCCC_SLC_WRITE_FNC  ((uint8_t)0xAA)
+#define PCCC_SLC_RMW_FNC    ((uint8_t)0xAB)
 
-    Bytes rest = bytes_unpack(hdr_buf, BYTES_LE,
-                              &hdr->cmd, &hdr->payload_len, &hdr->session_handle,
-                              &hdr->status, &hdr->sender_context, &hdr->options);
-    if(bytes_is_null(rest)) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "eip_parse_hdr: header unpack failed.");
-        return false;
-    }
-    return true;
-}
+#define PCCC_VENDOR_ID ((uint16_t)0xF33D)     /* matches ab/defs.h AB_EIP_VENDOR_ID */
+#define PCCC_VENDOR_SN ((uint32_t)0x21504345) /* matches ab/defs.h AB_EIP_VENDOR_SN */
 
-
-extern Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr) {
-    if(!a || !hdr) { return bytes_null(); }
-
-    return bytes_pack(a, BYTES_LE,
-                      hdr->cmd, hdr->payload_len, hdr->session_handle,
-                      hdr->status, hdr->sender_context, hdr->options);
-}
-
-
-extern Bytes eip_encode(Arena *a, eip_hdr_t *hdr, Bytes payload) {
-    if(!a || !hdr) { return bytes_null(); }
-
-    hdr->payload_len = (uint16_t)payload.len;
-
-    Bytes hdr_bytes = eip_encode_hdr(a, hdr);
-    if(bytes_is_null(hdr_bytes)) { return bytes_null(); }
-
-    if(bytes_is_null(payload) || payload.len == 0) { return hdr_bytes; }
-
-    return bytes_concat(a, hdr_bytes, payload);
-}
-
-
-extern bool eip_decode(Bytes in, eip_hdr_t *hdr, Bytes *payload) {
-    if(bytes_is_null(in) || in.len < EIP_HEADER_SIZE || !hdr || !payload) { return false; }
-
-    if(!eip_parse_hdr(in, hdr)) { return false; }
-
-    Bytes rest = bytes_slice(in, EIP_HEADER_SIZE, in.len - EIP_HEADER_SIZE);
-    if(rest.len < hdr->payload_len) { return false; }
-
-    *payload = bytes_slice(rest, 0, hdr->payload_len);
-
-    return true;
-}
+/* PCCC has no fragmentation status (unlike Logix's CIP_STATUS_FRAG), so every
+ * read/write/@tags-listing round trip on both sides is capped at a fixed
+ * page that fits comfortably under the single-byte SLC transfer-size field
+ * (max 255) and typical DF1/EtherNet-IP embedded-packet limits. */
+#define PCCC_MAX_TRANSFER_BYTES ((size_t)240)
+#define PCCC_MAX_TRANSFER_WORDS ((uint16_t)(PCCC_MAX_TRANSFER_BYTES / 2))

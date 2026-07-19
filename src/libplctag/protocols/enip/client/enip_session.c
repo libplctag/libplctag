@@ -40,7 +40,7 @@
  * OPEN_BULK (remaining elements, windowed per §11.3).
  *
  * Deviation from the literal §14.3 text: the tx frame is produced directly
- * by enip_cip_read / enip_cpf_wrap_* / enip_eip_* (each an arena allocation),
+ * by enip_cip_read / cpf_wrap_* / enip_eip_* (each an arena allocation),
  * rather than being assembled byte-by-byte into a pre-sized tx_buf.  The
  * arena is reset before building and the resulting Bytes is used in place
  * as tx_buf/tx_len.
@@ -52,12 +52,14 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/enip/client/enip_cip.h>
-#include <libplctag/protocols/enip/client/enip_cpf.h>
+#include <libplctag/protocols/enip/client/enip_connection_internal.h>
 #include <libplctag/protocols/enip/client/enip_dialect.h>
 #include <libplctag/protocols/enip/client/enip_eip.h>
 #include <libplctag/protocols/enip/client/enip_session.h>
 #include <libplctag/protocols/enip/client/enip_tag.h>
 #include <libplctag/protocols/enip/client/enip_type.h>
+#include <libplctag/protocols/enip/common/cpf.h>
+#include <libplctag/protocols/enip/common/identity.h>
 #include <libplctag/protocols/enip/common/plc_classify.h>
 #include <libplctag/protocols/enip/common/plc_type.h>
 #include <platform.h>
@@ -78,7 +80,8 @@
 #define ENIP_FO_CIP_SIZE ((size_t)504)
 
 /* EIP header (24) + connected CPF overhead (22). */
-#define ENIP_FRAMING_OVERHEAD (ENIP_EIP_HEADER_SIZE + ENIP_CPF_CONNECTED_OVERHEAD)
+#define ENIP_FRAMING_OVERHEAD \
+    (EIP_HEADER_SIZE + CPF_HEADER_SIZE + CPF_CONNECTED_ADDR_ITEM_SIZE + CPF_CONNECTED_DATA_ITEM_SIZE + CPF_CONN_SEQ_NUM_SIZE)
 
 /* Backing store for the per-connection arena; covers rx_cap (max_cip_packet_size
  * + ENIP_FRAMING_OVERHEAD) and tx-side scratch. Building a write request
@@ -106,10 +109,6 @@
 #define ENIP_MIN_INACTIVITY_MS ((int64_t)1000)
 #define ENIP_MAX_INACTIVITY_MS ((int64_t)30000)
 
-/* Connection-status event ring (§ @connection tag). Single producer (IO
- * thread), multiple consumers (each @connection tag keeps its own read idx). */
-#define ENIP_CONN_STATUS_RING_SIZE ((int32_t)16)
-#define ENIP_CONN_STATUS_RING_MASK (ENIP_CONN_STATUS_RING_SIZE - 1)
 /* Upper bound on batch array sizes (stack-allocated); the actual runtime limit
  * c->max_batch is derived from the negotiated CIP payload after ForwardOpen
  * and is always clamped to this value. */
@@ -123,18 +122,6 @@
 /* CIP Identity classification: see common/plc_classify.h for why this is
  * centralized (vendor id + product-name catalog-family prefix, matched
  * against a table shared with the server-side emulator). */
-
-static const char *identity_plc_type_name(enip_plc_type_t plc_type) {
-    switch(plc_type) {
-        case ENIP_PLC_PLC5: return "PLC-5";
-        case ENIP_PLC_SLC: return "SLC-500";
-        case ENIP_PLC_MLGX: return "MicroLogix";
-        case ENIP_PLC_LGX: return "ControlLogix-class";
-        case ENIP_PLC_MICRO800: return "Micro800";
-        case ENIP_PLC_OMRON_NJNX: return "OMRON NJ/NX";
-        case ENIP_PLC_UNKNOWN: default: return "unknown";
-    }
-}
 
 /* §4/§5: connection IO thread states. */
 enum {
@@ -150,96 +137,12 @@ enum {
     CONN_CLOSING
 };
 
-/* §4 + §14.3 connection structure. */
-struct enip_connection_t {
-    enip_connection_t *next; /* registry singly-linked list, under s_registry_mutex */
-
-    char *gateway;
-    char *path;
-    char *model; /* optional; overrides identity-based classification (§ model=) */
-    int tcp_port;
-    bool is_connected_path;
-
-    /* Large Forward Open (0x5B) try/fallback (ENIP-SESSION-DESIGN.md §16.4):
-     * try_large_fo is what the *next* step_open() attempt should use, reset
-     * true at connection creation; on_open_reply clears it (remembered for
-     * this connection's later reconnects) the first time a Large attempt is
-     * rejected with CIP 0x08 (Service Not Supported). used_large_fo and
-     * requested_cip_size record what the in-flight attempt actually asked
-     * for, so on_open_reply/parse_forward_open_reply don't have to re-derive
-     * it from the dialect. */
-    bool try_large_fo;
-    bool used_large_fo;
-    size_t requested_cip_size;
-
-    sock_p sock;
-    thread_p thread;
-    bool connect_started;
-
-    uint32_t session_handle;
-    uint32_t cip_conn_id;
-    uint16_t conn_seq;
-
-    uint32_t our_conn_id;
-    uint16_t conn_serial;
-
-    mutex_p sched_mutex;
-    enip_tag_p sched_head, sched_tail;
-    enip_tag_p in_flight;
-    enip_tag_p sched_cursor; /* service_special_tags walk position; sched_mutex */
-
-    enip_tag_p batch_head;
-    uint16_t batch_count;
-    uint16_t batch_complete_idx;
-
-    Arena arena;
-
-    size_t max_cip_packet_size;
-    size_t rx_cap;
-    uint16_t max_batch;
-
-    int64_t reconnect_at_ms;
-
-    /* idle disconnect (§ test_idle_disconnect); plain scalars, best-effort
-     * cross-thread access -- the IO thread writes conn_status/last_activity_ms,
-     * the API thread reads status and reads/writes inactivity_timeout_ms. */
-    int64_t inactivity_timeout_ms;
-    int64_t last_activity_ms;
-    uint8_t conn_status; /* PLCTAG_CONN_STATUS_* */
-
-    /* conn-status event ring; IO thread writes via set_conn_status, @connection
-     * tags drain via enip_session_next_conn_status. */
-    uint8_t conn_status_ring[ENIP_CONN_STATUS_RING_SIZE];
-    atomic_int32_t conn_status_ring_write_idx;
-
-    /* CIP Identity object, queried once during bring-up (§ @identity). Raw
-     * Get_Attributes_All payload cached for @identity tags; parsed fields kept
-     * for device detection. identity_data is mem_alloc'd, freed in destructor. */
-    bool identity_valid;
-    uint8_t *identity_data;
-    uint16_t identity_len;
-    uint16_t ident_vendor_id, ident_device_type, ident_product_code;
-    uint8_t ident_rev_major, ident_rev_minor;
-    uint16_t ident_status;
-    uint32_t ident_serial;
-    enip_plc_type_t plc_type; /* auto-detected PLC family; drives feature selection */
-
-    /* Manufacturer dialect (§16a.4): build/apply function pointers + the two
-     * sizing numbers. Defaults to &enip_logix_dialect at creation; reselected
-     * from the Identity reply at the end of bring-up. Never NULL. */
-    const enip_dialect_t *dialect;
-
-    uint8_t state;
-    uint8_t resume_state;
-
-    uint8_t *tx_buf;
-    size_t tx_len, tx_off;
-
-    uint8_t *rx_buf;
-    size_t rx_len;
-
-    atomic_bool terminate;
-};
+/* struct enip_connection_t's full definition moved to
+ * enip_connection_internal.h (3.d) -- shared with the dialect plugins
+ * (dialects/rockwell/logix_client.c, dialects/omron/omron_client.c,
+ * dialects/pccc/pccc_client.c), which need field access the same way this
+ * file does. Still opaque to everything outside this seam via
+ * enip_session.h. */
 
 /* Connection registry (§13.7). Colocated here -- enip_session_create() does
  * the find-or-create and link; conn_destructor() unlinks. */
@@ -253,7 +156,6 @@ static void service_due_tags(enip_connection_t *c, int64_t now);
 static int64_t rearm_time(enip_tag_p t, int64_t now);
 static int64_t next_special_wait(enip_connection_t *c, int64_t now, int64_t cap);
 static int32_t build_request(enip_connection_t *c);
-static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest);
 static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t);
 static int32_t build_batch_request(enip_connection_t *c);
 static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status);
@@ -276,11 +178,6 @@ static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr);
 static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
 static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
-static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
-static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t);
-static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
-static Bytes enip_omron_build_listing(Arena *a, enip_tag_p t);
-static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more);
 static const enip_dialect_t *listing_dialect_for(enip_connection_t *c);
 
 /* A tag that issues network ops via pick_batch (vs. the special tags that the
@@ -1104,7 +1001,7 @@ static int32_t step_waiting(enip_connection_t *c) {
     enip_eip_hdr_t hdr;
     Bytes payload;
 
-    if(!enip_eip_decode(bytes_from_buf(c->rx_buf, total), &hdr, &payload)) {
+    if(!eip_decode(bytes_from_buf(c->rx_buf, total), &hdr, &payload)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to decode EIP reply frame!");
         reset_connection(c);
         return PLCTAG_ERR_BAD_REPLY;
@@ -1148,7 +1045,7 @@ static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes paylo
     uint16_t seq = 0;
     Bytes cip;
 
-    if(!enip_cpf_unwrap(payload, false, &seq, &cip)) {
+    if(!cpf_unwrap(payload, false, NULL, &seq, &cip)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to unwrap ForwardOpen CPF reply!");
         reset_connection(c);
         return;
@@ -1186,7 +1083,7 @@ static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payl
         uint16_t seq = 0;
         Bytes cip;
 
-        if(enip_cpf_unwrap(payload, false, &seq, &cip)) {
+        if(cpf_unwrap(payload, false, NULL, &seq, &cip)) {
             cip_reply_t reply;
 
             if(enip_cip_parse_reply(cip, &reply) && reply.status != 0) {
@@ -1228,7 +1125,7 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
         uint16_t seq = 0;
         Bytes cip;
 
-        if(!enip_cpf_unwrap(payload, true, &seq, &cip)) {
+        if(!cpf_unwrap(payload, true, NULL, &seq, &cip)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to unwrap connected CPF reply!");
             status = (int8_t)PLCTAG_ERR_BAD_REPLY;
         } else if(t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT) {
@@ -1279,13 +1176,13 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
  * t->read_off (the write cursor) and t->write_window_elems (computed once at
  * OPEN_PROBE). Shared by build_tag_request (to size the outgoing request) and
  * apply_tag_reply (to advance the cursor by the same amount on success). */
-static uint32_t write_window_count(enip_tag_p t) {
+extern uint32_t write_window_count(enip_tag_p t) {
     uint32_t n = t->elem_count - t->read_off;
     if(n > t->write_window_elems) { n = t->write_window_elems; }
     return n;
 }
 
-static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+extern int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
     t->frag_more = false;
 
     if(t->op == ENIP_OP_OPEN_PROBE) {
@@ -1590,83 +1487,6 @@ static int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-/* Logix/Micro800 apply (enip_dialect_t.apply): parse one CIP reply, treat any
- * non-zero CIP status other than CIP_STATUS_FRAG (§16a.6: fragmentation
- * continuation, not an error) as a remote error, copy into t->data via
- * apply_tag_reply, and set *more when another read/write window (or
- * fragment) is due. Caller holds api_mutex. */
-static int32_t enip_logix_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
-    *more = false;
-
-    cip_reply_t reply;
-    if(!enip_cip_parse_reply(cip_reply, &reply)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse CIP reply!");
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    if(reply.status != 0 && reply.status != CIP_STATUS_FRAG) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "CIP error 0x%02X (ext 0x%04X).", reply.status, reply.ext_status);
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    int32_t rc = apply_tag_reply(c, t, reply.status, reply.data);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        if(t->frag_more) {
-            *more = true;
-        } else if((t->op == ENIP_OP_OPEN_BULK || t->op == ENIP_OP_READ || t->op == ENIP_OP_WRITE)
-                  && t->read_off < t->elem_count) {
-            *more = true;
-        }
-    }
-
-    return rc;
-}
-
-/* requested_cip_size 4002: the Large Forward Open size ControlLogix/
- * CompactLogix/GuardLogix (5580/5380/5370) and Micro800 "E" (2080-L50E/L70E)
- * grant, per vendor documentation (unverified against real hardware in this
- * tree). §16.4: the connection always tries Large Forward Open (0x5B) first
- * with this size and falls back to a plain 504-byte standard Forward Open
- * (0x54) if the target rejects 0x5B with CIP 0x08 -- so a target that can't
- * actually do 4002 (older Micro800, or anything else) just costs one extra
- * round trip on first connect, not a wrong value. */
-const enip_dialect_t enip_logix_dialect = {
-    .name = "logix",
-    .requested_cip_size = 4002,
-    .max_batch_cap = 0, /* no cap: Multiple Service Packet (0x0A) supported */
-    .build = enip_logix_build,
-    .apply = enip_logix_apply,
-    .build_listing = enip_logix_build_listing,
-    .apply_listing = enip_logix_apply_listing,
-};
-
-/* OMRON-SPECIFIC-DESIGN.md §6: same build/apply as Logix (§1 -- identical path
- * encoding, Read/Write Tag services, and CIP Common Format reply framing);
- * only the requested Forward Open size differs (§2.2 family default). */
-/* requested_cip_size 1892: "modern Sysmac standard" per vendor documentation
- * (unverified against real hardware in this tree) -- covers the NX1/NJ
- * mainline (NX102, NX1P2, NJ501, NJ301). The flagship NX7-series (NX701) is
- * documented as negotiating up to 9600, and legacy CJ1W-EIP21/early-NJ
- * bridges as low as 1444; this dialect doesn't distinguish those from the
- * mainline (no sub-family classification -- common/plc_classify.c only
- * resolves to ENIP_PLC_OMRON_NJNX, not a specific catalog line), so 1892 is
- * the safer common denominator: Forward Open is accept/reject, not a
- * negotiate-down, so a target that can't honor 1892 rejects the connection
- * outright rather than silently granting less. A target that can't do Large
- * Forward Open at all still recovers via the 0x08 fallback (§16.4); a
- * target that supports 0x5B but rejects this specific size for some other
- * reason is a hard failure, same as an oversized standard-FO request always
- * was. */
-const enip_dialect_t enip_omron_dialect = {
-    .name = "omron-njnx",
-    .requested_cip_size = 1892,
-    .max_batch_cap = 0,
-    .build = enip_logix_build,
-    .apply = enip_logix_apply,
-    .build_listing = enip_omron_build_listing,
-    .apply_listing = enip_omron_apply_listing,
-};
 
 /* §16a.4 dialect selection from the classified PLC family. PCCC families are
  * distinguished by name at tag create (ENIP_TAG_KIND_PCCC), not here -- see
@@ -1676,440 +1496,11 @@ const enip_dialect_t *enip_dialect_select(enip_plc_type_t plc_type) {
     return &enip_logix_dialect;
 }
 
-/* Logix/Micro800 symbolic build (enip_dialect_t.build): encode the CIP
- * sub-request for t's current data op into the caller-owned `dest` region.
- * Returns the used prefix of dest, or bytes_null() if it does not fit / on
- * error. Uses c->arena as scratch (the existing CIP encoders allocate there).
- * Caller holds t->api_mutex. */
-static Bytes enip_logix_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
-    Arena *a = &c->arena;
-    Bytes req = bytes_null();
-
-    switch(t->op) {
-        /* §16a.6: always ReadFrag (offset 0), not plain ReadTag -- for an
-         * element that fits, the reply is identical (status 0, all the
-         * data); for one that doesn't, the device signals CIP_STATUS_FRAG
-         * and apply_tag_reply switches to ENIP_OP_OPEN_PROBE_FRAG instead of
-         * this needing a client-side "will it fit" pre-check. */
-        case ENIP_OP_OPEN_PROBE: req = enip_cip_read_frag(a, t->path, 1, 0); break;
-
-        case ENIP_OP_OPEN_PROBE_FRAG: req = enip_cip_read_frag(a, t->path, 1, t->frag_offset); break;
-
-        case ENIP_OP_OPEN_BULK: {
-            uint32_t n = t->elem_count - t->read_off;
-            if(n > t->window_elems) { n = t->window_elems; }
-            Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
-            req = enip_cip_read(a, path, (uint16_t)n);
-            break;
-        }
-
-        case ENIP_OP_READ:
-            if(t->fragmented_elem) {
-                req = enip_cip_read_frag(a, t->path, 1, t->frag_offset);
-            } else if(t->elem_count <= 1) {
-                req = enip_cip_read(a, t->path, (uint16_t)t->elem_count);
-            } else {
-                uint32_t n = t->elem_count - t->read_off;
-                if(n > t->window_elems) { n = t->window_elems; }
-                Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
-                req = enip_cip_read(a, path, (uint16_t)n);
-            }
-            break;
-
-        case ENIP_OP_WRITE: {
-            Bytes type_header = bytes_from_buf(t->type_header, t->type_header_len);
-            if(t->fragmented_elem) {
-                /* §16a.6: fixed-size aligned chunk, computed once at
-                 * fragmentation-detection time (see apply_tag_reply's
-                 * OPEN_PROBE_FRAG completion) so build and apply always
-                 * agree on the chunk boundary without exchanging state. */
-                size_t remaining = (size_t)t->size - (size_t)t->frag_offset;
-                size_t chunk = (remaining < (size_t)t->frag_write_chunk) ? remaining : (size_t)t->frag_write_chunk;
-                Bytes data = bytes_from_buf(t->data + t->frag_offset, chunk);
-                req = enip_cip_write_frag(a, t->path, type_header, 1, t->frag_offset, data);
-            } else if(t->elem_count <= 1) {
-                Bytes data = bytes_from_buf(t->data, (size_t)t->size);
-                req = enip_cip_write(a, t->path, type_header, (uint16_t)t->elem_count, data);
-            } else {
-                uint32_t n = write_window_count(t);
-                Bytes path = enip_cip_encode_path_at(a, t->path, t->read_off);
-                Bytes data = bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, (size_t)n * (size_t)t->elem_size);
-                req = enip_cip_write(a, path, type_header, (uint16_t)n, data);
-            }
-            break;
-        }
-
-        default: return bytes_null();
-    }
-
-    if(bytes_is_null(req)) { return bytes_null(); }
-
-    if(bytes_is_null(bytes_pack_into(dest, BYTES_LE, req))) { return bytes_null(); }
-    return bytes_from_buf(dest.data, req.len);
-}
-
-/* ============================================================================
- * PCCC dialect: PLC-5 / SLC500 / MicroLogix (Execute-PCCC, CIP service 0x4B).
- * The CIP request rides the same connected CPF+EIP wrap as the symbolic dialect;
- * build/apply just speak PCCC. Reuses ab/pccc.c's pure address encoders.
- * ========================================================================= */
-
-#define PCCC_EXECUTE_SVC ((uint8_t)0x4B)
-#define PCCC_TYPED_CMD ((uint8_t)0x0F)
-#define PCCC_PLC5_READ_FNC ((uint8_t)0x01)
-#define PCCC_PLC5_WRITE_FNC ((uint8_t)0x00)
-#define PCCC_SLC_READ_FNC ((uint8_t)0xA2)
-#define PCCC_SLC_WRITE_FNC ((uint8_t)0xAA)
-#define PCCC_PLC5_RMW_FNC ((uint8_t)0x26)
-#define PCCC_SLC_RMW_FNC ((uint8_t)0xAB)
-#define PCCC_VENDOR_ID ((uint16_t)0xF33D)     /* matches ab/defs.h AB_EIP_VENDOR_ID */
-#define PCCC_VENDOR_SN ((uint32_t)0x21504345) /* matches ab/defs.h AB_EIP_VENDOR_SN */
-/* In a parsed reply.data: requestor id (7) + PCCC cmd(1)+sts(1)+tns(2) = 11. */
-#define PCCC_REPLY_HDR ((size_t)11)
-#define PCCC_REPLY_STS_OFF ((size_t)8)
-
-/* PCCC has no fragmentation status (unlike Logix's CIP_STATUS_FRAG), so every
- * read/write/@tags-listing round trip is capped at a fixed page that fits
- * comfortably under the single-byte SLC transfer-size field (max 255) and
- * typical DF1/EtherNet-IP embedded-packet limits. Data ops chunk across
- * multiple round trips by walking the element cursor (t->read_off); the
- * File-0 listing chunks by word offset (t->list_next_id) -- see below. */
-#define PCCC_MAX_TRANSFER_BYTES ((size_t)240)
-#define PCCC_MAX_TRANSFER_WORDS ((uint16_t)(PCCC_MAX_TRANSFER_BYTES / 2))
-
-/* Write the CIP/PCCC header + requestor id shared by every Execute-PCCC
- * request (13 bytes), then the PCCC command fields up to and including FNC.
- * Returns the unfilled remainder of dest (bytes_null() if dest was too
- * small), so callers thread it as their write cursor for the rest of the
- * request. */
-static Bytes pccc_write_header(Bytes dest, uint16_t tns, uint8_t fnc) {
-    return bytes_pack_into(dest, BYTES_LE,
-                           (uint8_t)PCCC_EXECUTE_SVC, (uint8_t)0x02 /* path size in 16-bit words */,
-                           (uint8_t)0x20, (uint8_t)0x67, (uint8_t)0x24, (uint8_t)0x01 /* PCCC object 0x67 inst 1 */,
-                           (uint8_t)0x07 /* requestor id size = vendor_id(2) + serial(4) + this byte */,
-                           (uint16_t)PCCC_VENDOR_ID, (uint32_t)PCCC_VENDOR_SN,
-                           (uint8_t)PCCC_TYPED_CMD, (uint8_t)0x00, tns, fnc);
-}
-
-/* PLC-5 masked bit write (Execute-PCCC function 0x26, "Protected Typed Logical
- * Read/Write with mask"): AND-mask/OR-mask pair, one byte per element byte.
- * The remote never learns the current value of the word -- only the target
- * bit's byte gets a non-0xFF/0x00 mask entry -- so unrelated bits are never
- * clobbered. Mirrors ab/pccc.c:plc5_tag_write_bit_start; server side is
- * dialects/pccc/pccc.c:handle_plc5_rmw. */
-static Bytes enip_pccc_build_plc5_bit_write(enip_connection_t *c, enip_tag_p t, Bytes dest) {
-    uint8_t addr_buf[32];
-    pccc_addr_t addr = t->pccc_addr;
-    Bytes encoded = enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
-    if(bytes_is_null(encoded) || encoded.len == 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
-        return bytes_null();
-    }
-
-    Bytes rest = pccc_write_header(dest, (uint16_t)(c->conn_seq + 1), PCCC_PLC5_RMW_FNC);
-    rest = bytes_pack_into(rest, BYTES_LE, encoded);
-    if(bytes_is_null(rest)) { return bytes_null(); }
-
-    size_t byte_idx = (size_t)(t->bit / 8);
-    uint8_t bit_mask = (uint8_t)(1u << (t->bit % 8));
-    bool bit_set = (t->data[byte_idx] & bit_mask) != 0;
-
-    for(uint32_t i = 0; i < t->elem_size && !bytes_is_null(rest); i++) {
-        uint8_t and_mask = ((size_t)i == byte_idx) ? (bit_set ? (uint8_t)0xFF : (uint8_t)~bit_mask) : (uint8_t)0xFF;
-        rest = bytes_pack_into(rest, BYTES_LE, and_mask);
-    }
-    for(uint32_t i = 0; i < t->elem_size && !bytes_is_null(rest); i++) {
-        uint8_t or_mask = ((size_t)i == byte_idx) ? (bit_set ? bit_mask : (uint8_t)0x00) : (uint8_t)0x00;
-        rest = bytes_pack_into(rest, BYTES_LE, or_mask);
-    }
-    if(bytes_is_null(rest)) { return bytes_null(); }
-
-    return bytes_from_buf(dest.data, dest.len - rest.len);
-}
-
-/* SLC/MicroLogix masked bit write (Execute-PCCC function 0xAB, "SLC Range
- * Write with mask"): a single 16-bit mask/set pair -- the mask is transmitted
- * as 2 bytes regardless of element size, so this only applies to 2-byte (B/N)
- * data files. A 32-bit L-file bit is not maskable this way (matches AB: real
- * hardware and run_enip_tests.sh's MicroLogix L-bit-write test both expect
- * failure). Mirrors ab/pccc.c:slc_tag_write_bit_start; server side is
- * dialects/pccc/pccc.c:handle_slc_rmw. */
-static Bytes enip_pccc_build_slc_bit_write(enip_connection_t *c, enip_tag_p t, Bytes dest) {
-    if(t->elem_size != 2 || t->size != 2) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id,
-               "SLC/MicroLogix masked bit write requires a 2-byte element (mask is 16 bits); got %u bytes.",
-               (unsigned)t->elem_size);
-        return bytes_null();
-    }
-
-    uint8_t addr_buf[32];
-    pccc_addr_t addr = t->pccc_addr;
-    Bytes encoded = enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
-    if(bytes_is_null(encoded) || encoded.len == 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
-        return bytes_null();
-    }
-
-    Bytes rest = pccc_write_header(dest, (uint16_t)(c->conn_seq + 1), PCCC_SLC_RMW_FNC);
-    rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)t->size /* transfer size in bytes, fixed at 2 */, encoded);
-    if(bytes_is_null(rest)) { return bytes_null(); }
-
-    uint8_t mask[2] = {0, 0};
-    mask[t->bit / 8] = (uint8_t)(1u << (t->bit % 8));
-
-    /* set bytes: only the masked bit is honored remotely, so t->data's other
-     * bits (whatever they happen to hold locally) are harmless. */
-    rest = bytes_pack_into(rest, BYTES_LE, bytes_from_buf(mask, sizeof(mask)), bytes_from_buf(t->data, 2));
-    if(bytes_is_null(rest)) { return bytes_null(); }
-
-    return bytes_from_buf(dest.data, dest.len - rest.len);
-}
-
-static Bytes enip_pccc_build(enip_connection_t *c, enip_tag_p t, Bytes dest) {
-    if(t->op != ENIP_OP_READ && t->op != ENIP_OP_WRITE) { return bytes_null(); }
-
-    /* A single-bit write must go out as a masked RMW, never a plain word
-     * write: t->data only ever holds the bit this tag cares about (it is
-     * never populated by a real read of the sibling bits), so overwriting the
-     * whole word would clobber them on real hardware. Bit reads need no
-     * special handling -- they fall through to the plain word read below and
-     * the generic plc_tag_get_bit() extracts the bit locally. */
-    if(t->is_bit && t->op == ENIP_OP_WRITE) {
-        return t->pccc_plc5 ? enip_pccc_build_plc5_bit_write(c, t, dest) : enip_pccc_build_slc_bit_write(c, t, dest);
-    }
-
-    bool is_write = (t->op == ENIP_OP_WRITE);
-
-    /* Chunk to <=PCCC_MAX_TRANSFER_BYTES per round trip: PCCC has no
-     * CIP_STATUS_FRAG equivalent, so a large array tag is walked one element
-     * chunk at a time via the element cursor t->read_off (reset to 0 for a
-     * fresh op in enip_tag_read/write), each chunk addressed by advancing the
-     * PCCC logical address's element field -- see apply() below for the other
-     * half of the loop. */
-    uint32_t remaining_elems = t->elem_count - t->read_off;
-    uint32_t max_elems = (uint32_t)(PCCC_MAX_TRANSFER_BYTES / (size_t)t->elem_size);
-    if(max_elems == 0) { max_elems = 1; }
-    uint32_t chunk_elems = (remaining_elems < max_elems) ? remaining_elems : max_elems;
-    size_t chunk_bytes = (size_t)chunk_elems * (size_t)t->elem_size;
-    size_t data_len = is_write ? chunk_bytes : 0;
-
-    /* Encode the logical address with the family encoder (copy: it may adjust), advanced to this chunk's starting element. */
-    uint8_t addr_buf[32];
-    pccc_addr_t addr = t->pccc_addr;
-    addr.element += (int32_t)t->read_off;
-    Bytes encoded = t->pccc_plc5 ? enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)))
-                                 : enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
-    if(bytes_is_null(encoded) || encoded.len == 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC logical address!");
-        return bytes_null();
-    }
-
-    uint16_t tns = (uint16_t)(c->conn_seq + 1);
-    uint8_t fnc = t->pccc_plc5 ? (is_write ? PCCC_PLC5_WRITE_FNC : PCCC_PLC5_READ_FNC)
-                               : (is_write ? PCCC_SLC_WRITE_FNC : PCCC_SLC_READ_FNC);
-    Bytes rest = pccc_write_header(dest, tns, fnc);
-
-    if(t->pccc_plc5) {
-        uint16_t words = (uint16_t)(chunk_bytes / 2u); /* transfer size in words, this chunk only */
-        rest = bytes_pack_into(rest, BYTES_LE, (uint16_t)0x0000 /* offset=0: each chunk uses its own address instead */,
-                               words, encoded);
-        if(!is_write && !bytes_is_null(rest)) {
-            rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)chunk_bytes); /* PLC-5 read appends this chunk's byte size */
-        }
-    } else {
-        rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)chunk_bytes /* transfer size in bytes, this chunk only (<=240) */,
-                               encoded);
-    }
-    if(bytes_is_null(rest)) { return bytes_null(); }
-
-    if(is_write) {
-        rest = bytes_pack_into(rest, BYTES_LE, bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, data_len));
-        if(bytes_is_null(rest)) { return bytes_null(); }
-    }
-
-    return bytes_from_buf(dest.data, dest.len - rest.len);
-}
-
-static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_reply, bool *more) {
-    (void)c;
-    *more = false;
-
-    cip_reply_t reply;
-    if(!enip_cip_parse_reply(cip_reply, &reply)) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to parse PCCC CIP reply!");
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    if(reply.status != 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC CIP error 0x%02X (ext 0x%04X).", reply.status, reply.ext_status);
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    if(reply.data.len < PCCC_REPLY_HDR) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC reply too short (%zu bytes)!", reply.data.len);
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    /* PCCC-level STS. 0xF0 carries an extended code in the next byte; treating
-     * any non-zero as a remote error is enough for the data path. */
-    uint8_t pccc_sts = reply.data.data[PCCC_REPLY_STS_OFF];
-    if(pccc_sts != 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC status error 0x%02X.", pccc_sts);
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    /* Same chunk-size formula as build() above, recomputed from the cursor
-     * build() used for this round trip (unchanged since then -- one round
-     * trip in flight at a time). */
-    uint32_t remaining_elems = t->elem_count - t->read_off;
-    uint32_t max_elems = (uint32_t)(PCCC_MAX_TRANSFER_BYTES / (size_t)t->elem_size);
-    if(max_elems == 0) { max_elems = 1; }
-    uint32_t chunk_elems = (remaining_elems < max_elems) ? remaining_elems : max_elems;
-
-    if(t->op == ENIP_OP_WRITE) {
-        t->read_off += chunk_elems;
-        if(t->read_off < t->elem_count) { *more = true; }
-        return PLCTAG_STATUS_OK;
-    }
-
-    size_t avail = reply.data.len - PCCC_REPLY_HDR;
-    size_t chunk_bytes = (size_t)chunk_elems * (size_t)t->elem_size;
-    size_t n = (avail < chunk_bytes) ? avail : chunk_bytes;
-    bytes_pack_into(bytes_from_buf(t->data + (size_t)t->read_off * (size_t)t->elem_size, n), BYTES_LE,
-                   bytes_from_buf(reply.data.data + PCCC_REPLY_HDR, n));
-    t->read_off += (uint32_t)(n / (size_t)t->elem_size);
-    if(t->read_off < t->elem_count) { *more = true; }
-    return PLCTAG_STATUS_OK;
-}
-
-/* PCCC "@tags" listing (File 0 system directory read). Per a vendor protocol
- * technical report (not independently verified against real PLC-5/SLC/
- * MicroLogix hardware in this tree): PCCC has no symbol-object equivalent to
- * Logix's class 0x6B, but every PCCC family exposes a fixed-width directory
- * record per data file in "File 0", readable with the ordinary word-range
- * read used for real data -- PLC-5's 2-address Word Range Read (FNC 0x01),
- * or SLC/MicroLogix's 3-address Typed Logical Read (FNC 0xA2) addressing
- * File 0 as an Integer file (0x89, the type code File 0 reports as). This
- * treats MicroLogix identically to SLC (6-byte records); the report also
- * describes an extended 8-byte record for specific newer MicroLogix variants
- * (e.g. 1400-series) that this does not distinguish or support -- a known
- * limitation, not a silent misread, since enip_plc_type_t has no MicroLogix
- * sub-family (see plc_type.h).
- *
- * Termination is inferred, not signaled: PCCC has no partial-transfer status
- * (unlike Logix's CIP_STATUS_FRAG), so apply_listing below infers "more"
- * purely from whether the reply came back exactly full. Both platforms'
- * record sizes (4 bytes/PLC-5, 6 bytes/SLC+MicroLogix) divide evenly into a
- * fixed 240-byte page, so one page size works for both with no per-platform
- * rounding, and it fits under the single-byte transfer-size field both
- * platforms' read wire format shares (max 255) -- see build below.
- *
- * t->list_next_id (reset to 0 by enip_listing_tag_read) is the next 16-bit
- * WORD offset into File 0; t->read_off is the accumulated raw byte length in
- * t->data -- both fields shared with Logix's own @tags use of the same
- * LISTING-kind tag (enip_dialect_t's listing seam, enip_dialect.h). The raw
- * buffer is bare concatenated native records, no per-record framing (matches
- * ENIP-METADATA-AND-DISCOVERY-DESIGN.md's raw-is-canonical model); parsed
- * access is via plc_tag_get_formatted_data(tag, PLCTAG_FORMAT_CBOR, ...)
- * (enip_tag.c), which knows the record layout from the connection's
- * identity-classified PLC family. */
-
-static Bytes enip_pccc_build_listing(Arena *a, enip_tag_p t) {
-    if(t->op != ENIP_OP_LIST) { return bytes_null(); }
-
-    enip_connection_t *c = t->conn;
-    bool is_plc5 = (c->plc_type == ENIP_PLC_PLC5);
-
-    /* File 0 has no name (it is the system directory itself); the address
-     * encoders below need only file/file_type/element/sub_element, not a
-     * parsed pccc_addr_t from a tag name -- built directly, not from
-     * t->pccc_addr (LISTING-kind tags don't have that union member). */
-    pccc_addr_t addr = {0};
-    addr.file = 0;
-    addr.file_type = PCCC_FILE_INT; /* File 0 reports as Integer-typed on SLC/MicroLogix; unused by the PLC-5 2-address encoder */
-    addr.element = (int32_t)t->list_next_id;
-    addr.sub_element = -1;
-
-    uint8_t addr_buf[32];
-    Bytes encoded = is_plc5 ? enip_pccc_encode_plc5_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)))
-                            : enip_pccc_encode_slc_address(&addr, bytes_from_buf(addr_buf, sizeof(addr_buf)));
-    if(bytes_is_null(encoded) || encoded.len == 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to encode PCCC File 0 address!");
-        return bytes_null();
-    }
-
-    size_t need = 13 /* CIP/PCCC header + requestor id, see pccc_write_header */ + (is_plc5 ? 5u : 1u) + encoded.len;
-    Bytes dest = bytes_alloc(a, need);
-    if(bytes_is_null(dest)) { return bytes_null(); }
-
-    Bytes rest = pccc_write_header(dest, (uint16_t)(c->conn_seq + 1), is_plc5 ? PCCC_PLC5_READ_FNC : PCCC_SLC_READ_FNC);
-
-    if(is_plc5) {
-        rest = bytes_pack_into(rest, BYTES_LE,
-                               (uint16_t)0x0000 /* byte offset = 0: whole-word range read, not a fragmented single element */,
-                               PCCC_MAX_TRANSFER_WORDS, encoded);
-        if(!bytes_is_null(rest)) {
-            rest = bytes_pack_into(rest, BYTES_LE,
-                                   (uint8_t)PCCC_MAX_TRANSFER_BYTES); /* PLC-5 read appends total byte size (fits: 240<=255) */
-        }
-    } else {
-        rest = bytes_pack_into(rest, BYTES_LE, (uint8_t)PCCC_MAX_TRANSFER_BYTES /* transfer size in bytes (fits: 240<=255) */,
-                               encoded);
-    }
-    if(bytes_is_null(rest)) { return bytes_null(); }
-
-    return bytes_from_buf(dest.data, dest.len - rest.len);
-}
-
-static int32_t enip_pccc_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
-    (void)cip_status; /* PCCC replies carry no CIP-level partial-transfer status */
-    *more = false;
-
-    if(data.len < PCCC_REPLY_HDR) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC File 0 reply too short (%zu bytes)!", data.len);
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    uint8_t pccc_sts = data.data[PCCC_REPLY_STS_OFF];
-    if(pccc_sts != 0) {
-        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "PCCC File 0 read status error 0x%02X.", pccc_sts);
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    size_t payload_len = data.len - PCCC_REPLY_HDR;
-
-    if(payload_len > 0) {
-        size_t need = (size_t)t->read_off + payload_len;
-        uint8_t *buf = mem_realloc(t->data, (int)need);
-        if(!buf) { return PLCTAG_ERR_NO_MEM; }
-        t->data = buf;
-        bytes_pack_into(bytes_from_buf(t->data + t->read_off, payload_len), BYTES_LE,
-                       bytes_from_buf(data.data + PCCC_REPLY_HDR, payload_len));
-        t->read_off = (uint32_t)need;
-        t->size = (int32_t)need;
-        t->list_next_id += (uint32_t)(payload_len / 2); /* advance the word cursor */
-    }
-
-    /* No PCCC partial-transfer signal exists (unlike Logix's CIP_STATUS_FRAG):
-     * a full page means "maybe more"; a short page is the last one. */
-    if(payload_len >= PCCC_MAX_TRANSFER_BYTES) { *more = true; }
-
-    return PLCTAG_STATUS_OK;
-}
-
-const enip_dialect_t enip_pccc_dialect = {
-    .name = "pccc",
-    .requested_cip_size = 0,
-    .max_batch_cap = 1, /* single in-flight: no Multiple Service (0x0A) packing */
-    .build = enip_pccc_build,
-    .apply = enip_pccc_apply,
-    .build_listing = enip_pccc_build_listing,
-    .apply_listing = enip_pccc_apply_listing,
-};
 
 /* @tags/@udt listing dialect for the connection: PCCC families (PLC-5/SLC/
- * MicroLogix) enumerate via File 0 (enip_pccc_dialect, above) rather than
- * c->dialect's regular symbolic build_listing/apply_listing -- independent
+ * MicroLogix) enumerate via File 0 (enip_pccc_dialect, dialects/pccc/
+ * pccc_client.c) rather than c->dialect's regular symbolic build_listing/
+ * apply_listing -- independent
  * of c->dialect itself, which stays Logix-shaped for every connection (PCCC
  * data ops are selected per-tag, not per-connection; see enip_dialect.h). */
 static const enip_dialect_t *listing_dialect_for(enip_connection_t *c) {
@@ -2182,7 +1573,7 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
         return PLCTAG_STATUS_OK;
     }
 
-    Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, req);
+    Bytes cpf = cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, req);
     Bytes frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
 
     if(bytes_is_null(frame)) {
@@ -2199,239 +1590,6 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
     c->state = CONN_SENDING;
 
     return PLCTAG_STATUS_OK;
-}
-
-/* Rockwell (ROCKWELL-SPECIFIC-DESIGN.md): @tags/@udt request for t's current
- * op, CIP class 0x6B (symbol) / 0x6C (template). read_off is the byte cursor
- * into the accumulated buffer; list_next_id is the symbol instance id (@tags)
- * or template id (@udt); list_total is the @udt field-definition byte target.
- * enip_dialect_t.build_listing for enip_logix_dialect. */
-static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t) {
-    switch(t->op) {
-        case ENIP_OP_LIST: return enip_cip_list_tags(a, t->path, (uint16_t)t->list_next_id);
-
-        case ENIP_OP_UDT_META: return enip_cip_udt_meta(a, (uint16_t)t->list_next_id);
-
-        case ENIP_OP_UDT_FIELDS: {
-            uint32_t remaining = (t->list_total > t->read_off) ? (t->list_total - t->read_off) : 0;
-            return enip_cip_udt_fields(a, (uint16_t)t->list_next_id, t->read_off, (uint16_t)remaining);
-        }
-
-        default: return bytes_null();
-    }
-}
-
-/* Rockwell: accumulate one @tags/@udt reply into t->data and advance the
- * continuation cursor. Sets *more when another request is needed (FRAG
- * status, or the UDT metadata->fields transition). Caller holds t->api_mutex.
- * enip_dialect_t.apply_listing for enip_logix_dialect. */
-static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
-    *more = false;
-
-    if(t->op == ENIP_OP_LIST) {
-        if(data.len > 0) {
-            size_t need = (size_t)t->read_off + data.len;
-            uint8_t *buf = mem_realloc(t->data, (int)need);
-            if(!buf) { return PLCTAG_ERR_NO_MEM; }
-            t->data = buf;
-            bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
-            t->read_off = (uint32_t)need;
-            t->size = (int32_t)need;
-
-            /* Walk this packet's entries to find the highest instance id. Each
-             * entry is a 22-byte fixed prefix (instance_id u32, symbol_type u16,
-             * element_length u16, array_dims 3xu32, string_len u16) + name. */
-            size_t off = 0;
-            while(off + 22 <= data.len) {
-                uint32_t inst = 0;
-                uint16_t name_len = 0;
-                bytes_unpack(bytes_from_buf(data.data + off, data.len - off), BYTES_LE, &inst, BYTES_SKIP(16), &name_len);
-                t->list_next_id = inst + 1;
-                off += (size_t)22 + name_len;
-            }
-        }
-
-        if(cip_status == CIP_STATUS_FRAG) { *more = true; }
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    if(t->op == ENIP_OP_UDT_META) {
-        /* The Get_Attribute_List reply packs count(2) then per-attribute
-         * {id(2), status(2), value}. Mirror the AB driver's fixed offsets to pull
-         * the four values and build a 14-byte synthetic header (udt id, field
-         * definition words, instance size, member count, handle). */
-        if(data.len < 30) { return PLCTAG_ERR_BAD_REPLY; }
-
-        uint32_t desc_words = 0, inst_size = 0;
-        uint16_t num_members = 0, handle = 0;
-        bytes_unpack(bytes_from_buf(data.data + 6, 4), BYTES_LE, &desc_words);
-        bytes_unpack(bytes_from_buf(data.data + 14, 4), BYTES_LE, &inst_size);
-        bytes_unpack(bytes_from_buf(data.data + 22, 2), BYTES_LE, &num_members);
-        bytes_unpack(bytes_from_buf(data.data + 28, 2), BYTES_LE, &handle);
-
-        uint8_t *buf = mem_realloc(t->data, 14);
-        if(!buf) { return PLCTAG_ERR_NO_MEM; }
-        t->data = buf;
-        Bytes hdr = bytes_from_buf(t->data, 14);
-        bytes_pack_into(hdr, BYTES_LE, (uint16_t)t->list_next_id, (uint32_t)desc_words, (uint32_t)inst_size,
-                        (uint16_t)num_members, (uint16_t)handle);
-        t->size = 14;
-
-        /* field-definition byte target (per the template docs), rounded up to 4. */
-        uint32_t total = (4 * desc_words) - 23;
-        t->list_total = (total + 3) & ~(uint32_t)3;
-        t->read_off = 0;
-
-        /* transition to reading the field definition bytes. */
-        t->op = ENIP_OP_UDT_FIELDS;
-        *more = true;
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    if(t->op == ENIP_OP_UDT_FIELDS) {
-        if(data.len > 0) {
-            size_t need = (size_t)14 + t->read_off + data.len;
-            uint8_t *buf = mem_realloc(t->data, (int)need);
-            if(!buf) { return PLCTAG_ERR_NO_MEM; }
-            t->data = buf;
-            bytes_pack_into(bytes_from_buf(t->data + 14 + t->read_off, data.len), BYTES_LE, data);
-            t->read_off += (uint32_t)data.len;
-            t->size = (int32_t)need;
-        }
-
-        if(cip_status == CIP_STATUS_FRAG) { *more = true; }
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    return PLCTAG_ERR_UNSUPPORTED;
-}
-
-/* OMRON (OMRON-SPECIFIC-DESIGN.md §5): @tags/@udt request for t's current op.
- * @tags walks the Tag Name Server (class 0x6A, Get_Instance_List_Ex2) in
- * pages of OMRON_LIST_PAGE; @udt is a single Get_Attribute_All on the
- * Variable Type Object (class 0x6C) -- list_next_id is the
- * variable_type_instance_id, set at tag create (same list_next_id/udt_id
- * convention Rockwell uses; see enip_tag.c). Unlike Rockwell there is no
- * separate metadata/field-definition split: one class-0x6C reply carries the
- * whole definition (fragmented, if needed, via ordinary CIP status 0x06).
- * enip_dialect_t.build_listing for enip_omron_dialect. */
-#define OMRON_LIST_PAGE ((uint32_t)100)
-#define OMRON_LIST_KIND_USER ((uint16_t)2)
-
-static Bytes enip_omron_build_listing(Arena *a, enip_tag_p t) {
-    switch(t->op) {
-        case ENIP_OP_LIST: return enip_cip_omron_list_tags(a, t->list_next_id, OMRON_LIST_PAGE, OMRON_LIST_KIND_USER);
-
-        case ENIP_OP_UDT_META: return enip_cip_omron_udt_get_all(a, t->list_next_id);
-
-        default: return bytes_null();
-    }
-}
-
-/* Extract next_instance_id/nesting_variable_type_instance_id from one
- * complete (non-fragmented) §5.3 Variable Type Object GetAttributeAll reply,
- * so enip_omron_apply_listing can walk the member-sibling chain and recurse
- * into nested UDTs. Parses array_dimension generically and skips past its
- * number_of_elements array rather than assuming it is 0, since this runs
- * against real OMRON firmware, not just device_sim (which does always send
- * 0 today). Returns false if data is too short to hold either field. */
-static bool omron_udt_reply_links(Bytes data, uint32_t *next_instance_id_out, uint32_t *nesting_instance_id_out) {
-    uint8_t array_dimension = 0;
-    Bytes rest = bytes_unpack(data, BYTES_LE, BYTES_SKIP(7) /* size_in_memory, reserved, cip_data_type(_array) */,
-                              &array_dimension);
-    if(bytes_is_null(rest)) { return false; }
-
-    rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP((size_t)array_dimension * 4u));
-    if(bytes_is_null(rest)) { return false; }
-
-    uint8_t name_len = 0;
-    rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(2) /* num_members */, BYTES_SKIP(4) /* reserved */,
-                        BYTES_SKIP(2) /* crc */, &name_len);
-    if(bytes_is_null(rest)) { return false; }
-
-    bool pad = (name_len % 2u) == 0u;
-    rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP((size_t)name_len + (pad ? 1u : 0u)));
-    if(bytes_is_null(rest)) { return false; }
-
-    return !bytes_is_null(bytes_unpack(rest, BYTES_LE, next_instance_id_out, nesting_instance_id_out));
-}
-
-/* Push id onto t's pending class-0x6C instance queue (dropped silently if
- * full or 0 -- 0 means "no more", not a real instance id). */
-static void omron_udt_walk_push(enip_tag_p t, uint32_t id) {
-    if(id == 0 || t->udt_walk_pending_count >= (sizeof(t->udt_walk_pending) / sizeof(t->udt_walk_pending[0]))) { return; }
-    t->udt_walk_pending[t->udt_walk_pending_count++] = id;
-}
-
-/* OMRON: accumulate one @tags/@udt reply into t->data verbatim (no synthetic
- * header -- @tags/@udt have no CBOR schema yet on any dialect, see
- * enip_tag.c's ENIP_TAG_KIND_LISTING/UDT doc comment, so raw bytes are all a
- * caller can get today; every reply visited by the @udt member-sibling walk
- * below is appended in visitation order). @tags advances list_next_id by the
- * reply's own instance_count and continues while its status byte is nonzero
- * (§5.1). @udt continues on ordinary CIP_STATUS_FRAG while one instance's
- * reply is still being assembled; once complete, next_instance_id/
- * nesting_variable_type_instance_id (§5.3) are queued and the walk continues
- * until the pending queue (udt_walk_pending) empties. Caller holds
- * t->api_mutex. enip_dialect_t.apply_listing for enip_omron_dialect. */
-static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes data, bool *more) {
-    *more = false;
-
-    if(t->op == ENIP_OP_LIST) {
-        if(data.len < 4) { return (data.len == 0) ? PLCTAG_STATUS_OK : PLCTAG_ERR_BAD_REPLY; }
-
-        uint16_t instance_count = 0;
-        uint8_t status_byte = 0;
-        bytes_unpack(data, BYTES_LE, &instance_count, &status_byte);
-
-        size_t need = (size_t)t->read_off + data.len;
-        uint8_t *buf = mem_realloc(t->data, (int)need);
-        if(!buf) { return PLCTAG_ERR_NO_MEM; }
-        t->data = buf;
-        bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
-        t->read_off = (uint32_t)need;
-        t->size = (int32_t)need;
-
-        t->list_next_id += instance_count;
-        if(status_byte != 0 && instance_count > 0) { *more = true; }
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    if(t->op == ENIP_OP_UDT_META) {
-        if(data.len > 0) {
-            size_t need = (size_t)t->read_off + data.len;
-            uint8_t *buf = mem_realloc(t->data, (int)need);
-            if(!buf) { return PLCTAG_ERR_NO_MEM; }
-            t->data = buf;
-            bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
-            t->read_off = (uint32_t)need;
-            t->size = (int32_t)need;
-        }
-
-        if(cip_status == CIP_STATUS_FRAG) {
-            *more = true; /* this instance's reply is still being assembled */
-            return PLCTAG_STATUS_OK;
-        }
-
-        uint32_t next_id = 0, nesting_id = 0;
-        if(omron_udt_reply_links(data, &next_id, &nesting_id)) {
-            omron_udt_walk_push(t, nesting_id); /* recurse into a nested UDT member first (order is arbitrary) */
-            omron_udt_walk_push(t, next_id);    /* then this template's next sibling member */
-        }
-
-        if(t->udt_walk_pending_count > 0) {
-            t->list_next_id = t->udt_walk_pending[--t->udt_walk_pending_count];
-            *more = true;
-        }
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    return PLCTAG_ERR_UNSUPPORTED;
 }
 
 static int32_t build_request(enip_connection_t *c) {
@@ -2492,7 +1650,7 @@ static int32_t build_batch_request(enip_connection_t *c) {
                        (uint8_t)0x20, (uint8_t)0x02, (uint8_t)0x24, (uint8_t)0x01, c->batch_count);
 
         Bytes ms = bytes_from_buf(ms_buf, cursor);
-        Bytes cpf = enip_cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
+        Bytes cpf = cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
         frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
     }
 
@@ -2543,7 +1701,7 @@ static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes 
 
     uint16_t seq = 0;
     Bytes cip;
-    if(!enip_cpf_unwrap(payload, true, &seq, &cip)) {
+    if(!cpf_unwrap(payload, true, NULL, &seq, &cip)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: unable to unwrap CPF!");
         complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
         c->state = CONN_READY;
@@ -2830,7 +1988,7 @@ static Bytes build_forward_open(enip_connection_t *c, bool use_large) {
     Bytes cip_payload = bytes_concat(a, fo_prefix, fo_params, fo_suffix, connection_path);
     if(bytes_is_null(cip_payload)) { return bytes_null(); }
 
-    Bytes cpf = enip_cpf_wrap_unconnected(a, cip_payload);
+    Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
     if(bytes_is_null(cpf)) { return bytes_null(); }
 
     return enip_eip_send_rr_data(a, c->session_handle, cpf);
@@ -2909,7 +2067,7 @@ static Bytes build_forward_close(enip_connection_t *c) {
     Bytes cip_payload = bytes_concat(a, fc_prefix, connection_path);
     if(bytes_is_null(cip_payload)) { return bytes_null(); }
 
-    Bytes cpf = enip_cpf_wrap_unconnected(a, cip_payload);
+    Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
     if(bytes_is_null(cpf)) { return bytes_null(); }
 
     return enip_eip_send_rr_data(a, c->session_handle, cpf);
@@ -2957,7 +2115,7 @@ static Bytes build_identity_request(enip_connection_t *c) {
         if(bytes_is_null(cip_payload)) { return bytes_null(); }
     }
 
-    Bytes cpf = enip_cpf_wrap_unconnected(a, cip_payload);
+    Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
     if(bytes_is_null(cpf)) { return bytes_null(); }
 
     return enip_eip_send_rr_data(a, c->session_handle, cpf);
@@ -2992,7 +2150,7 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
     uint16_t seq = 0;
     Bytes cip;
 
-    if(!enip_cpf_unwrap(payload, false, &seq, &cip)) {
+    if(!cpf_unwrap(payload, false, NULL, &seq, &cip)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to unwrap Identity CPF reply!");
         reset_connection(c);
         return;
@@ -3029,9 +2187,17 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
     c->identity_data = buf;
     c->identity_len = (uint16_t)reply.data.len;
 
-    /* parse the fixed-layout prefix; product name (SHORT_STRING) stays in buf. */
-    (void)bytes_unpack(reply.data, BYTES_LE, &c->ident_vendor_id, &c->ident_device_type, &c->ident_product_code,
-                       &c->ident_rev_major, &c->ident_rev_minor, &c->ident_status, &c->ident_serial);
+    /* Shared decode (common/identity.c); product name (SHORT_STRING) stays
+     * in buf -- only the fixed-layout scalar fields are kept on c. */
+    identity_t id = {0};
+    (void)identity_decode(reply.data, &id, NULL);
+    c->ident_vendor_id = id.vendor_id;
+    c->ident_device_type = id.device_type;
+    c->ident_product_code = id.product_code;
+    c->ident_rev_major = id.revision_major;
+    c->ident_rev_minor = id.revision_minor;
+    c->ident_status = id.status;
+    c->ident_serial = id.serial;
 
     c->plc_type = enip_classify_plc(c->ident_vendor_id, reply.data);
 
@@ -3044,12 +2210,12 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
         enip_plc_type_t override_type = enip_classify_plc_by_name(c->model);
         if(override_type != ENIP_PLC_UNKNOWN) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: model=\"%s\" overrides discovered family %s -> %s.", c->model,
-                   identity_plc_type_name(c->plc_type), identity_plc_type_name(override_type));
+                   plc_classify_name(c->plc_type), plc_classify_name(override_type));
             c->plc_type = override_type;
         } else {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0,
                    "Identity: model=\"%s\" does not match any known catalog prefix; keeping discovered family %s.", c->model,
-                   identity_plc_type_name(c->plc_type));
+                   plc_classify_name(c->plc_type));
         }
     }
 
@@ -3059,7 +2225,7 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "Identity: vendor=0x%04X device_type=0x%04X product=0x%04X rev=%u.%u serial=0x%08X.", c->ident_vendor_id,
            c->ident_device_type, c->ident_product_code, c->ident_rev_major, c->ident_rev_minor, c->ident_serial);
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: PLC family = %s.", identity_plc_type_name(c->plc_type));
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: PLC family = %s.", plc_classify_name(c->plc_type));
 
     c->state = CONN_OPEN;
 }

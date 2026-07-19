@@ -44,6 +44,7 @@
 #include "utils/debug.h"
 #include <libplctag/protocols/enip/server/device.h>
 #include "pccc.h"
+#include "pccc_defs.h"
 
 
 /* ============================================================================
@@ -51,24 +52,16 @@
  * ============================================================================ */
 
 static const uint8_t PCCC_RESP_PREFIX[11] = {0xcb, 0x00, 0x00, 0x00, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21};
-static const uint8_t PCCC_CMD_PREFIX[2]   = {0x0f, 0x00};
+static const uint8_t PCCC_CMD_PREFIX[2]   = {PCCC_TYPED_CMD, 0x00};
 
 #define PCCC_ERR_ADDR_NOT_USABLE ((uint8_t)0x06)
 #define PCCC_ERR_FILE_WRONG_SIZE ((uint8_t)0x07)
 #define PCCC_ERR_UNSUPPORTED_CMD ((uint8_t)0x0e)
 #define PCCC_DATA_FILE_PREFIX    ((uint8_t)0x06)
 
-#define PLC5_CMD_READ  ((uint8_t)0x01)
-#define PLC5_CMD_WRITE ((uint8_t)0x00)
-#define PLC5_CMD_RMW   ((uint8_t)0x26)
-#define SLC_CMD_READ   ((uint8_t)0xa2)
-#define SLC_CMD_WRITE  ((uint8_t)0xaa)
-#define SLC_CMD_RMW    ((uint8_t)0xab)
-
 #define PCCC_RESP_CMD  ((uint8_t)0x4f)
 
 #define PCCC_CIP_HEADER_SIZE      ((size_t)13)
-#define PCCC_MAX_TRANSFER_BYTES   ((size_t)240)
 
 /* ============================================================================
  * Forward declarations
@@ -126,9 +119,9 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
 
         if(dev->plc_type == ENIP_PLC_PLC5) {
             switch(cmd_byte) {
-                case PLC5_CMD_READ:  pccc_resp = handle_plc5_read(a, pccc_cmd, seq_id, dev);  break;
-                case PLC5_CMD_WRITE: pccc_resp = handle_plc5_write(a, pccc_cmd, seq_id, dev); break;
-                case PLC5_CMD_RMW:   pccc_resp = handle_plc5_rmw(a, pccc_cmd, seq_id, dev);   break;
+                case PCCC_PLC5_READ_FNC:  pccc_resp = handle_plc5_read(a, pccc_cmd, seq_id, dev);  break;
+                case PCCC_PLC5_WRITE_FNC: pccc_resp = handle_plc5_write(a, pccc_cmd, seq_id, dev); break;
+                case PCCC_PLC5_RMW_FNC:   pccc_resp = handle_plc5_rmw(a, pccc_cmd, seq_id, dev);   break;
                 default:
                     pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                            "PCCC PLC/5: unknown cmd 0x%02x.", (unsigned)cmd_byte);
@@ -137,9 +130,9 @@ extern Bytes pccc_dispatch(Arena *a, Bytes payload, eip_session_t *sess, device_
             }
         } else if(dev->plc_type == ENIP_PLC_SLC || dev->plc_type == ENIP_PLC_MLGX) {
             switch(cmd_byte) {
-                case SLC_CMD_READ:  pccc_resp = handle_slc_read(a, pccc_cmd, seq_id, dev);  break;
-                case SLC_CMD_WRITE: pccc_resp = handle_slc_write(a, pccc_cmd, seq_id, dev); break;
-                case SLC_CMD_RMW:   pccc_resp = handle_slc_rmw(a, pccc_cmd, seq_id, dev);   break;
+                case PCCC_SLC_READ_FNC:  pccc_resp = handle_slc_read(a, pccc_cmd, seq_id, dev);  break;
+                case PCCC_SLC_WRITE_FNC: pccc_resp = handle_slc_write(a, pccc_cmd, seq_id, dev); break;
+                case PCCC_SLC_RMW_FNC:   pccc_resp = handle_slc_rmw(a, pccc_cmd, seq_id, dev);   break;
                 default:
                     pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                            "PCCC SLC: unknown cmd 0x%02x.", (unsigned)cmd_byte);

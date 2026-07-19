@@ -33,11 +33,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
-#include <libplctag/protocols/enip/server/device.h>
 
 /* ============================================================================
  * CPF item type codes
@@ -60,8 +60,38 @@
 #define CPF_CONN_SEQ_NUM_SIZE          ((size_t)2)
 
 /* ============================================================================
- * Public API
+ * CPF wrap/unwrap codec — single source of truth for both the client
+ * (session.c, building requests / parsing replies) and the server (this
+ * file's cpf_handle_* dispatch, parsing requests / building responses).
  * ============================================================================ */
 
-extern Bytes cpf_handle_unconnected(Arena *a, Bytes payload, eip_session_t *sess, device_t *dev);
-extern Bytes cpf_handle_connected(Arena *a, Bytes payload, eip_session_t *sess, device_t *dev);
+/*
+ * Wrap a CIP payload for unconnected messaging (SendRRData):
+ *   header(iface=0, timeout=0, count=2) + Null Address Item + Unconnected Data Item(cip)
+ * Returns bytes_null() on arena exhaustion or a NULL cip.
+ */
+extern Bytes cpf_wrap_unconnected(Arena *a, Bytes cip);
+
+/*
+ * Wrap a CIP payload for connected messaging (SendUnitData):
+ *   header(count=2) + Connected Address Item(conn_id) + Connected Data Item(seq + cip)
+ * Returns bytes_null() on arena exhaustion or a NULL cip.
+ */
+extern Bytes cpf_wrap_connected(Arena *a, uint32_t conn_id, uint16_t seq, Bytes cip);
+
+/*
+ * Parse a CPF frame of exactly 2 items (address item + data item, the only
+ * shape either direction ever sends) and return the embedded CIP payload as
+ * a zero-copy slice of `in`. If `connected`, expects Connected Address/Data
+ * Items, strips the data item's leading 2-byte sequence number into
+ * *seq_out, and (if non-NULL) the address item's connection id into
+ * *conn_id_out; otherwise expects Null Address / Unconnected Data Items and
+ * sets *seq_out to 0. Returns false if the frame is malformed or the
+ * expected item types/count are wrong.
+ */
+extern bool cpf_unwrap(Bytes in, bool connected, uint32_t *conn_id_out, uint16_t *seq_out, Bytes *cip_out);
+
+/* Server-side dispatch (cpf_handle_unconnected/connected) lives in
+ * server/cpf_dispatch.h -- this file is the direction-agnostic codec only,
+ * built whenever ENIP is (client needs it too), with no device_t/
+ * eip_session_t dependency. */

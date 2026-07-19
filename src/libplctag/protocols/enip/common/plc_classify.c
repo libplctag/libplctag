@@ -128,3 +128,15 @@ extern enip_plc_type_t enip_classify_plc_by_name(const char *name) {
 
     return ENIP_PLC_UNKNOWN;
 }
+
+extern const char *plc_classify_name(enip_plc_type_t plc_type) {
+    switch(plc_type) {
+        case ENIP_PLC_PLC5: return "PLC-5";
+        case ENIP_PLC_SLC: return "SLC-500";
+        case ENIP_PLC_MLGX: return "MicroLogix";
+        case ENIP_PLC_LGX: return "ControlLogix-class";
+        case ENIP_PLC_MICRO800: return "Micro800";
+        case ENIP_PLC_OMRON_NJNX: return "OMRON NJ/NX";
+        case ENIP_PLC_UNKNOWN: default: return "unknown";
+    }
+}

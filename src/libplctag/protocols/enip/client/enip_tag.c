@@ -48,6 +48,7 @@
 #include <libplctag/protocols/enip/client/enip_cip.h>
 #include <libplctag/protocols/enip/client/enip_session.h>
 #include <libplctag/protocols/enip/client/enip_tag.h>
+#include <libplctag/protocols/enip/common/identity.h>
 #include <platform.h>
 #include <utils/arena.h>
 #include <utils/attr.h>
@@ -404,36 +405,18 @@ static int32_t enip_identity_tag_tickler(plc_tag_p tag) {
  * be written directly as a CBOR text string with no re-encoding. */
 #define CBOR_LIT(s) (s), (sizeof(s) - 1)
 
-/* Parsed view of the raw Get_Attributes_All payload cached in tag->data
- * (identity_encode_get_attrs_all's layout, common/identity.c). product_name
- * points directly into tag->data (not NUL-terminated, not copied). Returns
- * false if the payload is not yet cached or is malformed. */
-typedef struct {
-    uint16_t vendor_id, device_type, product_code, status;
-    uint8_t revision_major, revision_minor;
-    uint32_t serial;
-    const char *product_name;
-    uint8_t product_name_len;
-} enip_identity_fields_t;
-
-static bool enip_identity_parse_fields(plc_tag_p tag, enip_identity_fields_t *out) {
+/* Parsed view of the raw Get_Attributes_All payload cached in tag->data,
+ * via the shared identity_decode (common/identity.c). Returns false if the
+ * payload is not yet cached or is malformed. */
+static bool enip_identity_parse_fields(plc_tag_p tag, identity_t *out) {
     if(!tag->data || tag->size < 14) { return false; }
 
-    Bytes raw = bytes_from_buf(tag->data, (size_t)tag->size);
-    uint8_t name_len = 0;
-
-    Bytes rest = bytes_unpack(raw, BYTES_LE, &out->vendor_id, &out->device_type, &out->product_code, &out->revision_major,
-                              &out->revision_minor, &out->status, &out->serial, &name_len);
-    if(bytes_is_null(rest) || rest.len < (size_t)name_len) { return false; }
-
-    out->product_name = (const char *)rest.data;
-    out->product_name_len = name_len;
-
-    return true;
+    return identity_decode(bytes_from_buf(tag->data, (size_t)tag->size), out, NULL);
 }
 
 /* record map: 8 string-keyed fields (§0's per-record shape for "identity"). */
-static size_t enip_identity_record_cbor_size(const enip_identity_fields_t *f) {
+static size_t enip_identity_record_cbor_size(const identity_t *f) {
+    int32_t name_len = str_length(f->product_name);
     size_t sz = cbor_size_map_header(8);
     sz += cbor_size_text(sizeof("vendor_id") - 1) + cbor_size_uint(f->vendor_id);
     sz += cbor_size_text(sizeof("device_type") - 1) + cbor_size_uint(f->device_type);
@@ -442,11 +425,11 @@ static size_t enip_identity_record_cbor_size(const enip_identity_fields_t *f) {
     sz += cbor_size_text(sizeof("revision_minor") - 1) + cbor_size_uint(f->revision_minor);
     sz += cbor_size_text(sizeof("status") - 1) + cbor_size_uint(f->status);
     sz += cbor_size_text(sizeof("serial") - 1) + cbor_size_uint(f->serial);
-    sz += cbor_size_text(sizeof("product_name") - 1) + cbor_size_text(f->product_name_len);
+    sz += cbor_size_text(sizeof("product_name") - 1) + cbor_size_text((size_t)name_len);
     return sz;
 }
 
-static bool enip_identity_record_cbor_write(Bytes dest, size_t *pos, const enip_identity_fields_t *f) {
+static bool enip_identity_record_cbor_write(Bytes dest, size_t *pos, const identity_t *f) {
     if(!cbor_write_map_header(dest, pos, 8)) { return false; }
     if(!cbor_write_text(dest, pos, CBOR_LIT("vendor_id"))) { return false; }
     if(!cbor_write_uint(dest, pos, f->vendor_id)) { return false; }
@@ -463,12 +446,12 @@ static bool enip_identity_record_cbor_write(Bytes dest, size_t *pos, const enip_
     if(!cbor_write_text(dest, pos, CBOR_LIT("serial"))) { return false; }
     if(!cbor_write_uint(dest, pos, f->serial)) { return false; }
     if(!cbor_write_text(dest, pos, CBOR_LIT("product_name"))) { return false; }
-    if(!cbor_write_text(dest, pos, f->product_name, f->product_name_len)) { return false; }
+    if(!cbor_write_text(dest, pos, f->product_name, (size_t)str_length(f->product_name))) { return false; }
     return true;
 }
 
 /* top-level envelope: {"schema","schema-version","records":[<one record>]}. */
-static size_t enip_identity_envelope_cbor_size(const enip_identity_fields_t *f) {
+static size_t enip_identity_envelope_cbor_size(const identity_t *f) {
     size_t sz = cbor_size_map_header(3);
     sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_IDENTITY_SCHEMA_NAME) - 1);
     sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_IDENTITY_SCHEMA_VERSION);
@@ -477,7 +460,7 @@ static size_t enip_identity_envelope_cbor_size(const enip_identity_fields_t *f) 
     return sz;
 }
 
-static bool enip_identity_envelope_cbor_write(Bytes dest, size_t *pos, const enip_identity_fields_t *f) {
+static bool enip_identity_envelope_cbor_write(Bytes dest, size_t *pos, const identity_t *f) {
     if(!cbor_write_map_header(dest, pos, 3)) { return false; }
     if(!cbor_write_text(dest, pos, CBOR_LIT("schema"))) { return false; }
     if(!cbor_write_text(dest, pos, CBOR_LIT(ENIP_IDENTITY_SCHEMA_NAME))) { return false; }
@@ -491,7 +474,7 @@ static bool enip_identity_envelope_cbor_write(Bytes dest, size_t *pos, const eni
 static int enip_identity_get_formatted_data_size(plc_tag_p tag, plc_tag_format_type_t format) {
     if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
 
-    enip_identity_fields_t f;
+    identity_t f;
     if(!enip_identity_parse_fields(tag, &f)) { return PLCTAG_ERR_NO_DATA; }
 
     return (int)enip_identity_envelope_cbor_size(&f);
@@ -500,7 +483,7 @@ static int enip_identity_get_formatted_data_size(plc_tag_p tag, plc_tag_format_t
 static int enip_identity_get_formatted_data(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
 
-    enip_identity_fields_t f;
+    identity_t f;
     if(!enip_identity_parse_fields(tag, &f)) { return PLCTAG_ERR_NO_DATA; }
 
     if(enip_identity_envelope_cbor_size(&f) > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }

@@ -35,7 +35,7 @@
 
 #include "utils/arena.h"
 #include "utils/bytes.h"
-#include <libplctag/protocols/enip/server/device.h>   /* provides identity_t */
+#include <libplctag/protocols/enip/server/device_sim.h>   /* provides identity_t, enip_plc_type_t (POD only, no device_t) */
 
 /* Return the built-in default identity for a given PLC type (used at create time). */
 extern const identity_t *identity_for_plc_type(enip_plc_type_t pt);
@@ -45,6 +45,22 @@ extern const identity_t *identity_for_plc_type(enip_plc_type_t pt);
  * identity_for_plc_type(); an unrecognized model falls back to the family's
  * default and logs a warning. */
 extern const identity_t *identity_for_plc_type_model(enip_plc_type_t pt, const char *model);
+
+/*
+ * Decode a GetAttributesAll body (identity_encode_get_attrs_all's exact
+ * layout: vendor_id/device_type/product_code/revision_major/revision_minor/
+ * status/serial/name_len/name -- the same layout the real wire List
+ * Identity reply's identity fields use, and the CIP Get_Attributes_All
+ * reply for class 0x01 instance 1). product_name is copied into *out
+ * (truncated to IDENTITY_MAX_NAME-1 and NUL-terminated if the wire name is
+ * longer -- unlike the encode side, which is bounded by the same limit and
+ * so is always in range). out->state is not part of this layout and is left
+ * untouched by this call. *rest_out (if non-NULL) receives whatever bytes
+ * follow the name (e.g. the trailing device-state byte in a List Identity
+ * reply). Returns false if body is too short to contain the fixed prefix or
+ * the declared name.
+ */
+extern bool identity_decode(Bytes body, identity_t *out, Bytes *rest_out);
 
 /*
  * Encode GetAttributesAll body (no CIP response header).

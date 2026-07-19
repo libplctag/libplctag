@@ -37,7 +37,6 @@
 #include "platform.h"
 #include "utils/bytes.h"
 #include "utils/debug.h"
-#include <libplctag/protocols/enip/server/device.h>
 #include "identity.h"
 
 /* ============================================================================
@@ -308,6 +307,31 @@ extern const identity_t *identity_for_plc_type_model(enip_plc_type_t pt, const c
 }
 
 extern const identity_t *identity_for_plc_type(enip_plc_type_t pt) { return identity_for_plc_type_model(pt, NULL); }
+
+
+extern bool identity_decode(Bytes body, identity_t *out, Bytes *rest_out) {
+    if(!out) { return false; }
+
+    uint8_t name_len = 0;
+    Bytes rest = bytes_unpack(body, BYTES_LE, &out->vendor_id, &out->device_type, &out->product_code,
+                              &out->revision_major, &out->revision_minor, &out->status, &out->serial, &name_len);
+    if(bytes_is_null(rest) || rest.len < (size_t)name_len) { return false; }
+
+    size_t copy_len = (size_t)name_len;
+    if(copy_len >= sizeof(out->product_name)) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
+               "identity_decode: name_len=%u exceeds IDENTITY_MAX_NAME=%d, truncating.", (unsigned)name_len,
+               (int)sizeof(out->product_name));
+        copy_len = sizeof(out->product_name) - 1;
+    }
+    mem_copy(out->product_name, (void *)rest.data, (int)copy_len);
+    out->product_name[copy_len] = '\0';
+
+    Bytes after_name = bytes_slice(rest, (size_t)name_len, rest.len - (size_t)name_len);
+    if(rest_out) { *rest_out = after_name; }
+
+    return true;
+}
 
 
 extern Bytes identity_encode_get_attrs_all(Arena *a, const identity_t *id) {

@@ -34,6 +34,13 @@ endif()
   write_string
 )
 
+# ENIP-only CLI tools (enip-udp discovery, PLCTAG_FORMAT_CBOR) -- exercised
+# by src/tests/scripts/run_hardware_tests.sh and run_enip_tests.sh against
+# real hardware, not built when the feature is off.
+if(LIBPLCTAG_FEATURE_ENIP)
+    list(APPEND EXAMPLE_EXECUTABLES discover_identity identity_cbor)
+endif()
+
 foreach(example ${EXAMPLE_EXECUTABLES})
     if(example STREQUAL "simple_cpp")
         set(FILE_EXTENSION "cpp")

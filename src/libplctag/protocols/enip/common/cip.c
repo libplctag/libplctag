@@ -52,9 +52,10 @@
 #include "utils/bytes.h"
 #include "utils/debug.h"
 #include "cip.h"
+#include "cip_path.h"
 #include <libplctag/protocols/enip/server/device.h>
 #include <libplctag/protocols/enip/server/device_sim.h>
-#include "eip.h"
+#include <libplctag/protocols/enip/server/eip_dispatch.h>
 #include "identity.h"
 #include <libplctag/protocols/enip/dialects/pccc/pccc.h>
 
@@ -113,8 +114,6 @@ static atomic_int32_t s_conn_seq_counter = 1;
  * Forward declarations
  * ============================================================================ */
 
-static bool  parse_class_instance_path_wide(Bytes path, uint32_t *class_id,
-                                             uint32_t *instance_id, uint32_t *attr_id);
 static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
                              device_t *dev, size_t max_data);
 static bool  parse_cip_request(Bytes input, uint8_t *svc, Bytes *svc_path, Bytes *svc_payload);
@@ -134,8 +133,6 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
                           device_t *dev);
 static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
                           eip_session_t *sess, device_t *dev);
-static bool  parse_class_instance_path(Bytes path, uint8_t *class_id, uint8_t *instance_id,
-                                       uint8_t *attr_id);
 static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
                               device_t *dev);
 
@@ -388,52 +385,18 @@ static bool parse_tag_path(Bytes tag_path, device_t *dev, tag_def_t **tag_out,
 
     *tag_out = tag;
 
-    /* Parse optional numeric index segments. */
-    while(rest.len > 0) {
-        uint8_t idx_type = 0;
-        uint8_t  idx_val8  = 0;
-        uint16_t idx_val16 = 0;
-        uint32_t idx_val32 = 0;
-
-        if(*num_idx_out >= 3) {
-            pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "parse_tag_path: too many index segments.");
-            return false;
-        }
-
-        Bytes after_type = bytes_unpack(rest, BYTES_LE, &idx_type);
-        if(bytes_is_null(after_type)) { break; }
-
-        switch(idx_type) {
-            case 0x28: {
-                Bytes after_val = bytes_unpack(after_type, BYTES_LE, &idx_val8);
-                if(bytes_is_null(after_val)) { return false; }
-                indexes[(*num_idx_out)++] = (uint32_t)idx_val8;
-                rest = after_val;
-                break;
-            }
-            case 0x29: {
-                Bytes after_pad = bytes_unpack(after_type, BYTES_LE, BYTES_SKIP(1));
-                if(bytes_is_null(after_pad)) { return false; }
-                Bytes after_val = bytes_unpack(after_pad, BYTES_LE, &idx_val16);
-                if(bytes_is_null(after_val)) { return false; }
-                indexes[(*num_idx_out)++] = (uint32_t)idx_val16;
-                rest = after_val;
-                break;
-            }
-            case 0x2A: {
-                Bytes after_pad = bytes_unpack(after_type, BYTES_LE, BYTES_SKIP(1));
-                if(bytes_is_null(after_pad)) { return false; }
-                Bytes after_val = bytes_unpack(after_pad, BYTES_LE, &idx_val32);
-                if(bytes_is_null(after_val)) { return false; }
-                indexes[(*num_idx_out)++] = idx_val32;
-                rest = after_val;
-                break;
-            }
-            default:
-                pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
-                       "parse_tag_path: unknown index segment type 0x%02x.", (unsigned)idx_type);
-                return false;
-        }
+    /* Parse optional numeric index segments; any trailing bytes that aren't
+     * index segments are an error here (unlike cip_path_parse_indexes'
+     * generic leave-it-for-the-caller contract). */
+    Bytes idx_rest = {0};
+    if(!cip_path_parse_indexes(rest, num_idx_out, indexes, 3, &idx_rest)) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "parse_tag_path: malformed or too many index segments.");
+        return false;
+    }
+    if(idx_rest.len != 0) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
+               "parse_tag_path: unknown trailing segment type 0x%02x.", (unsigned)idx_rest.data[0]);
+        return false;
     }
 
     if(*num_idx_out != 0 && *num_idx_out != (uint32_t)tag->num_dimensions) {
@@ -489,80 +452,6 @@ static bool calc_offsets(tag_def_t *tag, uint32_t num_idx, uint32_t *indexes,
 
 
 /*
- * Parse a CIP logical class/instance/(optional)attribute path that may use
- * 8-bit (0x20/0x24/0x30), 16-bit (0x21/0x25/0x31), or 32-bit (0x22/0x26/0x32)
- * segment widths.  Returns true when at least a class and instance were found.
- */
-static bool parse_class_instance_path_wide(Bytes path, uint32_t *class_id,
-                                            uint32_t *instance_id, uint32_t *attr_id) {
-    *class_id = 0; *instance_id = 0; *attr_id = 0;
-
-    bool got_class    = false;
-    bool got_instance = false;
-    Bytes rest = path;
-
-    while(rest.len > 0) {
-        uint8_t seg = 0;
-        Bytes next = bytes_unpack(rest, BYTES_LE, &seg);
-        if(bytes_is_null(next)) { return false; }
-        rest = next;
-
-        if(seg == 0x20) { /* 8-bit class */
-            uint8_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, &v))) { return false; }
-            rest = next;
-            *class_id = v;
-            got_class = true;
-        } else if(seg == 0x21) { /* 16-bit class */
-            uint16_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
-            rest = next;
-            *class_id = v;
-            got_class = true;
-        } else if(seg == 0x22) { /* 32-bit class */
-            uint32_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
-            rest = next;
-            *class_id = v;
-            got_class = true;
-        } else if(seg == 0x24) { /* 8-bit instance */
-            uint8_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, &v))) { return false; }
-            rest = next;
-            *instance_id = v;
-            got_instance = true;
-        } else if(seg == 0x25) { /* 16-bit instance */
-            uint16_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
-            rest = next;
-            *instance_id = v;
-            got_instance = true;
-        } else if(seg == 0x26) { /* 32-bit instance */
-            uint32_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
-            rest = next;
-            *instance_id = v;
-            got_instance = true;
-        } else if(seg == 0x30) { /* 8-bit attribute */
-            uint8_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, &v))) { return false; }
-            rest = next;
-            *attr_id = v;
-        } else if(seg == 0x31) { /* 16-bit attribute */
-            uint16_t v = 0;
-            if(bytes_is_null(next = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1) /* pad */, &v))) { return false; }
-            rest = next;
-            *attr_id = v;
-        } else {
-            return false;
-        }
-    }
-
-    return got_class && got_instance;
-}
-
-
-/*
  * Consult the generic CIP object registry.  Returns null Bytes if no entry
  * matched or if the matching callback returned DEVICE_SIM_NOT_HANDLED; returns
  * a CIP response otherwise.  max_data is the max bytes of callback response
@@ -572,10 +461,11 @@ static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pay
                              device_t *dev, size_t max_data) {
     if(!dev->cip_objects) { return ((Bytes){NULL, 0}); }
 
-    uint32_t class_id = 0, instance_id = 0, attr_id = 0;
-    if(!parse_class_instance_path_wide(svc_path, &class_id, &instance_id, &attr_id)) {
+    cip_path_ids_t ids;
+    if(!cip_path_parse(svc_path, &ids)) {
         return ((Bytes){NULL, 0});
     }
+    uint32_t class_id = ids.class_id, instance_id = ids.instance_id, attr_id = ids.attr_id;
 
     /* Exact match first; fall back to wildcard (DEVICE_SIM_ANY_INSTANCE) entry. */
     cip_obj_entry_t *entry   = dev->cip_objects;
@@ -974,35 +864,17 @@ static Bytes handle_write(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_paylo
 }
 
 
-static bool parse_class_instance_path(Bytes path, uint8_t *class_id, uint8_t *instance_id,
-                                       uint8_t *attr_id) {
-    *attr_id = 0;
-
-    /* Logical class segment 8-bit: 0x20 + class_id; instance segment 8-bit: 0x24 + instance_id. */
-    uint8_t class_seg = 0, instance_seg = 0;
-    Bytes rest = bytes_unpack(path, BYTES_LE, &class_seg, class_id, &instance_seg, instance_id);
-    if(bytes_is_null(rest) || class_seg != 0x20 || instance_seg != 0x24) { return false; }
-
-    /* Optional logical attribute segment 8-bit: 0x30 + attr_id */
-    uint8_t attr_seg = 0, attr_val = 0;
-    if(!bytes_is_null(bytes_unpack(rest, BYTES_LE, &attr_seg, &attr_val)) && attr_seg == 0x30) {
-        *attr_id = attr_val;
-    }
-
-    return true;
-}
-
-
 static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
                               device_t *dev) {
     (void)svc_payload;
-    uint8_t class_id = 0, instance_id = 0, attr_id = 0;
+    cip_path_ids_t ids;
 
-    if(!parse_class_instance_path(svc_path, &class_id, &instance_id, &attr_id)) {
+    if(!cip_path_parse(svc_path, &ids)) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
                "handle_identity: malformed class/instance path (len=%zu).", svc_path.len);
         return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
     }
+    uint32_t class_id = ids.class_id, instance_id = ids.instance_id, attr_id = ids.attr_id;
 
     if(class_id != 0x01 || instance_id != 1) {
         pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,

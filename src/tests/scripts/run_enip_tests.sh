@@ -74,7 +74,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="tag_rw2 test_idle_disconnect test_shutdown_restart test_connection_tag test_connection_tag_late_join test_create_from_tag test_fairness thread_stress"
+EXECUTABLES="tag_rw2 test_idle_disconnect test_shutdown_restart test_connection_tag test_connection_tag_late_join test_create_from_tag test_fairness thread_stress identity_cbor discover_identity"
 for EXECUTABLE in $EXECUTABLES
 do
     if [[ ! -e "$TEST_DIR/$EXECUTABLE" ]]; then
@@ -213,6 +213,18 @@ run_grep_test "@identity device classified as ControlLogix" "identity_class" \
     "device is ControlLogix-class" \
     $VALGRIND$TEST_DIR/tag_rw2 --type=identity \
     "--tag=${BASE}&name=@identity" --debug=4
+
+# ----- @identity CBOR formatting (item 3.i: shared identity_decode) -----
+run_test "@identity PLCTAG_FORMAT_CBOR rendering" "identity_cbor" \
+    $VALGRIND$TEST_DIR/identity_cbor \
+    "--tag=${BASE}&name=@identity"
+
+# ----- enip-udp unicast discovery against the same known PLC (overlaps
+# run_hardware_tests.sh's broadcast coverage; this is the "does the wire
+# format even round-trip" smoke test, no subnet-wide broadcast needed) -----
+run_test "enip-udp unicast List Identity discovery" "discover_identity_unicast" \
+    $VALGRIND$TEST_DIR/discover_identity \
+    "--tag=protocol=enip-udp&gateway=${GW}&name=@identity"
 
 # ----- @tags / @udt listing (ControlLogix-class only; class 0x6B / 0x6C) -----
 # Controller-scope tag listing always exists on a Logix CPU. Dumped as raw bytes.
