@@ -282,8 +282,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if(is_async < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || base_tag_path == NULL
-       || base_tag_path[0] == '\0') {
+    if(is_async < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || base_tag_path == NULL || base_tag_path[0] == '\0') {
         fprintf(stderr, "Error: --mode, --groups, --threads, --tags, and --tag are required and must be valid.\n");
         usage(argv[0]);
     }

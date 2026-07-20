@@ -68,6 +68,9 @@ typedef struct {
     compat_atomic_int64_t min_wait_time;
 } tag_stats_t;
 
+static compat_mutex_t stats_mutex;
+static int shutting_down = 0;
+
 void usage(const char *prog_name) {
     printf(
         "Usage:\n"
@@ -89,6 +92,14 @@ void usage(const char *prog_name) {
 void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     (void)tag_id; /* tag_id is not used but kept for callback signature compatibility */
     tag_stats_t *stats = (tag_stats_t *)userdata;
+
+    if(compat_mutex_lock(&stats_mutex) != 0) { return; }
+
+    if(shutting_down) {
+        compat_mutex_unlock(&stats_mutex);
+        return;
+    }
+
     int64_t now = compat_time_ms();
 
     switch(event) {
@@ -122,6 +133,22 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
         default: break;
     }
+
+    compat_mutex_unlock(&stats_mutex);
+}
+
+static void cleanup_tags(tag_stats_t *stats, int num_created) {
+
+    compat_mutex_lock(&stats_mutex);
+    shutting_down = 1;
+    compat_mutex_unlock(&stats_mutex);
+
+    for(int i = 0; i < num_created; i++) {
+        int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
+        plc_tag_destroy(tag_id);
+    }
+
+    free(stats);
 }
 
 int main(int argc, char **argv) {
@@ -129,6 +156,7 @@ int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time, end_time;
     int num_tags = DEFAULT_NUM_TAGS;
+    int num_created = 0;
     int test_duration_secs = DEFAULT_TEST_DURATION_SECS;
     const char *tag_string = NULL;
 
@@ -173,6 +201,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if(compat_mutex_init(&stats_mutex) != 0) {
+        fprintf(stderr, "Error initializing stats mutex!\n");
+        free(stats);
+        return 1;
+    }
+
     fprintf(stderr, "Fairness Test\n");
     fprintf(stderr, "=============\n");
     fprintf(stderr, "Tags: %d\n", num_tags);
@@ -186,12 +220,13 @@ int main(int argc, char **argv) {
         int32_t tag_id = plc_tag_create_ex(tag_string, tag_callback, &stats[i], 0);
         if(tag_id < 0) {
             fprintf(stderr, "Failed to create tag %d: %s\n", i, plc_tag_decode_error(tag_id));
-            free(stats);
+            cleanup_tags(stats, num_created);
             return 1;
         }
 
         /* initialize stats with tag ID - must be set AFTER tag creation */
         compat_atomic_store_int32(&stats[i].tag_id, tag_id);
+        num_created++;
 
         if((i + 1) % 10 == 0) { fprintf(stderr, "  Created %d tags...\n", i + 1); }
     }
@@ -250,7 +285,7 @@ int main(int argc, char **argv) {
     int *read_counts = malloc((size_t)num_tags * sizeof(int));
     if(!read_counts) {
         fprintf(stderr, "Error allocating read_counts array!\n");
-        free(stats);
+        cleanup_tags(stats, num_created);
         return 1;
     }
 
@@ -277,7 +312,7 @@ int main(int argc, char **argv) {
     if(stats_calculate(read_counts, num_tags, &summary) != 0) {
         fprintf(stderr, "Error calculating statistics!\n");
         free(read_counts);
-        free(stats);
+        cleanup_tags(stats, num_created);
         return 1;
     }
 
@@ -292,12 +327,7 @@ int main(int argc, char **argv) {
 
     /* Cleanup */
     fprintf(stderr, "\nCleaning up...\n");
-    for(int i = 0; i < num_tags; i++) {
-        int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
-        plc_tag_destroy(tag_id);
-    }
-
-    free(stats);
+    cleanup_tags(stats, num_created);
 
     fprintf(stderr, "Done.\n");
 
