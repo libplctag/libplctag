@@ -64,7 +64,7 @@ typedef struct {
 
 
 /* global to cheat on passing it to threads. */
-volatile int done = 0;
+static compat_atomic_int32_t done = {0};
 
 
 static FILE *open_log(int tid) {
@@ -88,9 +88,9 @@ static int wait_ms(int timeout_ms) {
     int64_t timeout = 0;
 
     timeout = compat_time_ms() + timeout_ms;
-    while(!done && timeout > compat_time_ms()) { compat_sleep_ms(5, NULL); }
+    while(!compat_atomic_load_int32(&done) && timeout > compat_time_ms()) { compat_sleep_ms(5, NULL); }
 
-    if(!done) {
+    if(!compat_atomic_load_int32(&done)) {
         return PLCTAG_STATUS_OK;
     } else {
         return PLCTAG_ERR_ABORT;
@@ -157,7 +157,7 @@ static void *test_cip(void *data) {
     // NOLINTNEXTLINE
     fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, start_index);
 
-    while(!done) {
+    while(!compat_atomic_load_int32(&done)) {
         int64_t start = 0;
         int64_t end = 0;
 
@@ -236,7 +236,7 @@ static void *test_cip(void *data) {
 }
 
 
-static void interrupt_handler(void) { done = 1; }
+static void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
 
 
 #define MAX_THREADS (100)
@@ -300,11 +300,11 @@ int main(int argc, char **argv) {
     start_time = compat_time_ms();
     end_time = start_time + (int64_t)(seconds * 1000);
 
-    while(!done && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
+    while(!compat_atomic_load_int32(&done) && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
 
-    success = !done;
+    success = !compat_atomic_load_int32(&done);
 
-    done = 1;
+    compat_atomic_store_int32(&done, 1);
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(threads[tid], NULL); }
 

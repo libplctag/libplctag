@@ -76,9 +76,9 @@ void usage(void) {
     exit(PLCTAG_ERR_BAD_PARAM);
 }
 
-static volatile int done = 0;
+static compat_atomic_int32_t done = {0};
 
-static void interrupt_handler(void) { done = 1; }
+static void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
 
 static int read_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
 static int wait_for_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
@@ -156,18 +156,18 @@ int main(int argc, char **argv) {
     start = compat_time_ms();
 
     /* create the tags */
-    for(i = 0; i < num_tags && !done; i++) {
+    for(i = 0; i < num_tags && !compat_atomic_load_int32(&done); i++) {
         tags[i] = plc_tag_create(argv[2], 0);
         statuses[i] = plc_tag_status(tags[i]);
 
         if(tags[i] < 0) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Error %s: could not create tag %d\n", plc_tag_decode_error(tags[i]), i);
-            done = 1;
+            compat_atomic_store_int32(&done, 1);
         }
     }
 
-    if(!done) {
+    if(!compat_atomic_load_int32(&done)) {
         rc = wait_for_tags(tags, statuses, num_tags, TAG_CREATE_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
             for(int i = 0; i < num_tags; i++) {
@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
                 plc_tag_destroy(tags[i]);
             }
 
-            done = 1;
+            compat_atomic_store_int32(&done, 1);
         }
     }
 
@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creation of %d tags took %dms.\n", num_tags, (int)(end - start));
 
     /* read in a loop until ^C pressed */
-    while(!done && compat_time_ms() < end_time_ms) {
+    while(!compat_atomic_load_int32(&done) && compat_time_ms() < end_time_ms) {
         start = compat_time_ms();
 
         rc = read_tags(tags, statuses, num_tags, DATA_TIMEOUT);
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
                     if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
                         // NOLINTNEXTLINE
                         fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
-                        done = 1;
+                        compat_atomic_store_int32(&done, 1);
                     } else {
                         // NOLINTNEXTLINE
                         fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);

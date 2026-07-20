@@ -98,8 +98,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                                    void *userdata, int timeout, plc_tag_p src_tag);
 
 
-#ifdef LIPLCTAGDLL_EXPORTS
-#    if defined(_WIN32) || (defined(_WIN64)
+#ifdef LIBPLCTAGDLL_EXPORTS
+#    if defined(_WIN32) || defined(_WIN64)
 #        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
@@ -109,7 +109,16 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 
         case DLL_PROCESS_DETACH:
             // fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
-            plc_tag_shutdown();
+            /*
+             * Only tear down on an explicit FreeLibrary() (lpvReserved == NULL),
+             * where the process is still alive and our worker threads can be
+             * joined. When lpvReserved != NULL the process is terminating: the
+             * loader has already killed every other thread, so plc_tag_shutdown()
+             * would block forever waiting on them. Applications should still call
+             * plc_tag_shutdown() explicitly during orderly shutdown rather than
+             * rely on this path.
+             */
+            if(lpvReserved == NULL) { plc_tag_shutdown(); }
             break;
 
         case DLL_THREAD_ATTACH:
@@ -408,6 +417,13 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
     if(!tag || !tag->callback) { return; }
 
     critical_block(tag->api_mutex) {
+        /* Re-check the callback under the API mutex.  plc_tag_destroy() clears the
+         * callback (and userdata) under this same mutex while tearing the tag down.
+         * The tag tickler thread holds its own reference and can call this function
+         * after plc_tag_destroy() has returned, so without this guard it could invoke
+         * a stale callback and dereference userdata the caller has already freed. */
+        if(!tag->callback) { break; }
+
         /* trigger this if there is any other event. Only once. */
         if(tag->event_creation_complete) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag creation complete with status %s.",
@@ -1139,12 +1155,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     /* get the tag status. */
-    if(tag->vtable && tag->vtable->status) { rc = tag->vtable->status(tag); }
+    if(tag->vtable && tag->vtable->status) {
+        critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+    }
 
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-        if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+        if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
 
         /* remove the tag from the hashtable. */
         critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1180,7 +1198,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1191,7 +1209,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
             /* get the tag status. */
             if(tag->vtable && tag->vtable->status) {
-                rc = tag->vtable->status(tag);
+                critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have a status function!");
             }
@@ -1200,7 +1218,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag_lookup_mutex) { hashtable_remove(tags, (int64_t)tag->tag_id); }
@@ -1211,11 +1229,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* clear up any remaining flags.  This should be refactored. */
-        tag->read_in_flight = 0;
-        tag->write_in_flight = 0;
+        critical_block(tag->api_mutex) {
+            tag->read_in_flight = 0;
+            tag->write_in_flight = 0;
 
-        /* raise create event. */
-        tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+            /* raise create event. */
+            tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+        }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "tag set up elapsed time %" PRId64 "ms", (time_ms() - start_time));
     }
@@ -1679,6 +1699,15 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
     plc_tag_tickler_wake();
 
     plc_tag_generic_handle_event_callbacks(tag);
+
+    /* The tickler thread can still hold a reference and call
+     * plc_tag_generic_handle_event_callbacks() after this point,
+     * so clear the callback and userdata under the API mutex.
+     * This guarantees no stale callback fires after plc_tag_destroy(). */
+    critical_block(tag->api_mutex) {
+        tag->callback = NULL;
+        tag->userdata = NULL;
+    }
 
     /* release the reference outside the mutex. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 " and tag mutex not locked.",
