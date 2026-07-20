@@ -436,6 +436,39 @@ static void sched_unlink(enip_connection_t *c, enip_tag_p t) {
     t->scheduled = 0;
 }
 
+/* Per-op traits (3.e / plan item 3.3): complete_tag, build_tag_request, and
+ * is_batch_eligible each used to re-enumerate ENIP_OP_* in their own ||/switch
+ * ladder -- the exact bug class that produced last session's OMRON hang (a
+ * missing arm in one of them). One table now, sized off the last enip_op_t
+ * value; a new op appended after ENIP_OP_UDT_FIELDS defaults to all-false
+ * traits (not a compile error -- C's designated-initializer arrays can't
+ * enforce "every index named"), so still audit this table by hand whenever
+ * enip_op_t grows. The _Static_assert only guards ENIP_OP_COUNT itself
+ * against drifting out of sync with the macro that derives it. */
+#define ENIP_OP_COUNT (ENIP_OP_UDT_FIELDS + 1)
+
+typedef struct {
+    bool creates;    /* completion raises PLCTAG_EVENT_CREATED (the OPEN_* probe/bulk sequence) */
+    bool reads;      /* completion raises PLCTAG_EVENT_READ_COMPLETED (data read, or @tags/@udt) */
+    bool writes;     /* completion raises PLCTAG_EVENT_WRITE_COMPLETED */
+    bool listing;    /* build_tag_request routes through the dialect's build_listing, not build */
+    bool batchable;  /* is_batch_eligible may fold this op into a Multiple Service Packet */
+} enip_op_traits_t;
+
+static const enip_op_traits_t op_traits[ENIP_OP_COUNT] = {
+    [ENIP_OP_IDLE]            = {0},
+    [ENIP_OP_READ]            = {.reads = true, .batchable = true},
+    [ENIP_OP_WRITE]           = {.writes = true, .batchable = true},
+    [ENIP_OP_OPEN_PROBE]      = {.creates = true},
+    [ENIP_OP_OPEN_PROBE_FRAG] = {.creates = true},
+    [ENIP_OP_OPEN_BULK]       = {.creates = true},
+    [ENIP_OP_LIST]            = {.reads = true, .listing = true},
+    [ENIP_OP_UDT_META]        = {.reads = true, .listing = true},
+    [ENIP_OP_UDT_FIELDS]      = {.reads = true, .listing = true},
+};
+
+_Static_assert(sizeof(op_traits) / sizeof(op_traits[0]) == ENIP_OP_COUNT, "op_traits must cover every enip_op_t");
+
 static bool is_batch_eligible(enip_tag_p t) {
     if(t->kind != ENIP_TAG_KIND_DATA) { return false; }
     if(atomic_get_bool(&t->abort_requested)) { return false; }
@@ -444,9 +477,9 @@ static bool is_batch_eligible(enip_tag_p t) {
      * continuation loop; it can never be folded into a Multiple Service
      * Packet alongside other tags. */
     if(t->fragmented_elem) { return false; }
+    if(!op_traits[t->op].batchable) { return false; }
     if(t->op == ENIP_OP_READ) { return t->elem_count <= t->window_elems; }
-    if(t->op == ENIP_OP_WRITE) { return t->elem_count <= t->write_window_elems; }
-    return false;
+    return t->elem_count <= t->write_window_elems; /* ENIP_OP_WRITE, the only other batchable op */
 }
 
 static size_t batch_req_size(enip_tag_p t) {
@@ -1532,38 +1565,25 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
 
     Bytes req = bytes_null();
 
-    switch(t->op) {
-        case ENIP_OP_OPEN_PROBE:
-        case ENIP_OP_OPEN_PROBE_FRAG:
-        case ENIP_OP_OPEN_BULK:
-        case ENIP_OP_READ:
-        case ENIP_OP_WRITE:
-            req = dialect_build(c, t, c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD);
-            break;
-
-        case ENIP_OP_LIST:
-        case ENIP_OP_UDT_META:
-        case ENIP_OP_UDT_FIELDS:
-            /* @tags/@udt enumeration is dialect-specific (Rockwell and OMRON use
-             * different CIP classes/services -- see enip_dialect_t's
-             * build_listing doc). The device identity/dialect is known by the
-             * time pick_batch dispatches (queried during bring-up before
-             * CONN_READY). Reject when the connection's dialect has no listing
-             * support. */
-            {
-                const enip_dialect_t *ld = listing_dialect_for(c);
-                if(!ld->build_listing) {
-                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are not supported by dialect \"%s\"!",
-                           ld->name);
-                    complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
-                    c->state = CONN_READY;
-                    return PLCTAG_STATUS_OK;
-                }
-                req = ld->build_listing(&c->arena, t);
-            }
-            break;
-
-        default: break;
+    if(op_traits[t->op].listing) {
+        /* @tags/@udt enumeration is dialect-specific (Rockwell and OMRON use
+         * different CIP classes/services -- see enip_dialect_t's
+         * build_listing doc). The device identity/dialect is known by the
+         * time pick_batch dispatches (queried during bring-up before
+         * CONN_READY). Reject when the connection's dialect has no listing
+         * support. */
+        const enip_dialect_t *ld = listing_dialect_for(c);
+        if(!ld->build_listing) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "@tags/@udt are not supported by dialect \"%s\"!", ld->name);
+            complete_tag(c, t, (int8_t)PLCTAG_ERR_UNSUPPORTED);
+            c->state = CONN_READY;
+            return PLCTAG_STATUS_OK;
+        }
+        req = ld->build_listing(&c->arena, t);
+    } else if(t->op != ENIP_OP_IDLE) {
+        /* Every other live op (OPEN_PROBE/OPEN_PROBE_FRAG/OPEN_BULK/READ/WRITE)
+         * is a plain dialect-encoded data request. */
+        req = dialect_build(c, t, c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD);
     }
 
     if(bytes_is_null(req)) {
@@ -1807,9 +1827,9 @@ static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status) {
     } else {
         t->status = status;
 
-        if(t->op == ENIP_OP_OPEN_PROBE || t->op == ENIP_OP_OPEN_PROBE_FRAG || t->op == ENIP_OP_OPEN_BULK) {
+        if(op_traits[t->op].creates) {
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_CREATED, status);
-        } else if(t->op == ENIP_OP_READ || t->op == ENIP_OP_LIST || t->op == ENIP_OP_UDT_FIELDS || t->op == ENIP_OP_UDT_META) {
+        } else if(op_traits[t->op].reads) {
             /* Clear read_in_flight here (the global tickler used to do it via the
              * read_complete handshake, but ENIP tags skip that tickler). Without
              * this, generic_tickler's !read_in_flight guard blocks every later
@@ -1819,7 +1839,7 @@ static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status) {
             t->read_complete = 1;
             t->read_in_flight = 0;
             tag_raise_event((plc_tag_p)t, PLCTAG_EVENT_READ_COMPLETED, status);
-        } else if(t->op == ENIP_OP_WRITE) {
+        } else if(op_traits[t->op].writes) {
             t->write_complete = 1;
             t->write_in_flight = 0;
             t->auto_sync_next_write = 0;
