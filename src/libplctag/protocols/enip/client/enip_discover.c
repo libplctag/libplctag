@@ -48,6 +48,7 @@
  */
 
 #include <inttypes.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -62,6 +63,7 @@
 #include <utils/attr.h>
 #include <utils/bytes.h>
 #include <utils/cbor.h>
+#include <utils/cbor_schema.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 
@@ -536,10 +538,6 @@ static int enip_discover_get_int_attrib(plc_tag_p tag, const char *attrib_name, 
 #define ENIP_UDP_SCHEMA_NAME "enip-udp-identity"
 #define ENIP_UDP_SCHEMA_VERSION ((uint64_t)1)
 
-/* Same rationale as client/enip_tag.c's CBOR_LIT: CIP SHORT_STRING product
- * names are ASCII, valid UTF-8, and can be written as CBOR text as-is. */
-#define ENIP_UDP_CBOR_LIT(s) (s), (sizeof(s) - 1)
-
 typedef struct {
     uint32_t ip_host;
     uint16_t port, vendor_id, device_type, product_code, status;
@@ -580,55 +578,53 @@ static size_t enip_udp_parse_record_at(plc_tag_p tag, size_t off, enip_udp_recor
     return off + 2 + record_len;
 }
 
-/* record map: identity's 8 fields + ip/port/state (11 total). ip is a dotted
- * quad string, matching the "gateway" attribute's own notation. */
-static size_t enip_udp_record_cbor_size(const enip_udp_record_fields_t *f) {
-    char ip_buf[16];
-    enip_discover_format_ipv4(f->ip_host, ip_buf, sizeof(ip_buf));
+/* Pointer+length view of one record, for the generic cbor_field_t table
+ * below -- identity's 8 fields + ip/port/state (11 total). ip is a dotted
+ * quad string (not part of the raw wire record; formatted into a
+ * caller-owned buffer), matching the "gateway" attribute's own notation. */
+typedef struct {
+    const char *ip;
+    size_t ip_len;
+    uint16_t port, vendor_id, device_type, product_code, status;
+    uint8_t revision_major, revision_minor, state;
+    uint32_t serial;
+    const char *product_name;
+    size_t product_name_len;
+} enip_udp_view_t;
 
-    size_t sz = cbor_size_map_header(11);
-    sz += cbor_size_text(sizeof("ip") - 1) + cbor_size_text((size_t)str_length(ip_buf));
-    sz += cbor_size_text(sizeof("port") - 1) + cbor_size_uint(f->port);
-    sz += cbor_size_text(sizeof("vendor_id") - 1) + cbor_size_uint(f->vendor_id);
-    sz += cbor_size_text(sizeof("device_type") - 1) + cbor_size_uint(f->device_type);
-    sz += cbor_size_text(sizeof("product_code") - 1) + cbor_size_uint(f->product_code);
-    sz += cbor_size_text(sizeof("revision_major") - 1) + cbor_size_uint(f->revision_major);
-    sz += cbor_size_text(sizeof("revision_minor") - 1) + cbor_size_uint(f->revision_minor);
-    sz += cbor_size_text(sizeof("status") - 1) + cbor_size_uint(f->status);
-    sz += cbor_size_text(sizeof("serial") - 1) + cbor_size_uint(f->serial);
-    sz += cbor_size_text(sizeof("state") - 1) + cbor_size_uint(f->state);
-    sz += cbor_size_text(sizeof("product_name") - 1) + cbor_size_text(f->product_name_len);
-    return sz;
-}
+static const cbor_field_t ENIP_UDP_RECORD_FIELDS[] = {
+    {"ip", CBOR_FIELD_TEXT, offsetof(enip_udp_view_t, ip), offsetof(enip_udp_view_t, ip_len), -1},
+    {"port", CBOR_FIELD_U16, offsetof(enip_udp_view_t, port), 0, -1},
+    {"vendor_id", CBOR_FIELD_U16, offsetof(enip_udp_view_t, vendor_id), 0, -1},
+    {"device_type", CBOR_FIELD_U16, offsetof(enip_udp_view_t, device_type), 0, -1},
+    {"product_code", CBOR_FIELD_U16, offsetof(enip_udp_view_t, product_code), 0, -1},
+    {"revision_major", CBOR_FIELD_U8, offsetof(enip_udp_view_t, revision_major), 0, -1},
+    {"revision_minor", CBOR_FIELD_U8, offsetof(enip_udp_view_t, revision_minor), 0, -1},
+    {"status", CBOR_FIELD_U16, offsetof(enip_udp_view_t, status), 0, -1},
+    {"serial", CBOR_FIELD_U32, offsetof(enip_udp_view_t, serial), 0, -1},
+    {"state", CBOR_FIELD_U8, offsetof(enip_udp_view_t, state), 0, -1},
+    {"product_name", CBOR_FIELD_TEXT, offsetof(enip_udp_view_t, product_name), offsetof(enip_udp_view_t, product_name_len),
+     -1},
+};
+#define ENIP_UDP_RECORD_FIELD_COUNT ((size_t)(sizeof(ENIP_UDP_RECORD_FIELDS) / sizeof(ENIP_UDP_RECORD_FIELDS[0])))
 
-static bool enip_udp_record_cbor_write(Bytes dest, size_t *pos, const enip_udp_record_fields_t *f) {
-    char ip_buf[16];
-    enip_discover_format_ipv4(f->ip_host, ip_buf, sizeof(ip_buf));
-
-    if(!cbor_write_map_header(dest, pos, 11)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("ip"))) { return false; }
-    if(!cbor_write_text(dest, pos, ip_buf, (size_t)str_length(ip_buf))) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("port"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->port)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("vendor_id"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->vendor_id)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("device_type"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->device_type)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("product_code"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->product_code)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("revision_major"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->revision_major)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("revision_minor"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->revision_minor)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("status"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->status)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("serial"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->serial)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("state"))) { return false; }
-    if(!cbor_write_uint(dest, pos, f->state)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("product_name"))) { return false; }
-    if(!cbor_write_text(dest, pos, f->product_name, f->product_name_len)) { return false; }
-    return true;
+/* ip_buf must outlive the caller's use of *out (cbor_record_size/
+ * cbor_emit_record only borrow the pointer, they don't copy). */
+static void enip_udp_view_init(enip_udp_view_t *out, const enip_udp_record_fields_t *f, char *ip_buf, size_t ip_buf_size) {
+    enip_discover_format_ipv4(f->ip_host, ip_buf, ip_buf_size);
+    out->ip = ip_buf;
+    out->ip_len = (size_t)str_length(ip_buf);
+    out->port = f->port;
+    out->vendor_id = f->vendor_id;
+    out->device_type = f->device_type;
+    out->product_code = f->product_code;
+    out->revision_major = f->revision_major;
+    out->revision_minor = f->revision_minor;
+    out->status = f->status;
+    out->serial = f->serial;
+    out->state = f->state;
+    out->product_name = f->product_name;
+    out->product_name_len = f->product_name_len;
 }
 
 /* Two-pass envelope size/write: pass 1 walks tag->data to get the true
@@ -647,36 +643,33 @@ static bool enip_udp_envelope_cbor_size(plc_tag_p tag, size_t *record_count_out,
         enip_udp_record_fields_t f;
         size_t next = enip_udp_parse_record_at(tag, off, &f);
         if(next == 0) { break; }
-        records_size += enip_udp_record_cbor_size(&f);
+
+        char ip_buf[16];
+        enip_udp_view_t v;
+        enip_udp_view_init(&v, &f, ip_buf, sizeof(ip_buf));
+        records_size += cbor_record_size(ENIP_UDP_RECORD_FIELDS, ENIP_UDP_RECORD_FIELD_COUNT, &v);
         count++;
         off = next;
     }
 
-    size_t sz = cbor_size_map_header(3);
-    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_UDP_SCHEMA_NAME) - 1);
-    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_UDP_SCHEMA_VERSION);
-    sz += cbor_size_text(sizeof("records") - 1) + cbor_size_array_header(count) + records_size;
-
     *record_count_out = count;
-    *size_out = sz;
+    *size_out = cbor_envelope_size(ENIP_UDP_SCHEMA_NAME, ENIP_UDP_SCHEMA_VERSION, count, records_size);
     return true;
 }
 
 static bool enip_udp_envelope_cbor_write(plc_tag_p tag, size_t record_count, Bytes dest, size_t *pos) {
-    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema"))) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT(ENIP_UDP_SCHEMA_NAME))) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema-version"))) { return false; }
-    if(!cbor_write_uint(dest, pos, ENIP_UDP_SCHEMA_VERSION)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("records"))) { return false; }
-    if(!cbor_write_array_header(dest, pos, record_count)) { return false; }
+    if(!cbor_emit_envelope(dest, pos, ENIP_UDP_SCHEMA_NAME, ENIP_UDP_SCHEMA_VERSION, record_count)) { return false; }
 
     size_t off = 0;
     for(size_t i = 0; i < record_count; i++) {
         enip_udp_record_fields_t f;
         size_t next = enip_udp_parse_record_at(tag, off, &f);
         if(next == 0) { return false; } /* record count changed since the size pass -- shouldn't happen, no concurrent writer */
-        if(!enip_udp_record_cbor_write(dest, pos, &f)) { return false; }
+
+        char ip_buf[16];
+        enip_udp_view_t v;
+        enip_udp_view_init(&v, &f, ip_buf, sizeof(ip_buf));
+        if(!cbor_emit_record(dest, pos, ENIP_UDP_RECORD_FIELDS, ENIP_UDP_RECORD_FIELD_COUNT, &v)) { return false; }
         off = next;
     }
     return true;
@@ -712,43 +705,26 @@ static const char *const ENIP_UDP_FIELD_NAMES[] = {"ip",  "port",           "ven
                                                     "serial", "state", "product_name"};
 #define ENIP_UDP_FIELD_COUNT ((size_t)(sizeof(ENIP_UDP_FIELD_NAMES) / sizeof(ENIP_UDP_FIELD_NAMES[0])))
 
-static size_t enip_udp_schema_cbor_size(void) {
-    size_t sz = cbor_size_map_header(3);
-    sz += cbor_size_text(sizeof("schema") - 1) + cbor_size_text(sizeof(ENIP_UDP_SCHEMA_NAME) - 1);
-    sz += cbor_size_text(sizeof("schema-version") - 1) + cbor_size_uint(ENIP_UDP_SCHEMA_VERSION);
-    sz += cbor_size_text(sizeof("fields") - 1) + cbor_size_array_header(ENIP_UDP_FIELD_COUNT);
-    for(size_t i = 0; i < ENIP_UDP_FIELD_COUNT; i++) { sz += cbor_size_text((size_t)str_length(ENIP_UDP_FIELD_NAMES[i])); }
-    return sz;
-}
-
-static bool enip_udp_schema_cbor_write(Bytes dest, size_t *pos) {
-    if(!cbor_write_map_header(dest, pos, 3)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema"))) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT(ENIP_UDP_SCHEMA_NAME))) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("schema-version"))) { return false; }
-    if(!cbor_write_uint(dest, pos, ENIP_UDP_SCHEMA_VERSION)) { return false; }
-    if(!cbor_write_text(dest, pos, ENIP_UDP_CBOR_LIT("fields"))) { return false; }
-    if(!cbor_write_array_header(dest, pos, ENIP_UDP_FIELD_COUNT)) { return false; }
-    for(size_t i = 0; i < ENIP_UDP_FIELD_COUNT; i++) {
-        if(!cbor_write_text(dest, pos, ENIP_UDP_FIELD_NAMES[i], (size_t)str_length(ENIP_UDP_FIELD_NAMES[i]))) { return false; }
-    }
-    return true;
-}
-
 static int enip_discover_get_schema_size(plc_tag_p tag, plc_tag_format_type_t format) {
     (void)tag;
     if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
-    return (int)enip_udp_schema_cbor_size();
+    return (int)cbor_schema_size(ENIP_UDP_SCHEMA_NAME, ENIP_UDP_SCHEMA_VERSION, ENIP_UDP_FIELD_NAMES, ENIP_UDP_FIELD_COUNT);
 }
 
 static int enip_discover_get_schema(plc_tag_p tag, plc_tag_format_type_t format, uint8_t *buffer, int buffer_length) {
     (void)tag;
     if(format != PLCTAG_FORMAT_CBOR) { return PLCTAG_ERR_UNSUPPORTED; }
-    if(enip_udp_schema_cbor_size() > (size_t)buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+    if(cbor_schema_size(ENIP_UDP_SCHEMA_NAME, ENIP_UDP_SCHEMA_VERSION, ENIP_UDP_FIELD_NAMES, ENIP_UDP_FIELD_COUNT)
+       > (size_t)buffer_length) {
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
     Bytes dest = bytes_from_buf(buffer, (size_t)buffer_length);
     size_t pos = 0;
-    if(!enip_udp_schema_cbor_write(dest, &pos)) { return PLCTAG_ERR_TOO_SMALL; }
+    if(!cbor_emit_schema(dest, &pos, ENIP_UDP_SCHEMA_NAME, ENIP_UDP_SCHEMA_VERSION, ENIP_UDP_FIELD_NAMES,
+                        ENIP_UDP_FIELD_COUNT)) {
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
     return PLCTAG_STATUS_OK;
 }

@@ -69,6 +69,11 @@ static const uint8_t PCCC_CMD_PREFIX[2]   = {PCCC_TYPED_CMD, 0x00};
 
 static Bytes pccc_error(Arena *a, uint8_t err, uint16_t seq_id);
 static tag_def_t *find_tag_by_file_num(device_t *dev, size_t file_num);
+static bool pccc_locate(tag_def_t *tag, size_t start, size_t len, size_t max_len, uint8_t *err_out);
+static tag_def_t *pccc_locate_plc5_range(Bytes cmd, device_t *dev, size_t *start_out, size_t *data_bytes_out,
+                                         uint8_t *err_out);
+static tag_def_t *pccc_locate_slc_range(Bytes cmd, device_t *dev, uint8_t *transfer_size_out, size_t *start_out,
+                                        uint8_t *err_out);
 
 static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev);
 static Bytes handle_plc5_write(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev);
@@ -176,36 +181,124 @@ static tag_def_t *find_tag_by_file_num(device_t *dev, size_t file_num) {
 }
 
 
-static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev) {
+/* Shared front half for all six wire handlers (3.g): bounds-check
+ * [start, start+len) against tag's total byte size (elem_count*elem_size).
+ * max_len, if nonzero, additionally caps len (PCCC_MAX_TRANSFER_BYTES for
+ * the windowed read/write ops; 0 skips that check -- matches the RMW
+ * handlers' pre-existing behavior, which never separately capped a request
+ * already sized to one tag element). Sets *err_out to the CIP/PCCC error to
+ * reply with and returns false on any bounds failure. */
+static bool pccc_locate(tag_def_t *tag, size_t start, size_t len, size_t max_len, uint8_t *err_out) {
+    size_t tag_size = tag->elem_count * tag->elem_size;
+    size_t end = start + len;
+    if(start >= tag_size || end > tag_size) {
+        *err_out = PCCC_ERR_FILE_WRONG_SIZE;
+        return false;
+    }
+
+    if(max_len != 0 && len > max_len) {
+        *err_out = PCCC_ERR_FILE_WRONG_SIZE;
+        return false;
+    }
+
+    return true;
+}
+
+
+/* PLC-5 Word Range Read/Write (FNC 0x01/0x00) shared front half: parse the
+ * offset_words/transfer_size/file_prefix/file_num/file_element fields
+ * common to both, validate file_prefix, and locate+bounds-check the tag via
+ * pccc_locate. *start_out / *data_bytes_out are only meaningful when a tag is
+ * returned. */
+static tag_def_t *pccc_locate_plc5_range(Bytes cmd, device_t *dev, size_t *start_out, size_t *data_bytes_out,
+                                         uint8_t *err_out) {
     uint16_t offset_words  = 0;
     uint16_t transfer_size = 0;
     uint8_t  file_prefix   = 0;
     uint8_t  file_num      = 0;
     uint8_t  file_element  = 0;
-    size_t   start = 0;
-    size_t   end   = 0;
 
     if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, &offset_words,
                                   &transfer_size, &file_prefix, &file_num, &file_element))) {
-        return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id);
+        *err_out = PCCC_ERR_FILE_WRONG_SIZE;
+        return NULL;
     }
 
-    if(file_prefix != PCCC_DATA_FILE_PREFIX) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
+    if(file_prefix != PCCC_DATA_FILE_PREFIX) {
+        *err_out = PCCC_ERR_ADDR_NOT_USABLE;
+        return NULL;
+    }
 
     tag_def_t *tag = find_tag_by_file_num(dev, file_num);
     if(!tag) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "PLC/5 read: tag file %u not found.", (unsigned)file_num);
-        return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id);
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "PLC/5: tag file %u not found.", (unsigned)file_num);
+        *err_out = PCCC_ERR_ADDR_NOT_USABLE;
+        return NULL;
     }
 
-    size_t tag_size = tag->elem_count * tag->elem_size;
-    start = (size_t)(offset_words * 2) + ((size_t)file_element * tag->elem_size);
-    end   = start + ((size_t)transfer_size * tag->elem_size);
-
-    if(start >= tag_size || end > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
-
+    size_t start = (size_t)(offset_words * 2) + ((size_t)file_element * tag->elem_size);
     size_t data_bytes = (size_t)transfer_size * tag->elem_size;
-    if(data_bytes > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+
+    if(!pccc_locate(tag, start, data_bytes, PCCC_MAX_TRANSFER_BYTES, err_out)) { return NULL; }
+
+    *start_out = start;
+    *data_bytes_out = data_bytes;
+    return tag;
+}
+
+
+/* SLC/MicroLogix Typed Logical Read/Write (FNC 0xA2/0xAA) shared front half:
+ * parse the transfer_size/file_num/file_type/file_element/subelement fields
+ * common to both, validate subelement==0 and the file_type match, and
+ * locate+bounds-check the tag via pccc_locate. *start_out is only
+ * meaningful when a tag is returned; *transfer_size_out is always set from
+ * the wire (needed even on failure paths that log it). */
+static tag_def_t *pccc_locate_slc_range(Bytes cmd, device_t *dev, uint8_t *transfer_size_out, size_t *start_out,
+                                        uint8_t *err_out) {
+    uint8_t file_num      = 0;
+    uint8_t file_type     = 0;
+    uint8_t file_element  = 0;
+    uint8_t subelement    = 0;
+
+    if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, transfer_size_out,
+                                  &file_num, &file_type, &file_element, &subelement))) {
+        *err_out = PCCC_ERR_FILE_WRONG_SIZE;
+        return NULL;
+    }
+
+    if(subelement != 0) {
+        *err_out = PCCC_ERR_ADDR_NOT_USABLE;
+        return NULL;
+    }
+
+    tag_def_t *tag = find_tag_by_file_num(dev, file_num);
+    if(!tag) {
+        *err_out = PCCC_ERR_ADDR_NOT_USABLE;
+        return NULL;
+    }
+
+    if((uint16_t)tag->tag_type != (uint16_t)file_type) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0, "SLC: file type mismatch got 0x%02x expected 0x%04x.",
+               (unsigned)file_type, (unsigned)tag->tag_type);
+        *err_out = PCCC_ERR_ADDR_NOT_USABLE;
+        return NULL;
+    }
+
+    size_t start = (size_t)file_element * tag->elem_size;
+
+    if(!pccc_locate(tag, start, *transfer_size_out, PCCC_MAX_TRANSFER_BYTES, err_out)) { return NULL; }
+
+    *start_out = start;
+    return tag;
+}
+
+
+static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev) {
+    size_t start = 0, data_bytes = 0;
+    uint8_t err = 0;
+
+    tag_def_t *tag = pccc_locate_plc5_range(cmd, dev, &start, &data_bytes, &err);
+    if(!tag) { return pccc_error(a, err, seq_id); }
 
     Bytes hdr = bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
 
@@ -225,32 +318,11 @@ static Bytes handle_plc5_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *de
 
 
 static Bytes handle_plc5_write(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev) {
-    uint16_t offset_words  = 0;
-    uint16_t transfer_size = 0;
-    uint8_t  file_prefix   = 0;
-    uint8_t  file_num      = 0;
-    uint8_t  file_element  = 0;
-    size_t   start = 0;
-    size_t   end   = 0;
+    size_t start = 0, data_bytes = 0;
+    uint8_t err = 0;
 
-    if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, &offset_words,
-                                  &transfer_size, &file_prefix, &file_num, &file_element))) {
-        return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id);
-    }
-
-    if(file_prefix != PCCC_DATA_FILE_PREFIX) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    tag_def_t *tag = find_tag_by_file_num(dev, file_num);
-    if(!tag) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    size_t tag_size = tag->elem_count * tag->elem_size;
-    start = (size_t)(offset_words * 2) + ((size_t)file_element * tag->elem_size);
-    end   = start + ((size_t)transfer_size * tag->elem_size);
-
-    if(start >= tag_size || end > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
-
-    size_t data_bytes = (size_t)transfer_size * tag->elem_size;
-    if(data_bytes > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+    tag_def_t *tag = pccc_locate_plc5_range(cmd, dev, &start, &data_bytes, &err);
+    if(!tag) { return pccc_error(a, err, seq_id); }
 
     Bytes write_data = bytes_slice(cmd, 8, data_bytes);
     if(bytes_is_null(write_data)) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
@@ -271,7 +343,6 @@ static Bytes handle_plc5_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
     uint8_t file_prefix  = 0;
     uint8_t file_num     = 0;
     uint8_t file_element = 0;
-    size_t  start = 0;
 
     if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, &file_prefix, &file_num,
                                   &file_element))) {
@@ -283,10 +354,9 @@ static Bytes handle_plc5_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
     tag_def_t *tag = find_tag_by_file_num(dev, file_num);
     if(!tag) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
 
-    size_t tag_size = tag->elem_count * tag->elem_size;
-    start = (size_t)file_element * tag->elem_size;
-
-    if(start + tag->elem_size > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+    size_t start = (size_t)file_element * tag->elem_size;
+    uint8_t err = 0;
+    if(!pccc_locate(tag, start, tag->elem_size, 0, &err)) { return pccc_error(a, err, seq_id); }
 
     size_t mask_offset = 4;
     Bytes and_mask = bytes_slice(cmd, mask_offset, tag->elem_size);
@@ -313,36 +383,11 @@ static Bytes handle_plc5_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
 
 static Bytes handle_slc_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev) {
     uint8_t transfer_size = 0;
-    uint8_t file_num      = 0;
-    uint8_t file_type     = 0;
-    uint8_t file_element  = 0;
-    uint8_t subelement    = 0;
-    size_t  start = 0;
-    size_t  end   = 0;
+    size_t start = 0;
+    uint8_t err = 0;
 
-    if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, &transfer_size, &file_num,
-                                  &file_type, &file_element, &subelement))) {
-        return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id);
-    }
-
-    if(subelement != 0) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    tag_def_t *tag = find_tag_by_file_num(dev, file_num);
-    if(!tag) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    if((uint16_t)tag->tag_type != (uint16_t)file_type) {
-        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
-               "SLC read: file type mismatch got 0x%02x expected 0x%04x.",
-               (unsigned)file_type, (unsigned)tag->tag_type);
-        return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id);
-    }
-
-    size_t tag_size = tag->elem_count * tag->elem_size;
-    start = (size_t)file_element * tag->elem_size;
-    end   = start + transfer_size;
-
-    if(start >= tag_size || end > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
-    if(transfer_size > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+    tag_def_t *tag = pccc_locate_slc_range(cmd, dev, &transfer_size, &start, &err);
+    if(!tag) { return pccc_error(a, err, seq_id); }
 
     Bytes hdr = bytes_pack(a, BYTES_LE, PCCC_RESP_CMD, (uint8_t)0, seq_id);
 
@@ -363,31 +408,11 @@ static Bytes handle_slc_read(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev
 
 static Bytes handle_slc_write(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev) {
     uint8_t transfer_size = 0;
-    uint8_t file_num      = 0;
-    uint8_t file_type     = 0;
-    uint8_t file_element  = 0;
-    uint8_t subelement    = 0;
-    size_t  start = 0;
-    size_t  end   = 0;
+    size_t start = 0;
+    uint8_t err = 0;
 
-    if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, &transfer_size, &file_num,
-                                  &file_type, &file_element, &subelement))) {
-        return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id);
-    }
-
-    if(subelement != 0) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    tag_def_t *tag = find_tag_by_file_num(dev, file_num);
-    if(!tag) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    if((uint16_t)tag->tag_type != (uint16_t)file_type) { return pccc_error(a, PCCC_ERR_ADDR_NOT_USABLE, seq_id); }
-
-    size_t tag_size = tag->elem_count * tag->elem_size;
-    start = (size_t)file_element * tag->elem_size;
-    end   = start + transfer_size;
-
-    if(start >= tag_size || end > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
-    if(transfer_size > PCCC_MAX_TRANSFER_BYTES) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+    tag_def_t *tag = pccc_locate_slc_range(cmd, dev, &transfer_size, &start, &err);
+    if(!tag) { return pccc_error(a, err, seq_id); }
 
     Bytes write_data = bytes_slice(cmd, 6, transfer_size);
     if(bytes_is_null(write_data)) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
@@ -410,7 +435,6 @@ static Bytes handle_slc_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev)
     uint8_t file_type     = 0;
     uint8_t file_element  = 0;
     uint8_t subelement    = 0;
-    size_t  start = 0;
 
     if(bytes_is_null(bytes_unpack(cmd, BYTES_LE, BYTES_SKIP(1) /* fnc, already dispatched on */, &transfer_size, &file_num,
                                   &file_type, &file_element, &subelement))) {
@@ -427,9 +451,9 @@ static Bytes handle_slc_rmw(Arena *a, Bytes cmd, uint16_t seq_id, device_t *dev)
         return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id);
     }
 
-    size_t tag_size = tag->elem_count * tag->elem_size;
-    start = (size_t)file_element * tag->elem_size;
-    if(start + 2 > tag_size) { return pccc_error(a, PCCC_ERR_FILE_WRONG_SIZE, seq_id); }
+    size_t start = (size_t)file_element * tag->elem_size;
+    uint8_t err = 0;
+    if(!pccc_locate(tag, start, 2, 0, &err)) { return pccc_error(a, err, seq_id); }
 
     Bytes mask_bytes = bytes_slice(cmd, 6, 2);
     Bytes new_bytes  = bytes_slice(cmd, 8, 2);

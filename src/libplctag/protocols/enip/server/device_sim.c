@@ -62,32 +62,8 @@ struct device_sim_s {
  * Internal helpers
  * ============================================================================ */
 
-extern size_t device_elem_size_for_type(tag_type_t t) {
-    switch(t) {
-        case TAG_CIP_TYPE_BOOL:
-        case TAG_CIP_TYPE_SINT:    return 1;
-        case TAG_CIP_TYPE_INT:     return 2;
-        case TAG_CIP_TYPE_USINT:   return 1;
-        case TAG_CIP_TYPE_DINT:
-        case TAG_CIP_TYPE_UDINT:
-        case TAG_CIP_TYPE_REAL:
-        case TAG_CIP_TYPE_DWORD:   return 4;
-        case TAG_CIP_TYPE_UINT:
-        case TAG_CIP_TYPE_WORD:    return 2;
-        case TAG_CIP_TYPE_LINT:
-        case TAG_CIP_TYPE_ULINT:
-        case TAG_CIP_TYPE_LREAL:
-        case TAG_CIP_TYPE_LWORD:   return 8;
-        case TAG_CIP_TYPE_BYTE:    return 1;
-        case TAG_CIP_TYPE_STRING:  return TAG_CIP_STRING_SIZE;
-        case TAG_PCCC_TYPE_BIT:
-        case TAG_PCCC_TYPE_INT:    return 2;
-        case TAG_PCCC_TYPE_DINT:
-        case TAG_PCCC_TYPE_REAL:   return 4;
-        case TAG_PCCC_TYPE_STRING: return TAG_PCCC_STRING_SIZE;
-        default:                   return 0;
-    }
-}
+/* device_elem_size_for_type (device.h) is now defined in device_types.c,
+ * derived from the shared CIP_TYPES/PCCC_TYPES tables (3.h). */
 
 static tag_def_t *find_tag(device_t *dev, const char *name) {
     int32_t nlen = str_length(name);

@@ -447,21 +447,33 @@ static void sched_unlink(enip_connection_t *c, enip_tag_p t) {
  * against drifting out of sync with the macro that derives it. */
 #define ENIP_OP_COUNT (ENIP_OP_UDT_FIELDS + 1)
 
+/* apply_tag_reply (3.f) per-op handlers: parse one CIP sub-reply already
+ * routed to the right op, copy into t->data, set *frag_more via t->frag_more
+ * when another round trip is due. Only the network-data ops (not IDLE, not
+ * the listing ops -- those are the dialect's own apply_listing) have one;
+ * apply_tag_reply's dispatch treats a NULL entry as "unexpected op". */
+static int32_t apply_open_probe(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
+static int32_t apply_open_probe_frag(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
+static int32_t apply_open_bulk(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
+static int32_t apply_read(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
+static int32_t apply_write(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data);
+
 typedef struct {
     bool creates;    /* completion raises PLCTAG_EVENT_CREATED (the OPEN_* probe/bulk sequence) */
     bool reads;      /* completion raises PLCTAG_EVENT_READ_COMPLETED (data read, or @tags/@udt) */
     bool writes;     /* completion raises PLCTAG_EVENT_WRITE_COMPLETED */
     bool listing;    /* build_tag_request routes through the dialect's build_listing, not build */
     bool batchable;  /* is_batch_eligible may fold this op into a Multiple Service Packet */
+    int32_t (*apply)(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data); /* apply_tag_reply's handler, or NULL */
 } enip_op_traits_t;
 
 static const enip_op_traits_t op_traits[ENIP_OP_COUNT] = {
     [ENIP_OP_IDLE]            = {0},
-    [ENIP_OP_READ]            = {.reads = true, .batchable = true},
-    [ENIP_OP_WRITE]           = {.writes = true, .batchable = true},
-    [ENIP_OP_OPEN_PROBE]      = {.creates = true},
-    [ENIP_OP_OPEN_PROBE_FRAG] = {.creates = true},
-    [ENIP_OP_OPEN_BULK]       = {.creates = true},
+    [ENIP_OP_READ]            = {.reads = true, .batchable = true, .apply = apply_read},
+    [ENIP_OP_WRITE]           = {.writes = true, .batchable = true, .apply = apply_write},
+    [ENIP_OP_OPEN_PROBE]      = {.creates = true, .apply = apply_open_probe},
+    [ENIP_OP_OPEN_PROBE_FRAG] = {.creates = true, .apply = apply_open_probe_frag},
+    [ENIP_OP_OPEN_BULK]       = {.creates = true, .apply = apply_open_bulk},
     [ENIP_OP_LIST]            = {.reads = true, .listing = true},
     [ENIP_OP_UDT_META]        = {.reads = true, .listing = true},
     [ENIP_OP_UDT_FIELDS]      = {.reads = true, .listing = true},
@@ -1215,309 +1227,356 @@ extern uint32_t write_window_count(enip_tag_p t) {
     return n;
 }
 
-extern int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
-    t->frag_more = false;
+/* Discard any leftover t->data from a previous op and reset the
+ * fragment-assembly cursor to empty. */
+static void frag_reset(enip_tag_p t) {
+    if(t->data) { mem_free(t->data); t->data = NULL; }
+    t->size = 0;
+    t->frag_offset = 0;
+}
 
-    if(t->op == ENIP_OP_OPEN_PROBE) {
-        uint8_t header_len = 0;
-        uint32_t elem_size_hint = 0;
-        tag_byte_order_t order;
+/* Append `chunk` bytes at `src` to the end of t->data (grown by realloc;
+ * realloc(NULL, n) is malloc(n), so this also covers the first fragment
+ * after frag_reset), advancing t->size and t->frag_offset by chunk. The
+ * shared "unknown total size yet, grow as fragments arrive" pattern used by
+ * both legs of byte-fragmented single-element assembly (§16a.6): the first
+ * fragment (apply_open_probe's CIP_STATUS_FRAG case) and every continuation
+ * (apply_open_probe_frag). Returns false (t->data/size/frag_offset
+ * unchanged) only on allocation failure. */
+static bool frag_append(enip_tag_p t, const uint8_t *src, uint32_t chunk) {
+    size_t new_size = (size_t)t->size + (size_t)chunk;
+    uint8_t *buf = mem_realloc(t->data, (int)new_size);
+    if(!buf) { return false; }
+    bytes_pack_into(bytes_from_buf(buf + t->size, (size_t)chunk), BYTES_LE, bytes_from_buf(src, chunk));
+    t->data = buf;
+    t->size = (int32_t)new_size;
+    t->frag_offset += chunk;
+    return true;
+}
 
-        if(!enip_type_decode(data, &header_len, &elem_size_hint, &order)) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to decode reply type header!");
-            return PLCTAG_ERR_BAD_REPLY;
+/* §11.2 count=1 probe: decode the reply's type header, learn elem_size, and
+ * either (CIP_STATUS_FRAG) start byte-fragment assembly of one too-large
+ * element, or allocate the full elem_count buffer and compute the
+ * read/write windows (§11.3/§11.5) for the OPEN_BULK/READ/WRITE ops that
+ * follow. enip_dialect_t-independent: every symbolic dialect's probe reply
+ * has this same CIP Common Format header. op_traits[ENIP_OP_OPEN_PROBE].apply. */
+static int32_t apply_open_probe(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    uint8_t header_len = 0;
+    uint32_t elem_size_hint = 0;
+    tag_byte_order_t order;
+
+    if(!enip_type_decode(data, &header_len, &elem_size_hint, &order)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to decode reply type header!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    (void)elem_size_hint;
+
+    if(data.len < (size_t)header_len) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    if(header_len > sizeof(t->type_header)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Type header (%u bytes) is too large!", (unsigned int)header_len);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    bytes_pack_into(bytes_from_buf(t->type_header, sizeof(t->type_header)), BYTES_LE, bytes_from_buf(data.data, header_len));
+    t->type_header_len = header_len;
+
+    uint32_t chunk = (uint32_t)(data.len - (size_t)header_len);
+
+    if(status == CIP_STATUS_FRAG) {
+        /* §16a.6: the element does not fit one packet. Only a single
+         * element (elem_count<=1) can be byte-fragmented this way -- an
+         * array whose individual elements are each this large is a known
+         * limitation (see the design doc's fragmentation section). */
+        if(t->elem_count > 1) {
+            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id,
+                   "Element exceeds the connection and elem_count>1 array fragmentation is not supported!");
+            return PLCTAG_ERR_TOO_LARGE;
         }
 
-        (void)elem_size_hint;
-
-        if(data.len < (size_t)header_len) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        if(header_len > sizeof(t->type_header)) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Type header (%u bytes) is too large!", (unsigned int)header_len);
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        bytes_pack_into(bytes_from_buf(t->type_header, sizeof(t->type_header)), BYTES_LE,
-                       bytes_from_buf(data.data, header_len));
-        t->type_header_len = header_len;
-
-        uint32_t chunk = (uint32_t)(data.len - (size_t)header_len);
-
-        if(status == CIP_STATUS_FRAG) {
-            /* §16a.6: the element does not fit one packet. Only a single
-             * element (elem_count<=1) can be byte-fragmented this way -- an
-             * array whose individual elements are each this large is a known
-             * limitation (see the design doc's fragmentation section). */
-            if(t->elem_count > 1) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id,
-                       "Element exceeds the connection and elem_count>1 array fragmentation is not supported!");
-                return PLCTAG_ERR_TOO_LARGE;
-            }
-
-            uint8_t *buf = mem_alloc((int)chunk);
-            if(!buf) {
-                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to allocate tag data buffer!");
-                return PLCTAG_ERR_NO_MEM;
-            }
-
-            if(t->data) { mem_free(t->data); }
-
-            t->data = buf;
-            t->size = (int32_t)chunk;
-            bytes_pack_into(bytes_from_buf(t->data, (size_t)chunk), BYTES_LE, bytes_from_buf(data.data + header_len, chunk));
-
-            t->frag_offset = chunk;
-            t->frag_more = true;
-            t->op = ENIP_OP_OPEN_PROBE_FRAG;
-
-            return PLCTAG_STATUS_OK;
-        }
-
-        uint32_t elem_size = chunk;
-
-        t->elem_size = elem_size;
-
-        size_t total_size = (size_t)elem_size * (size_t)t->elem_count;
-
-        uint8_t *buf = mem_alloc((int)total_size);
-        if(!buf) {
+        frag_reset(t);
+        if(!frag_append(t, data.data + header_len, chunk)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to allocate tag data buffer!");
             return PLCTAG_ERR_NO_MEM;
         }
 
-        if(t->data) { mem_free(t->data); }
-
-        t->data = buf;
-        t->size = (int32_t)total_size;
-
-        bytes_pack_into(bytes_from_buf(t->data, (size_t)total_size), BYTES_LE, bytes_from_buf(data.data + header_len, elem_size));
-
-        /* §11.3: window = clamp((cap - overhead - header_len) / elem_size, 1, elem_count) */
-        uint32_t window = (uint32_t)((c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - CIP_READ_REPLY_OVERHEAD
-                                       - (size_t)header_len)
-                                      / elem_size);
-        if(window < 1) { window = 1; }
-        if(window > t->elem_count) { window = t->elem_count; }
-        t->window_elems = window;
-
-        /* §11.5: write window is symmetric, but a write request also carries
-         * the path inline (a read reply does not), so subtract the path
-         * length too. For elem_count > 1, each window appends an array-index
-         * segment to t->path; size that segment for the largest index
-         * (elem_count - 1) so the window never shrinks mid-transfer. */
-        size_t write_path_len = (size_t)t->path.len;
-        if(t->elem_count > 1) {
-            uint32_t max_index = t->elem_count - 1;
-            write_path_len += (max_index <= 0xFFu) ? 2 : (max_index <= 0xFFFFu) ? 4 : 6;
-        }
-
-        size_t write_overhead = CIP_CONNECTED_ITEM_OVERHEAD + CIP_WRITE_REQUEST_OVERHEAD + write_path_len + (size_t)header_len;
-
-        uint32_t write_window = 1;
-        if(write_overhead + (size_t)elem_size <= c->max_cip_packet_size) {
-            write_window = (uint32_t)((c->max_cip_packet_size - write_overhead) / elem_size);
-            if(write_window < 1) { write_window = 1; }
-        }
-        if(write_window > t->elem_count) { write_window = t->elem_count; }
-        t->write_window_elems = write_window;
-
-        t->read_off = 1;
-
-        if(t->elem_count <= 1) {
-            t->ready = 1;
-        } else {
-            t->op = ENIP_OP_OPEN_BULK;
-        }
-
-        return PLCTAG_STATUS_OK;
-    } else if(t->op == ENIP_OP_OPEN_PROBE_FRAG) {
-        /* §16a.6: continuation of a fragmented single-element OPEN_PROBE.
-         * Every ReadFrag reply re-sends the type header (already known from
-         * the first fragment); total size is not known upfront, so grow
-         * t->data as fragments arrive, matching the classic AB driver's
-         * check_read_status_connected(). */
-        if(data.len < (size_t)t->type_header_len) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        uint32_t chunk = (uint32_t)(data.len - (size_t)t->type_header_len);
-        size_t new_size = (size_t)t->size + (size_t)chunk;
-
-        uint8_t *buf = mem_realloc(t->data, (int)new_size);
-        if(!buf) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-
-        bytes_pack_into(bytes_from_buf(buf + t->size, (size_t)chunk), BYTES_LE,
-                       bytes_from_buf(data.data + t->type_header_len, chunk));
-        t->data = buf;
-        t->size = (int32_t)new_size;
-        t->frag_offset += chunk;
-
-        if(status == CIP_STATUS_FRAG) {
-            t->frag_more = true;
-            return PLCTAG_STATUS_OK;
-        }
-
-        /* final fragment: the element is now fully assembled. */
-        t->elem_size = (uint32_t)t->size;
-        t->elem_count = 1;
-        t->window_elems = 1;
-        t->write_window_elems = 1;
-        t->frag_align = (t->elem_size < 8) ? (uint8_t)t->elem_size : (uint8_t)8;
-        t->fragmented_elem = 1;
-        t->frag_offset = 0;
-        t->read_off = 1;
-        t->ready = 1;
-        t->op = ENIP_OP_OPEN_PROBE; /* cosmetic: complete_tag() keys CREATED off this */
-
-        /* §16a.6: fixed per-request byte count for a fragmented WRITE, sized
-         * from this connection's negotiated capacity; mirrors
-         * write_window_elems's role for the array case (both build and
-         * apply recompute the same chunk from fixed inputs, so they always
-         * agree without passing state between them). */
-        {
-            size_t fixed = (size_t)1 /* service */ + 1 /* path_size_words */ + (size_t)t->path.len
-                         + (size_t)t->type_header_len + 2 /* elem_count */ + 4 /* byte_offset */;
-            size_t cap = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
-            size_t usable = (cap > fixed) ? (cap - fixed) : 0;
-            size_t frag_chunk = (usable / t->frag_align) * t->frag_align;
-            t->frag_write_chunk = (frag_chunk > 0) ? (uint32_t)frag_chunk : (uint32_t)t->frag_align;
-        }
-
-        return PLCTAG_STATUS_OK;
-    } else if(t->op == ENIP_OP_OPEN_BULK) {
-        if(data.len < (size_t)t->type_header_len) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        size_t data_len = data.len - (size_t)t->type_header_len;
-        size_t returned = data_len / (size_t)t->elem_size;
-
-        if(returned == 0) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "OPEN_BULK reply contained no complete elements!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        size_t remaining = (size_t)(t->elem_count - t->read_off);
-        if(returned > remaining) { returned = remaining; }
-
-        size_t copy_bytes = returned * (size_t)t->elem_size;
-        size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
-
-        bytes_pack_into(bytes_from_buf(t->data + dest_off, copy_bytes), BYTES_LE,
-                       bytes_from_buf(data.data + t->type_header_len, copy_bytes));
-
-        t->read_off += (uint32_t)returned;
-
-        if(t->read_off >= t->elem_count) { t->ready = 1; }
-
-        return PLCTAG_STATUS_OK;
-    } else if(t->op == ENIP_OP_READ) {
-        if(data.len < (size_t)t->type_header_len) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        if(t->fragmented_elem) {
-            /* §16a.6: same growth strategy as OPEN_PROBE_FRAG, cursor reset
-             * to 0 by enip_tag_read() at the start of this read. */
-            uint32_t chunk = (uint32_t)(data.len - (size_t)t->type_header_len);
-            size_t dest_off = (size_t)t->frag_offset;
-            size_t needed = dest_off + (size_t)chunk;
-
-            if(needed > (size_t)t->size) {
-                uint8_t *buf = mem_realloc(t->data, (int)needed);
-                if(!buf) {
-                    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
-                    return PLCTAG_ERR_NO_MEM;
-                }
-                t->data = buf;
-                t->size = (int32_t)needed;
-                t->elem_size = (uint32_t)needed;
-            }
-
-            bytes_pack_into(bytes_from_buf(t->data + dest_off, (size_t)chunk), BYTES_LE,
-                           bytes_from_buf(data.data + t->type_header_len, chunk));
-            t->frag_offset += chunk;
-
-            if(status == CIP_STATUS_FRAG) {
-                t->frag_more = true;
-            } else {
-                t->frag_offset = 0;
-            }
-
-            return PLCTAG_STATUS_OK;
-        }
-
-        if(t->elem_count <= 1) {
-            size_t copy_len = data.len - (size_t)t->type_header_len;
-            if(copy_len > (size_t)t->size) { copy_len = (size_t)t->size; }
-
-            bytes_pack_into(bytes_from_buf(t->data, copy_len), BYTES_LE, bytes_from_buf(data.data + t->type_header_len, copy_len));
-
-            return PLCTAG_STATUS_OK;
-        }
-
-        /* §11.3: windowed read, same accounting as OPEN_BULK. */
-        size_t data_len = data.len - (size_t)t->type_header_len;
-        size_t returned = data_len / (size_t)t->elem_size;
-
-        if(returned == 0) {
-            pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Read reply contained no complete elements!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-
-        size_t remaining = (size_t)(t->elem_count - t->read_off);
-        if(returned > remaining) { returned = remaining; }
-
-        size_t copy_bytes = returned * (size_t)t->elem_size;
-        size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
-
-        bytes_pack_into(bytes_from_buf(t->data + dest_off, copy_bytes), BYTES_LE,
-                       bytes_from_buf(data.data + t->type_header_len, copy_bytes));
-
-        t->read_off += (uint32_t)returned;
-
-        return PLCTAG_STATUS_OK;
-    } else if(t->op == ENIP_OP_WRITE) {
-        /* CIP write replies carry no data. */
-        if(t->fragmented_elem) {
-            /* §16a.6: advance by the same chunk size build's WriteFrag just
-             * sent (recomputed here, not passed in -- deterministic from
-             * fixed inputs, mirrors write_window_count() for the array
-             * case). Cursor reset to 0 by enip_tag_write() at the start of
-             * this write. */
-            size_t remaining = (size_t)t->size - (size_t)t->frag_offset;
-            size_t chunk = (remaining < (size_t)t->frag_write_chunk) ? remaining : (size_t)t->frag_write_chunk;
-
-            t->frag_offset += (uint32_t)chunk;
-
-            if(t->frag_offset < (uint32_t)t->size) {
-                t->frag_more = true;
-            } else {
-                t->frag_offset = 0;
-            }
-
-            return PLCTAG_STATUS_OK;
-        }
-
-        /* advance the cursor by however many elements the just-sent request
-         * covered (§11.5). */
-        if(t->elem_count > 1) { t->read_off += write_window_count(t); }
+        t->frag_more = true;
+        t->op = ENIP_OP_OPEN_PROBE_FRAG;
 
         return PLCTAG_STATUS_OK;
     }
 
-    pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unexpected op %d while processing reply!", t->op);
+    uint32_t elem_size = chunk;
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    t->elem_size = elem_size;
+
+    size_t total_size = (size_t)elem_size * (size_t)t->elem_count;
+
+    uint8_t *buf = mem_alloc((int)total_size);
+    if(!buf) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to allocate tag data buffer!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    if(t->data) { mem_free(t->data); }
+
+    t->data = buf;
+    t->size = (int32_t)total_size;
+
+    bytes_pack_into(bytes_from_buf(t->data, (size_t)total_size), BYTES_LE, bytes_from_buf(data.data + header_len, elem_size));
+
+    /* §11.3: window = clamp((cap - overhead - header_len) / elem_size, 1, elem_count) */
+    uint32_t window = (uint32_t)(
+        (c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - CIP_READ_REPLY_OVERHEAD - (size_t)header_len) / elem_size);
+    if(window < 1) { window = 1; }
+    if(window > t->elem_count) { window = t->elem_count; }
+    t->window_elems = window;
+
+    /* §11.5: write window is symmetric, but a write request also carries
+     * the path inline (a read reply does not), so subtract the path
+     * length too. For elem_count > 1, each window appends an array-index
+     * segment to t->path; size that segment for the largest index
+     * (elem_count - 1) so the window never shrinks mid-transfer. */
+    size_t write_path_len = (size_t)t->path.len;
+    if(t->elem_count > 1) {
+        uint32_t max_index = t->elem_count - 1;
+        write_path_len += (max_index <= 0xFFu) ? 2 : (max_index <= 0xFFFFu) ? 4 : 6;
+    }
+
+    size_t write_overhead = CIP_CONNECTED_ITEM_OVERHEAD + CIP_WRITE_REQUEST_OVERHEAD + write_path_len + (size_t)header_len;
+
+    uint32_t write_window = 1;
+    if(write_overhead + (size_t)elem_size <= c->max_cip_packet_size) {
+        write_window = (uint32_t)((c->max_cip_packet_size - write_overhead) / elem_size);
+        if(write_window < 1) { write_window = 1; }
+    }
+    if(write_window > t->elem_count) { write_window = t->elem_count; }
+    t->write_window_elems = write_window;
+
+    t->read_off = 1;
+
+    if(t->elem_count <= 1) {
+        t->ready = 1;
+    } else {
+        t->op = ENIP_OP_OPEN_BULK;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Continuation of a fragmented single-element OPEN_PROBE (§16a.6). Every
+ * ReadFrag reply re-sends the type header (already known from the first
+ * fragment); total size is not known upfront, so t->data grows as fragments
+ * arrive via frag_append, matching the classic AB driver's
+ * check_read_status_connected(). op_traits[ENIP_OP_OPEN_PROBE_FRAG].apply. */
+static int32_t apply_open_probe_frag(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    if(data.len < (size_t)t->type_header_len) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    uint32_t chunk = (uint32_t)(data.len - (size_t)t->type_header_len);
+
+    if(!frag_append(t, data.data + t->type_header_len, chunk)) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    if(status == CIP_STATUS_FRAG) {
+        t->frag_more = true;
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* final fragment: the element is now fully assembled. */
+    t->elem_size = (uint32_t)t->size;
+    t->elem_count = 1;
+    t->window_elems = 1;
+    t->write_window_elems = 1;
+    t->frag_align = (t->elem_size < 8) ? (uint8_t)t->elem_size : (uint8_t)8;
+    t->fragmented_elem = 1;
+    t->frag_offset = 0;
+    t->read_off = 1;
+    t->ready = 1;
+    t->op = ENIP_OP_OPEN_PROBE; /* cosmetic: complete_tag() keys CREATED off this */
+
+    /* §16a.6: fixed per-request byte count for a fragmented WRITE, sized
+     * from this connection's negotiated capacity; mirrors
+     * write_window_elems's role for the array case (both build and
+     * apply recompute the same chunk from fixed inputs, so they always
+     * agree without passing state between them). */
+    {
+        size_t fixed = (size_t)1 /* service */ + 1 /* path_size_words */ + (size_t)t->path.len + (size_t)t->type_header_len
+                     + 2 /* elem_count */ + 4 /* byte_offset */;
+        size_t cap = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
+        size_t usable = (cap > fixed) ? (cap - fixed) : 0;
+        size_t frag_chunk = (usable / t->frag_align) * t->frag_align;
+        t->frag_write_chunk = (frag_chunk > 0) ? (uint32_t)frag_chunk : (uint32_t)t->frag_align;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* §11.2 remaining elements after the probe, single shot for the MVP.
+ * op_traits[ENIP_OP_OPEN_BULK].apply. */
+static int32_t apply_open_bulk(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    (void)c;
+    (void)status;
+
+    if(data.len < (size_t)t->type_header_len) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    size_t data_len = data.len - (size_t)t->type_header_len;
+    size_t returned = data_len / (size_t)t->elem_size;
+
+    if(returned == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "OPEN_BULK reply contained no complete elements!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    size_t remaining = (size_t)(t->elem_count - t->read_off);
+    if(returned > remaining) { returned = remaining; }
+
+    size_t copy_bytes = returned * (size_t)t->elem_size;
+    size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
+
+    bytes_pack_into(bytes_from_buf(t->data + dest_off, copy_bytes), BYTES_LE,
+                   bytes_from_buf(data.data + t->type_header_len, copy_bytes));
+
+    t->read_off += (uint32_t)returned;
+
+    if(t->read_off >= t->elem_count) { t->ready = 1; }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Post-probe read: a single already-fragmented element (t->fragmented_elem,
+ * ReadFrag continuation), a lone element, or a windowed array chunk (same
+ * accounting as OPEN_BULK). op_traits[ENIP_OP_READ].apply. */
+static int32_t apply_read(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    (void)c;
+
+    if(data.len < (size_t)t->type_header_len) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Reply data shorter than type header!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    if(t->fragmented_elem) {
+        /* §16a.6: t->size is already fixed at the element's known total
+         * (set once when OPEN_PROBE_FRAG finished assembling it); this walk
+         * only refills it at t->frag_offset, so it deliberately does NOT use
+         * frag_append (which would grow -- and mis-track t->size -- on
+         * every call). The realloc here is a defensive fallback for a
+         * frag_offset/size mismatch that should not happen in practice. */
+        uint32_t chunk = (uint32_t)(data.len - (size_t)t->type_header_len);
+        size_t dest_off = (size_t)t->frag_offset;
+        size_t needed = dest_off + (size_t)chunk;
+
+        if(needed > (size_t)t->size) {
+            uint8_t *buf = mem_realloc(t->data, (int)needed);
+            if(!buf) {
+                pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
+                return PLCTAG_ERR_NO_MEM;
+            }
+            t->data = buf;
+            t->size = (int32_t)needed;
+            t->elem_size = (uint32_t)needed;
+        }
+
+        bytes_pack_into(bytes_from_buf(t->data + dest_off, (size_t)chunk), BYTES_LE,
+                       bytes_from_buf(data.data + t->type_header_len, chunk));
+        t->frag_offset += chunk;
+
+        if(status == CIP_STATUS_FRAG) {
+            t->frag_more = true;
+        } else {
+            t->frag_offset = 0;
+        }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(t->elem_count <= 1) {
+        size_t copy_len = data.len - (size_t)t->type_header_len;
+        if(copy_len > (size_t)t->size) { copy_len = (size_t)t->size; }
+
+        bytes_pack_into(bytes_from_buf(t->data, copy_len), BYTES_LE, bytes_from_buf(data.data + t->type_header_len, copy_len));
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* §11.3: windowed read, same accounting as OPEN_BULK. */
+    size_t data_len = data.len - (size_t)t->type_header_len;
+    size_t returned = data_len / (size_t)t->elem_size;
+
+    if(returned == 0) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Read reply contained no complete elements!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    size_t remaining = (size_t)(t->elem_count - t->read_off);
+    if(returned > remaining) { returned = remaining; }
+
+    size_t copy_bytes = returned * (size_t)t->elem_size;
+    size_t dest_off = (size_t)t->read_off * (size_t)t->elem_size;
+
+    bytes_pack_into(bytes_from_buf(t->data + dest_off, copy_bytes), BYTES_LE,
+                   bytes_from_buf(data.data + t->type_header_len, copy_bytes));
+
+    t->read_off += (uint32_t)returned;
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* CIP write replies carry no data -- just advance the byte-fragment or
+ * element-window cursor by whatever build_tag_request just sent (recomputed
+ * here, not passed in -- deterministic from fixed inputs, so build and
+ * apply always agree without exchanging state). op_traits[ENIP_OP_WRITE].apply. */
+static int32_t apply_write(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    (void)c;
+    (void)status;
+    (void)data;
+
+    if(t->fragmented_elem) {
+        size_t remaining = (size_t)t->size - (size_t)t->frag_offset;
+        size_t chunk = (remaining < (size_t)t->frag_write_chunk) ? remaining : (size_t)t->frag_write_chunk;
+
+        t->frag_offset += (uint32_t)chunk;
+
+        if(t->frag_offset < (uint32_t)t->size) {
+            t->frag_more = true;
+        } else {
+            t->frag_offset = 0;
+        }
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* advance the cursor by however many elements the just-sent request
+     * covered (§11.5). */
+    if(t->elem_count > 1) { t->read_off += write_window_count(t); }
+
+    return PLCTAG_STATUS_OK;
+}
+
+/* Dispatch one already-CPF-unwrapped CIP reply to its op's handler (3.f;
+ * split out of what used to be a single 311-line if/else-if chain -- the
+ * exact ladder shape that caused last session's OMRON hang, a missing arm
+ * for one op). Caller holds t->api_mutex. */
+extern int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t status, Bytes data) {
+    t->frag_more = false;
+
+    if(!op_traits[t->op].apply) {
+        pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unexpected op %d while processing reply!", t->op);
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    return op_traits[t->op].apply(c, t, status, data);
 }
 
 

@@ -465,7 +465,7 @@ static Bytes try_cip_object(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pay
     if(!cip_path_parse(svc_path, &ids)) {
         return ((Bytes){NULL, 0});
     }
-    uint32_t class_id = ids.class_id, instance_id = ids.instance_id, attr_id = ids.attr_id;
+    uint32_t class_id = ids.class_id, instance_id = ids.instance_id;
 
     /* Exact match first; fall back to wildcard (DEVICE_SIM_ANY_INSTANCE) entry. */
     cip_obj_entry_t *entry   = dev->cip_objects;

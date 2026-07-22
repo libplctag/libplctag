@@ -47,6 +47,8 @@ set(ENIP_SERVER_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/device.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/device_sim.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/device_sim.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/server/device_types.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/server/device_types.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/server.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/eip_dispatch.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/server/eip_dispatch.c"
