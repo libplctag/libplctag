@@ -68,6 +68,23 @@ typedef struct udt_template_s {
     uint32_t     definition_len;
 } udt_template_t;
 
+/* One real class-0x6C instance id per UDT member (dialects/omron/omron_listing.c
+ * §5.3's per-member sibling records, needed so aphyt's GetAttributeAll member
+ * walk gets a real instance to re-query instead of a synthesized one). Drawn
+ * from the same next_template_id counter as whole templates below, so member
+ * and template ids are always disjoint and both stay within the 12-bit budget
+ * a structure tag's tag_type_t already caps templates to (Rockwell's
+ * DEVICE_SIM_STRUCTURE_TYPE encoding needs that same 12 bits, so sharing one
+ * counter keeps both dialects' ids in the one space instead of each inventing
+ * its own scheme). Built once at device_sim_add_udt_type time; read-only
+ * after, like udt_templates. */
+typedef struct udt_member_id_s {
+    struct udt_member_id_s *next;
+    uint16_t     instance_id;
+    uint16_t     template_id;
+    uint16_t     member_index;
+} udt_member_id_t;
+
 /* ============================================================================
  * tag_def_t — one per configured tag
  * ============================================================================ */
@@ -102,6 +119,13 @@ typedef struct tag_def_s {
      * of touching data or the tag's read/write callbacks. Set once at tag
      * creation (eip_server_tag_create); read-only after, so no lock needed. */
     uint8_t            fault_status;
+
+    /* OMRON class-0x6A GetInstanceListEx2 kind filter (dialects/omron/omron_listing.c):
+     * false = reported for kind=2 (user variable) list requests, true = kind=1
+     * (system variable). Always false today -- nothing sets it -- so kind=1
+     * returns an empty, well-formed list and kind=2 returns everything, which
+     * is enough to stop aphyt's user+system double-list from duplicating tags. */
+    bool               system;
 } tag_def_t;
 
 /* ============================================================================
@@ -174,6 +198,7 @@ typedef struct {
      * before device_sim_start() like cip_objects below -- read-only after,
      * so no lock needed by the class 0x6C handler's lookups. */
     udt_template_t *udt_templates;
+    udt_member_id_t *udt_member_ids;
     uint16_t         next_template_id;
 
     /* Back-pointer to the owning device_sim_t — set once at create, never changes.
@@ -263,6 +288,19 @@ extern tag_def_t *device_tag_alloc(const char *name, tag_type_t type, size_t ele
  * NULL if not found. */
 extern udt_template_t *device_udt_find(device_t *dev, uint16_t template_id);
 extern udt_template_t *device_udt_find_by_name(device_t *dev, const char *struct_name);
+
+/* Resolve a class-0x6C instance id that is NOT a whole template id (check
+ * device_udt_find first) to the (template_id, member_index) it was minted
+ * for at device_sim_add_udt_type time. false if id is unknown. Read-only
+ * after registration, like device_udt_find, so no lock needed. */
+extern bool device_udt_find_member(device_t *dev, uint16_t instance_id, uint16_t *template_id_out,
+                                   uint16_t *member_index_out);
+
+/* Reverse of device_udt_find_member: the instance id minted for template_id's
+ * member_index'th member. false if out of range (member_index >= the
+ * template's num_members). */
+extern bool device_udt_member_instance_id(device_t *dev, uint16_t template_id, uint16_t member_index,
+                                          uint16_t *instance_id_out);
 
 /* Byte size of one element of an atomic CIP/PCCC tag_type_t (0 if t is a
  * structure type or unknown). Used by dialects/omron/omron_listing.c to

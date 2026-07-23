@@ -99,6 +99,14 @@ static void free_udt_templates(udt_template_t *tmpl) {
     }
 }
 
+static void free_udt_member_ids(udt_member_id_t *m) {
+    while(m) {
+        udt_member_id_t *next = m->next;
+        mem_free(m);
+        m = next;
+    }
+}
+
 static void free_tags(tag_def_t *tag) {
     while(tag) {
         tag_def_t *next = tag->next_tag;
@@ -298,6 +306,7 @@ extern void device_sim_destroy(device_sim_t *sim) {
      * so no lock is needed for this final walk-and-free. */
     free_tags(sim->dev.tags);
     free_udt_templates(sim->dev.udt_templates);
+    free_udt_member_ids(sim->dev.udt_member_ids);
     if(sim->dev.bind_addr) { mem_free(sim->dev.bind_addr); }
     mutex_destroy(&sim->dev.tags_mutex);
     mutex_destroy(&sim->dev.identity_mutex);
@@ -414,6 +423,39 @@ extern udt_template_t *device_udt_find_by_name(device_t *dev, const char *struct
     return found;
 }
 
+
+extern bool device_udt_find_member(device_t *dev, uint16_t instance_id, uint16_t *template_id_out,
+                                   uint16_t *member_index_out) {
+    bool found = false;
+    critical_block(dev->tags_mutex) {
+        for(udt_member_id_t *m = dev->udt_member_ids; m; m = m->next) {
+            if(m->instance_id == instance_id) {
+                *template_id_out = m->template_id;
+                *member_index_out = m->member_index;
+                found = true;
+                break;
+            }
+        }
+    }
+    return found;
+}
+
+
+extern bool device_udt_member_instance_id(device_t *dev, uint16_t template_id, uint16_t member_index,
+                                          uint16_t *instance_id_out) {
+    bool found = false;
+    critical_block(dev->tags_mutex) {
+        for(udt_member_id_t *m = dev->udt_member_ids; m; m = m->next) {
+            if(m->template_id == template_id && m->member_index == member_index) {
+                *instance_id_out = m->instance_id;
+                found = true;
+                break;
+            }
+        }
+    }
+    return found;
+}
+
 /* Encode the class 0x6C service 0x4C definition blob: a fixed 8-byte member
  * entry per member (type(u16), info(u16), offset(u32)) -- see udt_member_t --
  * then a NUL-delimited name blob: "<struct_name>;\0" followed by each member
@@ -490,17 +532,36 @@ extern int32_t device_sim_add_udt_type(device_sim_t *sim, const char *struct_nam
 
     int32_t rc = PLCTAG_STATUS_OK;
 
-    /* Mutates the same shared list device_udt_find(_by_name) walks; role=server
-     * tags can add a template to an already-running endpoint (see device.h's
-     * device_udt_find comment), so this needs the same lock they take, not
-     * just the "before device_sim_start()" convention the C API documents. */
+    /* Mutates the same shared lists device_udt_find(_by_name)/device_udt_find_member
+     * walk; role=server tags can add a template to an already-running endpoint
+     * (see device.h's device_udt_find comment), so this needs the same lock
+     * they take, not just the "before device_sim_start()" convention the C API
+     * documents. Template id and member ids share one counter (device.h's
+     * udt_member_id_t comment) so they're always disjoint. */
     critical_block(sim->dev.tags_mutex) {
-        if(sim->dev.next_template_id >= 0x0FFFu) {
+        if(sim->dev.next_template_id + (uint32_t)num_members >= 0x0FFFu) {
             rc = PLCTAG_ERR_TOO_LARGE;
         } else {
             tmpl->template_id = ++sim->dev.next_template_id;
-            tmpl->next = sim->dev.udt_templates;
-            sim->dev.udt_templates = tmpl;
+
+            for(uint32_t i = 0; i < num_members && rc == PLCTAG_STATUS_OK; i++) {
+                udt_member_id_t *m = (udt_member_id_t *)mem_alloc((int)sizeof(udt_member_id_t));
+                if(!m) { rc = PLCTAG_ERR_NO_MEM; break; }
+                m->instance_id = ++sim->dev.next_template_id;
+                m->template_id = tmpl->template_id;
+                m->member_index = (uint16_t)i;
+                m->next = sim->dev.udt_member_ids;
+                sim->dev.udt_member_ids = m;
+            }
+
+            /* Link tmpl only once every member id was minted -- on failure the
+             * already-minted member ids stay linked (harmless leak, freed at
+             * device_sim_destroy) but tmpl itself must NOT be linked, since the
+             * caller frees it on the error path below. */
+            if(rc == PLCTAG_STATUS_OK) {
+                tmpl->next = sim->dev.udt_templates;
+                sim->dev.udt_templates = tmpl;
+            }
         }
     }
 

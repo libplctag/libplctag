@@ -48,14 +48,19 @@
  *   against this simulator; class 0x6B itself is not implemented, see below).
  *
  * §5.3's per-member sibling chain is implemented: each member of a template
- * gets a synthetic class-0x6C instance id (see member_id_encode/decode
- * below) so next_instance_id can walk the member list and
- * nesting_variable_type_instance_id can point straight at a nested member's
- * own template id (real class-0x6C instances, needing no synthesis). Class
- * 0x6B (Variable Object, §5.2) itself is still not implemented -- our client
- * sets list_next_id to the template id directly at tag create (see
- * client/enip_session.c), so nothing here needs the variable ->
- * variable_type_instance_id indirection.
+ * gets a real class-0x6C instance id, minted at device_sim_add_udt_type time
+ * (device.h's udt_member_id_t / device_udt_find_member), so next_instance_id
+ * can walk the member list and nesting_variable_type_instance_id can point
+ * straight at a nested member's own template id -- both real class-0x6C
+ * instances, both looked up the same way (device_udt_find /
+ * device_udt_find_member try each other on miss). This also makes the ids
+ * aphyt-compatible: aphyt re-queries next_instance_id/nesting id truncated to
+ * 2 bytes (id.to_bytes(2, 'little')), so a synthetic id >0xFFFF would
+ * overflow/crash it; real ids stay within the same 12-bit budget templates
+ * already use. Class 0x6B (Variable Object, §5.2) itself is still not
+ * implemented -- our client sets list_next_id to the template id directly at
+ * tag create (see client/enip_session.c), so nothing here needs the
+ * variable -> variable_type_instance_id indirection.
  *
  * Wire format reference: OMRON-SPECIFIC-DESIGN.md §5.
  */
@@ -129,9 +134,9 @@ static void parse_instance(const uint8_t *path, uint32_t path_len, uint32_t *ins
 /*
  * handle_tag_name_server — service 0x5F on class 0x6A (OMRON-SPECIFIC-DESIGN.md
  * §5.1). Request body: start_instance(u32 LE) | count(u32 LE) | kind(u16 LE).
- * `kind` is not filtered on -- device_sim's tag list has no system/user
- * distinction, so every non-PCCC tag is reported regardless of the requested
- * kind (real OMRON firmware separates kind=1 system / kind=2 user vars).
+ * kind=1 (system) reports tags with tag_def_t.system set, kind=2 (user)
+ * reports the rest -- real OMRON firmware makes the same split. aphyt calls
+ * both and concatenates; without this filter every tag would come back twice.
  */
 static int32_t handle_tag_name_server(device_sim_t *sim, uint8_t service, const uint8_t *path, uint32_t path_len,
                                       const uint8_t *req, uint32_t req_len, uint8_t *resp, uint32_t resp_cap,
@@ -152,7 +157,7 @@ static int32_t handle_tag_name_server(device_sim_t *sim, uint8_t service, const 
     if(bytes_is_null(bytes_unpack(bytes_from_buf(req, req_len), BYTES_LE, &start_instance, &max_count, &kind))) {
         return PLCTAG_ERR_TOO_SMALL;
     }
-    (void)kind;
+    bool want_system = (kind == 1);
 
     Bytes resp_buf = bytes_from_buf(resp, resp_cap);
     if(resp_buf.len < 4) { return PLCTAG_ERR_TOO_SMALL; }
@@ -168,7 +173,7 @@ static int32_t handle_tag_name_server(device_sim_t *sim, uint8_t service, const 
         while(tag) {
             instance_id++;
 
-            if(tag->data_file_num != 0 || instance_id < start_instance) {
+            if(tag->data_file_num != 0 || instance_id < start_instance || tag->system != want_system) {
                 tag = tag->next_tag;
                 continue;
             }
@@ -196,31 +201,6 @@ static int32_t handle_tag_name_server(device_sim_t *sim, uint8_t service, const 
            (unsigned)status_byte);
 
     return PLCTAG_STATUS_OK;
-}
-
-/* Synthetic class-0x6C instance id for template_id's member_index'th member
- * (§5.3's sibling records are separate CIP instances on real OMRON firmware;
- * device_sim has no real per-member instance table, so it synthesizes one
- * deterministically instead of allocating/storing it). Always > 0xFFFF so it
- * can never collide with a real template id (capped below 0x0FFF -- see
- * device_sim_add_udt_type) and always needs the 32-bit (0x26) path segment,
- * leaving every existing 16-bit top-level request untouched. member_index is
- * capped at 255 -- generous for any realistic UDT. */
-/* Bit 24: high enough that after decode's >>8 it lands at bit 16, outside
- * the 12-bit (bits 0-11) template_id mask below -- a lower flag bit (e.g.
- * bit 16) would land inside that mask after the shift and corrupt the
- * decoded template_id. */
-#define OMRON_MEMBER_ID_FLAG ((uint32_t)0x01000000u)
-
-static uint32_t member_id_encode(uint16_t template_id, uint16_t member_index) {
-    return OMRON_MEMBER_ID_FLAG | ((uint32_t)template_id << 8) | (uint32_t)(member_index & 0xFFu);
-}
-
-static bool member_id_decode(uint32_t id, uint16_t *template_id_out, uint16_t *member_index_out) {
-    if((id & OMRON_MEMBER_ID_FLAG) == 0) { return false; }
-    *template_id_out = (uint16_t)((id >> 8) & 0x0FFFu);
-    *member_index_out = (uint16_t)(id & 0xFFu);
-    return true;
 }
 
 /* tmpl->definition is [member-info array: {type(u16),info(u16),offset(u32)}
@@ -299,7 +279,9 @@ static int32_t handle_variable_type_template(device_t *dev, uint16_t template_id
     uint32_t name_len = 0;
     while(name_len < tmpl->definition_len && name[name_len] != ';') { name_len++; }
 
-    uint32_t next_id = (tmpl->num_members > 0) ? member_id_encode(template_id, 0) : 0;
+    uint16_t next_member_id = 0;
+    uint32_t next_id = (tmpl->num_members > 0 && device_udt_member_instance_id(dev, template_id, 0, &next_member_id))
+                        ? next_member_id : 0;
 
     int32_t rc = encode_variable_type_reply((uint32_t)tmpl->instance_size, OMRON_CIP_DATA_TYPE_STRUCT, tmpl->num_members,
                                             tmpl->handle, name, name_len, next_id, 0, resp, resp_cap, resp_len);
@@ -311,12 +293,12 @@ static int32_t handle_variable_type_template(device_t *dev, uint16_t template_id
     return rc;
 }
 
-/* One member's reply: a synthetic sibling instance. Atomic members report
- * their own type/size directly; a member typed DEVICE_SIM_STRUCTURE_TYPE(id)
- * reports OMRON_CIP_DATA_TYPE_STRUCT and points nesting_variable_type_instance_id
- * at that nested template's own (real) id, so the client's next GetAttributeAll
- * for the nested UDT lands back in handle_variable_type_template above --
- * recursion needs no synthetic id of its own. next_instance_id continues this
+/* One member's reply: a real sibling instance (device_udt_member_instance_id).
+ * Atomic members report their own type/size directly; a member typed
+ * DEVICE_SIM_STRUCTURE_TYPE(id) reports OMRON_CIP_DATA_TYPE_STRUCT and points
+ * nesting_variable_type_instance_id at that nested template's own (real) id,
+ * so the client's next GetAttributeAll for the nested UDT lands back in
+ * handle_variable_type_template above. next_instance_id continues this
  * template's own sibling chain (member_index + 1, or 0 if this was the last). */
 static int32_t handle_variable_type_member(device_t *dev, uint16_t template_id, uint16_t member_index, uint8_t *resp,
                                            uint32_t resp_cap, uint32_t *resp_len) {
@@ -361,7 +343,10 @@ static int32_t handle_variable_type_member(device_t *dev, uint16_t template_id, 
         nesting_instance_id = 0;
     }
 
-    uint32_t next_id = ((uint32_t)(member_index + 1) < tmpl->num_members) ? member_id_encode(template_id, (uint16_t)(member_index + 1)) : 0;
+    uint16_t next_member_id = 0;
+    uint32_t next_id = ((uint32_t)(member_index + 1) < tmpl->num_members
+                         && device_udt_member_instance_id(dev, template_id, (uint16_t)(member_index + 1), &next_member_id))
+                        ? next_member_id : 0;
 
     int32_t rc = encode_variable_type_reply(size_in_memory, cip_data_type, num_members, crc, name, name_len, next_id,
                                             nesting_instance_id, resp, resp_cap, resp_len);
@@ -376,8 +361,11 @@ static int32_t handle_variable_type_member(device_t *dev, uint16_t template_id, 
 /*
  * handle_variable_type — service 0x01 (GetAttributeAll) on class 0x6C
  * (OMRON-SPECIFIC-DESIGN.md §5.3). instance is either a real template id
- * (whole-template reply) or a synthetic member id (member_id_decode) for one
+ * (whole-template reply) or a real member id (device_udt_find_member) for one
  * member of the member-sibling chain that reply's next_instance_id starts.
+ * Template and member ids are minted from one disjoint counter (device.h's
+ * udt_member_id_t comment), so trying the member table first and falling
+ * back to a template lookup can never misclassify either.
  */
 static int32_t handle_variable_type(device_sim_t *sim, uint8_t service, const uint8_t *path, uint32_t path_len,
                                     const uint8_t *req, uint32_t req_len, uint8_t *resp, uint32_t resp_cap,
@@ -399,7 +387,7 @@ static int32_t handle_variable_type(device_sim_t *sim, uint8_t service, const ui
     parse_instance(path, path_len, &instance);
 
     uint16_t template_id = 0, member_index = 0;
-    if(member_id_decode(instance, &template_id, &member_index)) {
+    if(device_udt_find_member(dev, (uint16_t)instance, &template_id, &member_index)) {
         return handle_variable_type_member(dev, template_id, member_index, resp, resp_cap, resp_len);
     }
 

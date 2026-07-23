@@ -135,6 +135,7 @@ static Bytes handle_multi(Arena *a, uint8_t svc, Bytes svc_payload,
                           eip_session_t *sess, device_t *dev);
 static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_payload,
                               device_t *dev);
+static Bytes handle_omron_variable_attrs(Arena *a, uint8_t svc, Bytes svc_path, device_t *dev);
 
 /* ============================================================================
  * Public functions
@@ -161,6 +162,10 @@ extern Bytes cip_dispatch_unconnected(Arena *a, Bytes payload, eip_session_t *se
 
     switch(svc) {
         case CIP_SRV_GET_ATTRS_ALL:
+            if(dev->plc_type == ENIP_PLC_OMRON_NJNX && svc_path.len > 0 && svc_path.data[0] == CIP_SYMBOLIC_SEGMENT) {
+                return handle_omron_variable_attrs(a, svc, svc_path, dev);
+            }
+            return handle_identity(a, svc, svc_path, svc_payload, dev);
         case CIP_SRV_GET_ATTR_SINGLE:
             return handle_identity(a, svc, svc_path, svc_payload, dev);
 
@@ -237,6 +242,10 @@ extern Bytes cip_dispatch_connected(Arena *a, Bytes payload, eip_session_t *sess
 
     switch(svc) {
         case CIP_SRV_GET_ATTRS_ALL:
+            if(dev->plc_type == ENIP_PLC_OMRON_NJNX && svc_path.len > 0 && svc_path.data[0] == CIP_SYMBOLIC_SEGMENT) {
+                return handle_omron_variable_attrs(a, svc, svc_path, dev);
+            }
+            return handle_identity(a, svc, svc_path, svc_payload, dev);
         case CIP_SRV_GET_ATTR_SINGLE:
             return handle_identity(a, svc, svc_path, svc_payload, dev);
 
@@ -920,6 +929,83 @@ static Bytes handle_identity(Arena *a, uint8_t svc, Bytes svc_path, Bytes svc_pa
     }
 
     return cip_error(a, svc, CIP_ERR_UNSUPPORTED, false, 0);
+}
+
+
+/* CIPAbbreviatedStructure per the CIP spec (and aphyt's cip_datatypes.py) --
+ * matches dialects/omron/omron_listing.c's OMRON_CIP_DATA_TYPE_STRUCT. */
+#define CIP_DATA_TYPE_STRUCT ((uint8_t)0xA0)
+
+/*
+ * handle_omron_variable_attrs — GetAttributesAll (0x01) on a bare symbolic
+ * (0x91) path. This is aphyt's _get_instance_from_variable_name: it reads
+ * variable_type_instance_id at reply[8:12] to decide whether the variable is
+ * atomic (0) or a structure needing a class-0x6C walk. tag_type_t's low byte
+ * already carries the standard CIP elementary type code (device_sim.h's
+ * TAG_CIP_TYPE_* match aphyt's cip_datatypes.py byte-for-byte, e.g.
+ * STRING=0xD0), so no separate type-byte map is needed here.
+ *
+ * Reply: size_in_memory(u32) | cip_data_type(u8) | cip_type_of_array(u8) |
+ * array_dimension(u8) | reserved(u8)=0 | variable_type_instance_id(u32).
+ * cip_type_of_array/array_dimension are always 0 -- aphyt only reads them for
+ * ARRAY-typed variables, which device_sim tags don't report as such (see
+ * device_sim.h's DEVICE_SIM_STRUCTURE_TYPE comment); add real array
+ * dimensions here if an array UDT/member walk is ever needed.
+ */
+static Bytes handle_omron_variable_attrs(Arena *a, uint8_t svc, Bytes svc_path, device_t *dev) {
+    uint8_t seg_type = 0, name_len_u8 = 0;
+
+    Bytes rest = bytes_unpack(svc_path, BYTES_LE, &seg_type, &name_len_u8);
+    if(bytes_is_null(rest) || seg_type != CIP_SYMBOLIC_SEGMENT) {
+        return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0);
+    }
+
+    size_t name_len = (size_t)name_len_u8;
+    if(name_len > rest.len) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+
+    const uint8_t *name_bytes = rest.data;
+    rest = bytes_slice(rest, name_len, rest.len - name_len);
+    if(name_len % 2 != 0) {
+        rest = bytes_unpack(rest, BYTES_LE, BYTES_SKIP(1));
+        if(bytes_is_null(rest)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+    }
+    if(rest.len != 0) { return cip_error(a, svc, CIP_ERR_PATH_SEGMENT, false, 0); }
+
+    tag_def_t *tag = NULL;
+    critical_block(dev->tags_mutex) {
+        tag_def_t *t = dev->tags;
+        while(t) {
+            int32_t tag_name_len = str_length(t->name);
+            if(tag_name_len == (int32_t)name_len
+               && mem_cmp((void*)t->name, tag_name_len, (void*)name_bytes, (int)name_len) == 0) {
+                tag = t;
+                break;
+            }
+            t = t->next_tag;
+        }
+    }
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_WARN, 0,
+               "handle_omron_variable_attrs: tag '%.*s' not found.", (int)name_len, name_bytes);
+        return cip_error(a, svc, CIP_ERR_PATH_UNKNOWN, false, 0);
+    }
+
+    bool is_struct = (tag->tag_type & 0x8000u) != 0;
+    uint8_t cip_data_type = is_struct ? CIP_DATA_TYPE_STRUCT : (uint8_t)(tag->tag_type & 0xFFu);
+    uint32_t variable_type_instance_id = is_struct ? (uint32_t)(tag->tag_type & 0x0FFFu) : 0;
+    uint32_t size = (uint32_t)(tag->elem_size * (tag->elem_count ? tag->elem_count : 1));
+
+    Bytes hdr = bytes_pack(a, BYTES_LE, (uint8_t)(svc | CIP_DONE), (uint8_t)0, CIP_OK, (uint8_t)0);
+    Bytes obj = bytes_pack(a, BYTES_LE, size, cip_data_type, (uint8_t)0 /* cip_type_of_array */,
+                           (uint8_t)0 /* array_dimension */, BYTES_SKIP(1), variable_type_instance_id);
+    if(bytes_is_null(hdr) || bytes_is_null(obj)) { return cip_error(a, svc, CIP_ERR_INSUF_DATA, false, 0); }
+
+    pdebug(DEBUG_MODULE_ENIP, PLCTAG_DEBUG_DETAIL, 0,
+           "handle_omron_variable_attrs: '%.*s' size=%u type=0x%02x variable_type_instance_id=%u.",
+           (int)name_len, name_bytes, (unsigned)size, (unsigned)cip_data_type, (unsigned)variable_type_instance_id);
+
+    return bytes_concat(a, hdr, obj);
 }
 
 
