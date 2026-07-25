@@ -83,7 +83,7 @@ are dropped.)
 |---|---|---|---|---|
 | 1 | `0x5F` GetInstanceList on class 0x6A, **kind=user** and **kind=system** (two calls) | ✅ answers 0x5F, but **ignores kind** → returns all tags for *both* calls → aphyt concatenates → **duplicate** variables | filter by kind (user vs system) | ✅ exact |
 | 2 | `0x01` on **symbolic** path (`0x91` name) → variable attrs; aphyt reads type-id at `[8:12]` | symbolic path bypasses `try_cip_object`, switch routes to `handle_identity` → wrong | new by-name metadata handler emitting `size@0 | cip_data_type@4 | … | variable_type_instance_id@8:12` | ✅ offsets known |
-| 3 | `0x01` on class 0x6C, **2-byte** instance; walk `next_instance_id`, recurse `nesting_…_id`, all re-queried as 2-byte | ✅ reply format exact, **but** member/nested ids are synthetic **>0xFFFF** (`member_id_encode`) → aphyt's `id.to_bytes(2)` overflows/crashes | give members **real ≤0xFFFF** instance ids | ✅ exact (except ids) |
+| 3 | `0x01` on class 0x6C, **2-byte** instance; walk `next_instance_id`, recurse `nesting_…_id`, all re-queried as 2-byte | ✅ reply format exact, **but** member/nested ids are synthetic **>0xFFFF** (`member_id_encode`) → aphyt's `id.to_bytes(2)` overflows/crashes | give members **real ≤0x0FFF** instance ids | ✅ exact (except ids) |
 | 4 | `0x4D` write / `0x4C` read, symbolic + `0x80` Simple Data Segment offset | symbolic 0x4C/0x4D handled; `0x80`-offset parsing unverified | verify/extend `0x80` offset path | from write capture |
 
 Primary user goal ("list the tags and UDTs") = **1, 2, 3**. Full round-trip adds **4**.
@@ -135,9 +135,15 @@ at endpoint create, `eip_server_tag.c`, or gate on "0x6A/0x6C handlers registere
 Logix/PCCC servers are untouched.
 
 The handler: `device_tag_find_by_name`, emit the block above from `tag_def_t` —
-`instance_size` → size, atomic `tag_type_t` → OMRON `cip_data_type` byte (new small map,
-confirmed below), and for a UDT tag put its **template id** at `[8:12]` (must be ≤0xFFFF
-— it already is, see Phase 3).
+`instance_size` → size, atomic `tag_type_t` → OMRON `cip_data_type` byte, and for a UDT
+tag put its **template id** at `[8:12]` (must be ≤0x0FFF — it already is, see Phase 3).
+
+**No new type-map file needed** — `tag_type_t`'s low byte *is* the CIP type byte already
+(confirmed identical to the table below), so the handler reads it directly
+(`tag->tag_type & 0xFF`); struct tags substitute `CIP_DATA_TYPE_STRUCT` (0xA0). Implemented
+as `handle_omron_variable_attrs` in `common/cip.c` (not a separate dialect file), reached
+from both `cip_dispatch_unconnected` and `cip_dispatch_connected`'s `CIP_SRV_GET_ATTRS_ALL`
+case, gated on `dev->plc_type == ENIP_PLC_OMRON_NJNX && svc_path.data[0] == CIP_SYMBOLIC_SEGMENT`.
 
 **Confirmed type-byte map** (from aphyt's `src/aphyt/cip/cip_datatypes.py` — these are
 the standard CIP elementary type codes, not OMRON-vendor-specific, so they cover every
@@ -164,37 +170,63 @@ Also confirms `OMRON_CIP_DATA_TYPE_STRUCT = 0xA0` already in `omron_listing.c` m
 ## 4. Phase 3 — real member instance ids (gap 3)
 
 **Correction during implementation:** member ids are minted from the *same*
-`next_template_id` counter templates already use, capped at 12 bits
-(`0x0FFF`) — not a standalone 16-bit space. Rockwell's struct-tag encoding
+`next_template_id` counter templates already use, capped at **12 bits**
+(`0x0FFF`) — not a standalone 16-bit space, and not the full ≤0xFFFF range
+this section originally proposed. Reason: Rockwell's struct-tag encoding
 (`DEVICE_SIM_STRUCTURE_TYPE`, `tag_type_t`'s high nibble + low 12 bits) already
-caps template ids to 12 bits, so sharing one counter keeps template and
-member ids trivially disjoint without a flag-bit scheme, and both dialects
-draw from the one id space instead of each inventing its own. See
-`device.h`'s `udt_member_id_t` / `device_udt_find_member` /
-`device_udt_member_instance_id`.
+caps template ids to 12 bits (the 16-bit CIP type word only leaves 12 bits for
+the id once the structure-tag flag bit is carved out), so sharing one counter
+keeps template and member ids trivially disjoint without a flag-bit scheme,
+and both Rockwell and OMRON dialects draw from the one id space instead of
+each inventing its own. OMRON's wire format could in principle use the full
+16 bits, but narrowing both to 12 bits lets them share code, which is the
+adopted tradeoff.
+
+Implemented as (`server/device.h` for declarations, `server/device_sim.c` for logic):
+- `udt_member_id_t { instance_id, template_id, member_index, next }` — a linked list on
+  `device_t.udt_member_ids`, one node per member, minted individually
+  (`mem_alloc(sizeof(udt_member_id_t))` each, not a block) inside the same
+  `critical_block(dev->tags_mutex)` as template-id assignment, so template and member ids
+  can never collide.
+- `device_udt_find_member(dev, instance_id, &template_id_out, &member_index_out)` —
+  linear-scan lookup, instance → (template, member index).
+- `device_udt_member_instance_id(dev, template_id, member_index, &instance_id_out)` —
+  reverse lookup, (template, member index) → instance, used when encoding replies.
+- `device_sim_add_udt_type`'s cap check: `next_template_id + num_members >= 0x0FFF`.
+- Teardown: `free_udt_member_ids()` walks and frees each node individually (must match the
+  one-alloc-per-member minting above, or `device_sim_destroy` corrupts the allocator).
 
 The class-0x6C reply format already matches `VariableTypeObjectReply` byte-for-byte
 (`encode_variable_type_reply`, incl. the pad-when-even rule). The **only** problem:
 `_structure_instance_from_variable_type_object` re-queries `next_instance_id` and
 `nesting_variable_type_instance_id` as **2-byte** instances
 (`instance_id.to_bytes(2,'little')`), but the server hands back **synthetic ids
->0xFFFF** (`member_id_encode` sets bit 24, `omron_listing.c:213`). aphyt's `.to_bytes(2)`
-overflows → crash.
+>0xFFFF** (`member_id_encode` sets bit 24, `omron_listing.c:213`, since removed). aphyt's
+`.to_bytes(2)` overflows → crash.
 
-Fix: replace synthesis with a real ≤0xFFFF instance registry.
-- device_sim allocates a sequential 16-bit id per synthetic member entry at UDT-register
-  time, each mapping to `(template_id, member_index)`; nested-UDT members point
-  `nesting_variable_type_instance_id` at the nested template's own (already ≤0xFFFF) id.
-  Cap top-level template ids and member ids into disjoint ≤0xFFFF ranges.
-- `handle_variable_type` (`omron_listing.c:382`) looks up the incoming 16-bit instance in
-  that registry instead of `member_id_decode`.
+Fix: replaced synthesis with the real ≤0x0FFF instance registry above.
+- `omron_listing.c`'s `handle_variable_type_template`/`handle_variable_type_member` now
+  compute `next_id` via `device_udt_member_instance_id` instead of `member_id_encode`
+  (removed, along with `OMRON_MEMBER_ID_FLAG`).
+- `handle_variable_type` (dispatcher) tries `device_udt_find_member` first, falling back
+  to `handle_variable_type_template` on a miss (top-level template id) — replaces the old
+  `member_id_decode` call.
 - Keep the `next_instance_id` **chain** (one member per reply) — aphyt expects exactly
   that (`while member_instance_id != 0`), and it's what the server already emits; only
-  the id values change.
+  the id values changed.
 
-The libplctag client currently consumes the synthetic ids too — check
-`enip_omron_apply_listing`/`omron_udt_reply_links` still round-trips with real 16-bit ids
-(it reads `next_instance_id` opaquely, so it should; verify in the omron_udt_walk test).
+The libplctag client currently consumes these ids too — `omron_udt_walk` (existing test,
+unmodified) still passes against the new real ids, confirming the client's
+`next_instance_id` handling is opaque and round-trips fine.
+
+**Bugs caught and fixed during implementation** (self-caught, no user involvement):
+1. Use-after-free: `device_sim_add_udt_type` originally linked the new `tmpl` into
+   `sim->dev.udt_templates` *before* minting member ids; a mid-loop allocation failure
+   then `mem_free(tmpl)`'d it while still linked into the live list. Fixed by deferring
+   the link until after the member-id loop succeeds.
+2. Allocator corruption risk: originally minted all of a template's member ids as one
+   contiguous block; teardown frees each list node individually, which would corrupt the
+   allocator against a block allocation. Fixed by allocating one node per member.
 
 No class-0x6C-instance-0 "class metadata" handler is needed — aphyt's live UDT path
 reaches 0x6C only via a variable's `variable_type_instance_id`, never instance 0. (The
@@ -226,10 +258,17 @@ client case, not this):
 
 1. **device_sim self-test** (`src/tests`, libplctag API only): stand up a device-sim
    OMRON server with a few atomic tags + one UDT tag, drive the exact aphyt request byte
-   sequences (0x5F user/system, symbolic 0x01, 0x6C chain) at the CIP dispatch, and
-   `assert` the reply bytes at the offsets aphyt reads (list record fields, `[8:12]`
-   type-id, `next_instance_id` ≤0xFFFF, member names). One check per gap 1–3. In-sandbox,
-   no network.
+   sequences (0x5F user/system, symbolic 0x01, 0x6C chain) at the CIP dispatch, and check
+   the reply bytes at the offsets aphyt reads (list record fields, `[8:12]` type-id,
+   `next_instance_id` ≤0x0FFF, member names). In-sandbox, no network.
+   **Implemented** for gaps 1–2 as `src/tests/omron_aphyt_metadata` (plain executable,
+   not cmocka — the `unit/` cmocka suite only builds on Linux+Debug with network access
+   for `FetchContent`, neither available in this sandbox; and plain asserts are compiled
+   out under this build's `-DNDEBUG`, so the test uses an explicit `CHECK()` macro that
+   counts and prints failures instead). Calls `cip_dispatch_unconnected` directly
+   (bypasses EIP/CPF socket framing) with hand-packed `Bytes` requests. Gap 3 is covered
+   by the pre-existing `omron_udt_walk` test (full client-server round trip over a real
+   socket). Both pass clean under ASAN/UBSAN.
 2. **aphyt acceptance** (manual): `pip install aphyt`, point its `NSeries` at a running
    device-sim server, call `update_variable_dictionary()` + `variable_list()` and the
    UDT walk, diff against the configured tag/UDT set. This is the real "done" gate — the
@@ -240,10 +279,11 @@ client case, not this):
 
 ## 7. Risks / open questions
 
-- **Member-id registry (Phase 3)** is the one non-trivial change: disjoint ≤0xFFFF id
-  ranges for templates vs synthetic members, and keeping the libplctag *client* walk
-  (`omron_udt_reply_links`) working with the new ids. Covered by the existing
-  `omron_udt` test + the new self-test.
+- **Member-id registry (Phase 3)** was the one non-trivial change: disjoint ≤0x0FFF ids
+  for templates vs members (shared counter, not separate ranges), and keeping the
+  libplctag *client* walk working with the new ids. Resolved — covered by the existing
+  `omron_udt_walk` test (client walk, unmodified, still passes) + the new
+  `omron_aphyt_metadata` self-test (server-side kind filter + symbolic metadata).
 - ~~OMRON CIP data-type byte map~~ resolved — see the table in Phase 2, pulled from
   aphyt's `cip_datatypes.py`.
 - **Family gating**: the symbolic-`0x01` and `0x80`-segment branches must not regress
@@ -256,17 +296,25 @@ client case, not this):
 
 ## 8. Files touched
 
-- `dialects/omron/omron_listing.c` — Phase 1 (kind filter), Phase 3 (real member-id
-  registry lookup). Bulk of the work.
-- `common/cip.c` — Phase 2 routing (symbolic `0x01` → new handler), Phase 4 `0x80`
-  verify/patch.
-- `dialects/omron/omron_client.c` or new `omron_types.c` — `tag_type_t → OMRON CIP
-  data-type byte` map (Phase 2), sourced from aphyt `omron_datatypes.py`.
-- `server/device_sim.{c,h}` — `bool system` on `tag_def_t` (Phase 1); 16-bit member-id
-  registry (Phase 3).
-- `src/tests/…` + `run_enip_tests.sh` — Phase 5.
+- `dialects/omron/omron_listing.c` — Phase 1 (kind filter in `handle_tag_name_server`),
+  Phase 3 (`handle_variable_type*` use the real member-id registry; `member_id_encode`/
+  `member_id_decode`/`OMRON_MEMBER_ID_FLAG` removed).
+- `common/cip.c` — Phase 2: new `handle_omron_variable_attrs` (symbolic `0x01` handler,
+  reads `tag_type_t`'s low byte directly, no separate type-map file needed) plus routing
+  in both `cip_dispatch_unconnected` and `cip_dispatch_connected`'s
+  `CIP_SRV_GET_ATTRS_ALL` case. Phase 4 `0x80` verify/patch — not started.
+- `server/device.h` — Phase 1: `bool system` on `tag_def_t`. Phase 3: `udt_member_id_t`
+  struct, `device_t.udt_member_ids` field, `device_udt_find_member`/
+  `device_udt_member_instance_id` extern decls.
+- `server/device_sim.c` — Phase 3: member-id registry implementation
+  (`device_udt_find_member`, `device_udt_member_instance_id`, `free_udt_member_ids`,
+  restructured `device_sim_add_udt_type`).
+- `src/tests/omron_aphyt_metadata/` (new plain-executable test, unconditionally built
+  under `LIBPLCTAG_FEATURE_SERVER`, mirrors `omron_udt_walk`'s pattern) — Phase 5 for
+  Phases 1/2. `run_enip_tests.sh` — Phase 5 aphyt acceptance run, not yet added (manual
+  step, gated on running real aphyt).
 - `OMRON-SPECIFIC-DESIGN.md` — record the aphyt (stock-firmware) dialect, citing the
-  aphyt source offsets, alongside the existing client subset.
+  aphyt source offsets, alongside the existing client subset. **Not yet done.**
 
 ---
 
