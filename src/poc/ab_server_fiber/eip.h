@@ -53,6 +53,7 @@
 
 #define EIP_HEADER_SIZE ((size_t)24)
 
+#define EIP_CMD_LIST_IDENTITY      ((uint16_t)0x0063)
 #define EIP_CMD_REGISTER_SESSION   ((uint16_t)0x0065)
 #define EIP_CMD_UNREGISTER_SESSION ((uint16_t)0x0066)
 #define EIP_CMD_UNCONNECTED_SEND   ((uint16_t)0x006F)
@@ -81,3 +82,9 @@ extern void eip_session_set_unconnected_sizes(eip_session_t *sess, uint32_t raw_
  * Call after ForwardOpen sets server_to_client_max_packet.
  */
 extern void eip_session_set_connected_sizes(eip_session_t *sess, uint32_t raw_packet_size);
+
+/* CIP Identity (ListIdentity) overrides; all default to 0 (unspecified). Set these
+ * before starting the server to advertise a specific vendor id / product code / serial. */
+extern uint16_t ab_server_identity_vendor_id;
+extern uint16_t ab_server_identity_product_code;
+extern uint32_t ab_server_identity_serial_number;

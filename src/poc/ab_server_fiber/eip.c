@@ -70,6 +70,21 @@ static uint32_t s_next_session_handle = 1;
 /* RegisterSession response payload: protocol version (2 bytes) + options (2 bytes) */
 #define EIP_REG_SESSION_VERSION ((uint16_t)1)
 
+/* Revision reported in the CIP Identity object is the libplctag version. The build
+ * passes the real values; the fallback only keeps this file self-contained. */
+#ifndef AB_SERVER_VERSION_MAJOR
+#    define AB_SERVER_VERSION_MAJOR (0)
+#endif
+#ifndef AB_SERVER_VERSION_MINOR
+#    define AB_SERVER_VERSION_MINOR (0)
+#endif
+
+/* CIP Identity fields callers may set before the server starts; all default to 0
+ * so the open emulator advertises no specific vendor, product, or serial number. */
+uint16_t ab_server_identity_vendor_id = 0;
+uint16_t ab_server_identity_product_code = 0;
+uint32_t ab_server_identity_serial_number = 0;
+
 /* ============================================================================
  * Struct types
  * ============================================================================ */
@@ -91,6 +106,7 @@ static bool eip_parse_hdr(Bytes hdr_buf, eip_hdr_t *hdr);
 static Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr);
 static Bytes handle_register_session(Arena *a, Bytes payload, eip_session_t *sess);
 static Bytes handle_unregister_session(Arena *a, eip_session_t *sess);
+static Bytes handle_list_identity(Arena *a, eip_session_t *sess, plc_config_t *cfg);
 static Bytes make_eip_response(Arena *a, eip_hdr_t *req_hdr, eip_session_t *sess, Bytes body);
 static Bytes make_eip_error(Arena *a, eip_hdr_t *req_hdr);
 
@@ -121,6 +137,8 @@ extern Bytes eip_dispatch(Arena *a, Bytes hdr, Bytes payload, eip_session_t *ses
     pdlog(LOG_MODULE_EIP, LOG_LEVEL_DETAIL, "eip_dispatch: cmd=0x%04x payload len=%zu", req_hdr.cmd, payload.len);
 
     switch(req_hdr.cmd) {
+        case EIP_CMD_LIST_IDENTITY: response_body = handle_list_identity(a, sess, cfg); break;
+
         case EIP_CMD_REGISTER_SESSION: response_body = handle_register_session(a, payload, sess); break;
 
         case EIP_CMD_UNREGISTER_SESSION:
@@ -219,6 +237,73 @@ static Bytes handle_unregister_session(Arena *a, eip_session_t *sess) {
     pdlog(LOG_MODULE_EIP, LOG_LEVEL_INFO, "UnregisterSession: handle 0x%08x", sess->session_handle);
     sess->session_handle = 0;
     return (Bytes){0};
+}
+
+
+/*
+ * ListIdentity (0x0063): returns a hardcoded CIP Identity object for the
+ * emulator, so clients that query ListIdentity see a realistic-looking
+ * controller identity (vendor/product/revision/serial).  No registered
+ * session is required.
+ *
+ * Returns only the CPF body; make_eip_response() wraps the 24-byte EIP header.
+ *
+ * CPF body layout (all little-endian):
+ *   item count             u16  = 1
+ *   item type              u16  = 0x000C (CIP Identity)
+ *   item length            u16  = 0x48 (72 bytes: encap-version through state)
+ *   encap protocol version u16  = 1
+ *   socket address         16 zero bytes (clients ignore it for ListIdentity)
+ *   vendor id              u16  = ab_server_identity_vendor_id (default 0 = unspecified)
+ *   device type            u16  = 0x000E (Programmable Logic Controller)
+ *   product code           u16  = ab_server_identity_product_code (default 0)
+ *   revision major         u8   = libplctag version major
+ *   revision minor         u8   = libplctag version minor
+ *   status word            u16  = 0x0030 (see "Status word" note below)
+ *   serial number          u32  = ab_server_identity_serial_number (default 0)
+ *   product name length    u8   = strlen(product_name)
+ *   product name           ASCII bytes
+ *   state                  u8   = 0x03 (operational)
+ *
+ * Status word note: 0x0030 means the Extended Device Status field (bits 4-7) is 0x3,
+ * which reads as "no I/O connections established". That stays true no matter how many
+ * clients connect: this field counts only the implicit controller-to-I/O (Class 1)
+ * connections a real PLC runs to its I/O racks, and this emulator has none. Clients
+ * that read or write tags use ordinary (explicit) messaging, which does not touch it.
+ * The Owned and Configured bits are 0, and no fault bits are set.
+ */
+static Bytes handle_list_identity(Arena *a, eip_session_t *sess, plc_config_t *cfg) {
+    (void)sess;
+    (void)cfg;
+
+    static const char product_name[] = "libplctag ab_server";
+    const uint8_t name_len = (uint8_t)(sizeof(product_name) - 1);
+
+    /* item length: encap-version(2) + sockaddr(16) + vendor(2) + device_type(2)
+     * + product_code(2) + rev_major(1) + rev_minor(1) + status(2) + serial(4)
+     * + name_len(1) + name(name_len) + state(1) */
+    const uint16_t item_len = (uint16_t)(2 + 16 + 2 + 2 + 2 + 1 + 1 + 2 + 4 + 1 + (size_t)name_len + 1);
+
+    Bytes name_bytes = bytes_from_buf((const uint8_t *)product_name, (size_t)name_len);
+
+    pdlog(LOG_MODULE_EIP, LOG_LEVEL_INFO, "ListIdentity: %s", product_name);
+
+    return bytes_pack(a, BYTES_LE,
+                      (uint16_t)1,                /* CPF item count */
+                      (uint16_t)0x000C,           /* item type: CIP Identity */
+                      item_len,                   /* item length */
+                      EIP_REG_SESSION_VERSION,    /* encap protocol version */
+                      BYTES_SKIP(16),             /* socket address placeholder */
+                      ab_server_identity_vendor_id,     /* vendor id: 0 (unspecified) unless set */
+                      (uint16_t)0x000E,                 /* device type (generic ODVA PLC category) */
+                      ab_server_identity_product_code,  /* product code: 0 unless set */
+                      (uint8_t)AB_SERVER_VERSION_MAJOR, /* revision major = libplctag version major */
+                      (uint8_t)AB_SERVER_VERSION_MINOR, /* revision minor = libplctag version minor */
+                      (uint16_t)0x0030,                 /* status word */
+                      ab_server_identity_serial_number, /* serial: 0 unless set */
+                      name_len,                   /* product name length */
+                      name_bytes,                 /* product name (ASCII) */
+                      (uint8_t)0x03);             /* state: operational */
 }
 
 

@@ -42,6 +42,11 @@ add_executable(ab_server_fiber ${SOURCES})
 
 target_link_libraries(ab_server_fiber yafl)
 
+# Report the libplctag version as the CIP Identity revision in ListIdentity replies.
+target_compile_definitions(ab_server_fiber PRIVATE
+    AB_SERVER_VERSION_MAJOR=${libplctag_VERSION_MAJOR}
+    AB_SERVER_VERSION_MINOR=${libplctag_VERSION_MINOR})
+
 if(WIN32)
     target_link_libraries(ab_server_fiber ws2_32)
     target_compile_definitions(ab_server_fiber PRIVATE

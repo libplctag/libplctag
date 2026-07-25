@@ -60,7 +60,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server_fiber list_tags_logix string_non_standard_udt string_standard tag_rw2 test_connection_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server_fiber list_tags_logix string_non_standard_udt string_standard tag_rw2 test_connection_tag test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_idle_disconnect test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress test_list_identity"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -83,6 +83,17 @@ if [ $EMULATOR_PID -le 0 ]; then
 fi
 
 sleep 3
+
+let TEST++
+echo -n "  Test $TEST: EtherNet/IP ListIdentity returns the neutral CIP identity... "
+$VALGRIND$TEST_DIR/test_list_identity 127.0.0.1 44818 > "$LOG_DIR/${TEST}_list_identity_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "  Test $TEST: basic unconnected tag read/write... "
