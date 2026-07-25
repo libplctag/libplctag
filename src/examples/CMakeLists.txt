@@ -56,13 +56,13 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     if(UNIX AND NOT APPLE)
         # Don't use static linking with sanitizers as they are incompatible
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT USE_SANITIZERS)
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT (USE_MEM_SANITIZERS OR USE_THREAD_SANITIZERS))
             if(example STREQUAL "simple_cpp")
                 target_link_options(${example} PRIVATE -static-libgcc -static-libstdc++ ${EXTRA_LINK_FLAGS})
             else()
                 target_link_options(${example} PRIVATE -static ${EXTRA_LINK_FLAGS})
             endif()
-        elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" AND USE_SANITIZERS)
+        elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" AND (USE_MEM_SANITIZERS OR USE_THREAD_SANITIZERS))
             # Use dynamic linking when sanitizers are enabled
             target_link_options(${example} PRIVATE ${EXTRA_LINK_FLAGS})
         else()

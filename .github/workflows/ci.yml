@@ -283,6 +283,174 @@ jobs:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
 
+  ubuntu_mem_sanitizer:
+    runs-on: ubuntu-24.04
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      ASAN_OPTIONS: "halt_on_error=1"
+      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, ASan/UBSan)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under ASan/UBSan
+        run: |
+          cd ${{ github.workspace }}
+          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_mem_sanitizer
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  ubuntu_thread_sanitizer:
+    runs-on: ubuntu-24.04
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      TSAN_OPTIONS: "halt_on_error=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, TSan)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under TSan
+        run: |
+          cd ${{ github.workspace }}
+          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_thread_sanitizer
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  macos_mem_sanitizer:
+    runs-on: macos-15
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      ASAN_OPTIONS: "halt_on_error=1"
+      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, ASan/UBSan)
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under ASan/UBSan
+        run: |
+          cd ${{ github.workspace }}
+          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos_mem_sanitizer
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  macos_thread_sanitizer:
+    runs-on: macos-15
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      TSAN_OPTIONS: "halt_on_error=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, TSan)
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under TSan
+        run: |
+          cd ${{ github.workspace }}
+          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos_thread_sanitizer
+          path: |
+            logs/*.log
+          retention-days: 7
+
   windows_msvc_matrix:
     runs-on: ${{ matrix.runner }}
 
@@ -1139,6 +1307,10 @@ jobs:
         windows_msvc_matrix,
         ubuntu_arm_cross,
         alpine_native,
+        ubuntu_mem_sanitizer,
+        ubuntu_thread_sanitizer,
+        macos_mem_sanitizer,
+        macos_thread_sanitizer,
       ]
     runs-on: ubuntu-24.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')

@@ -10,13 +10,18 @@ if(APPLE)
     set(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -D_DARWIN_C_SOURCE")
 else()
     # Don't set static linker options if sanitizers are enabled in Debug mode
-    if(NOT (USE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug"))
+    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND (USE_MEM_SANITIZERS OR USE_THREAD_SANITIZERS)))
         set(STATIC_C_LINKER_OPTIONS "-static")
         set(STATIC_CXX_LINKER_OPTIONS "-static-libgcc;-static-libstdc++")
     endif()
 endif()
 
-if(USE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
+# ASan/UBSan/LeakSan and TSan cannot be linked together, so USE_THREAD_SANITIZERS takes a
+# separate, mutually exclusive branch from USE_MEM_SANITIZERS.
+if(USE_THREAD_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
+    message("Building Debug with ThreadSanitizer.")
+    SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=thread -fsanitize=undefined")
+elseif(USE_MEM_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
     message("Building Debug with ASan and UBSan etc.")
     if(APPLE)
         SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined")

@@ -1737,7 +1737,8 @@ int process_requests(omron_conn_p conn) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
-                        rc = CIP.decode_cip_error_code(&(resp->status));
+                        rc = CIP.decode_cip_error_code(&(resp->status), cip_error_data_size(&resp->status,
+                                                                                            conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
                         break;
@@ -1769,7 +1770,8 @@ int process_requests(omron_conn_p conn) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
-                        rc = CIP.decode_cip_error_code(&(resp->status));
+                        rc = CIP.decode_cip_error_code(&(resp->status), cip_error_data_size(&resp->status,
+                                                                                            conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
                         break;
@@ -1823,39 +1825,6 @@ int process_requests(omron_conn_p conn) {
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
-
-                /* we have multiple requests, sanity check the data. */
-                if(le2h16(multi_resp->request_count) == num_bundled_requests) {
-                    size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - conn->data);
-
-                    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
-
-                    /* check all the offsets */
-                    for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
-                        size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
-
-                        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
-                               resp_offset);
-
-                        if(resp_offset >= (size_t)conn->data_size) {
-                            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
-                                   "Response %d has offset %zu which is outside the conn data!", resp_index, resp_offset);
-                            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-                            break;
-                        }
-                    }
-                } else {
-                    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
-                           num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
-                    rc = PLCTAG_ERR_BAD_DATA;
-                    break;
-                }
-            }
-
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Got error %s when processing incoming response(s)!",
-                       plc_tag_decode_error(rc));
-                break;
             }
 
             if(rc != PLCTAG_STATUS_OK) {
@@ -1974,6 +1943,20 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
             pkt_end = (conn->data + le2h16(packed_resp->encap_length) + sizeof(eip_encap));
         }
 
+        /*
+         * The offsets and encap_length above all come from the wire.  Bound pkt_start/pkt_end
+         * against the bytes we actually received before trusting them as a memcpy source range.
+         */
+        uint8_t *buf_end = conn->data + conn->data_size;
+
+        if(sub_packet < 0 || sub_packet >= (int)total_responses
+           || (uint8_t *)(&multi->request_offsets[total_responses]) > buf_end || pkt_start < (uint8_t *)(&multi->request_count)
+           || pkt_start > buf_end || pkt_end < pkt_start || pkt_end > buf_end) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
+                   "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
         pkt_len = (int)(pkt_end - pkt_start);
 
         /* replace the request buffer if it is not big enough. */
@@ -2082,6 +2065,12 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "Starting.");
 
+    if((uint32_t)requests[0]->request_size > conn->data_capacity) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, requests[0]->tag_id,
+               "Request of %d bytes exceeds the conn buffer capacity of %u bytes!", requests[0]->request_size,
+               conn->data_capacity);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* get the header info from the first request. Just copy the whole thing. */
     mem_copy(conn->data, requests[0]->data, requests[0]->request_size);
@@ -2112,6 +2101,13 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
 
     /* point to where we want the current packet to start. */
     first_pkt_data = pkt_start + header_size;
+
+    /* bounds check before shifting data forward to make room for the multi-request header. */
+    if((first_pkt_data + pkt_len) > (conn->data + conn->data_capacity)) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, requests[0]->tag_id,
+               "Bundled request header does not fit in the conn buffer of %u bytes!", conn->data_capacity);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* move the data over to make room */
     mem_move(first_pkt_data, pkt_start, pkt_len);
@@ -2147,6 +2143,13 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
         pkt_len = (int)le2h16(new_req->cpf_cdi_item_length) - (int)sizeof(new_req->cpf_conn_seq_num);
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet %d is of length %d.", i, pkt_len);
+
+        /* bounds check before copying this request's payload into the conn buffer. */
+        if((next_pkt_data + pkt_len) > (conn->data + conn->data_capacity)) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
+                   "Bundled requests do not fit in the conn buffer of %u bytes!", conn->data_capacity);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
 
         /* copy the request into the conn buffer. */
         mem_copy(next_pkt_data, pkt_start, pkt_len);
@@ -2622,8 +2625,10 @@ int receive_forward_open_response(omron_conn_p conn) {
         }
 
         if(fo_resp->general_status != OMRON_EIP_OK) {
+            size_t general_status_size = cip_error_data_size(&fo_resp->general_status, conn->data + conn->data_size);
+
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Forward Open command failed, response code: %s (%d)",
-                   CIP.decode_cip_error_short(&fo_resp->general_status), fo_resp->general_status);
+                   CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
             if(fo_resp->general_status == OMRON_CIP_ERR_UNSUPPORTED_SERVICE) {
                 /* this type of command is not supported! */
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Received CIP command unsupported error from the PLC!");
@@ -2631,7 +2636,8 @@ int receive_forward_open_response(omron_conn_p conn) {
             } else {
                 rc = PLCTAG_ERR_REMOTE_ERR;
 
-                if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2) {
+                if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2
+                   && (&fo_resp->status_size + 5) <= (conn->data + conn->data_size)) {
                     /* we might have an error that tells us the actual size to use. */
                     uint8_t *data = &fo_resp->status_size;
                     int extended_status = data[1] | (data[2] << 8);
@@ -2640,21 +2646,36 @@ int receive_forward_open_response(omron_conn_p conn) {
                     if(extended_status == 0x109) { /* MAGIC */
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
                                "Error from forward open request, unsupported size, but size %d is supported.", supported_size);
-                        conn->max_payload_guess = supported_size;
-                        rc = PLCTAG_ERR_TOO_LARGE;
+
+                        /*
+                         * The PLC is telling us the size we asked for is unsupported and offering a size it
+                         * does support.  That offered size must not exceed what we asked for -- conn->data
+                         * was allocated based on our request, and a PLC claiming to "support" a larger size
+                         * than we asked for is a protocol disagreement, not a legitimate response.
+                         */
+                        if(supported_size <= conn->max_payload_guess) {
+                            conn->max_payload_guess = supported_size;
+                            rc = PLCTAG_ERR_TOO_LARGE;
+                        } else {
+                            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+                                   "PLC reported a supported size, %u, larger than what we requested, %u! This is a "
+                                   "protocol disagreement and may indicate a malicious or misbehaving PLC; aborting.",
+                                   supported_size, conn->max_payload_guess);
+                            rc = PLCTAG_ERR_BAD_DATA;
+                        }
                     } else if(extended_status == 0x100) { /* MAGIC */
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
                                "Error from forward open request, duplicate connection ID.  Need to try again.");
                         rc = PLCTAG_ERR_DUPLICATE;
                     } else {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "CIP extended error %s (%s)!",
-                               CIP.decode_cip_error_short(&fo_resp->general_status),
-                               CIP.decode_cip_error_long(&fo_resp->general_status));
+                               CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size),
+                               CIP.decode_cip_error_long(&fo_resp->general_status, general_status_size));
                     }
                 } else {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "CIP error code %s (%s)!",
-                           CIP.decode_cip_error_short(&fo_resp->general_status),
-                           CIP.decode_cip_error_long(&fo_resp->general_status));
+                           CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size),
+                           CIP.decode_cip_error_long(&fo_resp->general_status, general_status_size));
                 }
             }
 

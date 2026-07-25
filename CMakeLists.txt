@@ -69,7 +69,13 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
-set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
+set(USE_MEM_SANITIZERS 1 CACHE BOOL "Build with memory debug sanitizers (ASan/UBSan/LeakSan) or not")
+set(USE_THREAD_SANITIZERS 0 CACHE BOOL "Build with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
+
+if(USE_MEM_SANITIZERS AND USE_THREAD_SANITIZERS)
+    message(FATAL_ERROR "USE_MEM_SANITIZERS and USE_THREAD_SANITIZERS cannot both be enabled: ASan/LeakSan and TSan cannot be linked into the same binary.")
+endif()
+
 set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 set(MAX_DEBUG_LEVEL 4 CACHE STRING "Maximum debug level to include in the build (0-5)")
 set(LIBPLCTAG_ENABLE_COVERAGE 0 CACHE BOOL "Enable code coverage measurement")

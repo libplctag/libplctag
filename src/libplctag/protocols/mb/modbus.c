@@ -55,6 +55,10 @@
 #define PLC_READ_DATA_LEN (300)
 #define PLC_WRITE_DATA_LEN (300)
 #define MODBUS_MBAP_SIZE (6)
+/* smallest response we can act on: the MBAP header, plus unit id, function code, and one
+ * byte-count/exception-code byte. check_read_response()/check_write_response() read up to
+ * this offset unconditionally. */
+#define MODBUS_MIN_RESPONSE_SIZE (MODBUS_MBAP_SIZE + 3)
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 #define MAX_MODBUS_PDU_PAYLOAD (253) /* everything after the server address */
@@ -2215,9 +2219,9 @@ int receive_response(modbus_plc_p plc) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Packet header read, data_needed=%d, packet_size=%d, read_data_len=%d",
                    data_needed, packet_size, plc->read_data_len);
 
-            if(data_needed > PLC_READ_DATA_LEN) {
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error, packet size, %d, greater than buffer size, %d!", data_needed,
-                       PLC_READ_DATA_LEN);
+            if((MODBUS_MBAP_SIZE + packet_size) > PLC_READ_DATA_LEN) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error, packet size, %d, greater than buffer size, %d!",
+                       (MODBUS_MBAP_SIZE + packet_size), PLC_READ_DATA_LEN);
                 return PLCTAG_ERR_TOO_LARGE;
             } else if(data_needed < 0) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Read more than a packet!  Expected %d bytes, but got %d bytes!",
@@ -2259,6 +2263,13 @@ int receive_response(modbus_plc_p plc) {
         /* we got our packet. */
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Received full packet.");
         pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, plc->read_data, plc->read_data_len);
+
+        if(plc->read_data_len < MODBUS_MIN_RESPONSE_SIZE) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Response of %d bytes is too short to be a valid Modbus reply!",
+                   plc->read_data_len);
+            plc->read_data_len = 0;
+            return PLCTAG_ERR_TOO_SMALL;
+        }
 
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
@@ -2508,7 +2519,13 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             int register_offset = (tag->request_num * registers_per_request);
             int byte_offset = (register_offset * tag->elem_size) / 8;
             uint8_t payload_size = plc->read_data[8];
+            /* payload_size is wire-supplied; do not trust it past what we actually received. */
+            int payload_available = plc->read_data_len - MODBUS_MIN_RESPONSE_SIZE;
             int copy_size = ((tag->size - byte_offset) < payload_size ? (tag->size - byte_offset) : payload_size);
+
+            if(copy_size > payload_available) { copy_size = payload_available; }
+
+            if(copy_size < 0) { copy_size = 0; }
 
             /* no error. So copy the data. */
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Got read response %u of length %d with payload of size %d.",

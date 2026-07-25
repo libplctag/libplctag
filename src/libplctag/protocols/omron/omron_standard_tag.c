@@ -1280,7 +1280,7 @@ static int check_read_status_connected(omron_tag_p tag) {
     data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = tag->req->data + tag->req->request_size;
 
     /* check the status */
     do {
@@ -1294,11 +1294,14 @@ static int check_read_status_connected(omron_tag_p tag) {
         }
 
         if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, CIP.decode_cip_error_long((uint8_t *)&cip_resp->status));
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
-            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
+                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
+                   CIP.decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+
+            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
 
             break;
         }
@@ -1323,12 +1326,23 @@ static int check_read_status_connected(omron_tag_p tag) {
                     /* found it and we got the type data size */
 
                     /* some types use the second byte to indicate how many bytes more are used. */
-                    if(type_length == 0) { type_length = *(data + 1) + 2; }
+                    if(type_length == 0) {
+                        if(payload_size < 2) {
+                            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                                   "Response too short to hold extended type length byte!");
+                            rc = PLCTAG_ERR_TOO_SMALL;
+                            break;
+                        }
 
-                    if(type_length <= 0) {
+                        type_length = *(data + 1) + 2;
+                    }
+
+                    if(type_length <= 0 || type_length > (int)sizeof(tag->encoded_type_info)
+                       || type_length > (int)payload_size) {
                         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                               "Unable to determine type data length for type byte 0x%02x!", *data);
-                        rc = PLCTAG_ERR_UNSUPPORTED;
+                               "Type data length %d for type byte 0x%02x is out of range (max %d, available %d)!",
+                               type_length, *data, (int)sizeof(tag->encoded_type_info), (int)payload_size);
+                        rc = PLCTAG_ERR_TOO_LARGE;
                         break;
                     }
 
@@ -1445,7 +1459,7 @@ static int check_read_status_unconnected(omron_tag_p tag) {
     data = (tag->req->data) + sizeof(eip_cip_uc_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = tag->req->data + tag->req->request_size;
 
     /* check the status */
     do {
@@ -1480,11 +1494,14 @@ static int check_read_status_unconnected(omron_tag_p tag) {
         }
 
         if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, CIP.decode_cip_error_long((uint8_t *)&cip_resp->status));
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
-            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status);
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
+                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
+                   CIP.decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+
+            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
 
             break;
         }
@@ -1509,12 +1526,23 @@ static int check_read_status_unconnected(omron_tag_p tag) {
                     /* found it and we got the type data size */
 
                     /* some types use the second byte to indicate how many bytes more are used. */
-                    if(type_length == 0) { type_length = *(data + 1) + 2; }
+                    if(type_length == 0) {
+                        if(payload_size < 2) {
+                            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                                   "Response too short to hold extended type length byte!");
+                            rc = PLCTAG_ERR_TOO_SMALL;
+                            break;
+                        }
 
-                    if(type_length <= 0) {
+                        type_length = *(data + 1) + 2;
+                    }
+
+                    if(type_length <= 0 || type_length > (int)sizeof(tag->encoded_type_info)
+                       || type_length > (int)payload_size) {
                         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                               "Unable to determine type data length for type byte 0x%02x!", *data);
-                        rc = PLCTAG_ERR_UNSUPPORTED;
+                               "Type data length %d for type byte 0x%02x is out of range (max %d, available %d)!",
+                               type_length, *data, (int)sizeof(tag->encoded_type_info), (int)payload_size);
+                        rc = PLCTAG_ERR_TOO_LARGE;
                         break;
                     }
 
@@ -1652,10 +1680,13 @@ static int check_write_status_connected(omron_tag_p tag) {
         }
 
         if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
+
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, CIP.decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status);
+                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
+                   CIP.decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }
     } while(0);
@@ -1710,10 +1741,13 @@ static int check_write_status_unconnected(omron_tag_p tag) {
 
 
         if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
+
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, CIP.decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status);
+                   CIP.decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
+                   CIP.decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+            rc = CIP.decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }
     } while(0);
