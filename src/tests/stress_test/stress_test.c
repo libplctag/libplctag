@@ -161,7 +161,7 @@ static void *test_cip(void *data) {
         int64_t start = 0;
         int64_t end = 0;
 
-        while(tag <= 0 && !done) {
+        while(tag <= 0 && !compat_atomic_load_int32(&done)) {
             if(!first_time) { wait_ms(RETRY_TIMEOUT); }
 
             first_time = 0;
