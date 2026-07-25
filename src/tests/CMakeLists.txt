@@ -60,6 +60,7 @@ if(LIBPLCTAG_FEATURE_SERVER)
     add_subdirectory("server_tag_basic")
     add_subdirectory("server_udt")
     add_subdirectory("omron_udt_walk")
+    add_subdirectory("omron_aphyt_metadata")
 endif()
 
 

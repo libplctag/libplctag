@@ -283,11 +283,10 @@ client case, not this):
    Not started.
 5. **Phase 5** self-test alongside each phase; the aphyt acceptance run gates "done".
    Phase 3 is covered by the existing `omron_udt_walk` test. Phases 1 (kind filter) and
-   2 (symbolic metadata) have **no dedicated self-test yet** — both build clean and are
-   logically straightforward, but nothing in-tree exercises `kind=1` vs `kind=2` or a
-   symbolic `0x01` request end-to-end. A raw-socket test (RegisterSession + hand-built
-   CIP request bytes, same loopback pattern as `omron_udt_walk`) is the natural fit;
-   not yet written.
+   2 (symbolic metadata) are now covered by `src/tests/omron_aphyt_metadata` — drives
+   `cip_dispatch_unconnected` directly (no socket framing) with hand-packed CIP request
+   bytes for `kind=1`/`kind=2` GetInstanceListEx2 and symbolic `0x01` GetAttributesAll
+   against atomic, UDT, and unknown-tag names. Passes clean under ASAN/UBSAN. **Done.**
 
 Stop-and-confirm after Phase 2 (below) still applies — real aphyt hasn't been run
 against this yet.
