@@ -94,7 +94,7 @@ static inline int64_t time_us(void) {
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
 
-#define MB_CONN_EVENT_RING_SIZE 32
+#define MB_CONN_EVENT_RING_SIZE 64
 #define MB_CONN_EVENT_RING_MASK (MB_CONN_EVENT_RING_SIZE - 1)
 
 struct modbus_plc_t {
