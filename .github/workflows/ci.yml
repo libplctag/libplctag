@@ -869,6 +869,63 @@ jobs:
           path: ${{ env.BUILD }}/release_zips/*.zip
           if-no-files-found: error
 
+  ubuntu_s390x_qemu:
+    runs-on: ubuntu-24.04
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Install s390x cross-compiler and QEMU user-mode emulation
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake gcc-s390x-linux-gnu g++-s390x-linux-gnu qemu-user-static binfmt-support
+
+      - name: Verify cross-compiler and QEMU
+        run: |
+          s390x-linux-gnu-gcc --version
+          qemu-s390x-static --version
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (s390x, big-endian, static)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=s390x \
+            -DCMAKE_C_COMPILER=s390x-linux-gnu-gcc \
+            -DCMAKE_C_FLAGS='-static' \
+            -DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-s390x-static \
+            -DCMAKE_VERBOSE_MAKEFILE=On \
+            ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under QEMU (s390x, big-endian)
+        run: |
+          cd ${{ github.workspace }}
+          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_s390x_qemu
+          path: |
+            logs/*.log
+          retention-days: 7
+
   alpine_native:
     runs-on: ${{ matrix.runner }}
 
