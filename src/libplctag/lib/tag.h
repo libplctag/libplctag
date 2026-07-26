@@ -58,6 +58,18 @@ struct tag_vtable_t {
     tag_vtable_func wake_plc;
 
     /*
+     * Called once by plc_tag_create_impl() after every generic tag field has been
+     * initialized, right before it returns. Protocols that publish the tag to their
+     * own worker-thread infrastructure (e.g. Modbus's per-PLC handler thread) must
+     * do so here rather than during the protocol's own tag_create_function, since
+     * that runs before the generic layer finishes setting up the tag object --
+     * publishing any earlier lets the worker thread observe a half-initialized tag.
+     * NULL for protocols that only rely on the generic tag_tickler_func()/tag lookup
+     * hashtable, since add_tag_lookup() already runs after generic setup completes.
+     */
+    tag_vtable_func activate;
+
+    /*
      * Called from data-setter functions (plc_tag_set_int8 etc.) when
      * auto_sync_write_ms > 0 and the tag has just been marked dirty.
      * Called while api_mutex is held.  NULL if not implemented.
@@ -164,6 +176,11 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int bit;                                 \
     int protocol_type;                       \
     atomic_bool abort_requested;             \
+    /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
+     * field below is written under this tag's own per-tag api_mutex -- a different     \
+     * lock domain. Packing it into the bitfield run below would race with writes to    \
+     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */  \
+    atomic_bool skip_tickler;                \
     int8_t event_creation_complete_status;   \
     int8_t event_deletion_started_status;    \
     int8_t event_operation_aborted_status;   \
@@ -186,7 +203,6 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     uint8_t is_bit : 1;                      \
     uint8_t read_complete : 1;               \
     uint8_t read_in_flight : 1;              \
-    uint8_t skip_tickler : 1;                \
     uint8_t tag_is_dirty : 1;                \
     uint8_t write_complete : 1;              \
     uint8_t write_in_flight : 1

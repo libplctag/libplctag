@@ -109,7 +109,11 @@
  * ---------------------------------------------------------------------- */
 
 typedef struct {
-    int32_t tag_id;                         /* written once before callbacks start; plain int */
+    /* plc_tag_create_ex() can dispatch the creation-complete event to the callback
+     * on the tickler thread before it returns the new tag_id to this thread, so a
+     * plain int here races: find_tag_state() (callback thread) can read this while
+     * the create loop below (main thread) is still writing it. */
+    compat_atomic_int32_t tag_id;
     compat_atomic_int32_t next_expected_idx;
     compat_atomic_int32_t failed;
     compat_atomic_int32_t completed;
@@ -207,7 +211,7 @@ static const char *conn_status_name(int32_t s) {
 static tag_state_t *find_tag_state(int32_t tag_id) {
     int i;
     for(i = 0; i < num_tags; i++) {
-        if(tag_states[i].tag_id == tag_id) { return &tag_states[i]; }
+        if(compat_atomic_load_int32(&tag_states[i].tag_id) == tag_id) { return &tag_states[i]; }
     }
     return NULL;
 }
@@ -231,7 +235,7 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
 
         if(new_idx >= num_expected_states) { compat_atomic_store_int32(&ts->completed, 1); }
     } else {
-        fprintf(stderr, "ERROR [tag %d]: expected %s but got %s (at index %d).\n", (int)ts->tag_id,
+        fprintf(stderr, "ERROR [tag %d]: expected %s but got %s (at index %d).\n", (int)compat_atomic_load_int32(&ts->tag_id),
                 conn_status_name(expected_states[idx]), conn_status_name(conn_status), idx);
         compat_atomic_store_int32(&ts->failed, 1);
     }
@@ -469,7 +473,7 @@ int main(int argc, char **argv) {
     for(i = 0; i < num_tags; i++) {
         int32_t tag;
 
-        tag_states[i].tag_id = 0;
+        compat_atomic_store_int32(&tag_states[i].tag_id, 0);
         compat_atomic_store_int32(&tag_states[i].next_expected_idx, 0);
         compat_atomic_store_int32(&tag_states[i].failed, 0);
         compat_atomic_store_int32(&tag_states[i].completed, 0);
@@ -482,7 +486,7 @@ int main(int argc, char **argv) {
             if(data_tag) { plc_tag_destroy(data_tag); }
             return 1;
         }
-        tag_states[i].tag_id = tag;
+        compat_atomic_store_int32(&tag_states[i].tag_id, tag);
         tag_handles[i] = tag;
     }
 

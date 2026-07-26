@@ -284,7 +284,15 @@ jobs:
           path: ${{ env.BUILD }}/release_zips/*.zip
 
   ubuntu_mem_sanitizer:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -324,13 +332,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-ubuntu_mem_sanitizer
+          name: test-logs-ubuntu_mem_sanitizer_${{ matrix.arch }}
           path: |
             logs/*.log
           retention-days: 7
 
   ubuntu_thread_sanitizer:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -369,13 +385,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-ubuntu_thread_sanitizer
+          name: test-logs-ubuntu_thread_sanitizer_${{ matrix.arch }}
           path: |
             logs/*.log
           retention-days: 7
 
   macos_mem_sanitizer:
-    runs-on: macos-15
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-15-intel
+          - arch: aarch64
+            runner: macos-15
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -408,13 +432,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-macos_mem_sanitizer
+          name: test-logs-macos_mem_sanitizer_${{ matrix.arch }}
           path: |
             logs/*.log
           retention-days: 7
 
   macos_thread_sanitizer:
-    runs-on: macos-15
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-15-intel
+          - arch: aarch64
+            runner: macos-15
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -446,7 +478,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-macos_thread_sanitizer
+          name: test-logs-macos_thread_sanitizer_${{ matrix.arch }}
           path: |
             logs/*.log
           retention-days: 7

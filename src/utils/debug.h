@@ -92,3 +92,9 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
 extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));
 extern int debug_unregister_logger(void);
 extern void debug_flush(void);
+
+/* Create/destroy the mutex guarding the logger callback. Idempotent and safe to call
+ * more than once; also self-triggered lazily by the functions above if a caller (e.g.
+ * plc_tag_register_logger()) reaches them before initialize_modules() has run. */
+extern int debug_startup(void);
+extern void debug_shutdown(void);

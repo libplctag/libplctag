@@ -36,11 +36,13 @@
 #include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -58,13 +60,25 @@
 static volatile int global_debug_level = DEBUG_NONE;
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
-static lock_t logger_callback_lock = LOCK_INIT;
+
+/* Logger callback and the mutex guarding it. The mutex needs a real, one-time
+ * mutex_create() before use (unlike lock_t, which is valid from static init
+ * alone), but pdebug_impl()/debug_register_logger()/debug_unregister_logger()
+ * can all run before initialize_modules() ever calls debug_startup() -- e.g. a
+ * caller may register a logger as their very first API call. debug_startup_state
+ * makes creating it self-triggered and safe under concurrent first use, mirroring
+ * the UNINITIALIZED/INITIALIZING/RUNNING pattern in lib/init.c. */
+#define DEBUG_STARTUP_STATE_NOT_STARTED ((int32_t)0)
+#define DEBUG_STARTUP_STATE_STARTING ((int32_t)1)
+#define DEBUG_STARTUP_STATE_READY ((int32_t)2)
+
+static atomic_int32_t debug_startup_state = ATOMIC_INT_STATIC_INIT;
+static mutex_p logger_callback_mutex = NULL;
 static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
 
 /* Buffering control for stderr logging performance */
-static volatile int stderr_buffering_initialized = 0;
-static lock_t stderr_init_lock = LOCK_INIT;
-static volatile int log_call_count = 0;
+static atomic_bool stderr_buffering_initialized = ATOMIC_BOOL_STATIC_INIT;
+static atomic_int32_t log_call_count = ATOMIC_INT_STATIC_INIT;
 
 
 /* Module name lookup table is now defined in debug_generated.h */
@@ -170,16 +184,49 @@ static int64_t time_us(void) {
 
 
 static void ensure_stderr_buffering(void) {
-    /* Initialize stderr buffering once for better performance */
-    if(!stderr_buffering_initialized) {
-        spin_block(&stderr_init_lock) {
-            if(!stderr_buffering_initialized) {
-                /* Set stderr to full buffering with 8KB buffer for better performance */
-                setvbuf(stderr, NULL, _IOFBF, 8192);
-                stderr_buffering_initialized = 1;
-            }
-        }
+    /* Initialize stderr buffering exactly once. The thread that wins the
+     * compare-and-set performs the setup; everyone else just proceeds. */
+    if(atomic_compare_and_set_bool(&stderr_buffering_initialized, false, true) == false) {
+        /* Set stderr to full buffering with 8KB buffer for better performance */
+        setvbuf(stderr, NULL, _IOFBF, 8192);
     }
+}
+
+
+extern int debug_startup(void) {
+    int32_t old_state = atomic_compare_and_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_NOT_STARTED, DEBUG_STARTUP_STATE_STARTING);
+
+    if(old_state == DEBUG_STARTUP_STATE_NOT_STARTED) {
+        /* We won the race: we are responsible for creating the mutex. */
+        int rc = mutex_create(&logger_callback_mutex);
+        if(rc != PLCTAG_STATUS_OK) {
+            /* Allow a later call to retry. */
+            atomic_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_NOT_STARTED);
+            return rc;
+        }
+
+        atomic_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_READY);
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* Someone else already started this, or is in the middle of doing so. */
+    while(atomic_get_int32(&debug_startup_state) != DEBUG_STARTUP_STATE_READY) { sleep_ms(1); }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern void debug_shutdown(void) {
+    int32_t old_state = atomic_compare_and_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_READY, DEBUG_STARTUP_STATE_NOT_STARTED);
+
+    if(old_state == DEBUG_STARTUP_STATE_READY) { mutex_destroy(&logger_callback_mutex); }
+}
+
+
+/* Lazily self-trigger debug_startup() for callers that can run before
+ * initialize_modules() does, such as plc_tag_register_logger(). */
+static inline void ensure_debug_started(void) {
+    if(atomic_get_int32(&debug_startup_state) != DEBUG_STARTUP_STATE_READY) { debug_startup(); }
 }
 
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
@@ -194,6 +241,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 
     /* Ensure stderr buffering is set up (one-time initialization) */
     ensure_stderr_buffering();
+    ensure_debug_started();
 
     /* get the time parts */
     epoch_us = time_us();
@@ -219,16 +267,24 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     /* FIXME - check the output size */
     // NOLINTNEXTLINE
     /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
-    if(log_callback_func) {
-        log_callback_func(tag_id, debug_level, output);
-    } else {
-        fputs(output, stderr);
 
-        /* Flush periodically for better performance while ensuring timely output */
-        log_call_count++;
-        if(debug_level <= DEBUG_ERROR || (log_call_count % 100) == 0) {
-            /* Flush on errors (critical info) or every 100 log entries */
-            fflush(stderr);
+    /* Check and call the callback inside the same critical section that
+     * debug_register_logger()/debug_unregister_logger() use to change it: this
+     * makes "check whether a callback is registered" and "call it" one atomic
+     * step, so unregister can never return while a call to the just-cleared
+     * callback is still in flight or about to start. */
+    critical_block(logger_callback_mutex) {
+        if(log_callback_func) {
+            log_callback_func(tag_id, debug_level, output);
+        } else {
+            fputs(output, stderr);
+
+            /* Flush periodically for better performance while ensuring timely output */
+            int32_t call_count = atomic_add_int32(&log_call_count, 1) + 1;
+            if(debug_level <= DEBUG_ERROR || (call_count % 100) == 0) {
+                /* Flush on errors (critical info) or every 100 log entries */
+                fflush(stderr);
+            }
         }
     }
 
@@ -272,8 +328,9 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
 int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message)) {
     int rc = PLCTAG_STATUS_OK;
 
-    /* FIXME - make this a mutex */
-    spin_block(&logger_callback_lock) {
+    ensure_debug_started();
+
+    critical_block(logger_callback_mutex) {
         if(!log_callback_func) {
             log_callback_func = log_callback_func_arg;
         } else {
@@ -288,7 +345,14 @@ int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debu
 int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    spin_block(&logger_callback_lock) {
+    ensure_debug_started();
+
+    /* Because pdebug_impl() checks-and-calls the callback inside this same
+     * mutex, this cannot return while a call to the callback we're about to
+     * clear is in flight or about to start: either we get the mutex first (and
+     * no in-flight call exists yet) or a caller already holding it finishes its
+     * check-and-call before we get in. No separate drain/wait is needed. */
+    critical_block(logger_callback_mutex) {
         if(log_callback_func) {
             log_callback_func = NULL;
         } else {
@@ -302,7 +366,12 @@ int debug_unregister_logger(void) {
 
 void debug_flush(void) {
     /* Flush stderr to ensure all buffered log output is written */
-    if(!log_callback_func) { fflush(stderr); }
+    ensure_debug_started();
+
+    bool has_logger = false;
+    critical_block(logger_callback_mutex) { has_logger = (log_callback_func != NULL); }
+
+    if(!has_logger) { fflush(stderr); }
 }
 
 

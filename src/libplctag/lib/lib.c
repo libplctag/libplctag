@@ -564,7 +564,7 @@ THREAD_FUNC(tag_tickler_func) {
             for(int i = 0; i < max_index; i++) {
                 plc_tag_p tag = hashtable_get_index(tags, i);
 
-                if(tag && !tag->skip_tickler && rc_inc(tag) != NULL) {
+                if(tag && !atomic_get_bool(&tag->skip_tickler) && rc_inc(tag) != NULL) {
                     vector_insert(active_tags, vector_length(active_tags), tag);
                 }
             }
@@ -1146,10 +1146,18 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return id;
     }
 
-    /* save this for later. */
-    tag->tag_id = id;
+    /* Save this for later. Once add_tag_lookup() above publishes the tag into the
+     * hashtable, the tickler thread can pick it up and read tag->tag_id (e.g. to
+     * pass to the creation-complete callback) under tag->api_mutex, so the write
+     * here must use the same lock rather than racing that read. */
+    critical_block(tag->api_mutex) { tag->tag_id = id; }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Returning mapped tag ID %d", id);
+
+    /* Let protocols with their own worker-thread publishing step (e.g. Modbus) do it
+     * now that every generic field above is set. See the comment on activate in
+     * tag.h for why this can't happen earlier, inside the protocol's tag_create_function. */
+    if(tag->vtable && tag->vtable->activate) { tag->vtable->activate(tag); }
 
     /* wake up tag's PLC here. */
     if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
