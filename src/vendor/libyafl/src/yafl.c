@@ -26,6 +26,43 @@
 
 #include "yafl.h"
 
+/*
+ * Sanitizer fiber-switch support.
+ *
+ * yafl hand-swaps the raw stack pointer in assembly to implement stackful
+ * fibers. Without telling ASan/TSan about each switch, they misattribute
+ * memory and happens-before edges across what looks like one stack but is
+ * really several, producing spurious reports (or worse) unrelated to any
+ * real bug in code that merely uses fibers.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+    #define YAFL_ASAN_ENABLED 1
+#elif defined(__has_feature)
+    #if __has_feature(address_sanitizer)
+        #define YAFL_ASAN_ENABLED 1
+    #endif
+#endif
+#ifndef YAFL_ASAN_ENABLED
+    #define YAFL_ASAN_ENABLED 0
+#endif
+
+#if defined(__SANITIZE_THREAD__)
+    #define YAFL_TSAN_ENABLED 1
+#elif defined(__has_feature)
+    #if __has_feature(thread_sanitizer)
+        #define YAFL_TSAN_ENABLED 1
+    #endif
+#endif
+#ifndef YAFL_TSAN_ENABLED
+    #define YAFL_TSAN_ENABLED 0
+#endif
+
+#if YAFL_ASAN_ENABLED
+    #include <sanitizer/asan_interface.h>
+#endif
+#if YAFL_TSAN_ENABLED
+    #include <sanitizer/tsan_interface.h>
+#endif
 
 /* Raw context handle - opaque pointer to saved machine state */
 typedef struct yafl_opaque_t *yafl_t;
@@ -82,6 +119,11 @@ struct yafl_fiber {
     /* User entry and result */
     yafl_fiber_fn user_entry;
     void *cached_result;
+
+#if YAFL_TSAN_ENABLED
+    void *tsan_fiber;         /* TSan context representing this fiber */
+    void *tsan_resumer_fiber; /* TSan context representing whoever resumed us */
+#endif
 };
 
 /* Typedef for internal use */
@@ -176,6 +218,10 @@ static void fiber_entry_trampoline(void *arg) {
     fiber->cached_result = result;
     tls_current_fiber = NULL;
 
+#if YAFL_TSAN_ENABLED
+    __tsan_switch_to_fiber(fiber->tsan_resumer_fiber, 0);
+#endif
+
     /* Return to resumer with final result */
     yafl_switch(&fiber->context, fiber->resumer_context, result);
 
@@ -220,6 +266,11 @@ extern yafl_fiber_t *yafl_fiber_create(yafl_fiber_fn fiber_fn, size_t stack_size
     fiber->stack_total_size = 0;
     fiber->stack_top = NULL;
     fiber->stack_size = 0;
+
+#if YAFL_TSAN_ENABLED
+    fiber->tsan_fiber = __tsan_create_fiber(0);
+    fiber->tsan_resumer_fiber = NULL;
+#endif
 
     /* Use default stack size if not specified */
     if(stack_size == 0) { stack_size = YAFL_DEFAULT_STACK_SIZE; }
@@ -286,6 +337,9 @@ extern yafl_fiber_t *yafl_fiber_create(yafl_fiber_fn fiber_fn, size_t stack_size
     return fiber;
 
 create_fail:
+#if YAFL_TSAN_ENABLED
+    __tsan_destroy_fiber(fiber->tsan_fiber);
+#endif
     free_fiber_stack(fiber);
     free(fiber);
     return NULL;
@@ -312,8 +366,27 @@ extern void *yafl_fiber_resume(yafl_fiber_t *fiber, void *arg) {
     fiber->status = YAFL_FIBER_STATUS_RUNNING;
     tls_current_fiber = fiber;
 
+#if YAFL_ASAN_ENABLED
+    /* Bracket the switch away from and back to this exact call: capture our
+     * own (resumer) fake-stack state before jumping to the fiber's stack, and
+     * restore it once the fiber suspends or completes and control returns
+     * here. This round trip never leaves this C stack frame, so a plain
+     * local variable is sufficient -- no cross-fiber handoff needed. */
+    void *fake_stack_save = NULL;
+    void *fiber_stack_bottom = (char *)fiber->stack_top - fiber->stack_size;
+    __sanitizer_start_switch_fiber(&fake_stack_save, fiber_stack_bottom, fiber->stack_size);
+#endif
+#if YAFL_TSAN_ENABLED
+    fiber->tsan_resumer_fiber = __tsan_get_current_fiber();
+    __tsan_switch_to_fiber(fiber->tsan_fiber, 0);
+#endif
+
     /* Perform context switch */
     void *result = yafl_switch(&fiber->resumer_context, fiber->context, arg);
+
+#if YAFL_ASAN_ENABLED
+    __sanitizer_finish_switch_fiber(fake_stack_save, NULL, NULL);
+#endif
 
     /* Back in resumer */
     tls_current_fiber = NULL;
@@ -335,6 +408,10 @@ extern void *yafl_fiber_suspend(void *result) {
 
     /* Update status */
     current->status = YAFL_FIBER_STATUS_SUSPENDED;
+
+#if YAFL_TSAN_ENABLED
+    __tsan_switch_to_fiber(current->tsan_resumer_fiber, 0);
+#endif
 
     /* Switch back to resumer */
     void *arg = yafl_switch(&current->context, current->resumer_context, result);
@@ -386,6 +463,10 @@ extern void yafl_fiber_destroy(yafl_fiber_t *fiber) {
 
     /* Cannot destroy running fiber */
     if(fiber->status == YAFL_FIBER_STATUS_RUNNING) { return; }
+
+#if YAFL_TSAN_ENABLED
+    __tsan_destroy_fiber(fiber->tsan_fiber);
+#endif
 
     free_fiber_stack(fiber);
 
