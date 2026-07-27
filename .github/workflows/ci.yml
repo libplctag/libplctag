@@ -891,6 +891,7 @@ jobs:
       - name: Verify cross-compiler and QEMU
         run: |
           s390x-linux-gnu-gcc --version
+          s390x-linux-gnu-g++ --version
           qemu-s390x-static --version
 
       - name: Create build directory
@@ -904,7 +905,9 @@ jobs:
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=s390x \
             -DCMAKE_C_COMPILER=s390x-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=s390x-linux-gnu-g++ \
             -DCMAKE_C_FLAGS='-static' \
+            -DCMAKE_CXX_FLAGS='-static' \
             -DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-s390x-static \
             -DCMAKE_VERBOSE_MAKEFILE=On \
             ..
