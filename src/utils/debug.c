@@ -61,19 +61,18 @@ static volatile int global_debug_level = DEBUG_NONE;
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
 
-/* Logger callback and the mutex guarding it. The mutex needs a real, one-time
- * mutex_create() before use (unlike lock_t, which is valid from static init
- * alone), but pdebug_impl()/debug_register_logger()/debug_unregister_logger()
- * can all run before initialize_modules() ever calls debug_startup() -- e.g. a
- * caller may register a logger as their very first API call. debug_startup_state
- * makes creating it self-triggered and safe under concurrent first use, mirroring
- * the UNINITIALIZED/INITIALIZING/RUNNING pattern in lib/init.c. */
-#define DEBUG_STARTUP_STATE_NOT_STARTED ((int32_t)0)
-#define DEBUG_STARTUP_STATE_STARTING ((int32_t)1)
-#define DEBUG_STARTUP_STATE_READY ((int32_t)2)
-
-static atomic_int32_t debug_startup_state = ATOMIC_INT_STATIC_INIT;
-static mutex_p logger_callback_mutex = NULL;
+/* Logger callback and the lock guarding it. This must be a spinlock, not a real
+ * mutex: mutex_lock_impl()/mutex_unlock_impl() call pdebug() themselves to trace
+ * the lock attempt, and pdebug_impl() below takes this lock on every single call
+ * -- using a real mutex here means every log call re-enters pdebug_impl() while
+ * still inside this same critical section, recursing without ever completing the
+ * original lock attempt. lock_acquire()/lock_release() are deliberately pdebug-free
+ * for exactly this reason. lock_t is also valid from static initialization alone
+ * (LOCK_INIT is just 0), unlike a mutex_p, which needs a runtime mutex_create()
+ * -- and pdebug_impl()/debug_register_logger()/debug_unregister_logger() can all
+ * run before initialize_modules() ever does, e.g. a caller may register a logger
+ * as their very first API call. */
+static lock_t logger_callback_lock = LOCK_INIT;
 static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
 
 /* Buffering control for stderr logging performance */
@@ -193,42 +192,6 @@ static void ensure_stderr_buffering(void) {
 }
 
 
-extern int debug_startup(void) {
-    int32_t old_state = atomic_compare_and_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_NOT_STARTED, DEBUG_STARTUP_STATE_STARTING);
-
-    if(old_state == DEBUG_STARTUP_STATE_NOT_STARTED) {
-        /* We won the race: we are responsible for creating the mutex. */
-        int rc = mutex_create(&logger_callback_mutex);
-        if(rc != PLCTAG_STATUS_OK) {
-            /* Allow a later call to retry. */
-            atomic_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_NOT_STARTED);
-            return rc;
-        }
-
-        atomic_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_READY);
-        return PLCTAG_STATUS_OK;
-    }
-
-    /* Someone else already started this, or is in the middle of doing so. */
-    while(atomic_get_int32(&debug_startup_state) != DEBUG_STARTUP_STATE_READY) { sleep_ms(1); }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-extern void debug_shutdown(void) {
-    int32_t old_state = atomic_compare_and_set_int32(&debug_startup_state, DEBUG_STARTUP_STATE_READY, DEBUG_STARTUP_STATE_NOT_STARTED);
-
-    if(old_state == DEBUG_STARTUP_STATE_READY) { mutex_destroy(&logger_callback_mutex); }
-}
-
-
-/* Lazily self-trigger debug_startup() for callers that can run before
- * initialize_modules() does, such as plc_tag_register_logger(). */
-static inline void ensure_debug_started(void) {
-    if(atomic_get_int32(&debug_startup_state) != DEBUG_STARTUP_STATE_READY) { debug_startup(); }
-}
-
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
     va_list va;
     struct tm t;
@@ -241,7 +204,6 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 
     /* Ensure stderr buffering is set up (one-time initialization) */
     ensure_stderr_buffering();
-    ensure_debug_started();
 
     /* get the time parts */
     epoch_us = time_us();
@@ -273,7 +235,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
      * makes "check whether a callback is registered" and "call it" one atomic
      * step, so unregister can never return while a call to the just-cleared
      * callback is still in flight or about to start. */
-    critical_block(logger_callback_mutex) {
+    spin_block(&logger_callback_lock) {
         if(log_callback_func) {
             log_callback_func(tag_id, debug_level, output);
         } else {
@@ -328,9 +290,7 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
 int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message)) {
     int rc = PLCTAG_STATUS_OK;
 
-    ensure_debug_started();
-
-    critical_block(logger_callback_mutex) {
+    spin_block(&logger_callback_lock) {
         if(!log_callback_func) {
             log_callback_func = log_callback_func_arg;
         } else {
@@ -345,14 +305,12 @@ int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debu
 int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    ensure_debug_started();
-
     /* Because pdebug_impl() checks-and-calls the callback inside this same
-     * mutex, this cannot return while a call to the callback we're about to
-     * clear is in flight or about to start: either we get the mutex first (and
+     * lock, this cannot return while a call to the callback we're about to
+     * clear is in flight or about to start: either we get the lock first (and
      * no in-flight call exists yet) or a caller already holding it finishes its
      * check-and-call before we get in. No separate drain/wait is needed. */
-    critical_block(logger_callback_mutex) {
+    spin_block(&logger_callback_lock) {
         if(log_callback_func) {
             log_callback_func = NULL;
         } else {
@@ -366,10 +324,8 @@ int debug_unregister_logger(void) {
 
 void debug_flush(void) {
     /* Flush stderr to ensure all buffered log output is written */
-    ensure_debug_started();
-
     bool has_logger = false;
-    critical_block(logger_callback_mutex) { has_logger = (log_callback_func != NULL); }
+    spin_block(&logger_callback_lock) { has_logger = (log_callback_func != NULL); }
 
     if(!has_logger) { fflush(stderr); }
 }

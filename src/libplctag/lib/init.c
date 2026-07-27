@@ -189,9 +189,6 @@ void destroy_modules(void) {
     atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Done.");
-
-    /* Last: any pdebug() call after this point self-heals via ensure_debug_started(). */
-    debug_shutdown();
 }
 
 
@@ -253,15 +250,6 @@ int initialize_modules(void) {
 
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
-
-    /* Start logging infrastructure first: everything below this logs via pdebug(). */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting debug/logging infrastructure.");
-    rc = debug_startup();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start debug/logging infrastructure!");
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
-    }
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
     rc = refcount_startup();
