@@ -2043,8 +2043,12 @@ int process_requests(ab_session_p session) {
 
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Pushing %d requests back into the queue.", num_bundled_requests);
 
-            for(int i = num_bundled_requests - 1; i >= 0; i--) {
-                if(bundled_requests[i]) { vector_insert(session->requests, 0, bundled_requests[i]); }
+            /* session->requests is also written by session_add_request() (tickler thread)
+             * under session->session_mutex, so this push-back needs the same lock. */
+            critical_block(session->session_mutex) {
+                for(int i = num_bundled_requests - 1; i >= 0; i--) {
+                    if(bundled_requests[i]) { vector_insert(session->requests, 0, bundled_requests[i]); }
+                }
             }
         }
 

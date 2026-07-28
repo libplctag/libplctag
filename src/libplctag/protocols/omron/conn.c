@@ -2682,11 +2682,14 @@ int receive_forward_open_response(omron_conn_p conn) {
             break;
         }
 
-        /* success! */
-        conn->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
-        conn->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
+        /* success! conn_create_request() reads max_payload_size (via GET_MAX_PAYLOAD_SIZE)
+         * under conn->mutex, so committing it here needs the same lock. */
+        critical_block(conn->mutex) {
+            conn->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
+            conn->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
 
-        conn->max_payload_size = conn->max_payload_guess;
+            conn->max_payload_size = conn->max_payload_guess;
+        }
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0,
                "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",

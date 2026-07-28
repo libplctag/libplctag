@@ -57,7 +57,7 @@
  */
 
 
-static volatile int global_debug_level = DEBUG_NONE;
+static atomic_int32_t global_debug_level = ATOMIC_INT_STATIC_INIT; /* DEBUG_NONE == 0 */
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
 
@@ -82,12 +82,16 @@ static atomic_int32_t log_call_count = ATOMIC_INT_STATIC_INIT;
 
 /* Module name lookup table is now defined in debug_generated.h */
 
-/* Per-module debug levels - indexed directly by debug_module_t value. */
-static volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
+/* Per-module debug levels - indexed directly by debug_module_t value. Written by
+ * set_debug_level()/debug_module_set_level()/debug_set_all_modules() (rarely, from
+ * application code) and read by debug_is_enabled() (constantly, on every pdebug()
+ * call from every thread), so this needs real atomics, not just volatile. Static
+ * storage duration zero-initializes every element to 0 == DEBUG_NONE. */
+static atomic_int32_t debug_module_levels[DEBUG_MODULE_COUNT];
 
 
 bool debug_is_enabled(debug_module_t module, int level) {
-    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= (int)debug_module_levels[module];
+    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= atomic_get_int32(&debug_module_levels[module]);
 }
 
 
@@ -99,35 +103,33 @@ static THREAD_LOCAL uint32_t this_thread_num = 0;
 
 
 int set_debug_level(int level) {
-    int old_level = global_debug_level;
-
-    global_debug_level = level;
+    int old_level = atomic_set_int32(&global_debug_level, level);
 
     /* Push the global level into every module slot so the inline
      * debug_is_enabled() check needs only a single array lookup. */
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { debug_module_levels[i] = (uint8_t)level; }
+    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 
     return old_level;
 }
 
 
-int get_debug_level(void) { return global_debug_level; }
+int get_debug_level(void) { return atomic_get_int32(&global_debug_level); }
 
 
 
 void debug_module_set_level(debug_module_t module, int level) {
-    if((unsigned)module < DEBUG_MODULE_COUNT) { debug_module_levels[module] = (uint8_t)level; }
+    if((unsigned)module < DEBUG_MODULE_COUNT) { atomic_set_int32(&debug_module_levels[module], level); }
 }
 
 
 int debug_module_get_level(debug_module_t module) {
-    if((unsigned)module < DEBUG_MODULE_COUNT) { return debug_module_levels[module]; }
+    if((unsigned)module < DEBUG_MODULE_COUNT) { return atomic_get_int32(&debug_module_levels[module]); }
     return DEBUG_NONE;
 }
 
 
 void debug_set_all_modules(int level) {
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { debug_module_levels[i] = (uint8_t)level; }
+    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 }
 
 

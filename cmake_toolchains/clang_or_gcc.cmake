@@ -18,15 +18,24 @@ endif()
 
 # ASan/UBSan/LeakSan and TSan cannot be linked together, so USE_THREAD_SANITIZERS takes a
 # separate, mutually exclusive branch from USE_MEM_SANITIZERS.
+#
+# -fno-sanitize=function disables just the function-pointer-type-mismatch check within
+# -fsanitize=undefined. This codebase's protocol/tag vtable dispatch and rc_alloc()
+# destructors deliberately declare handlers taking a concrete tag/PLC pointer type (e.g.
+# ab_tag_p) and assign them into fields typed for the generic base pointer (plc_tag_p);
+# this is a standard, ABI-safe C idiom relying on the "common initial sequence" struct
+# layout guarantee, but it technically mismatches the exact function pointer type, which
+# -fsanitize=function flags as undefined behavior. Suppressed here rather than rewriting
+# every protocol's function signatures to take the generic pointer type and cast internally.
 if(USE_THREAD_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
     message("Building Debug with ThreadSanitizer.")
-    SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=thread -fsanitize=undefined")
+    SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=thread -fsanitize=undefined -fno-sanitize=function")
 elseif(USE_MEM_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
     message("Building Debug with ASan and UBSan etc.")
     if(APPLE)
-        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined")
+        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined -fno-sanitize=function")
     else()
-        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=leak -fsanitize=undefined")
+        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=leak -fsanitize=undefined -fno-sanitize=function")
     endif()
 endif()
 

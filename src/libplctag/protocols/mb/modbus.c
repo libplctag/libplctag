@@ -1328,8 +1328,12 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_IDLE_WAIT state.");
                 mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_IDLE_WAIT);
 
-                /* Check if any tags need connection (active_tags is non-empty) */
-                if(vector_length(plc->active_tags) > 0) {
+                /* Check if any tags need connection (active_tags is non-empty).
+                 * All access to active_tags must hold plc->mutex -- mb_read_start()/
+                 * mb_write_start() insert into it under that same lock. */
+                bool has_active_tags = false;
+                critical_block(plc->mutex) { has_active_tags = (vector_length(plc->active_tags) > 0); }
+                if(has_active_tags) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0,
                            "PLC has active tags needing connection, transitioning to PLC_CONNECT_START.");
                     plc->state = PLC_CONNECT_START;
@@ -3278,17 +3282,23 @@ int mb_read_start(plc_tag_p p_tag) {
 
     {
         int64_t now = time_ms();
-        tag->op = TAG_OP_READ_REQUEST;
-        tag->op_changed_time = now;
-        tag->request_start_time = now;
-        tag->read_complete = 0; /* clear stale completion flag from previous cycle */
 
         /*
+         * tag->op (and friends) must change under tag->plc->mutex, not before it: the PLC
+         * handler thread's tickle_all_tags() reads candidate->op for every entry in
+         * active_tags while holding this same mutex, and this tag may already be in that
+         * vector (e.g. a prior auto-sync insertion) by the time we get here.
+         *
          * Insert or move to front of active_tags so this read fires immediately.
          * If the tag is already in active_tags (e.g., auto-sync waiting for a
          * future op_time), move it to now (single rotate); otherwise insert fresh.
          */
         critical_block(tag->plc->mutex) {
+            tag->op = TAG_OP_READ_REQUEST;
+            tag->op_changed_time = now;
+            tag->request_start_time = now;
+            tag->read_complete = 0; /* clear stale completion flag from previous cycle */
+
             if(tag->in_active_vector) {
                 int idx = vector_find_index(tag->plc->active_tags, tag);
                 move_tag_sorted(tag->plc, tag, idx, now);
@@ -3364,15 +3374,17 @@ static int mb_write_start(plc_tag_p p_tag) {
 
     {
         int64_t now = time_ms();
-        tag->op = TAG_OP_WRITE_REQUEST;
-        tag->op_changed_time = now;
 
-        /*
-         * Insert or move to front of active_tags so this write fires immediately.
-         * If the tag is already in active_tags (e.g., auto-sync waiting for a
-         * future op_time), move it to now (single rotate); otherwise insert fresh.
-         */
+        /* tag->op must change under tag->plc->mutex -- see the comment in mb_read_start(). */
         critical_block(tag->plc->mutex) {
+            tag->op = TAG_OP_WRITE_REQUEST;
+            tag->op_changed_time = now;
+
+            /*
+             * Insert or move to front of active_tags so this write fires immediately.
+             * If the tag is already in active_tags (e.g., auto-sync waiting for a
+             * future op_time), move it to now (single rotate); otherwise insert fresh.
+             */
             if(tag->in_active_vector) {
                 int idx = vector_find_index(tag->plc->active_tags, tag);
                 move_tag_sorted(tag->plc, tag, idx, now);

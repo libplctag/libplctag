@@ -414,14 +414,15 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
     /* punt if not needed. */
-    if(!tag || !tag->callback) { return; }
+    if(!tag) { return; }
 
     critical_block(tag->api_mutex) {
-        /* Re-check the callback under the API mutex.  plc_tag_destroy() clears the
-         * callback (and userdata) under this same mutex while tearing the tag down.
+        /* Check the callback under the API mutex, not before: plc_tag_destroy() clears
+         * the callback (and userdata) under this same mutex while tearing the tag down.
          * The tag tickler thread holds its own reference and can call this function
-         * after plc_tag_destroy() has returned, so without this guard it could invoke
-         * a stale callback and dereference userdata the caller has already freed. */
+         * after plc_tag_destroy() has returned, so an unsynchronized pre-check here would
+         * race that clear -- benign in practice since this check alone re-runs properly
+         * guarded below, but still a real data race by the C11/TSan memory model. */
         if(!tag->callback) { break; }
 
         /* trigger this if there is any other event. Only once. */
