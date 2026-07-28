@@ -27,15 +27,23 @@ endif()
 # layout guarantee, but it technically mismatches the exact function pointer type, which
 # -fsanitize=function flags as undefined behavior. Suppressed here rather than rewriting
 # every protocol's function signatures to take the generic pointer type and cast internally.
+# GCC's C front end doesn't recognize "function" as a valid -fno-sanitize= value (it's a
+# Clang/C++-only check there), so only pass the flag when actually compiling with Clang.
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+    set(SANITIZE_NO_FUNCTION_FLAG "-fno-sanitize=function")
+else()
+    set(SANITIZE_NO_FUNCTION_FLAG "")
+endif()
+
 if(USE_THREAD_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
     message("Building Debug with ThreadSanitizer.")
-    SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=thread -fsanitize=undefined -fno-sanitize=function")
+    SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=thread -fsanitize=undefined ${SANITIZE_NO_FUNCTION_FLAG}")
 elseif(USE_MEM_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MINGW)
     message("Building Debug with ASan and UBSan etc.")
     if(APPLE)
-        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined -fno-sanitize=function")
+        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined ${SANITIZE_NO_FUNCTION_FLAG}")
     else()
-        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=leak -fsanitize=undefined -fno-sanitize=function")
+        SET(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -fsanitize=address -fsanitize=leak -fsanitize=undefined ${SANITIZE_NO_FUNCTION_FLAG}")
     endif()
 endif()
 
