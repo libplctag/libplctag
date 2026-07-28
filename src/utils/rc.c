@@ -73,6 +73,11 @@ static vector_p cleanup_queue = NULL;
 static thread_p cleanup_thread = NULL;
 static atomic_int32_t cleanup_thread_running = ATOMIC_INT_STATIC_INIT;
 
+/* Set around the refcount_cleanup(header) call in the cleanup thread loop below.
+ * Needed because "queue length == 0" is not the same as "quiescent": a destructor
+ * can be running right now and about to queue more work. */
+static atomic_int32_t cleanup_processing = ATOMIC_INT_STATIC_INIT;
+
 static void refcount_cleanup(refcount_p rc);
 
 static THREAD_FUNC(refcount_cleanup_thread_func);
@@ -260,7 +265,9 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
             if(header) {
                 pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Processing cleanup for object %p allocated at %s:%d",
                        (void *)(header + 1), header->function_name, header->line_num);
+                atomic_set_int32(&cleanup_processing, 1);
                 refcount_cleanup(header);
+                atomic_set_int32(&cleanup_processing, 0);
             }
         } while(header != NULL);
     }
@@ -333,6 +340,40 @@ int refcount_startup(void) {
  *
  * This waits for the cleanup queue to drain before returning.
  */
+/*
+ * refcount_drain
+ *
+ * Wait until the cleanup queue is empty and no destructor is currently running,
+ * i.e. every rc_dec() queued so far -- and everything those destructors have in
+ * turn queued -- has fully finished. Used by shutdown to make sure every tag
+ * destructor (and whatever it transitively released) has completed before the
+ * library-instance object itself is torn down.
+ */
+int refcount_drain(int timeout_ms) {
+    int64_t end_time = time_ms() + timeout_ms;
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Starting.");
+
+    while(1) {
+        int queue_len = 0;
+
+        if(cleanup_mutex && cleanup_queue) { critical_block(cleanup_mutex) { queue_len = vector_length(cleanup_queue); } }
+
+        if(queue_len == 0 && !atomic_get_int32(&cleanup_processing)) {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Done, queue is quiescent.");
+            return PLCTAG_STATUS_OK;
+        }
+
+        if(time_ms() >= end_time) {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Timed out waiting for cleanup queue to drain!");
+            return PLCTAG_ERR_TIMEOUT;
+        }
+
+        sleep_ms(5);
+    }
+}
+
+
 int refcount_teardown(void) {
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Shutting down refcount cleanup infrastructure.");
 

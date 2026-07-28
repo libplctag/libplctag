@@ -49,3 +49,11 @@ extern void *rc_dec_impl(const char *func, int line_num, void *ref);
 /* Refcount cleanup thread management */
 extern int refcount_startup(void);
 extern int refcount_teardown(void);
+
+/* Waits until the deferred-cleanup queue is empty AND no destructor is currently
+ * running, or until timeout_ms elapses. A queue-length check alone is not enough:
+ * a destructor can be mid-run, about to queue more work (e.g. a tag destructor
+ * releasing its last session reference queues the session destructor), so an
+ * empty queue with a destructor still executing is not quiescent. Returns
+ * PLCTAG_STATUS_OK if quiescent, PLCTAG_ERR_TIMEOUT otherwise. */
+extern int refcount_drain(int timeout_ms);

@@ -296,6 +296,11 @@ static void ab_connection_tag_destructor(void *ptr) {
         tag->data = NULL;
     }
 
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
+    }
+
     pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, tag->tag_id, "Finished releasing all tag resources.");
 
     pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, tag->tag_id, "Done");

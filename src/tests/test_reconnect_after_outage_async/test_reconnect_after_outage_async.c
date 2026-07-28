@@ -42,6 +42,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* Guard for MSVC which doesn't support C11 stdatomic.h */
+#ifdef _MSC_VER
+#    define _Atomic volatile
+#else
+#    include <stdatomic.h>
+#endif
+
 
 #define REQUIRED_VERSION 2, 6, 6
 
@@ -79,16 +86,18 @@ typedef struct {
     int64_t reconnect_time;
     int32_t tag;
     int read_timeout_ms;
-    int read_start_count;
-    int read_success_count;
-    int read_timeout_count;
-    int read_error_count;
-    int read_success_after_reconnect;
+    /* Written by tag_callback() on the library's callback thread, read from the main
+     * thread while the test runs concurrently -- need real atomics, not plain ints. */
+    _Atomic int read_start_count;
+    _Atomic int read_success_count;
+    _Atomic int read_timeout_count;
+    _Atomic int read_error_count;
+    _Atomic int read_success_after_reconnect;
+    _Atomic bool reconnect_done; /* flag to indicate reconnection has been done */
     int test_passed;
     int errors_before_disconnect; /* error count before disconnect */
     int errors_after_reconnect;   /* error count after reconnect */
     int errors_during_disconnect; /* calculated: errors that occurred during disconnect */
-    bool reconnect_done;          /* flag to indicate reconnection has been done */
 } test_state_t;
 
 

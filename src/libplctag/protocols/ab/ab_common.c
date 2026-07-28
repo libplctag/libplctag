@@ -970,6 +970,11 @@ void ab_tag_destroy(ab_tag_p tag) {
         tag->data = NULL;
     }
 
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
+    }
+
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag->tag_id, "Finished releasing all tag resources.");
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag->tag_id, "Done");

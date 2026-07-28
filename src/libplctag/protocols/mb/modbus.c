@@ -606,6 +606,11 @@ void modbus_tag_destructor(void *tag_arg) {
         tag->byte_order = NULL;
     }
 
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
+    }
+
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, tag->tag_id, "Done.");
 }
 
@@ -3767,6 +3772,11 @@ static void mb_connection_tag_destructor(void *ptr) {
     if(dt->data) {
         mem_free(dt->data);
         dt->data = NULL;
+    }
+
+    if(dt->instance) {
+        rc_dec(dt->instance);
+        dt->instance = NULL;
     }
 
     pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, dt->tag_id, "Done.");
