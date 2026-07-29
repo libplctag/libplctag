@@ -676,6 +676,15 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     conn->is_dhp = is_dhp;
     conn->dhp_dest = dhp_dest;
     atomic_init_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DOWN);
+
+    /* conn_event_ring_write_idx always points at the ring slot holding the current
+     * state, not the next free slot: conn_set_connection_status() dedups a new
+     * event against ring[write_idx] before writing ring[write_idx+1], and a
+     * connection tag seeds event_ring_read_idx to this same index to mean "I've
+     * already seen this one." Both of those need ring[0] to hold a real DOWN
+     * entry, not the zeroed garbage rc_alloc() leaves behind. */
+    conn->conn_event_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
+    conn->conn_event_ring[0].status = PLCTAG_STATUS_OK;
     atomic_init_int32(&conn->conn_event_ring_write_idx, 0);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
@@ -1095,23 +1104,30 @@ typedef enum {
 } conn_state_t;
 
 
+/* connection_status and the ring publish must change together under conn->mutex:
+ * omron_connection_tag_create() takes a paired snapshot of both (conn_event_ring_write_idx
+ * and connection_status) to seed a freshly created connection tag, and needs the same
+ * mutex to avoid reading one from before this transition and the other from after it --
+ * see the comment there. */
 static inline void conn_set_connection_status(omron_conn_p conn, int32_t new_status) {
-    int32_t old_status = atomic_get_int32(&conn->connection_status);
+    critical_block(conn->mutex) {
+        int32_t old_status = atomic_get_int32(&conn->connection_status);
 
-    if(old_status != new_status) {
-        atomic_set_int32(&conn->connection_status, new_status);
-        int32_t cur_idx = atomic_get_int32(&conn->conn_event_ring_write_idx);
-        int32_t event_type = new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET;
+        if(old_status != new_status) {
+            atomic_set_int32(&conn->connection_status, new_status);
+            int32_t cur_idx = atomic_get_int32(&conn->conn_event_ring_write_idx);
+            int32_t event_type = new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET;
 
-        if(conn->conn_event_ring[cur_idx].event_type == event_type && conn->conn_event_ring[cur_idx].status == PLCTAG_STATUS_OK) {
-            return;
+            if(conn->conn_event_ring[cur_idx].event_type == event_type && conn->conn_event_ring[cur_idx].status == PLCTAG_STATUS_OK) {
+                break;
+            }
+
+            cur_idx = (cur_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
+            conn->conn_event_ring[cur_idx].event_type = event_type;
+            conn->conn_event_ring[cur_idx].status = PLCTAG_STATUS_OK;
+            atomic_set_int32(&conn->conn_event_ring_write_idx, cur_idx);
+            plc_tag_tickler_wake();
         }
-
-        cur_idx = (cur_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-        conn->conn_event_ring[cur_idx].event_type = event_type;
-        conn->conn_event_ring[cur_idx].status = PLCTAG_STATUS_OK;
-        atomic_set_int32(&conn->conn_event_ring_write_idx, cur_idx);
-        plc_tag_tickler_wake();
     }
 }
 

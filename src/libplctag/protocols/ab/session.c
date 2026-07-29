@@ -885,6 +885,15 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     session->dhp_dest = dhp_dest;
     atomic_init_int32(&session->connection_status, PLCTAG_CONN_STATUS_DOWN);
     atomic_init_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
+
+    /* conn_status_ring_write_idx always points at the ring slot holding the
+     * current state, not the next free slot: session_publish_event() dedups a new
+     * event against ring[write_idx] before writing ring[write_idx+1], and a
+     * connection tag seeds status_ring_read_idx to this same index to mean "I've
+     * already seen this one." Both of those need ring[0] to hold a real DOWN
+     * entry, not the zeroed garbage rc_alloc() leaves behind. */
+    session->conn_status_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
+    session->conn_status_ring[0].status = PLCTAG_STATUS_OK;
     atomic_init_int32(&session->conn_status_ring_write_idx, 0);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
@@ -1322,13 +1331,21 @@ static inline void session_publish_event(ab_session_p session, int32_t event_typ
 
 
 /* Set connection status and reason atomics, and push a ring buffer entry if the status changed.
- * Must only be called from the session handler thread (single writer). */
+ * Must only be called from the session handler thread (single writer).
+ *
+ * connection_status and the ring publish must change together under session_mutex:
+ * ab_connection_tag_create() takes a paired snapshot of both (conn_status_ring_write_idx
+ * and connection_status) to seed a freshly created connection tag, and needs the same
+ * mutex to avoid reading one from before this transition and the other from after it --
+ * see the comment there. */
 static inline void session_set_connection_status(ab_session_p session, int32_t new_status, int32_t new_reason) {
-    int32_t old_status = atomic_get_int32(&session->connection_status);
-    atomic_set_int32(&session->connection_status_reason, new_reason);
-    atomic_set_int32(&session->connection_status, new_status);
-    if(old_status != new_status) {
-        session_publish_event(session, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, new_reason);
+    critical_block(session->session_mutex) {
+        int32_t old_status = atomic_get_int32(&session->connection_status);
+        atomic_set_int32(&session->connection_status_reason, new_reason);
+        atomic_set_int32(&session->connection_status, new_status);
+        if(old_status != new_status) {
+            session_publish_event(session, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, new_reason);
+        }
     }
 }
 

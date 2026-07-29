@@ -101,6 +101,8 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
     }
 
     /* get a session */
+    int new_session = 0;
+
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
@@ -116,24 +118,34 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
             tag->status = PLCTAG_ERR_NOT_ALLOWED;
             return (plc_tag_p)tag;
         }
-        /* Cloned from an existing tag: start with current connection state. */
-        tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
-        tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
     } else {
-        int new_session = 0;
         if(session_find_or_create(&tag->session, attribs, &new_session) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_INFO, 0, "Unable to create session!");
             tag->status = PLCTAG_ERR_BAD_GATEWAY;
             return (plc_tag_p)tag;
         }
-        if(new_session) {
-            /* Fresh session: start at ring index 0 so all events arrive via the ring
-             * in order (CONNECTING → UP).  This avoids a race where the session
-             * thread connects before we read connection_status here. */
-            tag->status_ring_read_idx = 0;
-            tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
-        } else {
-            /* Late join: session already exists and may already be UP. */
+    }
+
+    if(new_session) {
+        /* We just created this session (session_find_or_create() initializes
+         * connection_status to DOWN and ring[0] to a real DOWN entry before ever
+         * starting its handler thread), so we know its exact birth state without
+         * racing that thread for a snapshot: it may already have raced through
+         * CONNECTING -> UP by the time we get here (a fast local connection can do
+         * that before this thread is even scheduled again), and reading "current"
+         * values at that point would silently skip every transition that already
+         * happened, exactly like the joined-existing-session case below -- except
+         * this tag was never really joining an existing session, it just lost a
+         * scheduling race with the thread it started. */
+        tag->status_ring_read_idx = 0;
+        tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
+    } else {
+        /* Joining a session that already existed (found by session_find_or_create(),
+         * or shared via src_tag): take both values as one atomic snapshot under
+         * session->session_mutex so we get a real, consistent point-in-time state
+         * rather than a read_idx from before a transition paired with a status from
+         * after it -- see the comment in session_set_connection_status(). */
+        critical_block(tag->session->session_mutex) {
             tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
             tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
         }
@@ -164,8 +176,14 @@ static int connection_tag_abort(plc_tag_p tag) {
 static int connection_tag_status(plc_tag_p tag) {
     ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
 
-    if(conn_tag->vtable->tickler) { conn_tag->vtable->tickler(tag); }
-
+    /* Do NOT tickle here. connection_tag_tickler() must have exactly one caller --
+     * the generic tag_tickler_func() loop -- since it advances
+     * conn_tag->status_ring_read_idx past whatever is currently in the ring on
+     * every call. plc_tag_create_impl() calls ->status() synchronously, in a
+     * tight loop, on the creating thread while waiting for tag creation to
+     * finish; if that also ticked, it could drain and mark ring entries as seen
+     * before the real tickler thread ever got a chance to deliver them, silently
+     * dropping the earliest connection-status events (e.g. CONNECTING). */
     return conn_tag->status;
 }
 
