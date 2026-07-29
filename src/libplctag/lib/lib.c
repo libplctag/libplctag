@@ -1290,12 +1290,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return id;
     }
 
-    /* Save this for later. Once add_tag_lookup() above publishes the tag into the
-     * hashtable, the tickler thread can pick it up and read tag->tag_id (e.g. to
-     * pass to the creation-complete callback) under tag->api_mutex, so the write
-     * here must use the same lock rather than racing that read. */
-    critical_block(tag->api_mutex) { tag->tag_id = id; }
-
+    /* tag->tag_id is already set (add_tag_lookup() sets it under tag_lookup_mutex,
+     * in the same critical section that publishes the tag into the hashtable --
+     * see the comment there). */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Returning mapped tag ID %d", id);
 
     /* Let protocols with their own worker-thread publishing step (e.g. Modbus) do it
@@ -4779,6 +4776,17 @@ int add_tag_lookup(plc_tag_p tag) {
         } while(attempts < MAX_TAG_MAP_ATTEMPTS);
 
         if(attempts < MAX_TAG_MAP_ATTEMPTS) {
+            /* Set tag->tag_id before the tag is published into the hashtable (in
+             * the same tag_lookup_mutex critical section as the hashtable_put()
+             * below), not after: any thread that can observe this tag at all had
+             * to acquire this same mutex to do so (tag_tickler_func()'s scan), so
+             * by the time it later reads tag->tag_id -- even outside this lock,
+             * even in a branch that never takes tag->api_mutex -- that read is
+             * ordered after this write by the mutex's release/acquire pair. This
+             * closes the race where the write used to happen later, under
+             * api_mutex alone, after the tag was already hashtable-visible under
+             * this lock. */
+            tag->tag_id = new_id;
             rc = hashtable_put(tag->instance->tags, (int64_t)new_id, tag);
         } else {
             rc = PLCTAG_ERR_NO_RESOURCES;
