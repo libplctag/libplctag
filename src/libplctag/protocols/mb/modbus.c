@@ -740,7 +740,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
 
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
-                    atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT);
+                    atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
                     atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
                     /* conn_event_ring_write_idx always points at the ring slot holding the
