@@ -43,7 +43,12 @@
 #define REQUIRED_VERSION 2, 5, 5
 #define TAG_ATTRIBS_TMPL \
     "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"
-#define DATA_TIMEOUT (5000)
+/* Generous: this is the 10th Modbus test to hit the same long-lived modbus_server
+ * process, and CI runners don't guarantee prompt scheduling under sanitizer
+ * overhead. This only bounds the failure path -- a healthy create returns as soon
+ * as it succeeds, however fast that is -- so raising it doesn't slow down a normal
+ * run, only how long a transient stall is tolerated before giving up. */
+#define DATA_TIMEOUT (20000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
