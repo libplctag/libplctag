@@ -341,7 +341,8 @@ def build_manifest() -> Manifest:
                      LOG_DIR / "logix_slow_emulator.log")
 
     sec = m.section("controllogix_slow", start=start_slow, startup_wait_s=1)
-    sec.test("emulator test callbacks", [exe("test_callback")], F)
+    sec.test("emulator test callbacks",
+              [exe("test_callback"), f"--tag=protocol=ab-eip&gateway=127.0.0.1:{slow_port}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
     sec.test("emulator test extended callbacks sync", [exe("test_callback_ex")], F)
     sec.test("emulator test extended callbacks async",
               [exe("test_callback_ex_logix"), f"--tag=protocol=ab-eip&gateway=127.0.0.1:{slow_port}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
@@ -463,6 +464,7 @@ def build_manifest() -> Manifest:
 
     sec = m.section("modbus", start=start_modbus, startup_wait_s=3)
     mbgw = f"127.0.0.1:{modbus_port}"
+    mbgw2 = f"127.0.0.1:{modbus_port2}"
     sec.test("connection tag connection state transitions (Modbus)",
               [exe("test_connection_tag"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&connection_inactivity_timeout_ms=5000&name=@connection"], T)
     sec.test("multiple simultaneous @connection tags on same session (Modbus)",
@@ -483,7 +485,8 @@ def build_manifest() -> Manifest:
     sec.test("connection stress (multiple connections) Modbus",
               [exe("test_connection_stress"), "--num-threads=200",
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
-    sec.test("callback events Modbus", [exe("test_callback_ex_modbus")], F)
+    sec.test("callback events Modbus",
+              [exe("test_callback_ex_modbus"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=10&name=hr1"], F)
     sec.test("@connection tag late join (Modbus)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
@@ -495,11 +498,14 @@ def build_manifest() -> Manifest:
                "--clone-attrib=name=hr20&elem_count=2",
                f"--connection-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--timeout=10000"], F)
-    sec.test("hard library shutdown (Modbus)", [exe("test_shutdown_modbus")], F)
+    sec.test("hard library shutdown (Modbus)",
+              [exe("test_shutdown_modbus"),
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
     sec.test("Modbus tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=1&name=hr10&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
-    reconnect_test = sec.test("for Modbus reconnect bug", [exe("test_modbus_multiple")], T)
+    reconnect_test = sec.test("for Modbus reconnect bug",
+              [exe("test_modbus_multiple"), f"--gateway1={mbgw}", f"--gateway2={mbgw2}"], T)
     # Depends on the reconnect test's own log; must run after it, not concurrently.
     sec.test("check for exactly 2 PLC creation entries in Modbus reconnect test log",
               None, T, depends_on=reconnect_test.id, check=make_plc_count_check(reconnect_test.log_file))

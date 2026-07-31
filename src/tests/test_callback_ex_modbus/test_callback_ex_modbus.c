@@ -41,7 +41,7 @@
 
 #define REQUIRED_VERSION 2, 5, 0
 
-#define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr1"
+#define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr1"
 #define DATA_TIMEOUT 5000
 
 typedef int16_t TAG_ELEMENT;
@@ -145,7 +145,19 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
 }
 
 
-int main(void) {
+static const char *parse_args(int argc, char **argv) {
+    const char *tag_path = DEFAULT_TAG_PATH;
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
+    }
+
+    return tag_path;
+}
+
+
+int main(int argc, char **argv) {
+    const char *tag_path = parse_args(argc, argv);
     int32_t tag = 0;
     int rc;
     int i;
@@ -175,7 +187,7 @@ int main(void) {
 
     /* create the tag */
     printf("Creating test tag.\n");
-    tag = plc_tag_create_ex(TAG_PATH, tag_callback, tag_element_array, 0);
+    tag = plc_tag_create_ex(tag_path, tag_callback, tag_element_array, 0);
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;

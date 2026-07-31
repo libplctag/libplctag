@@ -41,7 +41,7 @@
 
 
 #define REQUIRED_VERSION 2, 5, 5
-#define TAG_ATTRIBS_TMPL \
+#define DEFAULT_TAG_ATTRIBS \
     "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"
 /* Generous: this is the 10th Modbus test to hit the same long-lived modbus_server
  * process, and CI runners don't guarantee prompt scheduling under sanitizer
@@ -69,7 +69,19 @@ static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 #define NUM_TAGS (10)
 
 
-int main(void) {
+static const char *parse_args(int argc, char **argv) {
+    const char *tag_attribs = DEFAULT_TAG_ATTRIBS;
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_attribs = &argv[i][6]; }
+    }
+
+    return tag_attribs;
+}
+
+
+int main(int argc, char **argv) {
+    const char *tag_attribs = parse_args(argc, argv);
     int rc = PLCTAG_STATUS_OK;
     compat_thread_t read_threads[NUM_TAGS];
     compat_thread_t write_threads[NUM_TAGS];
@@ -98,7 +110,7 @@ int main(void) {
         int32_t tag_id = PLCTAG_ERR_CREATE;
 
         // NOLINTNEXTLINE
-        tag_id = plc_tag_create_ex(TAG_ATTRIBS_TMPL, tag_callback, NULL, DATA_TIMEOUT);
+        tag_id = plc_tag_create_ex(tag_attribs, tag_callback, NULL, DATA_TIMEOUT);
 
         if(tag_id <= 0) {
             // NOLINTNEXTLINE

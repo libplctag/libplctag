@@ -42,20 +42,18 @@
 
 #define REQUIRED_VERSION 2, 6, 12
 
-/* Read tags: 8 tags total (11-14 on server 1, 15-18 on server 2) */
-#define TAG_READ_11 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=co0&elem_count=86"
-#define TAG_READ_12 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=di0&elem_count=92"
-#define TAG_READ_13 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=ir0&elem_count=21"
-#define TAG_READ_14 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=hr0&elem_count=23"
+#define DEFAULT_GATEWAY_1 "127.0.0.1:1502"
+#define DEFAULT_GATEWAY_2 "127.0.0.1:2502"
 
-#define TAG_READ_15 "protocol=modbus_tcp&gateway=127.0.0.1:2502&path=0&name=co0&elem_count=86"
-#define TAG_READ_16 "protocol=modbus_tcp&gateway=127.0.0.1:2502&path=0&name=di0&elem_count=92"
-#define TAG_READ_17 "protocol=modbus_tcp&gateway=127.0.0.1:2502&path=0&name=ir0&elem_count=21"
-#define TAG_READ_18 "protocol=modbus_tcp&gateway=127.0.0.1:2502&path=0&name=hr0&elem_count=23"
+/* Read tags: 8 tags total (11-14 on server 1, 15-18 on server 2) */
+#define TAG_READ_TMPL_11 "protocol=modbus_tcp&gateway=%s&path=0&name=co0&elem_count=86"
+#define TAG_READ_TMPL_12 "protocol=modbus_tcp&gateway=%s&path=0&name=di0&elem_count=92"
+#define TAG_READ_TMPL_13 "protocol=modbus_tcp&gateway=%s&path=0&name=ir0&elem_count=21"
+#define TAG_READ_TMPL_14 "protocol=modbus_tcp&gateway=%s&path=0&name=hr0&elem_count=23"
 
 /* Write tags: 2 tags (19-20) on server 1 */
-#define TAG_WRITE_19 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=hr0&elem_count=1"
-#define TAG_WRITE_20 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=co0&elem_count=1"
+#define TAG_WRITE_TMPL_19 "protocol=modbus_tcp&gateway=%s&path=0&name=hr0&elem_count=1"
+#define TAG_WRITE_TMPL_20 "protocol=modbus_tcp&gateway=%s&path=0&name=co0&elem_count=1"
 
 #define DATA_TIMEOUT 1000
 #define READ_PHASE_TIME_MS 5000    /* 5 seconds for read phase */
@@ -67,17 +65,50 @@
 static int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms);
 
 
-int main(void) {
+static void parse_args(int argc, char **argv, const char **gateway1, const char **gateway2) {
+    *gateway1 = DEFAULT_GATEWAY_1;
+    *gateway2 = DEFAULT_GATEWAY_2;
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--gateway1=", 11) == 0) {
+            *gateway1 = &argv[i][11];
+        } else if(strncmp(argv[i], "--gateway2=", 11) == 0) {
+            *gateway2 = &argv[i][11];
+        }
+    }
+}
+
+
+int main(int argc, char **argv) {
+    const char *gateway1 = NULL;
+    const char *gateway2 = NULL;
     int32_t read_tags[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     int32_t write_tags[2] = {0, 0};
     int rc = PLCTAG_STATUS_OK;
     int i;
-    const char *read_tag_paths[8] = {TAG_READ_11, TAG_READ_12, TAG_READ_13, TAG_READ_14,
-                                     TAG_READ_15, TAG_READ_16, TAG_READ_17, TAG_READ_18};
+    char read_tag_paths_buf[8][256];
+    const char *read_tag_paths[8];
+    char write_tag_19_buf[256];
+    char write_tag_20_buf[256];
     int64_t start_time, current_time, read_phase_end_time, write_phase_start_time, write_phase_end_time;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
+
+    parse_args(argc, argv, &gateway1, &gateway2);
+
+    snprintf(read_tag_paths_buf[0], sizeof(read_tag_paths_buf[0]), TAG_READ_TMPL_11, gateway1);
+    snprintf(read_tag_paths_buf[1], sizeof(read_tag_paths_buf[1]), TAG_READ_TMPL_12, gateway1);
+    snprintf(read_tag_paths_buf[2], sizeof(read_tag_paths_buf[2]), TAG_READ_TMPL_13, gateway1);
+    snprintf(read_tag_paths_buf[3], sizeof(read_tag_paths_buf[3]), TAG_READ_TMPL_14, gateway1);
+    snprintf(read_tag_paths_buf[4], sizeof(read_tag_paths_buf[4]), TAG_READ_TMPL_11, gateway2);
+    snprintf(read_tag_paths_buf[5], sizeof(read_tag_paths_buf[5]), TAG_READ_TMPL_12, gateway2);
+    snprintf(read_tag_paths_buf[6], sizeof(read_tag_paths_buf[6]), TAG_READ_TMPL_13, gateway2);
+    snprintf(read_tag_paths_buf[7], sizeof(read_tag_paths_buf[7]), TAG_READ_TMPL_14, gateway2);
+    for(i = 0; i < 8; i++) { read_tag_paths[i] = read_tag_paths_buf[i]; }
+
+    snprintf(write_tag_19_buf, sizeof(write_tag_19_buf), TAG_WRITE_TMPL_19, gateway1);
+    snprintf(write_tag_20_buf, sizeof(write_tag_20_buf), TAG_WRITE_TMPL_20, gateway1);
 
     /* check the library version. */
     rc = plc_tag_check_lib_version(REQUIRED_VERSION);
@@ -157,7 +188,7 @@ int main(void) {
 
     /* ===== PHASE 4: Create both write tags and wait for OK ===== */
     printf("PHASE 4: Creating write tags (19-20).\n");
-    write_tags[0] = plc_tag_create(TAG_WRITE_19, 0);
+    write_tags[0] = plc_tag_create(write_tag_19_buf, 0);
     if(write_tags[0] < 0) {
         printf("ERROR %s: Could not create write tag 19!\n", plc_tag_decode_error(write_tags[0]));
         rc = write_tags[0];
@@ -165,7 +196,7 @@ int main(void) {
     }
     printf("  Created write tag 19.\n");
 
-    write_tags[1] = plc_tag_create(TAG_WRITE_20, 0);
+    write_tags[1] = plc_tag_create(write_tag_20_buf, 0);
     if(write_tags[1] < 0) {
         printf("ERROR %s: Could not create write tag 20!\n", plc_tag_decode_error(write_tags[1]));
         rc = write_tags[1];
