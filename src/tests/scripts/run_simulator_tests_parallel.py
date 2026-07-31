@@ -640,16 +640,6 @@ def main() -> int:
                     stop_process(other.process)
                 return 1
 
-    def _watchdog():
-        while True:
-            time.sleep(1)
-            for s in servers:
-                if s.process is not None and s.process.poll() is not None:
-                    print(f"!!! WATCHDOG: server '{s.name}' (pid {s.process.pid}) died, "
-                          f"rc={s.process.returncode}, t={time.monotonic()-script_start:.1f}s", flush=True)
-                    s.process = None  # stop reporting the same death repeatedly
-    threading.Thread(target=_watchdog, daemon=True).start()
-
     all_tests = manifest.all_tests()
     futures_by_id: dict[int, Future] = {}
     all_results: list[Result] = []
