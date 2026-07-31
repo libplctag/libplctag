@@ -1297,8 +1297,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* Let protocols with their own worker-thread publishing step (e.g. Modbus) do it
      * now that every generic field above is set. See the comment on activate in
-     * tag.h for why this can't happen earlier, inside the protocol's tag_create_function. */
-    if(tag->vtable && tag->vtable->activate) { tag->vtable->activate(tag); }
+     * tag.h for why this can't happen earlier, inside the protocol's tag_create_function.
+     *
+     * The tag is already published into the hashtable (add_tag_lookup() above), so the
+     * PLC handler thread can already find and tickle it -- activate() must take api_mutex
+     * like status()/abort() below do, or its reads/writes of tag fields (e.g. tag->op in
+     * mb_activate/mb_read_start) race the handler thread's tickle_tag(), which changes
+     * tag->op under api_mutex + plc->mutex (see modbus.c tickle_all_tags). */
+    if(tag->vtable && tag->vtable->activate) { critical_block(tag->api_mutex) { tag->vtable->activate(tag); } }
 
     /* wake up tag's PLC here. */
     if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
