@@ -656,7 +656,7 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
 }
 
 
-static vector_p THREAD_LOCAL active_tags = NULL;
+static THREAD_LOCAL vector_p active_tags = NULL;
 
 
 THREAD_FUNC(tag_tickler_func) {
