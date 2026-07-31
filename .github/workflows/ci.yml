@@ -113,7 +113,7 @@ jobs:
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -249,7 +249,7 @@ jobs:
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -326,7 +326,7 @@ jobs:
       - name: Run Simulator Tests under ASan/UBSan
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -379,7 +379,7 @@ jobs:
       - name: Run Simulator Tests under TSan
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -426,7 +426,7 @@ jobs:
       - name: Run Simulator Tests under ASan/UBSan
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -472,7 +472,7 @@ jobs:
       - name: Run Simulator Tests under TSan
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -669,7 +669,7 @@ jobs:
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
       - name: Run Simulator Tests
-        run: bash src/tests/scripts/run_simulator_tests.sh '${{ env.DIST }}' logs
+        run: python3 src/tests/scripts/run_simulator_tests_parallel.py '${{ env.DIST }}' logs
         shell: bash
 
       - name: Upload test logs
@@ -918,7 +918,7 @@ jobs:
       - name: Run Simulator Tests under QEMU (s390x, big-endian)
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -992,7 +992,7 @@ jobs:
             echo "=== ALPINE CONTAINER SCRIPT START ==="
             echo "VERSION=$VERSION, MATRIX_ARCH=$MATRIX_ARCH"
             apk update && apk add --no-cache \
-              build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
+              build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar python3
 
             # Prepare build: preserve host-owned build dir, just clean contents
             mkdir -p /workspace/build || { echo "ERROR: Failed to create build directory" >&2; exit 1; }
@@ -1017,7 +1017,7 @@ jobs:
             if [ -f /workspace/build/bin_dist/ab_server ]; then
               echo "=== RUNNING SIMULATOR TESTS ==="
               mkdir -p /workspace/logs
-              bash /workspace/src/tests/scripts/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
+              python3 /workspace/src/tests/scripts/run_simulator_tests_parallel.py /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
               cd /workspace/build
             else
               echo "=== TESTS SKIPPED (ab_server binary not found) ==="
