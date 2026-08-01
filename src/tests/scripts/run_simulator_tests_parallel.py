@@ -765,6 +765,15 @@ def main() -> int:
         print(f"{TEST_DIR} is not a valid path for test executables!")
         return 1
 
+    print("Settings:")
+    print(f"  CPUs detected: {os.cpu_count()}")
+    print(f"  test_dir: {TEST_DIR}")
+    print(f"  log_dir: {LOG_DIR}")
+    print(f"  max-workers (functional+stress phase): {args.max_workers}")
+    print(f"  timing-workers (timing phase): {args.timing_workers}")
+    print(f"  max-stress (concurrent STRESS-group tests): {args.max_stress}")
+    print()
+
     check_executables_present()
     raise_fd_limit(1024)
     kill_stray_servers()
