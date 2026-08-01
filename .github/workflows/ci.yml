@@ -9,6 +9,7 @@ on:
 jobs:
   ubuntu_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -198,6 +199,7 @@ jobs:
 
   macos_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -285,6 +287,7 @@ jobs:
 
   ubuntu_mem_sanitizer:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -339,6 +342,7 @@ jobs:
 
   ubuntu_thread_sanitizer:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -392,6 +396,7 @@ jobs:
 
   macos_mem_sanitizer:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -439,6 +444,7 @@ jobs:
 
   macos_thread_sanitizer:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -485,6 +491,7 @@ jobs:
 
   windows_msvc_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -709,6 +716,7 @@ jobs:
 
   ubuntu_arm_cross:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -871,6 +879,7 @@ jobs:
 
   ubuntu_s390x_qemu:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -931,6 +940,7 @@ jobs:
 
   alpine_native:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -1306,6 +1316,7 @@ jobs:
 
   debug_context:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -1405,6 +1416,7 @@ jobs:
         macos_thread_sanitizer,
       ]
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
     env:
