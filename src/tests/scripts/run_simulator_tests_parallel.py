@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """Parallel-aware simulator test runner.
 
-Rewrite of run_simulator_tests.sh with a different scheduling model:
+Each test is a fully self-contained unit: its own server instance (if it
+needs one) plus its own client process, on its own dynamically-assigned
+port(s). A pool of worker *processes* -- one per CPU by default -- pulls
+tests off a flat list and runs each one's complete lifecycle (start server,
+run client, stop server) before picking up the next. This replaces an
+earlier design where one long-lived server was shared by every test in a
+"section" via a thread pool; full per-test isolation costs an extra server
+start per test but removes any chance of one test's server state leaking
+into another's, and lets scheduling spread across all cores instead of a
+handful of threads.
 
-  - Tests are declared as data (Section + Test), not as sequential script
-    steps, so each test gets a stable global id at declare time regardless
-    of what order things finish running in.
-  - Tests are tagged with a Group: FUNCTIONAL (correctness, fast, order/
-    timing doesn't matter), STRESS (many threads/tags -- parallel-safe but
-    CPU-heavy), or TIMING (depends on hardcoded waits/timeouts, sensitive to
-    CPU contention from neighbors). FUNCTIONAL+STRESS run together in one
-    phase; TIMING runs alone in a second phase so stress tests can't stall
-    its timers (see the ~300s stall in test 29's idle-disconnect wait during
-    a run that overlapped with contention -- that's the failure mode this
-    phase split avoids).
-  - Every emulator/server gets its own port, allocated centrally, so
-    sections can all start concurrently without colliding.
-  - subprocess.Popen + .terminate() replace pidfiles/pkill entirely, which
-    also makes this work on Windows without a separate code path.
+Tests are tagged with a Group: FUNCTIONAL (correctness, fast, order/timing
+doesn't matter), STRESS (many threads/tags -- parallel-safe but CPU-heavy),
+or TIMING (depends on hardcoded waits/timeouts, sensitive to CPU contention
+from neighbors). FUNCTIONAL+STRESS run together in one phase; TIMING runs
+alone in a second phase so stress tests can't stall its timers. STRESS tests
+are additionally capped by a semaphore independent of worker-pool size,
+since each one already opens up to 200 of its own threads/connections --
+letting one run per CPU would starve everything else on modest-core
+machines.
 
 Usage matches the bash script: run_simulator_tests_parallel.py TEST_DIR [LOG_DIR]
 """
@@ -29,11 +32,11 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -53,18 +56,53 @@ PHASES: list[set[Group]] = [
     {Group.TIMING},
 ]
 
+_UNSET = object()
 
-@dataclasses.dataclass
+
+@dataclasses.dataclass(frozen=True)
+class ServerSpec:
+    """A server to start for a test. args_template entries may contain the
+    literal placeholders "{PORT}" / "{PORT2}", filled in per-test at run
+    time once that test's worker has allocated its own port(s)."""
+    exe_path: str
+    args_template: list[str]
+    startup_wait_s: float = 1.0
+
+
+@dataclasses.dataclass(frozen=True)
+class CheckSpec:
+    """A post-hoc log check, run inline in the main process instead of a
+    worker (no subprocess involved -- just counts regex matches in a file
+    another test already produced)."""
+    log_file: str
+    pattern: str
+    expected: int
+
+
+@dataclasses.dataclass(frozen=True)
 class Test:
     id: int
     name: str
     section: str
     group: Group
-    cmd: Optional[list[str]]
+    cmd_template: Optional[list[str]]  # None for check-only tests
     log_file: str
+    server: Optional[ServerSpec] = None
+    server_log_file: Optional[str] = None
+    ports_needed: int = 0
     expect_failure: bool = False
+    # A handful of test binaries take no arguments and are hardcoded to
+    # connect to the library's compiled-in default gateway (127.0.0.1 with
+    # no port -> the default EtherNet/IP port, DEFAULT_LIB_PORT). Their
+    # server must be pinned to that literal port instead of a dynamically
+    # allocated one, and since that port can't be shared concurrently across
+    # more than one such test, they're serialized via a dedicated semaphore.
+    exclusive_default_port: bool = False
+    # depends_on is metadata only: the one dependent test in this manifest is
+    # a CheckSpec test, which always runs after its whole phase's pool has
+    # drained, so the dependency is satisfied by construction.
     depends_on: Optional[int] = None
-    check: Optional[Callable[[], tuple[bool, str]]] = None
+    check: Optional[CheckSpec] = None
 
 
 @dataclasses.dataclass
@@ -80,66 +118,59 @@ class Result:
         return self.end - self.start
 
 
-@dataclasses.dataclass
-class Section:
-    name: str
-    start: Optional[Callable[[], subprocess.Popen]]
-    startup_wait_s: float = 0.0
-    process: Optional[subprocess.Popen] = None
-    tests: list[Test] = dataclasses.field(default_factory=list)
-
-
 class Manifest:
     """Assigns stable global ids to tests as they're declared."""
 
     def __init__(self):
         self._next_id = 1
-        self.sections: list[Section] = []
+        self.tests: list[Test] = []
+        self.section_names: list[str] = []
 
-    def section(self, name: str, start=None, startup_wait_s: float = 0.0) -> "SectionBuilder":
-        s = Section(name=name, start=start, startup_wait_s=startup_wait_s)
-        self.sections.append(s)
-        return SectionBuilder(self, s)
+    def section(self, name: str, server: Optional[ServerSpec] = None) -> "SectionBuilder":
+        self.section_names.append(name)
+        return SectionBuilder(self, name, server)
 
-    def all_tests(self) -> list[Test]:
-        return [t for s in self.sections for t in s.tests]
+
+def _server_ports_needed(server: Optional[ServerSpec]) -> int:
+    if server is None:
+        return 0
+    return 2 if any("{PORT2}" in a for a in server.args_template) else 1
 
 
 class SectionBuilder:
-    def __init__(self, manifest: Manifest, section: Section):
+    def __init__(self, manifest: Manifest, name: str, server: Optional[ServerSpec]):
         self.manifest = manifest
-        self.section = section
+        self.name = name
+        self.server = server
 
-    def test(self, name: str, cmd: Optional[list[str]], group: Group, *,
-             expect_failure: bool = False, depends_on: Optional[int] = None,
-             check: Optional[Callable[[], tuple[bool, str]]] = None) -> Test:
+    def test(self, name: str, cmd_template: Optional[list[str]], group: Group, *,
+              ports_needed: Optional[int] = None, server=_UNSET,
+              expect_failure: bool = False, depends_on: Optional[int] = None,
+              check: Optional[CheckSpec] = None, exclusive_default_port: bool = False) -> Test:
         tid = self.manifest._next_id
         self.manifest._next_id += 1
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
         log_file = str(LOG_DIR / f"{tid}_{slug}.log")
-        t = Test(id=tid, name=name, section=self.section.name, group=group, cmd=cmd,
-                 log_file=log_file, expect_failure=expect_failure, depends_on=depends_on,
-                 check=check)
-        self.section.tests.append(t)
+
+        srv = self.server if server is _UNSET else server
+        if ports_needed is None:
+            ports_needed = _server_ports_needed(srv)
+        server_log_file = str(LOG_DIR / f"{tid}_{slug}_server.log") if srv else None
+
+        t = Test(id=tid, name=name, section=self.name, group=group, cmd_template=cmd_template,
+                  log_file=log_file, server=srv, server_log_file=server_log_file,
+                  ports_needed=ports_needed, expect_failure=expect_failure,
+                  exclusive_default_port=exclusive_default_port,
+                  depends_on=depends_on, check=check)
+        self.manifest.tests.append(t)
         return t
 
 
 # ---------------------------------------------------------------------------
-# Platform / process helpers
+# Platform / process helpers (used both in the main process and in workers)
 # ---------------------------------------------------------------------------
 
 TEST_DIR: Path
-LOG_DIR: Path
-
-_next_port = [44818]
-_port_lock = threading.Lock()
-
-
-def alloc_port() -> int:
-    with _port_lock:
-        p = _next_port[0]
-        _next_port[0] += 1
-        return p
 
 
 def exe(name: str) -> str:
@@ -161,13 +192,11 @@ def raise_fd_limit(n: int = 1024) -> None:
 
 
 def spawn(cmd: list[str], log_path: Path) -> subprocess.Popen:
-    # Long-lived servers must not share this script's session: ab_server (and
-    # friends) install no SIGHUP handler, so if they inherit our controlling
-    # terminal/session they die silently the moment it goes away -- observed
-    # directly here as servers vanishing from `ps` mid-run with no error in
-    # their own log. start_new_session (POSIX) / CREATE_NEW_PROCESS_GROUP
-    # (Windows) detaches them so they survive independent of how this script
-    # itself was launched (backgrounded, under a job runner, etc).
+    # Long-lived servers must not share their launching process's session:
+    # ab_server (and friends) install no SIGHUP handler, so if they inherit a
+    # controlling terminal/session they can die silently the moment it goes
+    # away. start_new_session (POSIX) / CREATE_NEW_PROCESS_GROUP (Windows)
+    # detaches them so they survive independent of how they were launched.
     log = open(log_path, "w")
     kwargs = {}
     if os.name == "posix":
@@ -192,9 +221,9 @@ REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
-    "test_callback_ex", "test_callback_ex_logix", "test_callback_ex_modbus", "test_idle_disconnect",
+    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect",
     "test_modbus_multiple", "test_omron_destroy", "test_raw_cip", "test_reconnect_after_outage_async",
-    "test_reconnect_after_outage_sync", "test_shutdown_cip", "test_shutdown_modbus",
+    "test_reconnect_after_outage_sync", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
 ]
@@ -207,40 +236,47 @@ def check_executables_present() -> None:
         sys.exit(1)
 
 
-def make_plc_count_check(log_path: str, expected: int = 2) -> Callable[[], tuple[bool, str]]:
-    def check() -> tuple[bool, str]:
-        pattern = re.compile(r"Creating new PLC connection\.")
-        count = 0
-        try:
-            with open(log_path, "r", errors="replace") as f:
-                count = sum(1 for line in f if pattern.search(line))
-        except FileNotFoundError:
-            return False, f"log file not found: {log_path}"
-        if count == expected:
-            return True, f"found {count} PLC creation entries in {log_path}"
-        return False, f"expected {expected} PLC creation entries, found {count} in {log_path}"
-    return check
+def run_check(check: CheckSpec) -> tuple[bool, str]:
+    pattern = re.compile(check.pattern)
+    count = 0
+    try:
+        with open(check.log_file, "r", errors="replace") as f:
+            count = sum(1 for line in f if pattern.search(line))
+    except FileNotFoundError:
+        return False, f"log file not found: {check.log_file}"
+    if count == check.expected:
+        return True, f"found {count} PLC creation entries in {check.log_file}"
+    return False, f"expected {check.expected} PLC creation entries, found {count} in {check.log_file}"
 
 
 # ---------------------------------------------------------------------------
-# Manifest: sections + tests (mirrors run_simulator_tests.sh 1:1)
+# Manifest: tests, flat (mirrors run_simulator_tests.sh 1:1)
 # ---------------------------------------------------------------------------
+
+# A few test binaries take no arguments and are hardcoded to connect to
+# "gateway=127.0.0.1" with no port, which the library resolves to its
+# compiled-in default EtherNet/IP port. Their server must be pinned to this
+# literal port (see Test.exclusive_default_port), so the general-purpose
+# dynamic port counter starts one above it to avoid ever handing this port
+# out to an unrelated test.
+DEFAULT_LIB_PORT = 44818
+
 
 def build_manifest() -> Manifest:
     m = Manifest()
     F, S, T = Group.FUNCTIONAL, Group.STRESS, Group.TIMING
 
     # --- ControlLogix "fast" section ---------------------------------------
-    port = alloc_port()
-    gw = f"127.0.0.1:{port}"
+    fast_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
+                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]"],
+        startup_wait_s=3,
+    )
+    gw = "127.0.0.1:{PORT}"
 
-    def start_fast(port=port):
-        return spawn([exe("ab_server"), "--debug", "--plc=ControlLogix", f"--port={port}",
-                      "--path=1,0", "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
-                      "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]"],
-                     LOG_DIR / "logix_fast_emulator.log")
-
-    sec = m.section("controllogix_fast", start=start_fast, startup_wait_s=3)
+    sec = m.section("controllogix_fast", server=fast_server)
     sec.test("basic unconnected tag read/write",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=10&name=TestBigArray&use_connected_msg=0",
@@ -257,17 +293,36 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=TestBigArray",
                "--debug=4", "--write=1,2,3,4,5,6,7,8,9"], F)
-    sec.test("stress RC memory code", [exe("stress_rc_mem")], S)
+    # These two take no arguments and are hardcoded to the library's default
+    # gateway/port (they're protocol-specific by nature, not consolidation
+    # candidates -- see stress_rc_mem/test_indexed_tags in the manifest
+    # design notes). Give each its own server pinned to that literal port,
+    # serialized against each other and against the controllogix_slow default-
+    # port test below via exclusive_default_port (see Test docstring).
+    fast_default_port_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", f"--port={DEFAULT_LIB_PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
+                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]"],
+        startup_wait_s=3,
+    )
+    sec.test("stress RC memory code", [exe("stress_rc_mem")], S,
+              server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("CIP thread stress",
               [exe("thread_stress"), "20", f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], S)
-    sec.test("auto sync", [exe("test_auto_sync")], T)
-    sec.test("indexed tags", [exe("test_indexed_tags")], F)
+    sec.test("auto sync",
+              [exe("test_auto_sync"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=600&auto_sync_write_ms=20"], T)
+    sec.test("indexed tags", [exe("test_indexed_tags")], F,
+              server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("AB/ControlLogix tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
     sec.test("idle disconnect and reconnect with runtime timeout change (AB ControlLogix)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], T)
-    sec.test("hard library shutdown", [exe("test_shutdown_cip")], F)
+    sec.test("hard library shutdown",
+              [exe("test_shutdown"),
+               f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
     sec.test("library shutdown and restart",
               [exe("test_shutdown_restart"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"], F)
     sec.test("connection tag connection state transitions (ControlLogix)",
@@ -296,15 +351,15 @@ def build_manifest() -> Manifest:
                "--timeout=10000"], F)
 
     # --- ControlLogix slot-16 path encoding section -------------------------
-    port16 = alloc_port()
-    gw16 = f"127.0.0.1:{port16}"
+    slot16_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,16",
+                        "--tag=TestBigArray:DINT[2000]"],
+        startup_wait_s=1,
+    )
+    gw16 = "127.0.0.1:{PORT}"
 
-    def start_slot16(port=port16):
-        return spawn([exe("ab_server"), "--debug", "--plc=ControlLogix", f"--port={port}",
-                      "--path=1,16", "--tag=TestBigArray:DINT[2000]"],
-                     LOG_DIR / "logix_slot16_emulator.log")
-
-    sec = m.section("controllogix_slot16", start=start_slot16, startup_wait_s=1)
+    sec = m.section("controllogix_slot16", server=slot16_server)
     sec.test("unconnected tag read/write through chassis slot 16 (path=1,16)",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw16}&path=1,16&plc=ControlLogix&elem_count=10&name=TestBigArray&use_connected_msg=0",
@@ -317,57 +372,59 @@ def build_manifest() -> Manifest:
     # --- Stand-alone section: no shared server ------------------------------
     # ERR_WAIT needs a port nothing is listening on; async/sync manage their
     # own ab_server internally (they take the ab_server path + port as argv).
-    unreachable_port = alloc_port()
-    async_port = alloc_port()
-    sync_port = alloc_port()
-
-    sec = m.section("standalone", start=None)
+    sec = m.section("standalone")
     sec.test("@connection tag ERR_WAIT on unreachable host (no server running)",
               [exe("test_connection_tag"),
-               f"--tag=protocol=ab-eip&gateway=127.0.0.1:{unreachable_port}&path=1,0&plc=ControlLogix&name=@connection",
-               "--expect-err"], T)
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",
+               "--expect-err"], T, ports_needed=1)
     sec.test("Test async reconnect after PLC outage",
-              [exe("test_reconnect_after_outage_async"), exe("ab_server"), str(async_port)], T)
+              [exe("test_reconnect_after_outage_async"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
     sec.test("Test sync reconnect after PLC outage",
-              [exe("test_reconnect_after_outage_sync"), exe("ab_server"), str(sync_port)], T)
+              [exe("test_reconnect_after_outage_sync"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
 
     # --- ControlLogix functional/slow (delay=100) section -------------------
-    slow_port = alloc_port()
+    slow_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--port={PORT}", "--plc=ControlLogix", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
+                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]", "--delay=100"],
+        startup_wait_s=1,
+    )
+    sgw = "127.0.0.1:{PORT}"
 
-    def start_slow(port=slow_port):
-        return spawn([exe("ab_server"), f"--port={port}", "--plc=ControlLogix", "--path=1,0",
-                      "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
-                      "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]", "--delay=100"],
-                     LOG_DIR / "logix_slow_emulator.log")
-
-    sec = m.section("controllogix_slow", start=start_slow, startup_wait_s=1)
+    sec = m.section("controllogix_slow", server=slow_server)
     sec.test("emulator test callbacks",
-              [exe("test_callback"), f"--tag=protocol=ab-eip&gateway=127.0.0.1:{slow_port}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
-    sec.test("emulator test extended callbacks sync", [exe("test_callback_ex")], F)
+              [exe("test_callback"), f"--tag=protocol=ab-eip&gateway={sgw}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
+    # Hardcoded to the library's default gateway/port like the four
+    # controllogix_fast tests above -- reuses that same pinned-port server
+    # config and serialization group (no need for --delay=100 here; this
+    # test doesn't exercise that timing).
+    sec.test("emulator test extended callbacks sync", [exe("test_callback_ex")], F,
+              server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("emulator test extended callbacks async",
-              [exe("test_callback_ex_logix"), f"--tag=protocol=ab-eip&gateway=127.0.0.1:{slow_port}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
+              [exe("test_callback_ex_async"), f"--tag=protocol=ab-eip&gateway={sgw}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
 
     # --- Micro800 section ----------------------------------------------------
-    m800_port = alloc_port()
+    micro800_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Micro800", "--port={PORT}", "--tag=TestDINTArray:DINT[10]"],
+        startup_wait_s=1,
+    )
 
-    def start_micro800(port=m800_port):
-        return spawn([exe("ab_server"), "--debug", "--plc=Micro800", f"--port={port}", "--tag=TestDINTArray:DINT[10]"],
-                     LOG_DIR / "micro800_emulator.log")
-
-    sec = m.section("micro800", start=start_micro800, startup_wait_s=1)
+    sec = m.section("micro800", server=micro800_server)
     sec.test("basic Micro800 read/write",
-              [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway=127.0.0.1:{m800_port}&plc=micro800&name=TestDINTArray",
+              [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
 
     # --- Omron section ---------------------------------------------------------
-    omron_port = alloc_port()
-    ogw = f"127.0.0.1:{omron_port}"
+    omron_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Omron", "--port={PORT}", "--tag=TestDINTArray:DINT[10]"],
+        startup_wait_s=1,
+    )
+    ogw = "127.0.0.1:{PORT}"
 
-    def start_omron(port=omron_port):
-        return spawn([exe("ab_server"), "--debug", "--plc=Omron", f"--port={port}", "--tag=TestDINTArray:DINT[10]"],
-                     LOG_DIR / "omron_emulator.log")
-
-    sec = m.section("omron", start=start_omron, startup_wait_s=1)
+    sec = m.section("omron", server=omron_server)
     sec.test("basic Omron read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
@@ -400,26 +457,28 @@ def build_manifest() -> Manifest:
               [exe("test_fairness"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray[0]&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
     sec.test("emulator test extended callbacks async (Omron)",
-              [exe("test_callback_ex_logix"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray"], F)
+              [exe("test_callback_ex_async"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray"], F)
     sec.test("create-from-tag API (17 permutation tests with Omron)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
                "--clone-attrib=name=TestDINTArray[1]&elem_count=1",
                f"--connection-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
                "--timeout=10000"], F)
+    # Manages its own ab_server internally on a hardcoded port -- no shared
+    # section server, no dynamically-allocated port.
     sec.test("plc_tag_destroy does not hang after Omron connection loss (issue #625)",
-              [exe("test_omron_destroy"), exe("ab_server")], F)
+              [exe("test_omron_destroy"), exe("ab_server")], F, server=None, ports_needed=0)
 
     # --- Micrologix section ----------------------------------------------------
-    mlgx_port = alloc_port()
+    micrologix_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Micrologix", "--port={PORT}",
+                        "--tag=B3[10]", "--tag=N7[10]", "--tag=L19[10]"],
+        startup_wait_s=1,
+    )
+    mgw = "127.0.0.1:{PORT}"
 
-    def start_micrologix(port=mlgx_port):
-        return spawn([exe("ab_server"), "--debug", "--plc=Micrologix", f"--port={port}",
-                      "--tag=B3[10]", "--tag=N7[10]", "--tag=L19[10]"],
-                     LOG_DIR / "micrologix_emulator.log")
-
-    sec = m.section("micrologix", start=start_micrologix, startup_wait_s=1)
-    mgw = f"127.0.0.1:{mlgx_port}"
+    sec = m.section("micrologix", server=micrologix_server)
     sec.test("B data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--debug=4"], F)
     sec.test("B bit data file Micrologix tag read/write",
@@ -437,14 +496,14 @@ def build_manifest() -> Manifest:
               F, expect_failure=True)  # this write should NOT succeed
 
     # --- PLC5 section ------------------------------------------------------
-    plc5_port = alloc_port()
+    plc5_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=PLC/5", "--port={PORT}", "--tag=B3[10]", "--tag=N7[10]"],
+        startup_wait_s=1,
+    )
+    pgw = "127.0.0.1:{PORT}"
 
-    def start_plc5(port=plc5_port):
-        return spawn([exe("ab_server"), "--debug", "--plc=PLC/5", f"--port={port}", "--tag=B3[10]", "--tag=N7[10]"],
-                     LOG_DIR / "plc5_emulator.log")
-
-    sec = m.section("plc5", start=start_plc5, startup_wait_s=1)
-    pgw = f"127.0.0.1:{plc5_port}"
+    sec = m.section("plc5", server=plc5_server)
     sec.test("B data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0"], F)
     sec.test("B bit data file PLC5 tag read/write",
@@ -455,16 +514,15 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1"], F)
 
     # --- Modbus section ------------------------------------------------------
-    modbus_port = alloc_port()
-    modbus_port2 = alloc_port()
+    modbus_server = ServerSpec(
+        exe_path=exe("modbus_server"),
+        args_template=["--listen=127.0.0.1:{PORT}", "--listen=127.0.0.1:{PORT2}", "--debug=DETAIL"],
+        startup_wait_s=3,
+    )
+    mbgw = "127.0.0.1:{PORT}"
+    mbgw2 = "127.0.0.1:{PORT2}"
 
-    def start_modbus(p1=modbus_port, p2=modbus_port2):
-        return spawn([exe("modbus_server"), f"--listen=127.0.0.1:{p1}", f"--listen=127.0.0.1:{p2}", "--debug=DETAIL"],
-                     LOG_DIR / "modbus_server.log")
-
-    sec = m.section("modbus", start=start_modbus, startup_wait_s=3)
-    mbgw = f"127.0.0.1:{modbus_port}"
-    mbgw2 = f"127.0.0.1:{modbus_port2}"
+    sec = m.section("modbus", server=modbus_server)
     sec.test("connection tag connection state transitions (Modbus)",
               [exe("test_connection_tag"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&connection_inactivity_timeout_ms=5000&name=@connection"], T)
     sec.test("multiple simultaneous @connection tags on same session (Modbus)",
@@ -486,7 +544,7 @@ def build_manifest() -> Manifest:
               [exe("test_connection_stress"), "--num-threads=200",
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
     sec.test("callback events Modbus",
-              [exe("test_callback_ex_modbus"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=10&name=hr1"], F)
+              [exe("test_callback_ex_async"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=10&name=hr1"], F)
     sec.test("@connection tag late join (Modbus)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
@@ -499,16 +557,20 @@ def build_manifest() -> Manifest:
                f"--connection-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--timeout=10000"], F)
     sec.test("hard library shutdown (Modbus)",
-              [exe("test_shutdown_modbus"),
+              [exe("test_shutdown"),
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
     sec.test("Modbus tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=1&name=hr10&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
     reconnect_test = sec.test("for Modbus reconnect bug",
               [exe("test_modbus_multiple"), f"--gateway1={mbgw}", f"--gateway2={mbgw2}"], T)
-    # Depends on the reconnect test's own log; must run after it, not concurrently.
+    # Depends on the reconnect test's own log; a CheckSpec test always runs
+    # after its whole phase's worker pool has drained, so this is guaranteed
+    # to see the finished log without needing any cross-process signaling.
     sec.test("check for exactly 2 PLC creation entries in Modbus reconnect test log",
-              None, T, depends_on=reconnect_test.id, check=make_plc_count_check(reconnect_test.log_file))
+              None, T, depends_on=reconnect_test.id, ports_needed=0,
+              check=CheckSpec(log_file=reconnect_test.log_file,
+                               pattern=r"Creating new PLC connection\.", expected=2))
 
     return m
 
@@ -517,61 +579,117 @@ def build_manifest() -> Manifest:
 # Execution
 # ---------------------------------------------------------------------------
 
-print_lock = threading.Lock()
-
-# Each STRESS test already opens up to 200 of its own connections/threads.
-# Letting several run at once (as the wide FUNCTIONAL+STRESS pool otherwise
-# would) starves everything else on modest-core / shared machines badly
-# enough that plain reads start missing their own default timeouts -- this
-# was observed directly (test_connection_stress hit PLCTAG_ERR_TIMEOUT
-# creating one of 200 tags, and unrelated functional reads in the Micrologix/
-# PLC5 sections timed out) the first time this script ran with no cap here.
-stress_limiter: threading.BoundedSemaphore
+# Set via ProcessPoolExecutor's initializer in each worker process.
+_port_counter = None
+_port_lock = None
+_stress_sema = None
+_default_port_sema = None
 
 
-def run_test(test: Test, futures_by_id: dict[int, "Future"]) -> Result:
-    if test.depends_on is not None:
-        futures_by_id[test.depends_on].result()
+def _worker_init(port_counter, port_lock, stress_sema, default_port_sema) -> None:
+    global _port_counter, _port_lock, _stress_sema, _default_port_sema
+    _port_counter = port_counter
+    _port_lock = port_lock
+    _stress_sema = stress_sema
+    _default_port_sema = default_port_sema
+    raise_fd_limit(1024)
 
+
+def _alloc_ports(n: int) -> list[int]:
+    if n == 0:
+        return []
+    with _port_lock:
+        start = _port_counter.value
+        _port_counter.value += n
+    return list(range(start, start + n))
+
+
+def _fill(template: list[str], ports: list[int]) -> list[str]:
+    out = []
+    for arg in template:
+        if ports:
+            arg = arg.replace("{PORT}", str(ports[0]))
+            if len(ports) > 1:
+                arg = arg.replace("{PORT2}", str(ports[1]))
+        out.append(arg)
+    return out
+
+
+def run_test_in_worker(test: Test) -> Result:
+    """Runs entirely inside a worker process: allocate this test's own
+    port(s), bring its server up if it needs one, run the client, tear the
+    server back down. One test occupies this worker until all of that is
+    done."""
     start = time.monotonic()
-    if test.cmd is None:
-        ok, detail = test.check()
-    else:
-        limiter = stress_limiter if test.group == Group.STRESS else None
-        if limiter is not None:
-            limiter.acquire()
-        try:
-            with open(test.log_file, "w") as log:
-                proc = subprocess.run(test.cmd, stdout=log, stderr=subprocess.STDOUT)
-        finally:
-            if limiter is not None:
-                limiter.release()
+    ports = _alloc_ports(test.ports_needed)
+    stress_held = False
+    default_port_held = False
+    server_proc = None
+    try:
+        if test.exclusive_default_port:
+            _default_port_sema.acquire()
+            default_port_held = True
+
+        if test.group == Group.STRESS:
+            _stress_sema.acquire()
+            stress_held = True
+
+        if test.server is not None:
+            server_cmd = [test.server.exe_path] + _fill(test.server.args_template, ports)
+            server_proc = spawn(server_cmd, Path(test.server_log_file))
+            time.sleep(test.server.startup_wait_s)
+            if server_proc.poll() is not None:
+                end = time.monotonic()
+                return Result(test=test, ok=False, detail="server exited during startup", start=start, end=end)
+
+        cmd = _fill(test.cmd_template, ports)
+        with open(test.log_file, "w") as log:
+            proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
         ok = (proc.returncode == 0) != test.expect_failure
         detail = ""
+    finally:
+        stop_process(server_proc)
+        if stress_held:
+            _stress_sema.release()
+        if default_port_held:
+            _default_port_sema.release()
     end = time.monotonic()
-
-    with print_lock:
-        status = "OK" if ok else "FAILURE"
-        suffix = f" ({detail})" if detail else ""
-        print(f"  [{test.section}] test {test.id} ({test.group.value}): {test.name}... "
-              f"{status} ({end - start:.0f}s){suffix}")
-
     return Result(test=test, ok=ok, detail=detail, start=start, end=end)
 
 
-def run_phase(tests: list[Test], max_workers: int, futures_by_id: dict[int, "Future"]) -> tuple[list[Result], float]:
+def _print_result(r: Result) -> None:
+    status = "OK" if r.ok else "FAILURE"
+    suffix = f" ({r.detail})" if r.detail else ""
+    print(f"  [{r.test.section}] test {r.test.id} ({r.test.group.value}): {r.test.name}... "
+          f"{status} ({r.elapsed:.0f}s){suffix}")
+
+
+def run_phase(pool: ProcessPoolExecutor, tests: list[Test]) -> tuple[list[Result], float]:
     if not tests:
         return [], 0.0
     phase_start = time.monotonic()
-    results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futs: dict[int, Future] = {}
-        for t in tests:
-            fut = pool.submit(run_test, t, futures_by_id)
-            futs[t.id] = fut
-            futures_by_id[t.id] = fut
-        for fut in futs.values():
-            results.append(fut.result())
+    results: list[Result] = []
+
+    pool_tests = [t for t in tests if t.cmd_template is not None]
+    check_tests = [t for t in tests if t.cmd_template is None]
+
+    futs = {pool.submit(run_test_in_worker, t): t for t in pool_tests}
+    for fut in as_completed(futs):
+        r = fut.result()
+        _print_result(r)
+        results.append(r)
+
+    # Check-only tests need no worker/subprocess: just grep a log file that's
+    # now guaranteed complete, since every pool test in this phase has
+    # finished above.
+    for t in check_tests:
+        cstart = time.monotonic()
+        ok, detail = run_check(t.check)
+        cend = time.monotonic()
+        r = Result(test=t, ok=ok, detail=detail, start=cstart, end=cend)
+        _print_result(r)
+        results.append(r)
+
     phase_end = time.monotonic()
     return results, phase_end - phase_start
 
@@ -582,19 +700,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("test_dir")
     parser.add_argument("log_dir", nargs="?", default=".")
-    parser.add_argument("--max-workers", type=int, default=max(2, (os.cpu_count() or 4) // 2),
-                         help="worker threads for the functional+stress phase")
+    parser.add_argument("--max-workers", type=int, default=os.cpu_count() or 4,
+                         help="worker processes for the functional+stress phase (one per CPU by default)")
     parser.add_argument("--timing-workers", type=int, default=max(2, (os.cpu_count() or 4) // 2),
-                         help="worker threads for the timing phase")
+                         help="worker processes for the timing phase")
     parser.add_argument("--max-stress", type=int, default=2,
-                         help="max STRESS-group tests allowed to run at once, regardless of --max-workers "
+                         help="max STRESS-group tests allowed to run at once, regardless of worker count "
                               "(each one already opens up to 200 of its own connections/threads)")
-    parser.add_argument("--server-stagger-s", type=float, default=2.0,
-                         help="delay between starting each section's server (see comment at the call site)")
     args = parser.parse_args()
-
-    global stress_limiter
-    stress_limiter = threading.BoundedSemaphore(args.max_stress)
 
     TEST_DIR = Path(args.test_dir)
     LOG_DIR = Path(args.log_dir)
@@ -608,52 +721,28 @@ def main() -> int:
     raise_fd_limit(1024)
 
     script_start = time.monotonic()
-
     manifest = build_manifest()
+    all_tests = manifest.tests
 
-    # Start every section's server up front; they're all on distinct ports
-    # so there's no collision even though they all run concurrently now.
-    #
-    # Launching them back-to-back with no gap was observed to get all of them
-    # killed (SIGTERM) in a single burst a few dozen seconds in, on this
-    # machine -- reproduced down to a minimal repro of just spawning many
-    # listening-socket processes at once (a plain `sleep` child launched the
-    # same way was unaffected, and staggering the launches by a few seconds
-    # made the problem disappear entirely). That points at host-level
-    # security/monitoring tooling reacting to a burst of new listeners, not a
-    # bug in this script or in ab_server -- the stagger below is a cheap,
-    # harmless way to avoid tripping it.
-    servers = [s for s in manifest.sections if s.start is not None]
-    for s in servers:
-        s.process = s.start()
-        if s.process.poll() is not None:
-            print(f"Server for section '{s.name}' exited immediately!")
-            return 1
-        time.sleep(args.server_stagger_s)
+    ctx = get_context("spawn")
+    # Start one above DEFAULT_LIB_PORT so the general-purpose allocator can
+    # never hand that reserved port out to an unrelated test.
+    port_counter = ctx.Value("i", DEFAULT_LIB_PORT + 1)
+    port_lock = ctx.Lock()
+    stress_sema = ctx.BoundedSemaphore(args.max_stress)
+    default_port_sema = ctx.BoundedSemaphore(1)
 
-    if servers:
-        time.sleep(max((s.startup_wait_s for s in servers), default=0))
-        for s in servers:
-            if s.process.poll() is not None:
-                print(f"Server for section '{s.name}' exited during startup!")
-                for other in servers:
-                    stop_process(other.process)
-                return 1
-
-    all_tests = manifest.all_tests()
-    futures_by_id: dict[int, Future] = {}
     all_results: list[Result] = []
     phase_times: list[float] = []
 
     for phase_groups in PHASES:
         phase_tests = [t for t in all_tests if t.group in phase_groups]
         workers = args.timing_workers if phase_groups == {Group.TIMING} else args.max_workers
-        results, elapsed = run_phase(phase_tests, workers, futures_by_id)
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_worker_init,
+                                  initargs=(port_counter, port_lock, stress_sema, default_port_sema)) as pool:
+            results, elapsed = run_phase(pool, phase_tests)
         all_results.extend(results)
         phase_times.append(elapsed)
-
-    for s in servers:
-        stop_process(s.process)
 
     total = time.monotonic() - script_start
 
@@ -661,12 +750,12 @@ def main() -> int:
     failures = sum(1 for r in all_results if not r.ok)
 
     print("\nSection timing (span from first test start to last test end in that section):")
-    for s in manifest.sections:
-        section_results = [r for r in all_results if r.test.section == s.name]
+    for name in manifest.section_names:
+        section_results = [r for r in all_results if r.test.section == name]
         if not section_results:
             continue
         span = max(r.end for r in section_results) - min(r.start for r in section_results)
-        print(f"  {s.name}: {span:.0f}s")
+        print(f"  {name}: {span:.0f}s")
 
     print("\nPhase timing:")
     for phase_groups, elapsed in zip(PHASES, phase_times):
