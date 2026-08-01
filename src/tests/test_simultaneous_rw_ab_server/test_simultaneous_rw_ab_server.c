@@ -19,8 +19,8 @@
  * running concurrently elsewhere in the test suite. */
 #ifdef _WIN32
 #    define SERVER_CMD_START \
-        "for /f \"tokens=2\" %%%%p in ('wmic process call create \"ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1]\" ^| find \"ProcessId\"') do echo %%%%p> ab_server_%d.pid"
-#    define SERVER_CMD_STOP "for /f %%%%p in (ab_server_%d.pid) do taskkill /PID %%%%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
+        "for /f \"tokens=2\" %%p in ('wmic process call create \"ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1]\" ^| find \"ProcessId\"') do echo %%p> ab_server_%d.pid"
+#    define SERVER_CMD_STOP "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
 #else
 #    define SERVER_CMD_START "./ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1] & echo $! > /tmp/ab_server_%d.pid"
 #    define SERVER_CMD_STOP  "kill -TERM $(cat /tmp/ab_server_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_%d.pid"
