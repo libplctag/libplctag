@@ -1,5 +1,16 @@
 message("Building modbus_server2 POC (BSD sockets + select() + pthreads).")
 
+# Override the inherited client flags: modbus_server2 is a standalone process, so its
+# sanitizer choice is independent -- see USE_SERVER_MEM_SANITIZERS / USE_SERVER_THREAD_SANITIZERS.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Override CMAKE_C_FLAGS_DEBUG too: CMake auto-appends it on top of CMAKE_C_FLAGS for
+    # Debug configs, which would otherwise reintroduce the client's sanitizer flags here.
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG_BASE} ${SERVER_SANITIZE_FLAGS}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS_DEBUG}")
+else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS_MINSIZEREL}")
+endif()
+
 cmake_minimum_required(VERSION 3.15)
 
 set(CMAKE_C_STANDARD 11)

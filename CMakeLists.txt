@@ -69,11 +69,22 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
-set(USE_MEM_SANITIZERS 1 CACHE BOOL "Build with memory debug sanitizers (ASan/UBSan/LeakSan) or not")
-set(USE_THREAD_SANITIZERS 0 CACHE BOOL "Build with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
+set(USE_MEM_SANITIZERS 1 CACHE BOOL "Build the client library/tests/tools with memory debug sanitizers (ASan/UBSan/LeakSan) or not")
+set(USE_THREAD_SANITIZERS 0 CACHE BOOL "Build the client library/tests/tools with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
+
+# Servers (ab_server, ab_server_fiber, modbus_server*) run as separate processes from the
+# client under test, so their sanitizer choice is independent -- e.g. TSan on the client
+# while the server runs plain, to isolate which side a report under CI actually belongs to.
+# Default to matching the client settings so existing builds/CI configs are unaffected.
+set(USE_SERVER_MEM_SANITIZERS ${USE_MEM_SANITIZERS} CACHE BOOL "Build the test servers (ab_server/modbus_server) with ASan/UBSan/LeakSan or not")
+set(USE_SERVER_THREAD_SANITIZERS ${USE_THREAD_SANITIZERS} CACHE BOOL "Build the test servers with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
 
 if(USE_MEM_SANITIZERS AND USE_THREAD_SANITIZERS)
     message(FATAL_ERROR "USE_MEM_SANITIZERS and USE_THREAD_SANITIZERS cannot both be enabled: ASan/LeakSan and TSan cannot be linked into the same binary.")
+endif()
+
+if(USE_SERVER_MEM_SANITIZERS AND USE_SERVER_THREAD_SANITIZERS)
+    message(FATAL_ERROR "USE_SERVER_MEM_SANITIZERS and USE_SERVER_THREAD_SANITIZERS cannot both be enabled: ASan/LeakSan and TSan cannot be linked into the same binary.")
 endif()
 
 set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")

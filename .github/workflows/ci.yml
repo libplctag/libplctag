@@ -321,7 +321,7 @@ jobs:
       - name: Configure CMake (Debug, ASan/UBSan)
         run: |
           cd ${{ env.BUILD }}
-          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -375,7 +375,7 @@ jobs:
       - name: Configure CMake (Debug, TSan)
         run: |
           cd ${{ env.BUILD }}
-          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -423,7 +423,7 @@ jobs:
         run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
       - name: Configure CMake (Debug, ASan/UBSan)
-        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -470,7 +470,7 @@ jobs:
         run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
       - name: Configure CMake (Debug, TSan)
-        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
