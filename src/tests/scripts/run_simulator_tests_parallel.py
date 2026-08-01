@@ -584,7 +584,7 @@ def main() -> int:
     parser.add_argument("log_dir", nargs="?", default=".")
     parser.add_argument("--max-workers", type=int, default=max(2, (os.cpu_count() or 4) // 2),
                          help="worker threads for the functional+stress phase")
-    parser.add_argument("--timing-workers", type=int, default=8,
+    parser.add_argument("--timing-workers", type=int, default=4,
                          help="worker threads for the timing phase")
     parser.add_argument("--max-stress", type=int, default=2,
                          help="max STRESS-group tests allowed to run at once, regardless of --max-workers "
