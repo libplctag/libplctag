@@ -831,6 +831,15 @@ def run_phase(pool: ProcessPoolExecutor, tests: list[Test]) -> tuple[list[Result
 def main() -> int:
     global TEST_DIR, LOG_DIR
 
+    # CI captures stdout through a pipe, not a TTY, so Python block-buffers
+    # by default -- output can sit unflushed for a long time, making a script
+    # that's actually running fine look hung in the CI log viewer. Force line
+    # buffering so every print() below is visible immediately.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
     parser = argparse.ArgumentParser()
     parser.add_argument("test_dir")
     parser.add_argument("log_dir", nargs="?", default=".")
@@ -860,13 +869,18 @@ def main() -> int:
     print(f"  max-stress (concurrent STRESS-group tests): {args.max_stress}")
     print()
 
+    print("Checking for required executables...")
     check_executables_present()
+    print("Raising file descriptor limit...")
     raise_fd_limit(1024)
+    print("Killing any stray ab_server/modbus_server processes from a previous run...")
     kill_stray_servers()
+    print("Done with startup checks.")
 
     script_start = time.monotonic()
     manifest = build_manifest()
     all_tests = manifest.tests
+    print(f"Built manifest: {len(all_tests)} tests.")
 
     ctx = get_context("spawn")
     # Start one above DEFAULT_LIB_PORT so the general-purpose allocator can
@@ -882,11 +896,14 @@ def main() -> int:
     for phase_groups in PHASES:
         phase_tests = [t for t in all_tests if t.group in phase_groups]
         workers = args.timing_workers if phase_groups == {Group.TIMING} else args.max_workers
+        names = "+".join(g.value for g in phase_groups)
+        print(f"Starting phase '{names}': {len(phase_tests)} tests, {workers} workers...")
         with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_worker_init,
                                   initargs=(port_counter, port_lock, stress_sema, default_port_sema)) as pool:
             results, elapsed = run_phase(pool, phase_tests)
         all_results.extend(results)
         phase_times.append(elapsed)
+        print(f"Phase '{names}' done in {elapsed:.0f}s.")
 
     kill_stray_servers()
 
