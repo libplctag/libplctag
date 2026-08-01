@@ -64,6 +64,13 @@ static void parse_pccc_tag(const char *tag, plc_s *plc);
 static void parse_cip_tag(const char *tag, plc_s *plc);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
+/* tcp_server.c gives every accepted connection its own memcpy'd copy of the
+ * plc_s context (see plc_s.reject_fo_count), so the ForwardOpen-rejection
+ * countdown must live outside that struct to persist across the client
+ * reconnecting with a new TCP session on every retry. Every copy's
+ * reject_fo_count pointer points back at this one instance. */
+static atomic_int32_t g_reject_fo_count;
+
 
 #ifdef IS_WINDOWS
 
@@ -152,6 +159,9 @@ int main(int argc, const char **argv) {
     // NOLINTNEXTLINE
     memset(&plc, 0, sizeof(plc));
 
+    /* shared across every connection's copy of plc -- see plc_s.reject_fo_count. */
+    plc.reject_fo_count = &g_reject_fo_count;
+
     /* set the random seed. */
     srand((unsigned int)time(NULL));
 
@@ -220,7 +230,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     bool has_tag = false;
 
     /* make sure that the reject FO count is zero. */
-    plc->reject_fo_count = 0;
+    atomic_store_int32(plc->reject_fo_count, 0);
 
     for(int i = 0; i < argc; i++) {
         if(strncmp(argv[i], "--plc=", 6) == 0) {
@@ -351,7 +361,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
         if(strncmp(argv[i], "--reject_fo=", 12) == 0) {
             if(plc) {
                 log_info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
-                plc->reject_fo_count = atoi(&argv[i][12]);
+                atomic_store_int32(plc->reject_fo_count, atoi(&argv[i][12]));
             }
         }
 

@@ -246,6 +246,7 @@ REQUIRED_EXECUTABLES = [
     "test_reconnect_after_outage_sync", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
+    "test_lib_api_coverage",
 ]
 
 
@@ -291,7 +292,9 @@ def build_manifest() -> Manifest:
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
                         "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
-                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]"],
+                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]",
+                        "--tag=TestReal:REAL[1]", "--tag=TestLReal:LREAL[1]",
+                        "--tag=TestLint:LINT[1]", "--tag=TestSint:SINT[1]"],
         startup_wait_s=3,
     )
     gw = "127.0.0.1:{PORT}"
@@ -335,6 +338,13 @@ def build_manifest() -> Manifest:
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=600&auto_sync_write_ms=20"], T)
     sec.test("indexed tags", [exe("test_indexed_tags")], F,
               server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
+    sec.test("lib.c public API coverage (float32/64, int64, int8, raw_bytes, lock, byte_order)",
+              [exe("test_lib_api_coverage"),
+               f"--real-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=REAL&elem_count=1&name=TestReal",
+               f"--lreal-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=LREAL&elem_count=1&name=TestLReal",
+               f"--lint-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=LINT&elem_count=1&name=TestLint",
+               f"--sint-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=SINT&elem_count=1&name=TestSint",
+               f"--byteorder-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"], F)
     sec.test("AB/ControlLogix tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
@@ -388,6 +398,82 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw16}&path=1,16&plc=ControlLogix&elem_count=10&name=TestBigArray",
                "--debug=4", "--write=1,2,3,4,5,6,7,8,9"], F)
+
+    # --- Error-path coverage section ----------------------------------------
+    # Deliberately trigger client-side error branches that the rest of the
+    # suite's happy-path tests never touch. The first three need nothing
+    # special from ab_server -- a nonexistent tag name / out-of-bounds index /
+    # oversized element count are naturally rejected by its own tag-path and
+    # bounds validation. The rest use ab_server's two error-injection knobs
+    # (--reject_fo=N, --delay=Nms) on their own dedicated server instances.
+    error_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]"],
+        startup_wait_s=3,
+    )
+    egw = "127.0.0.1:{PORT}"
+
+    sec = m.section("error_injection", server=error_server)
+    sec.test("read nonexistent tag",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=NoSuchTagAtAll",
+               "--debug=4"], F, expect_failure=True)
+    sec.test("read array index out of bounds",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[9999]",
+               "--debug=4"], F, expect_failure=True)
+    sec.test("request more elements than the tag holds",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=99999&name=TestBigArray",
+               "--debug=4"], F, expect_failure=True)
+
+    # ab_server's --reject_fo=N used to have a bug (fixed): reject_fo_count
+    # lived in plc_s, which tcp_server.c copies fresh into every accepted TCP
+    # connection, so the decrement never persisted across the client's
+    # reconnect-per-retry behavior -- N>=1 rejected forever instead of N
+    # times. Now fixed by sharing one atomic_int32_t (via pointer) across
+    # every connection's copy, decremented with atomic_dec_int32. This test
+    # confirms the counter genuinely persists: reject exactly once, then
+    # succeed on the next attempt -- verified via log content (exit code
+    # alone wouldn't catch a bug that skipped the rejection and "succeeded"
+    # some other way, or one that rejected every time).
+    #
+    # Note: the client still doesn't take the PLCTAG_ERR_DUPLICATE-specific
+    # retry branch in session.c:1498 for this rejection -- it recovers via a
+    # different, outer session-recreation retry instead, treating it as
+    # PLCTAG_ERR_REMOTE_ERR. That's a separate, still-open issue (see the
+    # proposed byte-layout investigation) independent of this counter fix.
+    reject_fo_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--reject_fo=1"],
+        startup_wait_s=3,
+    )
+    reject_fo_test = sec.test("ForwardOpen rejection persists across reconnect, then succeeds",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=4"], T, server=reject_fo_server)
+    sec.test("check ForwardOpen was rejected exactly once before succeeding",
+              None, T, depends_on=reject_fo_test.id, ports_needed=0,
+              check=CheckSpec(log_file=reject_fo_test.log_file,
+                               pattern=r"Forward Open command failed", expected=1))
+
+    # --delay= applied to every response (including session register and
+    # ForwardOpen, not just reads -- see ab_server's request_handler) paired
+    # with a short client timeout deterministically hits PLCTAG_ERR_TIMEOUT,
+    # instead of relying on incidental resource contention the way most
+    # accidental timeout failures elsewhere in this suite have been.
+    big_delay_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--delay=5000"],
+        startup_wait_s=3,
+    )
+    sec.test("deterministic timeout via injected response delay",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=4", "--timeout=1000"], T, server=big_delay_server, expect_failure=True)
 
     # --- Stand-alone section: no shared server ------------------------------
     # ERR_WAIT needs a port nothing is listening on; async/sync manage their

@@ -90,8 +90,8 @@
  * host). */
 #ifdef WINDOWS_PLATFORM
 #    define SERVER_START \
-        "for /f \"tokens=2\" %%p in ('wmic process call create \"%s --plc=Omron --port=" STRINGIFY( \
-            SERVER_PORT) " --tag=TestDINTArray:DINT[10]\" ^| find \"ProcessId\"') do echo %%p> ab_server_%d.pid"
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
+        "'--plc=Omron','--port=" STRINGIFY(SERVER_PORT) "','--tag=TestDINTArray:DINT[10]').Id\" > ab_server_%d.pid"
 #    define SERVER_STOP "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
 #else
 #    define SERVER_START \
