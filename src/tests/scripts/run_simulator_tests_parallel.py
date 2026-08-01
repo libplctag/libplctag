@@ -30,6 +30,7 @@ import dataclasses
 import enum
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -215,6 +216,25 @@ def stop_process(proc: Optional[subprocess.Popen]) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout=5)
+
+
+# ab_server/modbus_server processes left running from an earlier, unrelated
+# invocation (e.g. an interrupted prior run, or manual debugging) can squat
+# on a port this run's allocator later hands to one of its own tests. That
+# test's own server then fails to bind, but the client still connects --
+# to the stale process instead -- and gets served against whatever tag
+# config that old process happened to be started with. That produces a
+# confusing, mis-attributed protocol-level test failure instead of an
+# obvious "port already in use" one. Best-effort sweep before and after a
+# run closes that hole; it's a no-op if nothing stale is running.
+def kill_stray_servers() -> None:
+    names = ["ab_server", "modbus_server"]
+    if os.name == "posix":
+        for name in names:
+            subprocess.run(["pkill", "-f", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        for name in names:
+            subprocess.run(["taskkill", "/IM", f"{name}.exe", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 REQUIRED_EXECUTABLES = [
@@ -595,13 +615,34 @@ def _worker_init(port_counter, port_lock, stress_sema, default_port_sema) -> Non
     raise_fd_limit(1024)
 
 
+def _port_is_free(port: int) -> bool:
+    # Best-effort only: something else can still grab the port between this
+    # check and the server's own bind() moments later. It closes the much
+    # more common hole where the counter hands out a port some unrelated,
+    # already-running process on the host happens to occupy (see: a stray
+    # dev binary from a different project squatting on a low port number).
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
 def _alloc_ports(n: int) -> list[int]:
     if n == 0:
         return []
+    ports = []
+    # Hold the lock for the whole probe-and-claim sequence so two workers
+    # can't both pick the same still-free-looking port at once.
     with _port_lock:
-        start = _port_counter.value
-        _port_counter.value += n
-    return list(range(start, start + n))
+        while len(ports) < n:
+            candidate = _port_counter.value
+            _port_counter.value += 1
+            if _port_is_free(candidate):
+                ports.append(candidate)
+    return ports
 
 
 def _fill(template: list[str], ports: list[int]) -> list[str]:
@@ -621,11 +662,12 @@ def run_test_in_worker(test: Test) -> Result:
     server back down. One test occupies this worker until all of that is
     done."""
     start = time.monotonic()
-    ports = _alloc_ports(test.ports_needed)
     stress_held = False
     default_port_held = False
     server_proc = None
     try:
+        ports = _alloc_ports(test.ports_needed)
+
         if test.exclusive_default_port:
             _default_port_sema.acquire()
             default_port_held = True
@@ -647,6 +689,12 @@ def run_test_in_worker(test: Test) -> Result:
             proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
         ok = (proc.returncode == 0) != test.expect_failure
         detail = ""
+    except Exception as e:
+        # A crash here (e.g. a transient spawn failure under heavy load) must
+        # not take down every other in-flight/pending test -- record it as
+        # this one test's failure and let the rest of the run continue.
+        ok = False
+        detail = f"{type(e).__name__}: {e}"
     finally:
         stop_process(server_proc)
         if stress_held:
@@ -719,6 +767,7 @@ def main() -> int:
 
     check_executables_present()
     raise_fd_limit(1024)
+    kill_stray_servers()
 
     script_start = time.monotonic()
     manifest = build_manifest()
@@ -743,6 +792,8 @@ def main() -> int:
             results, elapsed = run_phase(pool, phase_tests)
         all_results.extend(results)
         phase_times.append(elapsed)
+
+    kill_stray_servers()
 
     total = time.monotonic() - script_start
 
