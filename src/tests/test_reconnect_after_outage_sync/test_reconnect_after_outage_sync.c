@@ -46,6 +46,10 @@
 #define REQUIRED_VERSION 2, 6, 6
 
 #define READ_TIMEOUT (100)
+/* Generous: the initial connect (TCP handshake + ForwardOpen) is a one-time cost that
+ * can badly overrun READ_TIMEOUT under CI contention or sanitizer overhead, unlike the
+ * steady-state reads below which are genuinely fast once connected. */
+#define SETUP_TIMEOUT (15000)
 #define FIRST_RUN_TIME (10000)
 #define DISCONNECT_TIME_MS (60000)
 #define SECOND_RUN_TIME (30000)
@@ -166,7 +170,7 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
     log("[DEBUG] setup_tag: starting tag creation\n");
 
     /* create tag */
-    test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, READ_TIMEOUT);
+    test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, SETUP_TIMEOUT);
     if(test_state->tag < 0) {
         log("Error %s creating tag!\n", plc_tag_decode_error(test_state->tag));
         exit(1);
