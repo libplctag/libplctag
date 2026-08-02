@@ -101,6 +101,17 @@ void log_impl(const char *func, int line_num, log_level_t lvl, const char *templ
         if((LOG_LEVEL_SPEW) <= log_get_level()) log_impl(__func__, __LINE__, LOG_LEVEL_SPEW, __VA_ARGS__); \
     } while(0)
 
+/* Startup information (which simulator was selected, etc.) that should always be
+ * visible, not just under --debug -- unlike log_info(), which the current level
+ * may suppress. Temporarily raises the level so log_info()'s own threshold check
+ * passes, then restores whatever level was in effect before. */
+#define log_info_always(...)                                    \
+    do {                                                        \
+        log_level_t _prior_level = log_set_level(LOG_LEVEL_INFO); \
+        log_info(__VA_ARGS__);                                  \
+        log_set_level(_prior_level);                             \
+    } while(0)
+
 
 #ifdef __cplusplus
 }
