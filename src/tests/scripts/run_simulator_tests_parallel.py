@@ -40,6 +40,26 @@ from pathlib import Path
 from typing import Optional
 
 
+def _now_ts() -> str:
+    t = time.time()
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int((t % 1) * 1000):03d}"
+
+
+_builtin_print = print
+
+
+def print(*args, **kwargs) -> None:
+    """Prefix every printed line with a timestamp, so a stalled/killed CI job's
+    output shows exactly when things stopped progressing (e.g. which test was
+    running right before a 1-hour job timeout fired). Overrides the builtin for
+    this module only; splits on embedded '\\n' so a single print() with a blank
+    spacer line or multi-line message still gets one timestamp per real line."""
+    sep = kwargs.pop("sep", " ")
+    text = sep.join(str(a) for a in args)
+    stamped = "\n".join(f"{_now_ts()} {line}" if line else _now_ts() for line in text.split("\n"))
+    _builtin_print(stamped, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Test model
 # ---------------------------------------------------------------------------
