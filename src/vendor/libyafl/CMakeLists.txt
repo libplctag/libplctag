@@ -216,6 +216,13 @@ elseif(YAFL_ASAN_ACTIVE)
     # direction. Skip the runtime probe and rely on the well-known fact that every
     # architecture this project ships a toolchain/asm implementation for grows downward.
     message(STATUS "Skipping stack direction check under ASan/UBSan (assuming downward)")
+elseif(CMAKE_CROSSCOMPILING AND CMAKE_CROSSCOMPILING_EMULATOR MATCHES "qemu")
+    # ponytail: QEMU user-mode emulation (e.g. the s390x CI leg) has been observed to make
+    # this probe report "upward" on architectures that are well-documented to grow the
+    # stack downward under their native SysV/Linux ABI (s390x included) and for which this
+    # project already ships a hand-verified downward-stack asm implementation (gated by the
+    # toolchains/${TRIPLE}.cmake lookup above). Trust the ABI instead of an emulator-only probe.
+    message(STATUS "Skipping stack direction check under QEMU user-mode emulation (assuming downward per target ABI)")
 elseif(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
     message(STATUS "Checking stack direction...")
     try_run(STACK_DIR_EXITCODE STACK_DIR_COMPILED
