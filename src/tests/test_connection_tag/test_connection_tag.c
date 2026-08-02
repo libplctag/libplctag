@@ -109,10 +109,9 @@
  * ---------------------------------------------------------------------- */
 
 typedef struct {
-    /* plc_tag_create_ex() can dispatch the creation-complete event to the callback
-     * on the tickler thread before it returns the new tag_id to this thread, so a
-     * plain int here races: find_tag_state() (callback thread) can read this while
-     * the create loop below (main thread) is still writing it. */
+    /* For logging only; the callback identifies its tag_state_t via userdata,
+     * not by looking this up, since events can be dispatched before the
+     * create loop below stores the returned tag_id here. */
     compat_atomic_int32_t tag_id;
     compat_atomic_int32_t next_expected_idx;
     compat_atomic_int32_t failed;
@@ -208,14 +207,6 @@ static const char *conn_status_name(int32_t s) {
     }
 }
 
-static tag_state_t *find_tag_state(int32_t tag_id) {
-    int i;
-    for(i = 0; i < num_tags; i++) {
-        if(compat_atomic_load_int32(&tag_states[i].tag_id) == tag_id) { return &tag_states[i]; }
-    }
-    return NULL;
-}
-
 /* Advance a tag's expected-state machine from within the callback. */
 static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
     int idx = compat_atomic_load_int32(&ts->next_expected_idx);
@@ -259,12 +250,13 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
  * ---------------------------------------------------------------------- */
 
 static void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
-    tag_state_t *ts;
+    /* userdata is the tag's own tag_state_t*, set at plc_tag_create_ex() time.
+     * Looking this up later by tag_id instead would race: the library can
+     * dispatch early events (CONNECTING, UP) on another thread before the
+     * creating thread stores the returned tag_id into a lookup table. */
+    tag_state_t *ts = (tag_state_t *)userdata;
     int32_t rc, ws;
 
-    (void)userdata;
-
-    ts = find_tag_state(tag_id);
     if(!ts) { return; }
 
     switch(event) {
@@ -479,7 +471,7 @@ int main(int argc, char **argv) {
         compat_atomic_store_int32(&tag_states[i].completed, 0);
 
         fprintf(stderr, "Creating @connection tag %d/%d: %s\n", i + 1, num_tags, tag_path);
-        tag = plc_tag_create_ex(tag_path, tag_callback, NULL, 0);
+        tag = plc_tag_create_ex(tag_path, tag_callback, &tag_states[i], 0);
         if(tag < 0) {
             fprintf(stderr, "ERROR: could not create @connection tag %d: %s\n", i + 1, plc_tag_decode_error((int)tag));
             while(--i >= 0) { plc_tag_destroy(tag_handles[i]); }
