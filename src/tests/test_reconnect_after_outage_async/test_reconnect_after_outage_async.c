@@ -209,7 +209,10 @@ void start_server(test_state_t *test_state) {
         exit(1);
     }
 
-    compat_sleep_ms(3000, NULL);
+    if(!compat_wait_for_listener("127.0.0.1", (uint16_t)atoi(g_port), 15000)) {
+        log("Error: AB server did not start listening on port %s in time!\n", g_port);
+        exit(1);
+    }
 }
 
 

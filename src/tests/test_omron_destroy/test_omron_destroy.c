@@ -120,7 +120,10 @@ static void start_server(const char *ab_server_path, int test_pid) {
         log("Failed to start ab_server.\n");
         exit(1);
     }
-    compat_sleep_ms(2000, NULL);
+    if(!compat_wait_for_listener("127.0.0.1", SERVER_PORT, 15000)) {
+        log("Error: ab_server did not start listening on port %d in time!\n", SERVER_PORT);
+        exit(1);
+    }
 }
 
 
@@ -167,7 +170,7 @@ int main(int argc, char **argv) {
     start_server(ab_server_path, test_pid);
 
     log("Creating Omron tag...\n");
-    int32_t tag = plc_tag_create(TAG_ATTRIBS, 5000);
+    int32_t tag = plc_tag_create(TAG_ATTRIBS, 15000);
     if(tag < 0) {
         log("FAIL: could not create tag: %s\n", plc_tag_decode_error(tag));
         stop_server(test_pid);
