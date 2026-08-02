@@ -716,6 +716,29 @@ def _port_is_free(port: int) -> bool:
             return False
 
 
+def _wait_for_server_ready(port: int, proc: subprocess.Popen, timeout_s: float) -> bool:
+    """Poll until something is actually listening on `port`, instead of a
+    fixed sleep. A fixed sleep only reflects the *typical* time a server
+    takes to bind and listen; on a slow/contended CI runner (e.g. observed on
+    Windows ARM64 under 4-way parallel load) that can take longer than the
+    sleep, and the client then fails with a spurious connect/read timeout
+    even though the server would have come up fine given a bit more time.
+    Returns False if the server process exits first or the timeout expires."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.2)
+            try:
+                s.connect(("127.0.0.1", port))
+                return True
+            except OSError:
+                pass
+        time.sleep(0.1)
+    return False
+
+
 def _alloc_ports(n: int) -> list[int]:
     if n == 0:
         return []
@@ -765,10 +788,15 @@ def run_test_in_worker(test: Test) -> Result:
         if test.server is not None:
             server_cmd = [test.server.exe_path] + _fill(test.server.args_template, ports)
             server_proc = spawn(server_cmd, Path(test.server_log_file))
-            time.sleep(test.server.startup_wait_s)
-            if server_proc.poll() is not None:
+            ready_port = ports[0] if ports else DEFAULT_LIB_PORT
+            # Generous upper bound (not just startup_wait_s) so a slow/contended CI
+            # runner gets real headroom instead of a spurious timeout; a healthy
+            # server still returns almost immediately once it's actually listening.
+            ready_timeout = max(test.server.startup_wait_s * 10, 15.0)
+            if not _wait_for_server_ready(ready_port, server_proc, ready_timeout):
                 end = time.monotonic()
-                return Result(test=test, ok=False, detail="server exited during startup", start=start, end=end)
+                detail = "server exited during startup" if server_proc.poll() is not None else "server did not start listening in time"
+                return Result(test=test, ok=False, detail=detail, start=start, end=end)
 
         cmd = _fill(test.cmd_template, ports)
         with open(test.log_file, "w") as log:
