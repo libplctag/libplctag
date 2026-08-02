@@ -18,25 +18,29 @@ jobs:
             libc: glibc
             runner: ubuntu-24.04
             cmake_flags: ""
-            apt_packages: "build-essential cmake"
+            apt_packages: "build-essential cmake clang"
+            compiler: clang
             artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
             runner: ubuntu-24.04
             cmake_flags: ""
             apt_packages: "build-essential cmake musl-tools musl-dev"
+            compiler: gcc
             artifact_suffix: "ubuntu_x64_musl"
           - arch: x86
             libc: glibc
             runner: ubuntu-24.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
+            compiler: gcc
             artifact_suffix: "ubuntu_x86"
           - arch: arm64
             libc: glibc
             runner: ubuntu-24.04-arm
             cmake_flags: ""
-            apt_packages: "build-essential cmake zip"
+            apt_packages: "build-essential cmake zip clang"
+            compiler: clang
             artifact_suffix: "ubuntu_arm64"
 
     env:
@@ -101,6 +105,8 @@ jobs:
             if [ -n "${CXXFLAGS}" ]; then
               CMAKE_EXTRA_FLAGS="${CMAKE_EXTRA_FLAGS} -DCMAKE_CXX_FLAGS='${CXXFLAGS}'"
             fi
+          elif [ "${{ matrix.compiler }}" = "clang" ]; then
+            CMAKE_EXTRA_FLAGS="-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
           fi
           # Set install prefix for proper Linux packaging
           if [ "${{ matrix.libc }}" = "glibc" ]; then
@@ -313,7 +319,7 @@ jobs:
       - name: Set up build environment
         run: |
           sudo apt update
-          sudo apt install -y build-essential cmake
+          sudo apt install -y build-essential cmake clang
 
       - name: Create build directory
         run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -321,7 +327,7 @@ jobs:
       - name: Configure CMake (Debug, ASan/UBSan)
         run: |
           cd ${{ env.BUILD }}
-          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+          cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -367,7 +373,7 @@ jobs:
       - name: Set up build environment
         run: |
           sudo apt update
-          sudo apt install -y build-essential cmake
+          sudo apt install -y build-essential cmake clang
 
       - name: Create build directory
         run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -375,7 +381,7 @@ jobs:
       - name: Configure CMake (Debug, TSan)
         run: |
           cd ${{ env.BUILD }}
-          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+          cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
