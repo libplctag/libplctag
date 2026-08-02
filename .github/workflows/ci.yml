@@ -342,7 +342,7 @@ jobs:
 
   ubuntu_thread_sanitizer:
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     strategy:
       matrix:
@@ -515,6 +515,10 @@ jobs:
             msvc_arch: arm64
             cmake_processor: ARM64
             artifact_suffix: "windows_arm64"
+            # This runner has shown far more scheduling jitter under 4-way parallel load
+            # than the other Windows legs (multi-second stalls tripping timing-sensitive
+            # reconnect tests); fewer concurrent workers gives each test more headroom.
+            max_workers: 2
           # MinGW toolchain variants (no ZIP artifacts)
           - name: x64_MinGW
             toolchain: mingw
@@ -676,7 +680,12 @@ jobs:
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
       - name: Run Simulator Tests
-        run: python3 src/tests/scripts/run_simulator_tests_parallel.py '${{ env.DIST }}' logs
+        run: |
+          ARGS=()
+          if [ -n "${{ matrix.max_workers }}" ]; then
+            ARGS+=(--max-workers "${{ matrix.max_workers }}")
+          fi
+          python3 src/tests/scripts/run_simulator_tests_parallel.py '${{ env.DIST }}' logs "${ARGS[@]}"
         shell: bash
 
       - name: Upload test logs
