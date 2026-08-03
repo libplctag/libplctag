@@ -41,6 +41,12 @@
 
 #define REQUIRED_VERSION 2, 5, 0
 #define DATA_TIMEOUT 5000
+/* Generous: the initial connect (TCP handshake + ForwardOpen/registration) is a
+ * one-time cost that can badly overrun DATA_TIMEOUT under CI scheduling delays
+ * -- observed on a CI runner where the connection handler thread didn't even
+ * start running until 4s after tag creation began, unlike the steady-state
+ * read/write waits below which are genuinely fast once connected. */
+#define SETUP_TIMEOUT 15000
 
 /* Tag path from command line */
 static char *tag_path = NULL;
@@ -225,7 +231,7 @@ int main(int argc, char **argv) {
     }
 
     printf("Waiting for tag creation to complete.\n");
-    wait_for_ok(tag, DATA_TIMEOUT);
+    wait_for_ok(tag, SETUP_TIMEOUT);
 
     /* get the data */
     printf("Reading tag data.\n");
