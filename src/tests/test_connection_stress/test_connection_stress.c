@@ -234,12 +234,35 @@ static bool parse_gateway_host_port(const char *tag_string, char *host_out, size
 
 #define MAX_THREADS (200)
 
+/* Detect ASan/TSan across Clang and GCC without erroring on compilers that
+ * have neither __has_feature nor the __SANITIZE_*__ macros (e.g. MSVC). */
+#if defined(__has_feature)
+#    define STRESS_HAS_ASAN __has_feature(address_sanitizer)
+#    define STRESS_HAS_TSAN __has_feature(thread_sanitizer)
+#else
+#    define STRESS_HAS_ASAN 0
+#    define STRESS_HAS_TSAN 0
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__) || STRESS_HAS_ASAN || STRESS_HAS_TSAN
+#    define STRESS_TEST_SANITIZED 1
+#else
+#    define STRESS_TEST_SANITIZED 0
+#endif
+
 /* On a 32-bit build, address space is the scarce resource: each connection
  * needs a test thread plus a library-internal handler thread, and every
  * thread's stack eats into a ~3GB address space. MAX_THREADS worth of both
  * kinds of thread has been observed to exhaust it (PLCTAG_ERR_THREAD_CREATE /
- * PLCTAG_ERR_BAD_GATEWAY partway through), so cap concurrency lower there. */
-#if UINTPTR_MAX == 0xFFFFFFFFU
+ * PLCTAG_ERR_BAD_GATEWAY partway through), so cap concurrency lower there.
+ *
+ * Under ASan/TSan, the scarce resource is time instead of address space:
+ * per-access/per-allocation instrumentation overhead makes MAX_THREADS worth
+ * of concurrent connections slow enough to starve the CI harness's worker
+ * pool, causing unrelated queued tests to fail because their client process
+ * never got launched in time (observed: two of these stress tests alone took
+ * over 20 minutes each under ASan, stalling everything queued behind them). */
+#if UINTPTR_MAX == 0xFFFFFFFFU || STRESS_TEST_SANITIZED
 #    define MAX_THREADS_FOR_PLATFORM (75)
 #else
 #    define MAX_THREADS_FOR_PLATFORM (MAX_THREADS)
