@@ -805,24 +805,38 @@ def run_test_in_worker(test: Test) -> Result:
             _stress_sema.acquire()
             stress_held = True
 
-        if test.server is not None:
-            server_cmd = [test.server.exe_path] + _fill(test.server.args_template, ports)
-            server_proc = spawn(server_cmd, Path(test.server_log_file))
-            ready_port = ports[0] if ports else DEFAULT_LIB_PORT
-            # Generous upper bound (not just startup_wait_s) so a slow/contended CI
-            # runner gets real headroom instead of a spurious timeout; a healthy
-            # server still returns almost immediately once it's actually listening.
-            ready_timeout = max(test.server.startup_wait_s * 10, 15.0)
-            if not _wait_for_server_ready(ready_port, server_proc, ready_timeout):
-                end = time.monotonic()
-                detail = "server exited during startup" if server_proc.poll() is not None else "server did not start listening in time"
-                return Result(test=test, ok=False, detail=detail, start=start, end=end)
+        # A server that vanishes mid-test with no shutdown log and no signal
+        # handler firing (observed on Windows -- see test 36 investigation)
+        # looks identical to a real client-side protocol failure. One retry
+        # with a freshly spawned server tells the two apart cheaply, since a
+        # real bug reproduces and an external one-off process kill doesn't.
+        for attempt in range(2):
+            if test.server is not None:
+                server_cmd = [test.server.exe_path] + _fill(test.server.args_template, ports)
+                server_proc = spawn(server_cmd, Path(test.server_log_file))
+                ready_port = ports[0] if ports else DEFAULT_LIB_PORT
+                # Generous upper bound (not just startup_wait_s) so a slow/contended CI
+                # runner gets real headroom instead of a spurious timeout; a healthy
+                # server still returns almost immediately once it's actually listening.
+                ready_timeout = max(test.server.startup_wait_s * 10, 15.0)
+                if not _wait_for_server_ready(ready_port, server_proc, ready_timeout):
+                    end = time.monotonic()
+                    detail = "server exited during startup" if server_proc.poll() is not None else "server did not start listening in time"
+                    return Result(test=test, ok=False, detail=detail, start=start, end=end)
 
-        cmd = _fill(test.cmd_template, ports)
-        with open(test.log_file, "w") as log:
-            proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
-        ok = (proc.returncode == 0) != test.expect_failure
-        detail = ""
+            cmd = _fill(test.cmd_template, ports)
+            with open(test.log_file, "w") as log:
+                proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
+            ok = (proc.returncode == 0) != test.expect_failure
+            detail = ""
+
+            server_vanished = test.server is not None and server_proc.poll() is not None
+            stop_process(server_proc)
+            server_proc = None
+            if ok or not server_vanished or attempt == 1:
+                if not ok and server_vanished:
+                    detail = "server vanished mid-test (retried once, still failed)"
+                break
     except Exception as e:
         # A crash here (e.g. a transient spawn failure under heavy load) must
         # not take down every other in-flight/pending test -- record it as
