@@ -212,6 +212,9 @@ def raise_fd_limit(n: int = 1024) -> None:
         pass
 
 
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
 def spawn(cmd: list[str], log_path: Path) -> subprocess.Popen:
     # Long-lived servers must not share their launching process's session:
     # ab_server (and friends) install no SIGHUP handler, so if they inherit a
@@ -219,12 +222,23 @@ def spawn(cmd: list[str], log_path: Path) -> subprocess.Popen:
     # away. start_new_session (POSIX) / CREATE_NEW_PROCESS_GROUP (Windows)
     # detaches them so they survive independent of how they were launched.
     log = open(log_path, "w")
-    kwargs = {}
     if os.name == "posix":
-        kwargs["start_new_session"] = True
-    else:
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, **kwargs)
+        return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+    # On GitHub Actions' Windows runners, ab_server has been observed to vanish
+    # mid-test with no shutdown log and no console-control-handler event fired --
+    # the signature of the whole job object being torn down with
+    # TerminateProcess, which bypasses SetConsoleCtrlHandler entirely.
+    # CREATE_NEW_PROCESS_GROUP only protects against console Ctrl events, not
+    # job-object membership, so also try to break the child out of the job
+    # entirely. Some job objects don't permit breakaway, in which case
+    # CreateProcess fails outright and we fall back to the old behavior.
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+    try:
+        return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+    except OSError:
+        return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
+                                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
 
 
 def stop_process(proc: Optional[subprocess.Popen]) -> None:
