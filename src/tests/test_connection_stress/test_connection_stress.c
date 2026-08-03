@@ -234,6 +234,17 @@ static bool parse_gateway_host_port(const char *tag_string, char *host_out, size
 
 #define MAX_THREADS (200)
 
+/* On a 32-bit build, address space is the scarce resource: each connection
+ * needs a test thread plus a library-internal handler thread, and every
+ * thread's stack eats into a ~3GB address space. MAX_THREADS worth of both
+ * kinds of thread has been observed to exhaust it (PLCTAG_ERR_THREAD_CREATE /
+ * PLCTAG_ERR_BAD_GATEWAY partway through), so cap concurrency lower there. */
+#if UINTPTR_MAX == 0xFFFFFFFFU
+#    define MAX_THREADS_FOR_PLATFORM (75)
+#else
+#    define MAX_THREADS_FOR_PLATFORM (MAX_THREADS)
+#endif
+
 int main(int argc, char **argv) {
     compat_thread_t thread[MAX_THREADS];
     int num_threads = 0;
@@ -289,6 +300,13 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Too many threads.  A maximum of %d threads are supported.\n", MAX_THREADS);
         usage();
+    }
+
+    if(num_threads > MAX_THREADS_FOR_PLATFORM) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Limiting thread count to %d on this platform (requested %d).\n", MAX_THREADS_FOR_PLATFORM,
+                num_threads);
+        num_threads = MAX_THREADS_FOR_PLATFORM;
     }
 
     if(!tag_string || strlen(tag_string) < 10) {
