@@ -609,10 +609,6 @@ const char *pccc_decode_error(uint8_t *error_ptr) {
 }
 
 
-/*
- * FIXME This does not check for data overruns!
- */
-
 uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length) {
     uint8_t *data_start = data;
     uint32_t d_type;
