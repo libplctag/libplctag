@@ -211,11 +211,11 @@ jobs:
       matrix:
         include:
           - name: x64
-            runner: macos-15-intel
+            runner: macos-26-intel
             cmake_arch: x86_64
             artifact_suffix: "macos_x64"
           - name: arm64
-            runner: macos-15
+            runner: macos-26
             cmake_arch: arm64
             artifact_suffix: "macos_aarch64"
 
@@ -408,9 +408,9 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: macos-15-intel
+            runner: macos-26-intel
           - arch: aarch64
-            runner: macos-15
+            runner: macos-26
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -456,9 +456,9 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: macos-15-intel
+            runner: macos-26-intel
           - arch: aarch64
-            runner: macos-15
+            runner: macos-26
 
     env:
       BUILD: "${{ github.workspace }}/build"
@@ -505,13 +505,13 @@ jobs:
           # MSVC toolchain variants
           - name: x64
             toolchain: msvc
-            runner: windows-2022
+            runner: windows-2025
             msvc_arch: amd64
             cmake_processor: AMD64
             artifact_suffix: "windows_x64"
           - name: x86
             toolchain: msvc
-            runner: windows-2022
+            runner: windows-2025
             msvc_arch: amd64_x86
             cmake_processor: Win32
             artifact_suffix: "windows_x86"
@@ -528,12 +528,12 @@ jobs:
           # MinGW toolchain variants (no ZIP artifacts)
           - name: x64_MinGW
             toolchain: mingw
-            runner: windows-2022
+            runner: windows-2025
             cmake_processor: AMD64
             artifact_suffix: "windows_x64_MinGW"
           - name: x86_MinGW
             toolchain: mingw
-            runner: windows-2022
+            runner: windows-2025
             cmake_processor: x86
             cmake_toolchain_file: cmake_toolchains/mingw_i686_windows.cmake
             artifact_suffix: "windows_x86_MinGW"
