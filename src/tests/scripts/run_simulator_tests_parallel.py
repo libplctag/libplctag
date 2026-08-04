@@ -78,6 +78,14 @@ class Group(enum.Enum):
 # the actual culprit.
 STRESS_TEST_TIMEOUT_S = 180
 
+# A genuinely deadlocked FUNCTIONAL/TIMING test has the same failure mode:
+# no output, no error, the whole CI job silently eats its 1-hour timeout
+# instead of naming the stuck test (observed: macOS TSan x64 run stopped
+# dead after the timing-phase "auto sync" test, no log for whatever ran
+# next). Every group gets a budget; TIMING's is generous since several of
+# those tests deliberately sleep tens of seconds already.
+DEFAULT_TEST_TIMEOUT_S = 300
+
 
 # Which groups are allowed to run concurrently with each other. Phases run
 # in order; a phase doesn't start until the previous one has fully drained.
@@ -854,7 +862,7 @@ def run_test_in_worker(test: Test) -> Result:
                     return Result(test=test, ok=False, detail=detail, start=start, end=end)
 
             cmd = _fill(test.cmd_template, ports)
-            timeout_s = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else None
+            timeout_s = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else DEFAULT_TEST_TIMEOUT_S
             try:
                 with open(test.log_file, "w") as log:
                     proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout_s)
