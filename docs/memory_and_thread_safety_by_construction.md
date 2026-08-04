@@ -38,20 +38,36 @@ thread-local stack check in `mutex_lock_impl()`. Debug/CI builds only.
 
 ```c
 /* platform.c, guarded by #ifdef LIBPLCTAG_LOCK_ORDER_CHECK */
+static THREAD_LOCAL mutex_p held_mutexes[16];
 static THREAD_LOCAL int held_ranks[16];
 static THREAD_LOCAL int held_depth;
 
 int mutex_lock_impl(const char *func, int line_num, mutex_p m) {
-    if(held_depth > 0 && m->rank <= held_ranks[held_depth - 1]) {
+    /* same-pointer exemption: mutexes are recursive, re-locking one we already
+     * hold is legal and must not trip the check. See note below. */
+    if(held_depth > 0 && m != held_mutexes[held_depth - 1]
+                      && m->rank <= held_ranks[held_depth - 1]) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0,
                "Lock order violation at %s:%d: taking rank %d while holding rank %d",
                func, line_num, m->rank, held_ranks[held_depth - 1]);
         abort();
     }
     /* ... existing lock ... */
+    held_mutexes[held_depth] = m;
     held_ranks[held_depth++] = m->rank;
 }
 ```
+
+**The same-pointer exemption is not optional.** `platform.c:600` creates every mutex
+with `PTHREAD_MUTEX_RECURSIVE`; Windows uses `CRITICAL_SECTION`, also recursive. The
+codebase relies on this — `add_session_unsafe()` and friends are called both from inside
+`critical_block(session_mutex)` and from paths that take it themselves. Without the
+pointer comparison, a rank-equal re-acquisition of the *same* mutex aborts, and §1 fires
+false positives on the first run.
+
+Recursive mutexes are also why this problem is invisible today: a callee can silently
+re-enter a lock its caller holds, so nesting never announces itself at any single point
+in the source. The assert is what makes it announce.
 
 Proposed ranks — chosen to match how the code *wants* to flow; the assert then reports
 where it does not:
@@ -68,6 +84,53 @@ Under this ranking `lib.c:1307` aborts immediately. That is the point: a latent
 deadlock becomes a CI failure on hardware we already run. Enable in every sanitizer job.
 
 ~40 lines.
+
+### 1a. Two cheaper-looking alternatives, and why neither replaces this
+
+**Multi-lock `critical_block`.** Extend the macro to take several mutexes, sort them by
+rank internally, and lock in rank order — correct by construction instead of asserted
+after the fact. Recursion makes the nesting safe. The premise holds; the reach does not.
+The macro can only order locks named at one lexical point, and the edges that deadlock
+here are not named anywhere:
+
+```c
+/* lib.c:1307 */
+critical_block(tag->api_mutex) { tag->vtable->activate(tag); }
+```
+
+`activate()` reaches `session_mutex` (ab), `plc->mutex` (modbus), or `conn->mutex`
+(omron), three frames down. Hoisting that into a multi-lock block means `lib.c` writing
+the second mutex's name — but it lives in the protocol-specific struct, not
+`TAG_BASE_STRUCT`. Generic code behind a vtable structurally cannot see it; that is what
+the vtable is for.
+
+Of the 7 lexically nested lock sites, exactly 2 could use it (`lib.c:1770` and
+`lib.c:1812`, `api_mutex` + `ext_mutex`). The other 4 are vtable calls. So: ~20 lines of
+varargs macro for 2 sites, leaving the 4 that actually bite. The assert inspects the
+order a thread actually performed, at any call depth, and costs the same.
+
+Worth keeping from the idea: the `rank` field on `struct mutex_t` is needed either way,
+and if a third genuine two-lock site ever appears, the macro becomes worth its 20 lines.
+
+**More atomics instead of locks.** Holding a reference to a tag or session and touching a
+single field atomically is sound, and the codebase already does it correctly
+(`atomic_get_int32(&tag->session->conn_status_ring_write_idx)`, `connection_tag.c:148`;
+`modbus.c:3844`). It just does not reach far. Of 157 `critical_block` sites in
+`src/libplctag`:
+
+| body                                                                    | count | atomic-able |
+|-------------------------------------------------------------------------|------:|-------------|
+| calls a function (`hashtable_*`, `vector_*`, `*_unsafe`, `vtable->*`)   |  ~135 | no          |
+| single scalar field, no invariant with a sibling                        |    ~8 | **yes**     |
+| two fields with an invariant between them                               |    ~6 | no          |
+| `req = rc_inc(tag->req)`                                                |     6 | no          |
+
+~5% of sites, and **0 of the 7 nesting sites** — those are calls, not field accesses.
+
+The rule holds for stale-tolerant scalars, not for pointers into refcounted objects.
+`req = rc_inc(tag->req)` is the trap: it looks like one field, but load-then-increment is
+two operations, and a concurrent `tag->req = new` plus `rc_dec(old)` frees the object
+between them. Making `tag->req` atomic converts a mutex into a use-after-free.
 
 ---
 

@@ -70,6 +70,15 @@ class Group(enum.Enum):
     TIMING = "timing"
 
 
+# A starved STRESS test (too many threads for too few cores) doesn't hang --
+# it retries and backs off forever, one client at a time, and silently eats
+# the whole CI job's 1-hour timeout before anyone finds out which test did it
+# (observed: 38 minutes on a 4-CPU runner for a test that should take well
+# under a minute). Kill it and fail it explicitly instead so the log names
+# the actual culprit.
+STRESS_TEST_TIMEOUT_S = 180
+
+
 # Which groups are allowed to run concurrently with each other. Phases run
 # in order; a phase doesn't start until the previous one has fully drained.
 # STRESS gets its own phase: each stress test already opens up to 100
@@ -845,10 +854,15 @@ def run_test_in_worker(test: Test) -> Result:
                     return Result(test=test, ok=False, detail=detail, start=start, end=end)
 
             cmd = _fill(test.cmd_template, ports)
-            with open(test.log_file, "w") as log:
-                proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
-            ok = (proc.returncode == 0) != test.expect_failure
-            detail = ""
+            timeout_s = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else None
+            try:
+                with open(test.log_file, "w") as log:
+                    proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout_s)
+                ok = (proc.returncode == 0) != test.expect_failure
+                detail = ""
+            except subprocess.TimeoutExpired:
+                ok = False
+                detail = f"client exceeded {timeout_s}s budget, killed"
 
             server_vanished = test.server is not None and server_proc.poll() is not None
             stop_process(server_proc)
