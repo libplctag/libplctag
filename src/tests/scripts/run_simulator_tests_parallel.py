@@ -923,7 +923,7 @@ def main() -> int:
                          help="worker processes for the functional+stress phase (one per CPU by default)")
     parser.add_argument("--timing-workers", type=int, default=max(2, (os.cpu_count() or 4) // 2),
                          help="worker processes for the timing phase")
-    parser.add_argument("--max-stress", type=int, default=2,
+    parser.add_argument("--max-stress", type=int, default=1,
                          help="max STRESS-group tests allowed to run at once, regardless of worker count "
                               "(each one already opens up to 200 of its own connections/threads)")
     args = parser.parse_args()
