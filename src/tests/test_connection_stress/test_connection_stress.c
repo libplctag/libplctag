@@ -255,16 +255,30 @@ static bool parse_gateway_host_port(const char *tag_string, char *host_out, size
  * hardware: on a 32-bit build it exhausts the ~3GB address space
  * (PLCTAG_ERR_THREAD_CREATE / PLCTAG_ERR_BAD_GATEWAY partway through); under
  * ASan/TSan, per-access/per-allocation instrumentation overhead makes it slow
- * enough to starve the CI harness's worker pool; and even a plain 64-bit
- * build on a low-core-count runner (observed: 4 CPUs) has taken over 10
- * minutes for this test alone. Cap concurrency well below MAX_THREADS
- * everywhere, and lower still under the added overhead of a sanitizer or a
- * 32-bit address space. */
+ * enough to starve the CI harness's worker pool; and a flat 100 on a
+ * low-core-count runner starves too: observed 38 minutes on a 4-CPU aarch64
+ * runner (each connection's 2s protocol timeout firing over and over because
+ * 200 threads on 4 cores can't get scheduled inside it, driving endless
+ * reconnect/backoff cycles instead of ever finishing). Cap concurrency both
+ * by a static platform ceiling and by detected CPU count. */
 #if UINTPTR_MAX == 0xFFFFFFFFU || STRESS_TEST_SANITIZED
-#    define MAX_THREADS_FOR_PLATFORM (50)
+#    define MAX_THREADS_STATIC_CAP (50)
+#    define THREADS_PER_CPU (6)
 #else
-#    define MAX_THREADS_FOR_PLATFORM (100)
+#    define MAX_THREADS_STATIC_CAP (100)
+#    define THREADS_PER_CPU (10)
 #endif
+
+/* At least 10 threads even on a single-detected-CPU runner -- the test still
+ * needs to exercise real concurrency, just not thousands of threads' worth. */
+static int compute_max_threads_for_platform(void) {
+    int scaled = compat_cpu_count() * THREADS_PER_CPU;
+
+    if(scaled < 10) { scaled = 10; }
+    if(scaled > MAX_THREADS_STATIC_CAP) { scaled = MAX_THREADS_STATIC_CAP; }
+
+    return scaled;
+}
 
 int main(int argc, char **argv) {
     compat_thread_t thread[MAX_THREADS];
@@ -323,11 +337,12 @@ int main(int argc, char **argv) {
         usage();
     }
 
-    if(num_threads > MAX_THREADS_FOR_PLATFORM) {
+    int max_threads_for_platform = compute_max_threads_for_platform();
+    if(num_threads > max_threads_for_platform) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "Limiting thread count to %d on this platform (requested %d).\n", MAX_THREADS_FOR_PLATFORM,
-                num_threads);
-        num_threads = MAX_THREADS_FOR_PLATFORM;
+        fprintf(stderr, "Limiting thread count to %d on this platform (requested %d, %d CPUs detected).\n",
+                max_threads_for_platform, num_threads, compat_cpu_count());
+        num_threads = max_threads_for_platform;
     }
 
     if(!tag_string || strlen(tag_string) < 10) {
