@@ -215,6 +215,13 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 }
 
 
+int compat_cpu_count(void) {
+    long count = sysconf(_SC_NPROCESSORS_ONLN);
+
+    return (count > 0) ? (int)count : 1;
+}
+
+
 #elif defined(WINDOWS_PLATFORM)
 
 #    include <process.h>
@@ -469,6 +476,15 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
     return 0;
+}
+
+
+int compat_cpu_count(void) {
+    SYSTEM_INFO sys_info;
+
+    GetSystemInfo(&sys_info);
+
+    return (sys_info.dwNumberOfProcessors > 0) ? (int)sys_info.dwNumberOfProcessors : 1;
 }
 
 

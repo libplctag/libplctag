@@ -190,6 +190,10 @@ extern bool compat_wait_for_listener(const char *host, uint16_t port, uint32_t t
 
 extern int compat_fprintf(FILE *stream, const char *format, ...);
 
+
+/* Number of logical CPUs available to this process, or 1 if it cannot be determined. */
+extern int compat_cpu_count(void);
+
 #ifdef __cplusplus
 }
 #endif
