@@ -72,8 +72,14 @@ class Group(enum.Enum):
 
 # Which groups are allowed to run concurrently with each other. Phases run
 # in order; a phase doesn't start until the previous one has fully drained.
+# STRESS gets its own phase: each stress test already opens up to 100
+# connections/threads, and running one alongside unrelated FUNCTIONAL tests
+# in sibling workers was starving those tests' own server-startup and
+# protocol-round-trip timeouts on constrained CI hardware. Running STRESS
+# alone (no FUNCTIONAL test sharing the host's CPU) removes that contention.
 PHASES: list[set[Group]] = [
-    {Group.FUNCTIONAL, Group.STRESS},
+    {Group.STRESS},
+    {Group.FUNCTIONAL},
     {Group.TIMING},
 ]
 
@@ -971,7 +977,12 @@ def main() -> int:
 
     for phase_groups in PHASES:
         phase_tests = [t for t in all_tests if t.group in phase_groups]
-        workers = args.timing_workers if phase_groups == {Group.TIMING} else args.max_workers
+        if phase_groups == {Group.TIMING}:
+            workers = args.timing_workers
+        elif phase_groups == {Group.STRESS}:
+            workers = args.max_stress
+        else:
+            workers = args.max_workers
         names = "+".join(g.value for g in phase_groups)
         print(f"Starting phase '{names}': {len(phase_tests)} tests, {workers} workers...")
         with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_worker_init,
