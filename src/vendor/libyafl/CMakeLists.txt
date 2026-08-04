@@ -231,7 +231,11 @@ elseif(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
     )
 
     if(STACK_DIR_COMPILED)
-        if(STACK_DIR_EXITCODE EQUAL 0)
+        if(STACK_DIR_EXITCODE STREQUAL "FAILED_TO_RUN")
+            # ponytail: sandboxed/CI environments can deny exec of the freshly-built probe
+            # even when not cross-compiling. That's "couldn't test it", not "tested upward".
+            message(WARNING "Could not execute stack direction check (sandboxed environment?). Assuming downward stack.")
+        elseif(STACK_DIR_EXITCODE EQUAL 0)
             message(STATUS "Stack grows downward (supported)")
         else()
             message(FATAL_ERROR "Stack grows upward! This architecture is not supported by yafl.")
