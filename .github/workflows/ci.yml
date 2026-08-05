@@ -342,7 +342,13 @@ jobs:
       - name: Run unit tests
         run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
       - name: Run Simulator Tests under ASan/UBSan
+        timeout-minutes: 50
         run: |
           cd ${{ github.workspace }}
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
@@ -403,7 +409,13 @@ jobs:
       - name: Run unit tests
         run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
       - name: Run Simulator Tests under TSan
+        timeout-minutes: 80
         run: |
           cd ${{ github.workspace }}
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
@@ -456,7 +468,13 @@ jobs:
       - name: Run unit tests
         run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
       - name: Run Simulator Tests under ASan/UBSan
+        timeout-minutes: 50
         run: |
           cd ${{ github.workspace }}
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
@@ -510,7 +528,13 @@ jobs:
       - name: Run unit tests
         run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
       - name: Run Simulator Tests under TSan
+        timeout-minutes: 50
         run: |
           cd ${{ github.workspace }}
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
@@ -589,19 +613,41 @@ jobs:
       - name: Run unit tests
         run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
+      # Deliberately NO --error-exitcode: it makes Valgrind's own findings
+      # override the client's exit status, which conflates two different
+      # questions. It reported every exit-0-expecting test as a failure while
+      # the expect_failure=True tests "passed" on a Valgrind error, so the run
+      # produced no usable signal in either direction. The "Check Valgrind
+      # summaries" step below is the sole authority on findings; the test's
+      # exit code is left to mean what it has always meant.
+      #
+      # --errors-for-leak-kinds=none: leaks are still reported in the logs for
+      # information, but do not count as errors. Valgrind is here for the class
+      # ASan and TSan both miss -- reads of uninitialized memory -- and leaks at
+      # exit are a separate concern that needs its own baseline before it can
+      # gate CI.
+      #
+      # --timeout-scale 4, not 20: the budget is a kill-switch, not an expected
+      # duration, and 20x on the already-generous 300s default gave each test
+      # 100 minutes. Two genuinely stuck tests then outlived the whole job.
+      # Observed worst case under Valgrind so far is 493s, which 1200s covers.
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
       - name: Run Simulator Tests under Valgrind
+        timeout-minutes: 100
         run: |
           cd ${{ github.workspace }}
           mkdir -p logs
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs \
             --skip-groups stress,timing \
-            --timeout-scale 20 \
-            --client-wrapper "valgrind --tool=memcheck --error-exitcode=1 --track-origins=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
+            --timeout-scale 4 \
+            --client-wrapper "valgrind --tool=memcheck --track-origins=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
 
-      # --error-exitcode alone is not sufficient: a handful of tests are
-      # registered with expect_failure=True, where a nonzero exit is the pass
-      # condition and a Valgrind error would be silently absorbed. Scanning the
-      # summaries catches those regardless of exit code.
+      # The client's exit code carries no Valgrind information now, so this scan
+      # is the only thing that turns a finding into a build failure.
       - name: Check Valgrind summaries
         if: always()
         run: |
