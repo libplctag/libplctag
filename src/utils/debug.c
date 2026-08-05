@@ -36,11 +36,13 @@
 #include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -55,26 +57,41 @@
  */
 
 
-static volatile int global_debug_level = DEBUG_NONE;
+static atomic_int32_t global_debug_level = ATOMIC_INT_STATIC_INIT; /* DEBUG_NONE == 0 */
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
+
+/* Logger callback and the lock guarding it. This must be a spinlock, not a real
+ * mutex: mutex_lock_impl()/mutex_unlock_impl() call pdebug() themselves to trace
+ * the lock attempt, and pdebug_impl() below takes this lock on every single call
+ * -- using a real mutex here means every log call re-enters pdebug_impl() while
+ * still inside this same critical section, recursing without ever completing the
+ * original lock attempt. lock_acquire()/lock_release() are deliberately pdebug-free
+ * for exactly this reason. lock_t is also valid from static initialization alone
+ * (LOCK_INIT is just 0), unlike a mutex_p, which needs a runtime mutex_create()
+ * -- and pdebug_impl()/debug_register_logger()/debug_unregister_logger() can all
+ * run before initialize_modules() ever does, e.g. a caller may register a logger
+ * as their very first API call. */
 static lock_t logger_callback_lock = LOCK_INIT;
 static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
 
 /* Buffering control for stderr logging performance */
-static volatile int stderr_buffering_initialized = 0;
-static lock_t stderr_init_lock = LOCK_INIT;
-static volatile int log_call_count = 0;
+static atomic_bool stderr_buffering_initialized = ATOMIC_BOOL_STATIC_INIT;
+static atomic_int32_t log_call_count = ATOMIC_INT_STATIC_INIT;
 
 
 /* Module name lookup table is now defined in debug_generated.h */
 
-/* Per-module debug levels - indexed directly by debug_module_t value. */
-static volatile uint8_t debug_module_levels[DEBUG_MODULE_COUNT];
+/* Per-module debug levels - indexed directly by debug_module_t value. Written by
+ * set_debug_level()/debug_module_set_level()/debug_set_all_modules() (rarely, from
+ * application code) and read by debug_is_enabled() (constantly, on every pdebug()
+ * call from every thread), so this needs real atomics, not just volatile. Static
+ * storage duration zero-initializes every element to 0 == DEBUG_NONE. */
+static atomic_int32_t debug_module_levels[DEBUG_MODULE_COUNT];
 
 
 bool debug_is_enabled(debug_module_t module, int level) {
-    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= (int)debug_module_levels[module];
+    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= atomic_get_int32(&debug_module_levels[module]);
 }
 
 
@@ -86,35 +103,33 @@ static THREAD_LOCAL uint32_t this_thread_num = 0;
 
 
 int set_debug_level(int level) {
-    int old_level = global_debug_level;
-
-    global_debug_level = level;
+    int old_level = atomic_set_int32(&global_debug_level, level);
 
     /* Push the global level into every module slot so the inline
      * debug_is_enabled() check needs only a single array lookup. */
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { debug_module_levels[i] = (uint8_t)level; }
+    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 
     return old_level;
 }
 
 
-int get_debug_level(void) { return global_debug_level; }
+int get_debug_level(void) { return atomic_get_int32(&global_debug_level); }
 
 
 
 void debug_module_set_level(debug_module_t module, int level) {
-    if((unsigned)module < DEBUG_MODULE_COUNT) { debug_module_levels[module] = (uint8_t)level; }
+    if((unsigned)module < DEBUG_MODULE_COUNT) { atomic_set_int32(&debug_module_levels[module], level); }
 }
 
 
 int debug_module_get_level(debug_module_t module) {
-    if((unsigned)module < DEBUG_MODULE_COUNT) { return debug_module_levels[module]; }
+    if((unsigned)module < DEBUG_MODULE_COUNT) { return atomic_get_int32(&debug_module_levels[module]); }
     return DEBUG_NONE;
 }
 
 
 void debug_set_all_modules(int level) {
-    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { debug_module_levels[i] = (uint8_t)level; }
+    for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 }
 
 
@@ -170,17 +185,14 @@ static int64_t time_us(void) {
 
 
 static void ensure_stderr_buffering(void) {
-    /* Initialize stderr buffering once for better performance */
-    if(!stderr_buffering_initialized) {
-        spin_block(&stderr_init_lock) {
-            if(!stderr_buffering_initialized) {
-                /* Set stderr to full buffering with 8KB buffer for better performance */
-                setvbuf(stderr, NULL, _IOFBF, 8192);
-                stderr_buffering_initialized = 1;
-            }
-        }
+    /* Initialize stderr buffering exactly once. The thread that wins the
+     * compare-and-set performs the setup; everyone else just proceeds. */
+    if(atomic_compare_and_set_bool(&stderr_buffering_initialized, false, true) == false) {
+        /* Set stderr to full buffering with 8KB buffer for better performance */
+        setvbuf(stderr, NULL, _IOFBF, 8192);
     }
 }
+
 
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
     va_list va;
@@ -219,16 +231,24 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     /* FIXME - check the output size */
     // NOLINTNEXTLINE
     /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
-    if(log_callback_func) {
-        log_callback_func(tag_id, debug_level, output);
-    } else {
-        fputs(output, stderr);
 
-        /* Flush periodically for better performance while ensuring timely output */
-        log_call_count++;
-        if(debug_level <= DEBUG_ERROR || (log_call_count % 100) == 0) {
-            /* Flush on errors (critical info) or every 100 log entries */
-            fflush(stderr);
+    /* Check and call the callback inside the same critical section that
+     * debug_register_logger()/debug_unregister_logger() use to change it: this
+     * makes "check whether a callback is registered" and "call it" one atomic
+     * step, so unregister can never return while a call to the just-cleared
+     * callback is still in flight or about to start. */
+    spin_block(&logger_callback_lock) {
+        if(log_callback_func) {
+            log_callback_func(tag_id, debug_level, output);
+        } else {
+            fputs(output, stderr);
+
+            /* Flush periodically for better performance while ensuring timely output */
+            int32_t call_count = atomic_add_int32(&log_call_count, 1) + 1;
+            if(debug_level <= DEBUG_ERROR || (call_count % 100) == 0) {
+                /* Flush on errors (critical info) or every 100 log entries */
+                fflush(stderr);
+            }
         }
     }
 
@@ -272,7 +292,6 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
 int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message)) {
     int rc = PLCTAG_STATUS_OK;
 
-    /* FIXME - make this a mutex */
     spin_block(&logger_callback_lock) {
         if(!log_callback_func) {
             log_callback_func = log_callback_func_arg;
@@ -288,6 +307,11 @@ int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debu
 int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
+    /* Because pdebug_impl() checks-and-calls the callback inside this same
+     * lock, this cannot return while a call to the callback we're about to
+     * clear is in flight or about to start: either we get the lock first (and
+     * no in-flight call exists yet) or a caller already holding it finishes its
+     * check-and-call before we get in. No separate drain/wait is needed. */
     spin_block(&logger_callback_lock) {
         if(log_callback_func) {
             log_callback_func = NULL;
@@ -302,7 +326,10 @@ int debug_unregister_logger(void) {
 
 void debug_flush(void) {
     /* Flush stderr to ensure all buffered log output is written */
-    if(!log_callback_func) { fflush(stderr); }
+    bool has_logger = false;
+    spin_block(&logger_callback_lock) { has_logger = (log_callback_func != NULL); }
+
+    if(!has_logger) { fflush(stderr); }
 }
 
 

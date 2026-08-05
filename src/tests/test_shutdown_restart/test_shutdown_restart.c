@@ -46,6 +46,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Guard for MSVC which doesn't support C11 stdatomic.h */
+#ifdef _MSC_VER
+#    define _Atomic volatile
+#else
+#    include <stdatomic.h>
+#endif
+
 #define REQUIRED_VERSION 2, 5, 0
 #define DATA_TIMEOUT (5000)
 #define NUM_THREADS (10)
@@ -57,7 +64,9 @@
 static char *base_tag_path = NULL;
 
 /* Thread state flags */
-static volatile int terminate_threads = 0;
+/* Written by main thread and worker threads, read by worker threads -- needs real
+ * atomics on TSan-checked platforms (Linux/macOS), see the _Atomic guard above. */
+static _Atomic int terminate_threads = 0;
 
 /* Thread statistics */
 typedef struct {

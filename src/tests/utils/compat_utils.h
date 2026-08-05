@@ -38,6 +38,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -179,11 +180,19 @@ extern void compat_thread_yield(void);
 extern int compat_set_interrupt_handler(void (*handler)(void));
 
 
-#define RANDOM_U64_ERROR (UINT64_MAX)
-extern uint64_t compat_random_u64(uint64_t upper_bound);
+/* Poll a TCP port on host until something accepts a connection or timeout_ms
+ * elapses. Used instead of a fixed sleep after spawning a simulator process:
+ * a fixed sleep either wastes time on a fast/idle runner or comes up short on
+ * a slow/contended one, while this returns as soon as the server is actually
+ * ready and only waits as long as it takes on a slow runner. */
+extern bool compat_wait_for_listener(const char *host, uint16_t port, uint32_t timeout_ms);
 
 
 extern int compat_fprintf(FILE *stream, const char *format, ...);
+
+
+/* Number of logical CPUs available to this process, or 1 if it cannot be determined. */
+extern int compat_cpu_count(void);
 
 #ifdef __cplusplus
 }

@@ -45,34 +45,17 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/compat_utils.c")
 
+    # STATIC_C_LINKER_OPTIONS/STATIC_CXX_LINKER_OPTIONS (cmake_toolchains/clang_or_gcc.cmake)
+    # already go static-free when sanitizers are enabled, same as every other target
+    # (tools, tests) that uses them.
     if(example STREQUAL "simple_cpp")
-        target_link_options(${example} PRIVATE "${STATIC_CXX_LINKER_OPTIONS}")
+        target_link_options(${example} PRIVATE ${STATIC_CXX_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
     else()
-        target_link_options(${example} PRIVATE "${STATIC_C_LINKER_OPTIONS}")
+        target_link_options(${example} PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
     endif()
 
     # Link with the static library and apply static linking flags
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
-
-    if(UNIX AND NOT APPLE)
-        # Don't use static linking with sanitizers as they are incompatible
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT USE_SANITIZERS)
-            if(example STREQUAL "simple_cpp")
-                target_link_options(${example} PRIVATE -static-libgcc -static-libstdc++ ${EXTRA_LINK_FLAGS})
-            else()
-                target_link_options(${example} PRIVATE -static ${EXTRA_LINK_FLAGS})
-            endif()
-        elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" AND USE_SANITIZERS)
-            # Use dynamic linking when sanitizers are enabled
-            target_link_options(${example} PRIVATE ${EXTRA_LINK_FLAGS})
-        else()
-            if(example STREQUAL "simple_cpp")
-                target_link_options(${example} PRIVATE -static-libgcc -static-libstdc++ -s ${EXTRA_LINK_FLAGS})
-            else()
-                target_link_options(${example} PRIVATE -static -s ${EXTRA_LINK_FLAGS})
-            endif()
-        endif()
-    endif()
 
     # if(STATIC_LINK_OPTIONS)
     #     set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")

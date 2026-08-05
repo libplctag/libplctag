@@ -251,7 +251,6 @@ int initialize_modules(void) {
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
 
-    /* Start the refcount cleanup thread first */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
     rc = refcount_startup();
     if(rc != PLCTAG_STATUS_OK) {
@@ -272,6 +271,7 @@ int initialize_modules(void) {
     rc = ab_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize AB module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -280,6 +280,7 @@ int initialize_modules(void) {
     rc = mb_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -288,9 +289,17 @@ int initialize_modules(void) {
     rc = omron_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
+
+    /* Publish the instance lib_init() built above -- making it visible to
+     * lib_instance_acquire() -- and start its tag tickler thread, now that every
+     * module has initialized successfully. Must happen before library_state is set
+     * to RUNNING below: see the comment on lib_instance_publish() in lib.c for why
+     * the tickler is started last. */
+    lib_instance_publish();
 
     /* hook the destructor */
 #if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)

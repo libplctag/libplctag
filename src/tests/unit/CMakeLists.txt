@@ -17,7 +17,12 @@ set(WITH_EXAMPLES OFF CACHE BOOL "Disable CMocka examples" FORCE)
 # Linux. Setting BUILD_SHARED_LIBS=OFF makes cmocka's add_library() produce a
 # static archive where all symbols are accessible to the linker regardless of
 # visibility attributes.
-set(BUILD_SHARED_LIBS OFF)
+#
+# This must be a CACHE FORCE, not a plain set(): cmocka's own CMakeLists.txt
+# selects this via option(BUILD_SHARED_LIBS ...), and pre-CMP0077 option()
+# ignores an existing normal variable, creating its own cache entry (default
+# ON) regardless. Only a real cache entry survives that.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Disable CMocka shared library" FORCE)
 FetchContent_MakeAvailable(cmocka)
 
 # We want to mock out initialize_modules dependencies using GNU linker wraps

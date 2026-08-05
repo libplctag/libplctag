@@ -4,13 +4,27 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-
 #ifdef _WIN32
-#    define SERVER_CMD_START "start /B ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1]"
-#    define SERVER_CMD_STOP "taskkill /IM ab_server.exe /F"
+#    include <process.h>
+#    define compat_getpid _getpid
 #else
-#    define SERVER_CMD_START "./ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1] &"
-#    define SERVER_CMD_STOP "pkill -f ab_server"
+#    include <unistd.h>
+#    define compat_getpid getpid
+#endif
+
+
+/* Capture the backgrounded server's PID into a pidfile keyed on this test
+ * process's own PID, so stop_server() kills exactly this instance --
+ * pkill/taskkill by image name would also kill any other ab_server instance
+ * running concurrently elsewhere in the test suite. */
+#ifdef _WIN32
+#    define SERVER_CMD_START \
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden 'ab_server' -ArgumentList " \
+        "'--plc=ControlLogix','--path=1,0','--tag=TestTag:DINT[1]').Id\" > ab_server_%d.pid"
+#    define SERVER_CMD_STOP "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
+#else
+#    define SERVER_CMD_START "./ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1] & echo $! > /tmp/ab_server_%d.pid"
+#    define SERVER_CMD_STOP  "kill -TERM $(cat /tmp/ab_server_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_%d.pid"
 #endif
 
 #define REQUIRED_VERSION 2, 6, 4
@@ -90,11 +104,14 @@ void *writer_thread(void *arg) {
     return NULL;
 }
 
-void start_server(void) {
+void start_server(int test_pid) {
     // NOLINTNEXTLINE
     fprintf(stdout, "[INFO ] Starting ab_server...\n");
 
-    int rc = system(SERVER_CMD_START);
+    char cmd[512] = {0};
+    snprintf(cmd, sizeof(cmd), SERVER_CMD_START, test_pid);
+
+    int rc = system(cmd);
 
     if(rc != 0) {
         // NOLINTNEXTLINE
@@ -105,10 +122,14 @@ void start_server(void) {
     compat_sleep_ms(1000, NULL);  // wait for server to initialize
 }
 
-void stop_server(void) {
+void stop_server(int test_pid) {
     // NOLINTNEXTLINE
     fprintf(stdout, "[INFO ] Stopping ab_server...\n");
-    system(SERVER_CMD_STOP);
+
+    char cmd[512] = {0};
+    snprintf(cmd, sizeof(cmd), SERVER_CMD_STOP, test_pid, test_pid);
+
+    system(cmd);
     compat_sleep_ms(500, NULL);
 }
 
@@ -119,13 +140,15 @@ int main(void) {
         return 1;
     }
 
-    start_server();
+    int test_pid = (int)compat_getpid();
+
+    start_server(test_pid);
 
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Could not create tag: %s\n", plc_tag_decode_error(tag));
-        stop_server();
+        stop_server(test_pid);
         return 1;
     }
 
@@ -140,7 +163,7 @@ int main(void) {
     compat_thread_join(writer, NULL);
 
     plc_tag_destroy(tag);
-    stop_server();
+    stop_server(test_pid);
 
     // NOLINTNEXTLINE
     fprintf(stdout, "[DONE ] Test completed.\n");

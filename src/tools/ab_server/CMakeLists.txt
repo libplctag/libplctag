@@ -1,5 +1,17 @@
 message("Building ab_server tool.")
 
+# Override the inherited client flags: ab_server is a standalone process (doesn't link
+# plctag_static), so its sanitizer choice is independent -- see USE_SERVER_MEM_SANITIZERS /
+# USE_SERVER_THREAD_SANITIZERS in the top-level CMakeLists.txt.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Override CMAKE_C_FLAGS_DEBUG too: CMake auto-appends it on top of CMAKE_C_FLAGS for
+    # Debug configs, which would otherwise reintroduce the client's sanitizer flags here.
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG_BASE} ${SERVER_SANITIZE_FLAGS}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS_DEBUG}")
+else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS_MINSIZEREL}")
+endif()
+
 # Define the source files for ab_server
 set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/cip.c

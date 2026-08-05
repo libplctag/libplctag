@@ -40,11 +40,37 @@
 #include <string.h>
 
 #define REQUIRED_VERSION 2, 5, 0
-
-#define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr1"
 #define DATA_TIMEOUT 5000
+/* Generous: the initial connect (TCP handshake + ForwardOpen/registration) is a
+ * one-time cost that can badly overrun DATA_TIMEOUT under CI scheduling delays
+ * -- observed on a CI runner where the connection handler thread didn't even
+ * start running until 4s after tag creation began, unlike the steady-state
+ * read/write waits below which are genuinely fast once connected. */
+#define SETUP_TIMEOUT 15000
 
-typedef int16_t TAG_ELEMENT;
+/* Tag path from command line */
+static char *tag_path = NULL;
+
+typedef int32_t TAG_ELEMENT;
+
+
+/* AB/Logix tags in this test use a 4-byte DINT; Modbus tags use a 2-byte
+ * register. Read the width off the tag itself so one binary covers both,
+ * regardless of which protocol elem_size actually is. */
+static int32_t get_elem(int32_t tag, int offset) {
+    int elem_size = plc_tag_get_int_attribute(tag, "elem_size", 4);
+    return (elem_size <= 2) ? (int32_t)plc_tag_get_int16(tag, offset) : plc_tag_get_int32(tag, offset);
+}
+
+
+static void set_elem(int32_t tag, int offset, int32_t val) {
+    int elem_size = plc_tag_get_int_attribute(tag, "elem_size", 4);
+    if(elem_size <= 2) {
+        plc_tag_set_int16(tag, offset, (int16_t)val);
+    } else {
+        plc_tag_set_int32(tag, offset, val);
+    }
+}
 
 
 void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
@@ -77,7 +103,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
 
-                for(int i = 0; i < elem_count; i++) { data[i] = plc_tag_get_int16(tag_id, (i * elem_size)); }
+                for(int i = 0; i < elem_count; i++) { data[i] = get_elem(tag_id, i * elem_size); }
             }
 
             printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
@@ -104,7 +130,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
 
-                for(int i = 0; i < elem_count; i++) { plc_tag_set_int16(tag_id, (i * elem_size), data[i] + 1); }
+                for(int i = 0; i < elem_count; i++) { set_elem(tag_id, i * elem_size, data[i]); }
             }
 
             printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
@@ -145,16 +171,39 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
 }
 
 
-int main(void) {
+static void parse_args(int argc, char **argv) {
+    if(argc < 2) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Usage: test_callback_ex_async --tag=TAG_STRING\n");
+        // NOLINTNEXTLINE
+        fprintf(stderr, "  --tag=TAG_STRING: tag path string\n");
+        exit(1);
+    }
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
+    }
+
+    if(tag_path == NULL || strlen(tag_path) == 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error: tag path must be specified\n");
+        exit(1);
+    }
+}
+
+
+int main(int argc, char **argv) {
     int32_t tag = 0;
     int rc;
     int i;
     int elem_count = 10;
-    int elem_size = 2;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     TAG_ELEMENT *tag_element_array = NULL;
+
+    /* Parse command line arguments */
+    parse_args(argc, argv);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -165,7 +214,7 @@ int main(void) {
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    tag_element_array = (TAG_ELEMENT *)calloc((size_t)elem_size, (size_t)elem_count);
+    tag_element_array = (TAG_ELEMENT *)calloc((size_t)elem_count, sizeof(TAG_ELEMENT));
     if(!tag_element_array) {
         printf("Unable to allocate memory for tag array!\n");
         return 1;
@@ -175,14 +224,14 @@ int main(void) {
 
     /* create the tag */
     printf("Creating test tag.\n");
-    tag = plc_tag_create_ex(TAG_PATH, tag_callback, tag_element_array, 0);
+    tag = plc_tag_create_ex(tag_path, tag_callback, tag_element_array, 0);
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
     }
 
     printf("Waiting for tag creation to complete.\n");
-    wait_for_ok(tag, DATA_TIMEOUT);
+    wait_for_ok(tag, SETUP_TIMEOUT);
 
     /* get the data */
     printf("Reading tag data.\n");

@@ -44,6 +44,13 @@
 
 typedef struct plc_tag_t *plc_tag_p;
 
+/* Opaque handle to the library-scoped instance (tag hashtable, its lookup mutex,
+ * and the tag tickler thread/condvar). Full definition lives in lib.c. A tag holds
+ * a reference for its whole lifetime (see plc_tag_create_impl()/each protocol
+ * destructor), so any code reachable from a valid plc_tag_p may use
+ * tag->instance->tags / tag->instance->tag_lookup_mutex directly: those objects
+ * cannot be destroyed while a tag referencing them still exists. */
+typedef struct lib_instance_t *lib_instance_p;
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
@@ -56,6 +63,18 @@ struct tag_vtable_t {
     tag_vtable_func write;
 
     tag_vtable_func wake_plc;
+
+    /*
+     * Called once by plc_tag_create_impl() after every generic tag field has been
+     * initialized, right before it returns. Protocols that publish the tag to their
+     * own worker-thread infrastructure (e.g. Modbus's per-PLC handler thread) must
+     * do so here rather than during the protocol's own tag_create_function, since
+     * that runs before the generic layer finishes setting up the tag object --
+     * publishing any earlier lets the worker thread observe a half-initialized tag.
+     * NULL for protocols that only rely on the generic tag_tickler_func()/tag lookup
+     * hashtable, since add_tag_lookup() already runs after generic setup completes.
+     */
+    tag_vtable_func activate;
 
     /*
      * Called from data-setter functions (plc_tag_set_int8 etc.) when
@@ -155,6 +174,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     mutex_p ext_mutex;                       \
     tag_extended_callback_func callback;     \
     tag_vtable_p vtable;                     \
+    lib_instance_p instance;                 \
     void *userdata;                          \
     int32_t auto_sync_read_ms;               \
     int32_t auto_sync_write_ms;              \
@@ -164,6 +184,11 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int bit;                                 \
     int protocol_type;                       \
     atomic_bool abort_requested;             \
+    /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
+     * field below is written under this tag's own per-tag api_mutex -- a different     \
+     * lock domain. Packing it into the bitfield run below would race with writes to    \
+     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */  \
+    atomic_bool skip_tickler;                \
     int8_t event_creation_complete_status;   \
     int8_t event_deletion_started_status;    \
     int8_t event_operation_aborted_status;   \
@@ -186,7 +211,6 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     uint8_t is_bit : 1;                      \
     uint8_t read_complete : 1;               \
     uint8_t read_in_flight : 1;              \
-    uint8_t skip_tickler : 1;                \
     uint8_t tag_is_dirty : 1;                \
     uint8_t write_complete : 1;              \
     uint8_t write_in_flight : 1
@@ -205,6 +229,26 @@ extern atomic_bool lib_active;
 
 extern int lib_init(void);
 extern void lib_teardown(void);
+
+/* Acquire a reference to the current library instance, or NULL if the library is
+ * not running (never started, or a shutdown has closed the gate). Safe to call
+ * from any thread at any time; the caller must rc_dec() the result when done,
+ * unless it is being transferred into a tag's tag->instance field (in which case
+ * the tag's own destructor is the release). */
+extern lib_instance_p lib_instance_acquire(void);
+
+/* Used only by initialize_modules() (init.c): publishes the instance lib_init()
+ * built (making it visible to lib_instance_acquire()) once every protocol module
+ * has also initialized successfully, and only then starts the tag tickler thread.
+ * The tickler must be started last -- see the design note on lib_instance_publish()
+ * in lib.c for why starting it any earlier is a bug. */
+extern void lib_instance_publish(void);
+
+/* Used only by initialize_modules() on a failure path after lib_init() has already
+ * succeeded (e.g. ab_init()/mb_init()/omron_init() failing): discards the instance
+ * lib_init() built without ever publishing it. */
+extern void lib_instance_discard_pending(void);
+
 extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 #define plc_tag_tickler_wake() plc_tag_tickler_wake_impl(__func__, __LINE__)

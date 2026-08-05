@@ -508,10 +508,19 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
         return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
     }
 
-    /* check to see how many refusals we should do. */
-    if(plc->reject_fo_count > 0) {
-        plc->reject_fo_count--;
-        log_info("Forward open request being bounced for debugging. %d to go.", plc->reject_fo_count);
+    /* check to see how many refusals we should do. reject_fo_count is shared
+     * (via pointer) across every connection's copy of this struct, so this
+     * must be a single atomic op rather than a check-then-decrement -- two
+     * connections racing in with the count at 1 must not both see ">0" and
+     * both bounce. atomic_dec_int32 returns the value from *before*
+     * the decrement, so >0 means this caller is the one that should reject.
+     * ponytail: once exhausted this keeps decrementing into negative
+     * territory on every later ForwardOpen for the life of the process;
+     * harmless since nothing else reads the value, add a CAS-at-zero floor
+     * if that ever needs to change. */
+    int32_t reject_remaining = atomic_dec_int32(plc->reject_fo_count);
+    if(reject_remaining > 0) {
+        log_info("Forward open request being bounced for debugging. %d to go.", reject_remaining - 1);
         return make_cip_log_error(output, cip_service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_DUPLICATE_CONN);
     }
 

@@ -55,7 +55,7 @@
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
 
-#    define SESSION_CONN_STATUS_RING_SIZE (8)
+#    define SESSION_CONN_STATUS_RING_SIZE (64)
 #    define SESSION_CONN_STATUS_RING_SIZE_MASK (SESSION_CONN_STATUS_RING_SIZE - 1)
 
 

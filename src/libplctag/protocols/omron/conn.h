@@ -54,7 +54,7 @@
 
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
-#    define OMRON_CONN_EVENT_RING_SIZE (8)
+#    define OMRON_CONN_EVENT_RING_SIZE (64)
 #    define OMRON_CONN_EVENT_RING_MASK (OMRON_CONN_EVENT_RING_SIZE - 1)
 
 

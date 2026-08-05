@@ -46,6 +46,10 @@
 #define REQUIRED_VERSION 2, 6, 6
 
 #define READ_TIMEOUT (100)
+/* Generous: the initial connect (TCP handshake + ForwardOpen) is a one-time cost that
+ * can badly overrun READ_TIMEOUT under CI contention or sanitizer overhead, unlike the
+ * steady-state reads below which are genuinely fast once connected. */
+#define SETUP_TIMEOUT (15000)
 #define FIRST_RUN_TIME (10000)
 #define DISCONNECT_TIME_MS (60000)
 #define SECOND_RUN_TIME (30000)
@@ -56,15 +60,26 @@
 
 
 /* uses manual plc_tag_read() calls */
-#define MANUAL_SYNC_TAG_ATTRIBS \
-    "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]"
+#define MANUAL_SYNC_TAG_ATTRIBS_FMT \
+    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]"
+
+/* Default port; overridden by an optional second CLI argument so this test and
+ * test_reconnect_after_outage_async can run against independent ab_server instances
+ * in parallel instead of colliding on the same default port. */
+static const char *g_port = "44818";
 
 #ifdef WINDOWS_PLATFORM
-#    define SERVER_START "start /B %s --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[10] >nul 2>&1"
+/* Not parallel-safe: taskkill here is by image name, not PID, so two instances of
+ * this test running at once would kill each other's server. run_simulator_tests.sh
+ * only launches these in parallel on POSIX; Windows still runs them sequentially. */
+#    define SERVER_START "start /B %s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] >nul 2>&1"
 #    define SERVER_STOP "taskkill /IM ab_server.exe /F"
 #else
-#    define SERVER_START "%s --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[10] --debug > ab_server.log 2>&1 &"
-#    define SERVER_STOP "pkill -TERM ab_server"
+/* Capture the backgrounded server's PID into a port-specific pidfile so
+ * stop_server() can kill exactly this instance -- pkill-by-name would also kill a
+ * concurrently-running instance on a different port. */
+#    define SERVER_START "%s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] --debug > ab_server_%s.log 2>&1 & echo $! > ab_server_%s.pid"
+#    define SERVER_STOP "kill -TERM $(cat ab_server_%s.pid 2>/dev/null) 2>/dev/null; rm -f ab_server_%s.pid"
 #endif
 
 #define log(...)                         \
@@ -109,10 +124,12 @@ int main(int argc, char **argv) {
     if(argc > 1) {
         ab_server_cmd = argv[1];
     } else {
-        log("Usage: %s <ab_server_command>\n", argv[0]);
-        log("Example: %s \"./build/bin_dist/ab_server\"\n", argv[0]);
+        log("Usage: %s <ab_server_command> [port]\n", argv[0]);
+        log("Example: %s \"./build/bin_dist/ab_server\" 44818\n", argv[0]);
         exit(1);
     }
+
+    if(argc > 2) { g_port = argv[2]; }
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
@@ -153,7 +170,7 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
     log("[DEBUG] setup_tag: starting tag creation\n");
 
     /* create tag */
-    test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, READ_TIMEOUT);
+    test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, SETUP_TIMEOUT);
     if(test_state->tag < 0) {
         log("Error %s creating tag!\n", plc_tag_decode_error(test_state->tag));
         exit(1);
@@ -172,7 +189,11 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
 void start_server(test_state_t *test_state) {
     char start_cmd[1024] = {0};
 
-    snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd);
+#ifdef WINDOWS_PLATFORM
+    snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd, g_port);
+#else
+    snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd, g_port, g_port, g_port);
+#endif
 
     if(system(start_cmd) != 0) {
         log("Error starting AB server! Make sure it's compiled.\n");
@@ -180,14 +201,25 @@ void start_server(test_state_t *test_state) {
         exit(1);
     }
 
-    compat_sleep_ms(3000, NULL);
+    if(!compat_wait_for_listener("127.0.0.1", (uint16_t)atoi(g_port), 15000)) {
+        log("Error: AB server did not start listening on port %s in time!\n", g_port);
+        exit(1);
+    }
 }
 
 
 void stop_server(void) {
-    if(system(SERVER_STOP) < 0) {
+    char stop_cmd[256] = {0};
+
+#ifdef WINDOWS_PLATFORM
+    snprintf(stop_cmd, sizeof(stop_cmd), "%s", SERVER_STOP);
+#else
+    snprintf(stop_cmd, sizeof(stop_cmd), SERVER_STOP, g_port, g_port);
+#endif
+
+    if(system(stop_cmd) < 0) {
         log("Error stopping AB server!\n");
-        log("Server stop command line: \"%s\"\n", SERVER_STOP);
+        log("Server stop command line: \"%s\"\n", stop_cmd);
         exit(1);
     }
 
@@ -359,7 +391,9 @@ int run_manual_test(const char *ab_server_cmd) {
 
     /* set up the tag and set the callback */
     log("[DEBUG] Setting up tag...\n");
-    setup_tag(&manual_test_state, MANUAL_SYNC_TAG_ATTRIBS);
+    char tag_attribs[256] = {0};
+    snprintf(tag_attribs, sizeof(tag_attribs), MANUAL_SYNC_TAG_ATTRIBS_FMT, g_port);
+    setup_tag(&manual_test_state, tag_attribs);
     log("[DEBUG] Tag setup complete\n");
 
     log("[DEBUG] Entering Phase 1 - reading until disconnect at %" PRId64 "ms\n",

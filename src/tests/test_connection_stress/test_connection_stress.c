@@ -52,11 +52,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <utils/random_utils.h>
 
 #define REQUIRED_VERSION 2, 4, 1
 
 #define DATA_TIMEOUT (5000)
-#define TAG_CREATE_TIMEOUT (5000)
+/* Generous: each successfully created tag spins up its own background connection
+ * handler thread that keeps running, so creating tag N means competing for CPU
+ * against N-1 already-live handler threads -- under TSan's per-access overhead
+ * with hundreds of threads, a flat 5s budget starves out well before N=200. */
+#define TAG_CREATE_TIMEOUT (15000)
 #define RETRY_TIMEOUT (10000)
 
 #define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59:1502&path=0&elem_count=2&name=hr10"
@@ -64,7 +69,8 @@
 
 
 void usage(void) {
-    printf(
+    // NOLINTNEXTLINE
+    fprintf(stderr,
         "Usage:\n"
         "  test_connection_stress [--num-threads=N] [--tag=TAG_STRING]\n"
         "  test_connection_stress <num_threads> <tag_string>  (legacy format)\n"
@@ -83,6 +89,13 @@ void usage(void) {
 
 static compat_atomic_int32_t go = {0};
 
+/* Counts threads that have finished trying to create their tag (success or
+ * failure). main() waits for this to reach num_threads before releasing
+ * everyone via go=1 -- otherwise a thread still inside plc_tag_create() when
+ * go flips back to 0 at the end of the run would wait forever for a go=1
+ * that never comes again. */
+static compat_atomic_int32_t ready_count = {0};
+
 static void interrupt_handler(void) { compat_atomic_store_int32(&go, 1); }
 
 /*
@@ -94,6 +107,7 @@ static void interrupt_handler(void) { compat_atomic_store_int32(&go, 1); }
 
 typedef struct {
     int tid;
+    const char *tag_string;
     int32_t tag;
     int status;
     int32_t iteration;
@@ -107,19 +121,46 @@ typedef struct {
 void *test_runner(void *data) {
     thread_args *args = (thread_args *)data;
     int tid = args->tid;
-    int32_t tag = args->tag;
+    int32_t tag = 0;
+    char full_tag_string[1024];
     int *status = &(args->status);
     int *iteration = &(args->iteration);
     int64_t *total_io_time = &(args->total_io_time);
     int64_t *max_io_time = &(args->max_io_time);
     int64_t *min_io_time = &(args->min_io_time);
     int rc = PLCTAG_STATUS_OK;
+    uint32_t delay_ms = 0;
 
     *status = PLCTAG_STATUS_OK;
     *iteration = 0;
     *total_io_time = 0;
     *max_io_time = 0;
     *min_io_time = 1000000000L;
+
+    /* Spread out connection setup instead of all threads hitting the server at
+     * once -- wait a random 1-2000ms before creating this thread's tag. */
+    delay_ms = 1U + (uint32_t)random_u64(2000);
+    compat_sleep_ms(delay_ms, NULL);
+
+    /* Append connection_group_id to force separate connection per thread */
+    // NOLINTNEXTLINE
+    snprintf(full_tag_string, sizeof(full_tag_string), "%s&connection_group_id=%d", args->tag_string, tid);
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "--- Creating test tag %d.\n", tid);
+
+    tag = plc_tag_create(full_tag_string, TAG_CREATE_TIMEOUT);
+    args->tag = tag;
+
+    if(tag < 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "!!! Failed to create tag for thread %d with error %s!\n", tid, plc_tag_decode_error(tag));
+        *status = tag;
+        compat_atomic_inc_int32(&ready_count);
+        return 0;
+    }
+
+    compat_atomic_inc_int32(&ready_count);
 
     /* wait until all threads ready. */
     while(!compat_atomic_load_int32(&go)) { compat_sleep_ms(10, NULL); }
@@ -160,7 +201,84 @@ void *test_runner(void *data) {
 }
 
 
+/* Pulls "host:port" out of a tag attribute string's gateway= field, e.g.
+ * "protocol=modbus-tcp&gateway=127.0.0.1:44862&path=0..." -> host="127.0.0.1",
+ * port=44862. Returns false if the tag string has no gateway=host:port field. */
+static bool parse_gateway_host_port(const char *tag_string, char *host_out, size_t host_out_size, uint16_t *port_out) {
+    const char *gateway_start = strstr(tag_string, "gateway=");
+    const char *field_end = NULL;
+    const char *colon = NULL;
+    size_t host_len = 0;
+
+    if(!gateway_start) { return false; }
+
+    gateway_start += strlen("gateway=");
+
+    field_end = strchr(gateway_start, '&');
+    if(!field_end) { field_end = gateway_start + strlen(gateway_start); }
+
+    colon = strchr(gateway_start, ':');
+    if(!colon || colon > field_end) { return false; }
+
+    host_len = (size_t)(colon - gateway_start);
+    if(host_len >= host_out_size) { host_len = host_out_size - 1; }
+
+    memcpy(host_out, gateway_start, host_len);
+    host_out[host_len] = 0;
+
+    *port_out = (uint16_t)atoi(colon + 1);
+
+    return true;
+}
+
+
 #define MAX_THREADS (200)
+
+/* Detect ASan/TSan across Clang and GCC without erroring on compilers that
+ * have neither __has_feature nor the __SANITIZE_*__ macros (e.g. MSVC). */
+#if defined(__has_feature)
+#    define STRESS_HAS_ASAN __has_feature(address_sanitizer)
+#    define STRESS_HAS_TSAN __has_feature(thread_sanitizer)
+#else
+#    define STRESS_HAS_ASAN 0
+#    define STRESS_HAS_TSAN 0
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__) || STRESS_HAS_ASAN || STRESS_HAS_TSAN
+#    define STRESS_TEST_SANITIZED 1
+#else
+#    define STRESS_TEST_SANITIZED 0
+#endif
+
+/* MAX_THREADS worth of concurrent connections (each needing a test thread
+ * plus a library-internal handler thread) has repeatedly overwhelmed CI
+ * hardware: on a 32-bit build it exhausts the ~3GB address space
+ * (PLCTAG_ERR_THREAD_CREATE / PLCTAG_ERR_BAD_GATEWAY partway through); under
+ * ASan/TSan, per-access/per-allocation instrumentation overhead makes it slow
+ * enough to starve the CI harness's worker pool; and a flat 100 on a
+ * low-core-count runner starves too: observed 38 minutes on a 4-CPU aarch64
+ * runner (each connection's 2s protocol timeout firing over and over because
+ * 200 threads on 4 cores can't get scheduled inside it, driving endless
+ * reconnect/backoff cycles instead of ever finishing). Cap concurrency both
+ * by a static platform ceiling and by detected CPU count. */
+#if UINTPTR_MAX == 0xFFFFFFFFU || STRESS_TEST_SANITIZED
+#    define MAX_THREADS_STATIC_CAP (50)
+#    define THREADS_PER_CPU (6)
+#else
+#    define MAX_THREADS_STATIC_CAP (100)
+#    define THREADS_PER_CPU (10)
+#endif
+
+/* At least 10 threads even on a single-detected-CPU runner -- the test still
+ * needs to exercise real concurrency, just not thousands of threads' worth. */
+static int compute_max_threads_for_platform(void) {
+    int scaled = compat_cpu_count() * THREADS_PER_CPU;
+
+    if(scaled < 10) { scaled = 10; }
+    if(scaled > MAX_THREADS_STATIC_CAP) { scaled = MAX_THREADS_STATIC_CAP; }
+
+    return scaled;
+}
 
 int main(int argc, char **argv) {
     compat_thread_t thread[MAX_THREADS];
@@ -168,6 +286,8 @@ int main(int argc, char **argv) {
     int success = 0;
     thread_args args[MAX_THREADS];
     char *tag_string = NULL;
+    char gateway_host[256];
+    uint16_t gateway_port = 0;
     int64_t start = 0;
     int64_t total_run_time = 0;
     int count_down = 50;
@@ -217,53 +337,64 @@ int main(int argc, char **argv) {
         usage();
     }
 
+    int max_threads_for_platform = compute_max_threads_for_platform();
+    if(num_threads > max_threads_for_platform) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Limiting thread count to %d on this platform (requested %d, %d CPUs detected).\n",
+                max_threads_for_platform, num_threads, compat_cpu_count());
+        num_threads = max_threads_for_platform;
+    }
+
     if(!tag_string || strlen(tag_string) < 10) {
         // NOLINTNEXTLINE
         fprintf(stderr, "You must provide a valid tag string.\n");
         usage();
     }
 
+    /* Don't start any threads until the server is actually accepting
+     * connections -- otherwise every thread races the server's startup and
+     * the first wave of connection attempts is wasted. */
+    if(!parse_gateway_host_port(tag_string, gateway_host, sizeof(gateway_host), &gateway_port)) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "!!! Could not find a gateway=host:port field in tag string \"%s\"!\n", tag_string);
+        exit(1);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "--- Waiting for %s:%u to accept connections...\n", gateway_host, gateway_port);
+
+    if(!compat_wait_for_listener(gateway_host, gateway_port, TAG_CREATE_TIMEOUT)) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "!!! Server %s:%u did not start listening in time!\n", gateway_host, gateway_port);
+        exit(1);
+    }
+
     // NOLINTNEXTLINE
     fprintf(stderr, "--- starting run with %d threads using tag string \"%s\".\n", num_threads, tag_string);
 
-    /* create the test tags */
+    /* Each thread creates and owns its own connection -- see test_runner() --
+     * so this loop just needs to start them all; no per-tag setup here. */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
-        int32_t tag = 0;
-        char full_tag_string[1024];
-
-        // NOLINTNEXTLINE
-        fprintf(stderr, "--- Creating test tag %d.\n", tid);
-
-        /* Append connection_group_id to force separate connection per thread */
-        // NOLINTNEXTLINE
-        snprintf(full_tag_string, sizeof(full_tag_string), "%s&connection_group_id=%d", tag_string, tid);
-
-        tag = plc_tag_create(full_tag_string, TAG_CREATE_TIMEOUT);
-
-        if(tag < 0) {
-            // NOLINTNEXTLINE
-            fprintf(stderr, "!!! Failed to create tag for thread %d with error %s!\n", tid, plc_tag_decode_error(tag));
-            usage();
-        }
-
         args[tid].tid = tid;
-        args[tid].tag = tag;
+        args[tid].tag_string = tag_string;
+        args[tid].tag = 0;
         args[tid].status = PLCTAG_STATUS_OK;
         args[tid].iteration = 0;
         args[tid].total_io_time = 0;
         args[tid].min_io_time = 0;
         args[tid].max_io_time = 0;
-    }
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
+        fprintf(stderr, "--- Creating test thread %d.\n", tid);
 
         compat_thread_create(&thread[tid], test_runner, (void *)&args[tid]);
     }
 
-    /* wait for threads to create and start. */
-    compat_sleep_ms(100, NULL);
+    /* Wait until every thread has either created its tag or given up -- see
+     * the comment on ready_count. Each thread's own plc_tag_create() call is
+     * already bounded by TAG_CREATE_TIMEOUT, so this loop is implicitly
+     * bounded too; it does not need its own separate timeout. */
+    while(compat_atomic_load_int32(&ready_count) < num_threads) { compat_sleep_ms(10, NULL); }
 
     /* launch the threads */
     compat_atomic_store_int32(&go, 1);
@@ -283,8 +414,11 @@ int main(int argc, char **argv) {
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(thread[tid], NULL); }
 
-    /* close the tags. */
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { plc_tag_destroy(args[tid].tag); }
+    /* close the tags. args[tid].tag holds a negative error code, not a valid
+     * handle, for any thread whose plc_tag_create() failed. */
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
+        if(args[tid].tag >= 0) { plc_tag_destroy(args[tid].tag); }
+    }
 
     /* check the status */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {

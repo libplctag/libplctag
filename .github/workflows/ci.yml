@@ -9,6 +9,7 @@ on:
 jobs:
   ubuntu_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -17,25 +18,29 @@ jobs:
             libc: glibc
             runner: ubuntu-24.04
             cmake_flags: ""
-            apt_packages: "build-essential cmake"
+            apt_packages: "build-essential cmake clang"
+            compiler: clang
             artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
             runner: ubuntu-24.04
             cmake_flags: ""
             apt_packages: "build-essential cmake musl-tools musl-dev"
+            compiler: gcc
             artifact_suffix: "ubuntu_x64_musl"
           - arch: x86
             libc: glibc
             runner: ubuntu-24.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
+            compiler: gcc
             artifact_suffix: "ubuntu_x86"
           - arch: arm64
             libc: glibc
             runner: ubuntu-24.04-arm
             cmake_flags: ""
-            apt_packages: "build-essential cmake zip"
+            apt_packages: "build-essential cmake zip clang"
+            compiler: clang
             artifact_suffix: "ubuntu_arm64"
 
     env:
@@ -100,6 +105,8 @@ jobs:
             if [ -n "${CXXFLAGS}" ]; then
               CMAKE_EXTRA_FLAGS="${CMAKE_EXTRA_FLAGS} -DCMAKE_CXX_FLAGS='${CXXFLAGS}'"
             fi
+          elif [ "${{ matrix.compiler }}" = "clang" ]; then
+            CMAKE_EXTRA_FLAGS="-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
           fi
           # Set install prefix for proper Linux packaging
           if [ "${{ matrix.libc }}" = "glibc" ]; then
@@ -113,7 +120,7 @@ jobs:
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -198,16 +205,17 @@ jobs:
 
   macos_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
         include:
           - name: x64
-            runner: macos-15-intel
+            runner: macos-26-intel
             cmake_arch: x86_64
             artifact_suffix: "macos_x64"
           - name: arm64
-            runner: macos-15
+            runner: macos-26
             cmake_arch: arm64
             artifact_suffix: "macos_aarch64"
 
@@ -249,7 +257,7 @@ jobs:
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -283,8 +291,213 @@ jobs:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
 
+  ubuntu_mem_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      ASAN_OPTIONS: "halt_on_error=1"
+      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake clang
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, ASan/UBSan)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under ASan/UBSan
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_mem_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  ubuntu_thread_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      TSAN_OPTIONS: "halt_on_error=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake clang
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, TSan)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under TSan
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_thread_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  macos_mem_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-26-intel
+          - arch: aarch64
+            runner: macos-26
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      ASAN_OPTIONS: "halt_on_error=1"
+      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, ASan/UBSan)
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under ASan/UBSan
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos_mem_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  macos_thread_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-26-intel
+          - arch: aarch64
+            runner: macos-26
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      TSAN_OPTIONS: "halt_on_error=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, TSan)
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under TSan
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos_thread_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
   windows_msvc_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -292,13 +505,13 @@ jobs:
           # MSVC toolchain variants
           - name: x64
             toolchain: msvc
-            runner: windows-2022
+            runner: windows-2025
             msvc_arch: amd64
             cmake_processor: AMD64
             artifact_suffix: "windows_x64"
           - name: x86
             toolchain: msvc
-            runner: windows-2022
+            runner: windows-2025
             msvc_arch: amd64_x86
             cmake_processor: Win32
             artifact_suffix: "windows_x86"
@@ -308,15 +521,19 @@ jobs:
             msvc_arch: arm64
             cmake_processor: ARM64
             artifact_suffix: "windows_arm64"
+            # This runner has shown far more scheduling jitter under 4-way parallel load
+            # than the other Windows legs (multi-second stalls tripping timing-sensitive
+            # reconnect tests); fewer concurrent workers gives each test more headroom.
+            max_workers: 2
           # MinGW toolchain variants (no ZIP artifacts)
           - name: x64_MinGW
             toolchain: mingw
-            runner: windows-2022
+            runner: windows-2025
             cmake_processor: AMD64
             artifact_suffix: "windows_x64_MinGW"
           - name: x86_MinGW
             toolchain: mingw
-            runner: windows-2022
+            runner: windows-2025
             cmake_processor: x86
             cmake_toolchain_file: cmake_toolchains/mingw_i686_windows.cmake
             artifact_suffix: "windows_x86_MinGW"
@@ -469,7 +686,12 @@ jobs:
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
       - name: Run Simulator Tests
-        run: bash src/tests/scripts/run_simulator_tests.sh '${{ env.DIST }}' logs
+        run: |
+          ARGS=()
+          if [ -n "${{ matrix.max_workers }}" ]; then
+            ARGS+=(--max-workers "${{ matrix.max_workers }}")
+          fi
+          python3 src/tests/scripts/run_simulator_tests_parallel.py '${{ env.DIST }}' logs "${ARGS[@]}"
         shell: bash
 
       - name: Upload test logs
@@ -509,6 +731,7 @@ jobs:
 
   ubuntu_arm_cross:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -669,8 +892,70 @@ jobs:
           path: ${{ env.BUILD }}/release_zips/*.zip
           if-no-files-found: error
 
+  ubuntu_s390x_qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Install s390x cross-compiler and QEMU user-mode emulation
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake gcc-s390x-linux-gnu g++-s390x-linux-gnu qemu-user-static binfmt-support
+
+      - name: Verify cross-compiler and QEMU
+        run: |
+          s390x-linux-gnu-gcc --version
+          s390x-linux-gnu-g++ --version
+          qemu-s390x-static --version
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (s390x, big-endian, static)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=s390x \
+            -DCMAKE_C_COMPILER=s390x-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=s390x-linux-gnu-g++ \
+            -DCMAKE_C_FLAGS='-static' \
+            -DCMAKE_CXX_FLAGS='-static' \
+            -DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-s390x-static \
+            -DCMAKE_VERBOSE_MAKEFILE=On \
+            ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under QEMU (s390x, big-endian)
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_s390x_qemu
+          path: |
+            logs/*.log
+          retention-days: 7
+
   alpine_native:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -732,7 +1017,7 @@ jobs:
             echo "=== ALPINE CONTAINER SCRIPT START ==="
             echo "VERSION=$VERSION, MATRIX_ARCH=$MATRIX_ARCH"
             apk update && apk add --no-cache \
-              build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
+              build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar python3
 
             # Prepare build: preserve host-owned build dir, just clean contents
             mkdir -p /workspace/build || { echo "ERROR: Failed to create build directory" >&2; exit 1; }
@@ -757,7 +1042,7 @@ jobs:
             if [ -f /workspace/build/bin_dist/ab_server ]; then
               echo "=== RUNNING SIMULATOR TESTS ==="
               mkdir -p /workspace/logs
-              bash /workspace/src/tests/scripts/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
+              python3 /workspace/src/tests/scripts/run_simulator_tests_parallel.py /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
               cd /workspace/build
             else
               echo "=== TESTS SKIPPED (ab_server binary not found) ==="
@@ -1046,6 +1331,7 @@ jobs:
 
   debug_context:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -1139,8 +1425,13 @@ jobs:
         windows_msvc_matrix,
         ubuntu_arm_cross,
         alpine_native,
+        ubuntu_mem_sanitizer,
+        ubuntu_thread_sanitizer,
+        macos_mem_sanitizer,
+        macos_thread_sanitizer,
       ]
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
     env:
