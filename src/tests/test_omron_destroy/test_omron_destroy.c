@@ -113,25 +113,42 @@ typedef struct {
 } destroy_state_t;
 
 
-static void start_server(const char *ab_server_path, int test_pid) {
-    char cmd[1024] = {0};
-    snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_path, test_pid);
-    if(system(cmd) != 0) {
-        log("Failed to start ab_server.\n");
-        exit(1);
-    }
-    if(!compat_wait_for_listener("127.0.0.1", SERVER_PORT, 15000)) {
-        log("Error: ab_server did not start listening on port %d in time!\n", SERVER_PORT);
-        exit(1);
-    }
-}
-
-
 static void stop_server(int test_pid) {
     char cmd[512] = {0};
     snprintf(cmd, sizeof(cmd), SERVER_STOP, test_pid, test_pid);
     system(cmd);
     compat_sleep_ms(500, NULL);
+}
+
+
+/* Unlike the harness-managed servers elsewhere in the suite, this test
+ * backgrounds ab_server itself via an extra shell fork/exec hop and gets
+ * no help from the harness's own retry-on-vanish logic (that only applies
+ * when the Python runner owns the server). A contended CI runner can push
+ * that extra hop past a naive one-shot wait, so retry once with a fresh
+ * server before giving up -- a real bug reproduces every time; a one-off
+ * scheduling delay does not. */
+static void start_server(const char *ab_server_path, int test_pid) {
+    char cmd[1024] = {0};
+    snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_path, test_pid);
+
+    for(int attempt = 0; attempt < 2; attempt++) {
+        if(system(cmd) != 0) {
+            log("Failed to start ab_server.\n");
+            exit(1);
+        }
+
+        if(compat_wait_for_listener("127.0.0.1", SERVER_PORT, 30000)) {
+            return;
+        }
+
+        log("Warning: ab_server did not start listening on port %d in time%s.\n", SERVER_PORT,
+            attempt == 0 ? ", retrying" : "");
+        stop_server(test_pid);
+    }
+
+    log("Error: ab_server did not start listening on port %d in time!\n", SERVER_PORT);
+    exit(1);
 }
 
 
