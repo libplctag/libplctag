@@ -8,9 +8,10 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
-# Build cmocka unit tests only in Debug builds (they require FetchContent and
-# are not part of the release artifact set)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Build unit tests only in Debug builds; they're not part of the release artifact set.
+# unit/CMakeLists.txt bails out itself on compilers that can't do -Wl,--wrap (e.g. MSVC);
+# APPLE is excluded here too since Darwin's ld64 has no --wrap equivalent at all.
+if(NOT APPLE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_subdirectory("unit")
 endif()
 add_subdirectory("stress_api_lock")

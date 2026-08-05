@@ -1,29 +1,16 @@
 # Define a top-level unit test directory
 
-message("Building unit tests with CMocka.")
+# test_init mocks initialize_modules()'s dependencies via -Wl,--wrap, a GNU ld feature.
+# MSVC's linker has no equivalent, so building here would silently link the real
+# refcount_startup/lib_init/etc. instead of the mocks -- a test that runs and reports a
+# result, just the wrong one. Bail out before that can happen instead of relying on the
+# caller's platform gate to keep MSVC out.
+if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang"))
+    message(STATUS "Skipping unit tests: -Wl,--wrap requires GCC or Clang (using GNU ld), not ${CMAKE_C_COMPILER_ID}.")
+    return()
+endif()
 
-# Fetch CMocka
-include(FetchContent)
-FetchContent_Declare(
-    cmocka
-    GIT_REPOSITORY https://git.cryptomilk.org/projects/cmocka.git
-    GIT_TAG        cmocka-1.1.7
-)
-# Suppress CMocka's own tests and examples from polluting our build
-set(UNIT_TESTING OFF CACHE BOOL "Disable CMocka tests" FORCE)
-set(WITH_EXAMPLES OFF CACHE BOOL "Disable CMocka examples" FORCE)
-# Build static cmocka: the project uses -fvisibility=hidden which hides cmocka's
-# internal symbols (_will_return etc.) in the shared library, breaking linking on
-# Linux. Setting BUILD_SHARED_LIBS=OFF makes cmocka's add_library() produce a
-# static archive where all symbols are accessible to the linker regardless of
-# visibility attributes.
-#
-# This must be a CACHE FORCE, not a plain set(): cmocka's own CMakeLists.txt
-# selects this via option(BUILD_SHARED_LIBS ...), and pre-CMP0077 option()
-# ignores an existing normal variable, creating its own cache entry (default
-# ON) regardless. Only a real cache entry survives that.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Disable CMocka shared library" FORCE)
-FetchContent_MakeAvailable(cmocka)
+message("Building unit tests with mini_mock (local CMocka-macro stand-in, see mini_mock.h).")
 
 # We want to mock out initialize_modules dependencies using GNU linker wraps
 set(MOCK_LINK_FLAGS 
@@ -41,9 +28,8 @@ add_executable(test_init
 )
 
 # Add necessary includes
-target_include_directories(test_init PRIVATE 
+target_include_directories(test_init PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-    ${cmocka_SOURCE_DIR}/include
 )
 
 # If you have platform headers or utils
@@ -53,14 +39,9 @@ target_include_directories(test_init PRIVATE
     ${PLATFORM_SHIM_PATH}
 )
 
-# Link against cmocka (static archive when BUILD_SHARED_LIBS=OFF)
-target_link_libraries(test_init PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+target_link_libraries(test_init PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
-    if(NOT APPLE)
-        target_link_options(test_init PRIVATE ${MOCK_LINK_FLAGS})
-    endif()
-endif()
+target_link_options(test_init PRIVATE ${MOCK_LINK_FLAGS})
 
 # Register the unit test with CTest
 add_test(NAME unit_test_init COMMAND test_init)

@@ -1,8 +1,4 @@
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <setjmp.h>
-#include "cmocka.h"
+#include "mini_mock.h"
 
 // Your library headers
 #include <libplctag/lib/init.h>
