@@ -307,8 +307,15 @@ jobs:
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
-      ASAN_OPTIONS: "halt_on_error=1"
-      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+      # detect_stack_use_after_return and strict_string_checks are both off by
+      # default and are what turn "happens to still read the right bytes" into a
+      # reported error. detect_invalid_pointer_pairs needs the
+      # -fsanitize=pointer-compare/pointer-subtract instrumentation, which
+      # clang_or_gcc.cmake probes for and enables where the runtime supports it
+      # (Linux only -- the Darwin ASan runtime has no such detector).
+      ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_stack_use_after_return=1:detect_leaks=1:strict_string_checks=1:detect_invalid_pointer_pairs=2:alloc_dealloc_mismatch=1"
+      LSAN_OPTIONS: "report_objects=1"
+      UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
 
     steps:
       - name: "Checkout library source."
@@ -362,7 +369,11 @@ jobs:
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
-      TSAN_OPTIONS: "halt_on_error=1"
+      # second_deadlock_stack makes lock-order-inversion reports show both
+      # acquisition sites instead of one, and history_size=7 (the maximum) keeps
+      # enough per-thread history that the *previous* access in a race report
+      # still has a full stack rather than "failed to restore the stack".
+      TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1:history_size=7"
 
     steps:
       - name: "Checkout library source."
@@ -416,8 +427,10 @@ jobs:
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
-      ASAN_OPTIONS: "halt_on_error=1"
-      UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+      # No detect_leaks or detect_invalid_pointer_pairs here: the Darwin ASan
+      # runtime ships neither LeakSanitizer nor an invalid-pointer-pair detector.
+      ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_stack_use_after_return=1:strict_string_checks=1:alloc_dealloc_mismatch=1"
+      UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
 
     steps:
       - name: "Checkout library source."
@@ -464,7 +477,11 @@ jobs:
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
-      TSAN_OPTIONS: "halt_on_error=1"
+      # second_deadlock_stack makes lock-order-inversion reports show both
+      # acquisition sites instead of one, and history_size=7 (the maximum) keeps
+      # enough per-thread history that the *previous* access in a race report
+      # still has a full stack rather than "failed to restore the stack".
+      TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1:history_size=7"
 
     steps:
       - name: "Checkout library source."
@@ -491,6 +508,101 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-macos_thread_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  # Valgrind memcheck covers the one class ASan and TSan both miss: reads of
+  # uninitialized memory, e.g. the tail of a receive buffer left untouched by a
+  # truncated response. Linux only -- Valgrind has never supported macOS on
+  # ARM64 and is unmaintained on modern macOS generally.
+  #
+  # Valgrind serializes threads onto a single core and costs roughly 20-50x, so
+  # this job deliberately runs only the FUNCTIONAL group:
+  #   - TIMING tests assert on wall-clock behaviour (idle disconnect windows,
+  #     auto-sync intervals) and would fail on the slowdown alone, reporting
+  #     nothing about memory safety.
+  #   - STRESS tests open up to 200 connections/threads each, which Valgrind's
+  #     serialization turns into an hours-long run for no extra coverage --
+  #     FUNCTIONAL already walks every protocol decode path.
+  # Only the client is wrapped; the simulators run natively.
+  ubuntu_valgrind:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake valgrind
+          valgrind --version
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      # No sanitizers: ASan's shadow-memory allocator and Valgrind's are
+      # mutually exclusive. Debug build for -O0 and full symbols so Valgrind's
+      # stacks name real lines.
+      - name: Configure CMake (Debug, no sanitizers)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      # --errors-for-leak-kinds excludes "still reachable", which every library
+      # with process-lifetime globals reports and which is not a defect.
+      # --log-file keeps Valgrind's output out of each test's own log (so a
+      # failing test's log still reads normally) and gives the scan step below
+      # one file per client process.
+      - name: Run Simulator Tests under Valgrind
+        run: |
+          cd ${{ github.workspace }}
+          mkdir -p logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs \
+            --skip-groups stress,timing \
+            --timeout-scale 20 \
+            --client-wrapper "valgrind --tool=memcheck --error-exitcode=1 --track-origins=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
+
+      # --error-exitcode alone is not sufficient: a handful of tests are
+      # registered with expect_failure=True, where a nonzero exit is the pass
+      # condition and a Valgrind error would be silently absorbed. Scanning the
+      # summaries catches those regardless of exit code.
+      - name: Check Valgrind summaries
+        if: always()
+        run: |
+          cd ${{ github.workspace }}
+          if grep -l -E "ERROR SUMMARY: [1-9]" logs/valgrind-*.log 2>/dev/null; then
+            echo "::error::Valgrind reported errors in the logs listed above."
+            grep -h -A 20 -E "ERROR SUMMARY: [1-9]" logs/valgrind-*.log | head -200
+            exit 1
+          fi
+          echo "No Valgrind errors reported."
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_valgrind_${{ matrix.arch }}
           path: |
             logs/*.log
           retention-days: 7

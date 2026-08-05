@@ -30,6 +30,7 @@ import dataclasses
 import enum
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -747,14 +748,25 @@ _port_counter = None
 _port_lock = None
 _stress_sema = None
 _default_port_sema = None
+# Prefixed to every client command line (see --client-wrapper). Servers are
+# deliberately left unwrapped: they are spawned separately below, and under a
+# tool like Valgrind an instrumented server would slow the whole suite down a
+# second time for no extra coverage of the library under test.
+_client_wrapper: list[str] = []
+# Multiplies the per-test kill budgets (see --timeout-scale).
+_timeout_scale = 1.0
 
 
-def _worker_init(port_counter, port_lock, stress_sema, default_port_sema) -> None:
+def _worker_init(port_counter, port_lock, stress_sema, default_port_sema,
+                 client_wrapper, timeout_scale) -> None:
     global _port_counter, _port_lock, _stress_sema, _default_port_sema
+    global _client_wrapper, _timeout_scale
     _port_counter = port_counter
     _port_lock = port_lock
     _stress_sema = stress_sema
     _default_port_sema = default_port_sema
+    _client_wrapper = client_wrapper
+    _timeout_scale = timeout_scale
     raise_fd_limit(1024)
 
 
@@ -861,8 +873,9 @@ def run_test_in_worker(test: Test) -> Result:
                     detail = "server exited during startup" if server_proc.poll() is not None else "server did not start listening in time"
                     return Result(test=test, ok=False, detail=detail, start=start, end=end)
 
-            cmd = _fill(test.cmd_template, ports)
-            timeout_s = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else DEFAULT_TEST_TIMEOUT_S
+            cmd = _client_wrapper + _fill(test.cmd_template, ports)
+            base_timeout = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else DEFAULT_TEST_TIMEOUT_S
+            timeout_s = base_timeout * _timeout_scale
             try:
                 with open(test.log_file, "w") as log:
                     proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout_s)
@@ -954,7 +967,25 @@ def main() -> int:
     parser.add_argument("--max-stress", type=int, default=1,
                          help="max STRESS-group tests allowed to run at once, regardless of worker count "
                               "(each one already opens up to 200 of its own connections/threads)")
+    parser.add_argument("--client-wrapper", default="",
+                         help="command prefixed to every client invocation, e.g. "
+                              "\"valgrind --tool=memcheck --error-exitcode=1\". Servers are not wrapped.")
+    parser.add_argument("--timeout-scale", type=float, default=1.0,
+                         help="multiplier for the per-test kill budgets; raise it when --client-wrapper "
+                              "slows the client down (Valgrind costs roughly 20-50x)")
+    parser.add_argument("--skip-groups", default="",
+                         help="comma-separated groups to skip entirely (functional, stress, timing). "
+                              "TIMING tests assert on wall-clock behaviour and STRESS tests spawn hundreds "
+                              "of threads, so both give false failures under a heavy --client-wrapper.")
     args = parser.parse_args()
+
+    client_wrapper = shlex.split(args.client_wrapper)
+
+    try:
+        skip_groups = {Group(g.strip()) for g in args.skip_groups.split(",") if g.strip()}
+    except ValueError as e:
+        print(f"--skip-groups: {e}")
+        return 1
 
     TEST_DIR = Path(args.test_dir)
     LOG_DIR = Path(args.log_dir)
@@ -971,6 +1002,12 @@ def main() -> int:
     print(f"  max-workers (functional+stress phase): {args.max_workers}")
     print(f"  timing-workers (timing phase): {args.timing_workers}")
     print(f"  max-stress (concurrent STRESS-group tests): {args.max_stress}")
+    if client_wrapper:
+        print(f"  client-wrapper: {' '.join(client_wrapper)}")
+    if args.timeout_scale != 1.0:
+        print(f"  timeout-scale: {args.timeout_scale}")
+    if skip_groups:
+        print(f"  skip-groups: {', '.join(sorted(g.value for g in skip_groups))}")
     print()
 
     print("Checking for required executables...")
@@ -995,9 +1032,12 @@ def main() -> int:
     default_port_sema = ctx.BoundedSemaphore(1)
 
     all_results: list[Result] = []
-    phase_times: list[float] = []
+    phase_times: list[tuple[str, float]] = []
 
     for phase_groups in PHASES:
+        phase_groups = phase_groups - skip_groups
+        if not phase_groups:
+            continue
         phase_tests = [t for t in all_tests if t.group in phase_groups]
         if phase_groups == {Group.TIMING}:
             workers = args.timing_workers
@@ -1008,10 +1048,13 @@ def main() -> int:
         names = "+".join(g.value for g in phase_groups)
         print(f"Starting phase '{names}': {len(phase_tests)} tests, {workers} workers...")
         with ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_worker_init,
-                                  initargs=(port_counter, port_lock, stress_sema, default_port_sema)) as pool:
+                                  initargs=(port_counter, port_lock, stress_sema, default_port_sema,
+                                            client_wrapper, args.timeout_scale)) as pool:
             results, elapsed = run_phase(pool, phase_tests)
         all_results.extend(results)
-        phase_times.append(elapsed)
+        # Record the name alongside the time: with --skip-groups, phases can be
+        # dropped, so zipping the timings back against PHASES would mislabel them.
+        phase_times.append((names, elapsed))
         print(f"Phase '{names}' done in {elapsed:.0f}s.")
 
     kill_stray_servers()
@@ -1030,8 +1073,7 @@ def main() -> int:
         print(f"  {name}: {span:.0f}s")
 
     print("\nPhase timing:")
-    for phase_groups, elapsed in zip(PHASES, phase_times):
-        names = "+".join(g.value for g in phase_groups)
+    for names, elapsed in phase_times:
         print(f"  {names}: {elapsed:.0f}s")
 
     print("\nResults:")
