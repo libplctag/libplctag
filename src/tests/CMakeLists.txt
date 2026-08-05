@@ -9,9 +9,9 @@ endif()
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
 # Build unit tests only in Debug builds; they're not part of the release artifact set.
-# unit/CMakeLists.txt bails out itself on compilers that can't do -Wl,--wrap (e.g. MSVC);
-# APPLE is excluded here too since Darwin's ld64 has no --wrap equivalent at all.
-if(NOT APPLE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+# No platform gate: the mocks are wired up with plain -D compile definitions rather than
+# GNU ld's --wrap, so this builds on every compiler/linker the project supports.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_subdirectory("unit")
 endif()
 add_subdirectory("stress_api_lock")

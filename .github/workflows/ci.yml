@@ -339,6 +339,9 @@ jobs:
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
       - name: Run Simulator Tests under ASan/UBSan
         run: |
           cd ${{ github.workspace }}
@@ -397,6 +400,9 @@ jobs:
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
       - name: Run Simulator Tests under TSan
         run: |
           cd ${{ github.workspace }}
@@ -446,6 +452,9 @@ jobs:
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
       - name: Run Simulator Tests under ASan/UBSan
         run: |
@@ -497,6 +506,9 @@ jobs:
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
       - name: Run Simulator Tests under TSan
         run: |
@@ -574,6 +586,9 @@ jobs:
       # --log-file keeps Valgrind's output out of each test's own log (so a
       # failing test's log still reads normally) and gives the scan step below
       # one file per client process.
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
       - name: Run Simulator Tests under Valgrind
         run: |
           cd ${{ github.workspace }}

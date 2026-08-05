@@ -1,24 +1,25 @@
 # Define a top-level unit test directory
 
-# test_init mocks initialize_modules()'s dependencies via -Wl,--wrap, a GNU ld feature.
-# MSVC's linker has no equivalent, so building here would silently link the real
-# refcount_startup/lib_init/etc. instead of the mocks -- a test that runs and reports a
-# result, just the wrong one. Bail out before that can happen instead of relying on the
-# caller's platform gate to keep MSVC out.
-if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang"))
-    message(STATUS "Skipping unit tests: -Wl,--wrap requires GCC or Clang (using GNU ld), not ${CMAKE_C_COMPILER_ID}.")
-    return()
-endif()
-
 message("Building unit tests with mini_mock (local CMocka-macro stand-in, see mini_mock.h).")
 
-# We want to mock out initialize_modules dependencies using GNU linker wraps
-set(MOCK_LINK_FLAGS 
-    "-Wl,--wrap=refcount_startup"
-    "-Wl,--wrap=lib_init"
-    "-Wl,--wrap=ab_init"
-    "-Wl,--wrap=mb_init"
-    "-Wl,--wrap=omron_init"
+# Redirect initialize_modules()'s dependencies to the mocks in test_init.c at compile
+# time. This works because init.c is listed in add_executable() below and so is compiled
+# here rather than taken from the prebuilt archive -- we control its preprocessing.
+#
+# The previous approach used -Wl,--wrap, which is GNU ld only and kept this test off
+# macOS and MSVC entirely. Plain -D uses no linker features at all, so it works
+# everywhere. See the comment in test_init.c for why link-order shadowing is not an
+# option (the mocked *_init functions share object files with the *_teardown functions
+# that destroy_modules() genuinely needs).
+#
+# Caveat: this only reaches code compiled into this target. Mocking a function called
+# from deep inside the prebuilt library would need something else.
+set(MOCK_DEFINITIONS
+    "refcount_startup=mock_refcount_startup"
+    "lib_init=mock_lib_init"
+    "ab_init=mock_ab_init"
+    "mb_init=mock_mb_init"
+    "omron_init=mock_omron_init"
 )
 
 # test_init: tests initialize_modules()
@@ -41,7 +42,7 @@ target_include_directories(test_init PRIVATE
 
 target_link_libraries(test_init PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
-target_link_options(test_init PRIVATE ${MOCK_LINK_FLAGS})
+target_compile_definitions(test_init PRIVATE ${MOCK_DEFINITIONS})
 
 # Register the unit test with CTest
 add_test(NAME unit_test_init COMMAND test_init)
