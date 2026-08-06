@@ -121,13 +121,15 @@ static void stop_server(int test_pid) {
 }
 
 
-/* Unlike the harness-managed servers elsewhere in the suite, this test
+/*
+ * Unlike the harness-managed servers elsewhere in the suite, this test
  * backgrounds ab_server itself via an extra shell fork/exec hop and gets
  * no help from the harness's own retry-on-vanish logic (that only applies
  * when the Python runner owns the server). A contended CI runner can push
  * that extra hop past a naive one-shot wait, so retry once with a fresh
  * server before giving up -- a real bug reproduces every time; a one-off
- * scheduling delay does not. */
+ * scheduling delay does not.
+ */
 static void start_server(const char *ab_server_path, int test_pid) {
     char cmd[1024] = {0};
     snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_path, test_pid);
