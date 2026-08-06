@@ -44,12 +44,26 @@ target_link_libraries(test_init PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
 target_compile_definitions(test_init PRIVATE ${MOCK_DEFINITIONS})
 
-# Register the unit test with CTest
+# test_platform_str: tests str_to_int()/str_to_float() in the platform shim.
+# No mocks, so no MOCK_DEFINITIONS -- it links and calls the real functions.
+add_executable(test_platform_str test_platform_str.c)
+
+target_include_directories(test_platform_str PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_platform_str PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# Register the unit tests with CTest
 add_test(NAME unit_test_init COMMAND test_init)
+add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init
+    DEPENDS test_init test_platform_str
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"
