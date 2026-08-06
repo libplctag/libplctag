@@ -140,6 +140,7 @@ static int perform_forward_close(ab_session_p session);
 static int send_forward_close_req(ab_session_p session);
 static int recv_forward_close_resp(ab_session_p session);
 static int send_forward_open_request(ab_session_p session);
+static uint16_t next_conn_serial_number(uint16_t current);
 static int send_old_forward_open_request(ab_session_p session);
 static int send_extended_forward_open_request(ab_session_p session);
 static int receive_forward_open_response(ab_session_p session);
@@ -2714,6 +2715,24 @@ int send_forward_open_request(ab_session_p session) {
 }
 
 
+/*
+ * Advance the connection serial number, skipping zero.
+ *
+ * The field is 16 bits and is meant to cycle, but zero is not a usable serial
+ * number -- conn setup seeds it into 1..65535 for exactly that reason -- so the
+ * wrap has to land on 1 rather than 0. Doing the arithmetic in uint16_t here
+ * also keeps -fsanitize=implicit-integer-truncation quiet: a bare ++ on a
+ * uint16_t promotes to int and narrows again on store.
+ */
+static uint16_t next_conn_serial_number(uint16_t current) {
+    uint16_t next = (uint16_t)(current + 1);
+
+    if(next == 0) { next = 1; }
+
+    return next;
+}
+
+
 int send_old_forward_open_request(ab_session_p session) {
     eip_forward_open_request_t *fo = NULL;
     uint8_t *data;
@@ -2764,10 +2783,11 @@ int send_old_forward_open_request(ab_session_p session) {
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(++(session->conn_serial_number)); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                    /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);                /* our serial number. */
-    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;          /* timeout = mult * RPI */
+    session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
+    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);            /* our serial number. */
+    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;      /* timeout = mult * RPI */
 
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
@@ -2856,11 +2876,12 @@ int send_extended_forward_open_request(ab_session_p session) {
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(++(session->conn_serial_number)); /* our connection ID/serial number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                    /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);                /* our serial number. */
-    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;          /* timeout = mult * RPI */
-    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
+    session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection ID/serial number. */
+    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);            /* our serial number. */
+    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;      /* timeout = mult * RPI */
+    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI);                    /* us to target RPI - Request Packet Interval in microseconds */
     fo->orig_to_targ_conn_params_ex = h2le32(
         AB_EIP_CONN_PARAM_EX | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI);              /* target to us RPI - not really used for explicit messages? */

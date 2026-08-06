@@ -113,6 +113,7 @@ static int perform_forward_close(omron_conn_p conn);
 static int send_forward_close_req(omron_conn_p conn);
 static int recv_forward_close_resp(omron_conn_p conn);
 static int send_forward_open_request(omron_conn_p conn);
+static uint16_t next_conn_serial_number(uint16_t current);
 static int send_old_forward_open_request(omron_conn_p conn);
 static int send_extended_forward_open_request(omron_conn_p conn);
 static int receive_forward_open_response(omron_conn_p conn);
@@ -2459,6 +2460,24 @@ int send_forward_open_request(omron_conn_p conn) {
 }
 
 
+/*
+ * Advance the connection serial number, skipping zero.
+ *
+ * The field is 16 bits and is meant to cycle, but zero is not a usable serial
+ * number -- conn setup seeds it into 1..65535 for exactly that reason -- so the
+ * wrap has to land on 1 rather than 0. Doing the arithmetic in uint16_t here
+ * also keeps -fsanitize=implicit-integer-truncation quiet: a bare ++ on a
+ * uint16_t promotes to int and narrows again on store.
+ */
+static uint16_t next_conn_serial_number(uint16_t current) {
+    uint16_t next = (uint16_t)(current + 1);
+
+    if(next == 0) { next = 1; }
+
+    return next;
+}
+
+
 int send_old_forward_open_request(omron_conn_p conn) {
     eip_forward_open_request_t *fo = NULL;
     uint8_t *data;
@@ -2509,10 +2528,11 @@ int send_old_forward_open_request(omron_conn_p conn) {
     fo->orig_to_targ_conn_id = h2le32(0);                        /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(conn->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(++(conn->conn_serial_number)); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);              /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);          /* our serial number. */
-    fo->conn_timeout_multiplier = OMRON_EIP_TIMEOUT_MULTIPLIER;    /* timeout = mult * RPI */
+    conn->conn_serial_number = next_conn_serial_number(conn->conn_serial_number);
+    fo->conn_serial_number = h2le16(conn->conn_serial_number);  /* our connection SEQUENCE number. */
+    fo->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);           /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);       /* our serial number. */
+    fo->conn_timeout_multiplier = OMRON_EIP_TIMEOUT_MULTIPLIER; /* timeout = mult * RPI */
 
     fo->orig_to_targ_rpi = h2le32(OMRON_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
@@ -2589,11 +2609,12 @@ int send_extended_forward_open_request(omron_conn_p conn) {
     fo->orig_to_targ_conn_id = h2le32(0);                        /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(conn->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(++(conn->conn_serial_number)); /* our connection ID/serial number. */
-    fo->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);              /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);          /* our serial number. */
-    fo->conn_timeout_multiplier = OMRON_EIP_TIMEOUT_MULTIPLIER;    /* timeout = mult * RPI */
-    fo->orig_to_targ_rpi = h2le32(OMRON_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
+    conn->conn_serial_number = next_conn_serial_number(conn->conn_serial_number);
+    fo->conn_serial_number = h2le16(conn->conn_serial_number);  /* our connection ID/serial number. */
+    fo->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);           /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);       /* our serial number. */
+    fo->conn_timeout_multiplier = OMRON_EIP_TIMEOUT_MULTIPLIER; /* timeout = mult * RPI */
+    fo->orig_to_targ_rpi = h2le32(OMRON_EIP_RPI);               /* us to target RPI - Request Packet Interval in microseconds */
     fo->orig_to_targ_conn_params_ex = h2le32(
         OMRON_EIP_CONN_PARAM_EX | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(OMRON_EIP_RPI);           /* target to us RPI - not really used for explicit messages? */
