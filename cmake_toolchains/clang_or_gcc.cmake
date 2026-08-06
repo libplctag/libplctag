@@ -9,11 +9,15 @@ if(APPLE)
     set(EXTRA_COMPILE_FLAGS_MINSIZEREL "${EXTRA_COMPILE_FLAGS_MINSIZEREL} -D_DARWIN_C_SOURCE")
     set(EXTRA_COMPILE_FLAGS_DEBUG "${EXTRA_COMPILE_FLAGS_DEBUG} -D_DARWIN_C_SOURCE")
 else()
-    # Don't set static linker options if sanitizers are enabled in Debug mode.
+    # Don't set static linker options if sanitizers are enabled in Debug mode, or if the
+    # build is meant to run under Valgrind. Both need to interpose on libc's allocator and
+    # string/pthread routines, which only works when those come from a shared object.
+    # USE_VALGRIND is deliberately not gated on Debug: a Valgrind run of any build type
+    # needs dynamic linking just as much.
     # ponytail: this is still a single global flag applied to every target (client and
     # server binaries alike), so it goes static-free if *either* side wants sanitizers,
     # even when only one of them actually needs it. Split per-target if that ever matters.
-    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND (USE_MEM_SANITIZERS OR USE_THREAD_SANITIZERS OR USE_SERVER_MEM_SANITIZERS OR USE_SERVER_THREAD_SANITIZERS)))
+    if(NOT USE_VALGRIND AND NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND (USE_MEM_SANITIZERS OR USE_THREAD_SANITIZERS OR USE_SERVER_MEM_SANITIZERS OR USE_SERVER_THREAD_SANITIZERS)))
         set(STATIC_C_LINKER_OPTIONS "-static")
         set(STATIC_CXX_LINKER_OPTIONS "-static-libgcc;-static-libstdc++")
     endif()

@@ -79,6 +79,15 @@ set(USE_THREAD_SANITIZERS 0 CACHE BOOL "Build the client library/tests/tools wit
 set(USE_SERVER_MEM_SANITIZERS ${USE_MEM_SANITIZERS} CACHE BOOL "Build the test servers (ab_server/modbus_server) with ASan/UBSan/LeakSan or not")
 set(USE_SERVER_THREAD_SANITIZERS ${USE_THREAD_SANITIZERS} CACHE BOOL "Build the test servers with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
 
+# Valgrind adds no compiler flags -- it runs an ordinary binary -- but it does need one
+# thing from the build: dynamic linking. Valgrind replaces malloc/free and the string and
+# pthread routines by interposing on the dynamic symbols, which is impossible in a
+# statically linked binary. Run one anyway and Memcheck reports thousands of false
+# positives from inside glibc's own allocator, cancellation handling, and AVX string
+# routines (a measured 2026 of 2055 errors in the first CI run). See the -static block in
+# cmake_toolchains/clang_or_gcc.cmake, which this flag feeds.
+set(USE_VALGRIND 0 CACHE BOOL "Build for running under Valgrind: forces dynamic linking so Memcheck can interpose on libc")
+
 if(USE_MEM_SANITIZERS AND USE_THREAD_SANITIZERS)
     message(FATAL_ERROR "USE_MEM_SANITIZERS and USE_THREAD_SANITIZERS cannot both be enabled: ASan/LeakSan and TSan cannot be linked into the same binary.")
 endif()

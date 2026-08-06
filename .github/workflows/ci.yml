@@ -597,10 +597,16 @@ jobs:
       # No sanitizers: ASan's shadow-memory allocator and Valgrind's are
       # mutually exclusive. Debug build for -O0 and full symbols so Valgrind's
       # stacks name real lines.
-      - name: Configure CMake (Debug, no sanitizers)
+      #
+      # USE_VALGRIND=1 is required, not cosmetic. Turning the sanitizers off is
+      # exactly what re-enables -static in the toolchain, and Memcheck cannot
+      # interpose on a statically linked libc -- the first run of this job spent
+      # 2026 of its 2055 reported errors inside glibc's own allocator, thread
+      # cancellation, and AVX string routines because of it.
+      - name: Configure CMake (Debug, no sanitizers, dynamic link for Valgrind)
         run: |
           cd ${{ env.BUILD }}
-          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_VALGRIND=1 -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -631,6 +637,13 @@ jobs:
       # duration, and 20x on the already-generous 300s default gave each test
       # 100 minutes. Two genuinely stuck tests then outlived the whole job.
       # Observed worst case under Valgrind so far is 493s, which 1200s covers.
+      #
+      # --max-workers 2 on a 4-CPU runner: Valgrind serializes a client's threads
+      # onto one core, so four of them plus four native servers oversubscribes the
+      # box badly. That contention is what pushed tests 19 and 47 past the
+      # library's own protocol timeouts (PLCTAG_ERR_TIMEOUT) -- a timeout the
+      # harness cannot extend, since --timeout-scale only moves the harness's kill
+      # budget and not timeouts baked into the tag strings.
       # Step budget sits below the job budget on purpose. A job that hits its own
       # timeout-minutes is cancelled outright and the always() upload step below is
       # not reliably reached -- so the run that hangs is exactly the run whose logs
@@ -644,6 +657,7 @@ jobs:
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs \
             --skip-groups stress,timing \
             --timeout-scale 4 \
+            --max-workers 2 \
             --client-wrapper "valgrind --tool=memcheck --track-origins=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
 
       # The client's exit code carries no Valgrind information now, so this scan
