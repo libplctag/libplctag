@@ -435,6 +435,13 @@ extern int str_to_int(const char *str, int *val) {
     char *endptr;
     long int tmp_val;
 
+    /*
+     * strtol() only ever sets errno, it never clears it, so a stale ERANGE left
+     * behind by any earlier library or system call would be read back below as
+     * this conversion's own failure. Clear it first so the check means something.
+     */
+    errno = 0;
+
     tmp_val = strtol(str, &endptr, 0);
 
     if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
@@ -454,6 +461,12 @@ extern int str_to_int(const char *str, int *val) {
 extern int str_to_float(const char *str, float *val) {
     char *endptr;
     float tmp_val;
+
+    /*
+     * See str_to_int() above. This one matters more: the ERANGE test also covers
+     * underflow-to-zero, so a stale ERANGE would reject a plain "0" as an error.
+     */
+    errno = 0;
 
     tmp_val = strtof(str, &endptr);
 
@@ -987,7 +1000,11 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
                 rc = PLCTAG_ERR_TIMEOUT;
                 break;
             } else if(wait_rc != 0) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error %d waiting on condition variable!", errno);
+                /*
+                 * pthread_cond_timedwait() returns the error directly and never touches
+                 * errno, so wait_rc is the only meaningful value to report here.
+                 */
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error %d waiting on condition variable!", wait_rc);
                 rc = PLCTAG_ERR_BAD_STATUS;
                 break;
             } else {
@@ -1040,9 +1057,15 @@ int cond_signal_impl(const char *func, int line_num, cond_p c) {
 
     c->flag = 1;
 
-    if(pthread_cond_signal(&(c->cond))) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Signal of condition var returned error %d in call at %s:%d!", errno, func,
-               line_num);
+    /*
+     * pthread_cond_signal() returns the error directly and never touches errno, so
+     * capture the return value rather than reporting an unrelated stale errno.
+     */
+    int signal_rc = pthread_cond_signal(&(c->cond));
+
+    if(signal_rc) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Signal of condition var returned error %d in call at %s:%d!", signal_rc,
+               func, line_num);
         rc = PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -1191,16 +1214,18 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     sock_opt = 1;
 
     if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
+        /* report before close(), which sets errno of its own on failure. */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting socket reuse option, errno: %d", errno);
+        close(fd);
         return PLCTAG_ERR_OPEN;
     }
 
 #ifdef BSD_OS_TYPE
     /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
     if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
+        /* report before close(), which sets errno of its own on failure. */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
+        close(fd);
         return PLCTAG_ERR_OPEN;
     }
 #endif
@@ -1232,8 +1257,9 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     /* set no delay for TCP connections.  Send immediately. */
     sock_opt = 1;
     if(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
+        /* report before close(), which sets errno of its own on failure. */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting TCP_NODELAY option, errno: %d", errno);
+        close(fd);
         return PLCTAG_ERR_OPEN;
     }
 
