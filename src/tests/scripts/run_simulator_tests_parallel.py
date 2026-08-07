@@ -340,6 +340,20 @@ def run_check(check: CheckSpec) -> tuple[bool, str]:
 # out to an unrelated test.
 DEFAULT_LIB_PORT = 44818
 
+# Base for dynamically allocated server ports.
+#
+# Deliberately BELOW Linux's default ephemeral range (net.ipv4.ip_local_port_range
+# is 32768-60999). Allocating server ports inside that range means a client
+# connection's ephemeral source port can take the number in the window between
+# _port_is_free() probing it and the server actually calling bind() -- which shows
+# up as an intermittent "Address already in use" on a port the probe just reported
+# as free. SO_REUSEADDR does not help against a live socket.
+#
+# Note DEFAULT_LIB_PORT itself is inside the ephemeral range and cannot move: it is
+# the standard EtherNet/IP port and is compiled into the library. The handful of
+# exclusive_default_port tests therefore keep that small exposure.
+ALLOC_PORT_BASE = 20000
+
 
 def build_manifest() -> Manifest:
     m = Manifest()
@@ -628,10 +642,11 @@ def build_manifest() -> Manifest:
                "--clone-attrib=name=TestDINTArray[1]&elem_count=1",
                f"--connection-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
                "--timeout=10000"], F)
-    # Manages its own ab_server internally on a hardcoded port -- no shared
-    # section server, no dynamically-allocated port.
+    # Starts and stops its own ab_server internally, so there is no section server
+    # for the harness to manage -- but it still takes an allocated port so its
+    # private server cannot collide with anyone else's.
     sec.test("plc_tag_destroy does not hang after Omron connection loss (issue #625)",
-              [exe("test_omron_destroy"), exe("ab_server")], F, server=None, ports_needed=0)
+              [exe("test_omron_destroy"), exe("ab_server"), "{PORT}"], F, server=None, ports_needed=1)
 
     # --- Micrologix section ----------------------------------------------------
     micrologix_server = ServerSpec(
@@ -1024,9 +1039,9 @@ def main() -> int:
     print(f"Built manifest: {len(all_tests)} tests.")
 
     ctx = get_context("spawn")
-    # Start one above DEFAULT_LIB_PORT so the general-purpose allocator can
-    # never hand that reserved port out to an unrelated test.
-    port_counter = ctx.Value("i", DEFAULT_LIB_PORT + 1)
+    # ALLOC_PORT_BASE sits below the ephemeral range and below DEFAULT_LIB_PORT,
+    # so the allocator can never hand out that reserved port either.
+    port_counter = ctx.Value("i", ALLOC_PORT_BASE)
     port_lock = ctx.Lock()
     stress_sema = ctx.BoundedSemaphore(args.max_stress)
     default_port_sema = ctx.BoundedSemaphore(1)

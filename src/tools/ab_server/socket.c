@@ -164,6 +164,32 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
 }
 
 
+/*
+ * Last error from a socket call, mapped into the project's unified error space.
+ *
+ * Winsock reports through WSAGetLastError() and POSIX through errno. They are
+ * separate namespaces -- strerror() on a Winsock code is meaningless -- so pick
+ * the right source per platform and let err_to_string() render it.
+ */
+static int socket_last_error(void) {
+#ifdef IS_WINDOWS
+    return err_from_winsock(WSAGetLastError());
+#else
+    return err_from_errno(errno);
+#endif
+}
+
+
+/*
+ * Returns INVALID_SOCKET on every failure, never an error code.
+ *
+ * The ERR_* values are POSITIVE (ERR_SOCKET_BIND == 1002) while SOCKET is a plain
+ * int, so returning one produced a "socket" that sailed through the caller's
+ * `sock >= 0` check and was stored as a live fd. A failed bind then left the
+ * server running its accept loop against a descriptor that was never opened:
+ * alive, logging "Timed out waiting for new client connection" forever, and never
+ * accepting anything. The specific reason is logged here instead.
+ */
 SOCKET socket_open_tcp_server(const char *listening_port) {
     struct sockaddr_in address = {0};
     SOCKET sock = INVALID_SOCKET;
@@ -176,16 +202,16 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
     rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
 
     if(rc != NO_ERROR) {
-        log_info("WSAStartup failed with error: %d\n", rc);
-        return (SOCKET)ERR_SOCKET_STARTUP;
+        log_error("ERROR: WSAStartup failed with error %d!", rc);
+        return INVALID_SOCKET;
     }
 #endif
 
     /* create the socket */
     sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
-        log_info("ERROR: socket() failed: %s\n", gai_strerror((int)sock));
-        return (SOCKET)ERR_SOCKET_CREATE;
+        log_error("ERROR: socket() failed for port %s: %s", listening_port, err_to_string(socket_last_error()));
+        return INVALID_SOCKET;
     }
 
     address.sin_family = AF_INET;
@@ -197,25 +223,29 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
     rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt));
     if(rc) {
         socket_close(sock);
-        log_info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
-        return (SOCKET)ERR_SOCKET_SETOPT;
+        log_error("ERROR: Setting SO_REUSEADDR failed for port %s: %s", listening_port, err_to_string(socket_last_error()));
+        return INVALID_SOCKET;
     }
 
-    log_info("socket_open() setting up server socket. Binding to address 0.0.0.0.");
+    log_info("socket_open() setting up server socket. Binding to address 0.0.0.0 port %s.", listening_port);
 
     rc = bind(sock, (struct sockaddr *)&address, (socklen_t)sizeof(address));
     if(rc < 0) {
-        perror("Error from bind(): ");
-        printf("ERROR: Unable to bind() socket: %d\n", rc);
+        /* capture the error before socket_close() can overwrite it. */
+        int bind_err = socket_last_error();
+
+        log_error("ERROR: Unable to bind() to port %s: %s", listening_port, err_to_string(bind_err));
         socket_close(sock);
-        return (SOCKET)ERR_SOCKET_BIND;
+        return INVALID_SOCKET;
     }
 
     rc = listen(sock, LISTEN_QUEUE);
     if(rc < 0) {
-        log_info("ERROR: Unable to call listen() on socket: %d\n", rc);
+        int listen_err = socket_last_error();
+
+        log_error("ERROR: Unable to listen() on port %s: %s", listening_port, err_to_string(listen_err));
         socket_close(sock);
-        return (SOCKET)ERR_SOCKET_LISTEN;
+        return INVALID_SOCKET;
     }
 
     return sock;

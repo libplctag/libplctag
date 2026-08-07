@@ -167,6 +167,11 @@ int main(int argc, const char **argv) {
 
     /* open a server connection and listen on the right port. */
     server = tcp_server_create("0.0.0.0", (plc.port_str ? plc.port_str : "44818"), request_handler, &plc, sizeof(plc));
+    if(!server) {
+        /* tcp_server_create() already logged the specific reason. */
+        log_error("ERROR: Unable to start the server, exiting!");
+        return 1;
+    }
 
     tcp_server_start(server, &done);
 
