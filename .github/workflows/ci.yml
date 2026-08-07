@@ -658,7 +658,7 @@ jobs:
             --skip-groups stress,timing \
             --timeout-scale 4 \
             --max-workers 2 \
-            --client-wrapper "valgrind --tool=memcheck --track-origins=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
+            --client-wrapper "valgrind --tool=memcheck --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
 
       # The client's exit code carries no Valgrind information now, so this scan
       # is the only thing that turns a finding into a build failure.
