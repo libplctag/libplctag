@@ -1021,12 +1021,12 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* FIXME - should this be BAD_PARAM as it orginally was? */
     if(timeout_ms <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Timeout must be a positive value but was %d in call from %s:%d!",
                timeout_ms, func, line_num);
-        return PLCTAG_ERR_BAD_PARAM;
+        return PLCTAG_ERR_TIMEOUT;
     }
-
 
     EnterCriticalSection(&(c->cs));
 
