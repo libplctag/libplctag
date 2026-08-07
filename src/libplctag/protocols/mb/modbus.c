@@ -368,6 +368,7 @@ static int mb_wake_plc(plc_tag_p p_tag);
 
 
 /* data accessors */
+static uint16_t next_seq_id(uint16_t current);
 static int mb_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
 static int mb_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
 
@@ -2411,12 +2412,33 @@ int send_request(modbus_plc_p plc) {
 }
 
 
+/*
+ * Advance the MBAP transaction identifier, skipping zero.
+ *
+ * Zero is reserved: pending_transaction_id == 0 is the "no transaction
+ * outstanding" sentinel, so a live request must never carry it. The wrap is
+ * done in uint16_t explicitly because a bare ++ on a uint16_t promotes to int
+ * and narrows again on store, which -fsanitize=implicit-integer-truncation
+ * reports once the value reaches 65535.
+ */
+static uint16_t next_seq_id(uint16_t current) {
+    uint16_t next = (uint16_t)(current + 1);
+
+    if(next == 0) { next = 1; }
+
+    return next;
+}
+
+
 int create_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id));  // disallow zero
+    uint16_t seq_id = 0;
     int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
     int base_register = tag->reg_base + (tag->request_num * registers_per_request);
     int register_count = tag->elem_count - (tag->request_num * registers_per_request);
+
+    plc->seq_id = next_seq_id(plc->seq_id);
+    seq_id = plc->seq_id;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, tag->tag_id, "Starting.");
 
@@ -2646,13 +2668,16 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
 int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id));  // disallow zero
+    uint16_t seq_id = 0;
     int registers_per_request = (MAX_MODBUS_REQUEST_PAYLOAD * 8) / tag->elem_size;
     int base_register = tag->reg_base + (tag->request_num * registers_per_request);
     int register_count = tag->elem_count - (tag->request_num * registers_per_request);
     int register_offset = (tag->request_num * registers_per_request);
     int byte_offset = (register_offset * tag->elem_size) / 8;
     int request_payload_size = 0;
+
+    plc->seq_id = next_seq_id(plc->seq_id);
+    seq_id = plc->seq_id;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
