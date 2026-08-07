@@ -255,8 +255,7 @@ void lib_instance_publish(void) {
      * comment history on that flag); starting the thread last avoids repeating it.
      */
     if(thread_create(&inst->tag_tickler_thread, tag_tickler_func, 32 * 1024, inst) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0,
-               "Unable to create tag tickler thread! Automatic tag operations will not run.");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag tickler thread! Automatic tag operations will not run.");
     }
 }
 
@@ -1304,7 +1303,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      * like status()/abort() below do, or its reads/writes of tag fields (e.g. tag->op in
      * mb_activate/mb_read_start) race the handler thread's tickle_tag(), which changes
      * tag->op under api_mutex + plc->mutex (see modbus.c tickle_all_tags). */
-    if(tag->vtable && tag->vtable->activate) { critical_block(tag->api_mutex) { tag->vtable->activate(tag); } }
+    if(tag->vtable && tag->vtable->activate) {
+        critical_block(tag->api_mutex) { tag->vtable->activate(tag); }
+    }
 
     /* wake up tag's PLC here. */
     if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
@@ -1317,7 +1318,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-        if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
+        if(tag->vtable && tag->vtable->abort) {
+            critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+        }
 
         /* remove the tag from the hashtable. */
         critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
@@ -1343,17 +1346,25 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         do {
             int64_t timeout_left = end_time - time_ms();
 
-            /* clamp the timeout left to non-negative int range. */
-            if(timeout_left < 0) { timeout_left = 0; }
-
-            if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
+            /*
+             * clamp the value so that we do not wait some rediculous time.
+             * FIXME - should this return a BAD_PARAM error?  Or some sort of out of range error. A value like this is
+             * almost certainly a logic bug or a wrapping error.
+             */
+            if(timeout_left > INT_MAX) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Timeout left %" PRId64 " is too large, clamping to 100ms.",
+                       timeout_left);
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
+            }
 
             /* wait for something to happen */
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
+                if(tag->vtable && tag->vtable->abort) {
+                    critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                }
 
                 /* remove the tag from the hashtable. */
                 critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
@@ -1369,19 +1380,25 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have a status function!");
             }
 
-            /* check to see if there was an error during tag creation. */
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!",
-                       plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) { critical_block(tag->api_mutex) { tag->vtable->abort(tag); } }
+            /* are we out of time? FIXME - this is too complicated.  Refactor. */
+            if(rc == PLCTAG_STATUS_PENDING && time_ms() >= end_time) { rc = PLCTAG_ERR_TIMEOUT; }
+        } while(rc == PLCTAG_STATUS_PENDING);
 
-                /* remove the tag from the hashtable. */
-                critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+        /* check to see if there was an error during tag creation. */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
 
-                rc_dec(tag);
-                return rc;
+            /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
+            if(tag->vtable && tag->vtable->abort) {
+                critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
             }
-        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
+
+            /* remove the tag from the hashtable. */
+            critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+
+            rc_dec(tag);
+            return rc;
+        }
 
         /* clear up any remaining flags.  This should be refactored. */
         critical_block(tag->api_mutex) {
@@ -2037,8 +2054,16 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         do {
             int64_t timeout_left = end_time - time_ms();
 
-            /* clamp the timeout left to non-negative int range. */
-            if(timeout_left < 0) { timeout_left = 0; }
+            /*
+             * The deadline has passed. cond_wait() rejects a zero or negative
+             * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
+             * a bad-parameter error instead of the timeout that actually
+             * happened, so stop here and report the timeout itself.
+             */
+            if(timeout_left <= 0) {
+                rc = PLCTAG_ERR_TIMEOUT;
+                break;
+            }
 
             if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
 
@@ -2231,8 +2256,16 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         do {
             int64_t timeout_left = end_time - time_ms();
 
-            /* clamp the timeout left to non-negative int range. */
-            if(timeout_left < 0) { timeout_left = 0; }
+            /*
+             * The deadline has passed. cond_wait() rejects a zero or negative
+             * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
+             * a bad-parameter error instead of the timeout that actually
+             * happened, so stop here and report the timeout itself.
+             */
+            if(timeout_left <= 0) {
+                rc = PLCTAG_ERR_TIMEOUT;
+                break;
+            }
 
             if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
 

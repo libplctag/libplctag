@@ -214,6 +214,16 @@ typedef enum {
 typedef enum {
     TAG_OP_IDLE = 0,
     TAG_OP_READ_REQUEST,
+    /*
+     * Armed for a future auto-sync read: the tag sits in active_tags keyed on its
+     * next scheduled op_time, but nothing the caller asked for is in flight. Kept
+     * separate from TAG_OP_READ_REQUEST purely so mb_tag_status() can tell the two
+     * apart -- an auto-sync tag is re-armed the instant its previous read completes,
+     * so treating that as "busy" would leave status() permanently PENDING and stall
+     * plc_tag_create()'s wait loop until it times out. The PLC handler treats this
+     * state exactly like TAG_OP_READ_REQUEST.
+     */
+    TAG_OP_READ_SCHEDULED,
     TAG_OP_READ_RESPONSE,
     TAG_OP_WRITE_REQUEST,
     TAG_OP_WRITE_RESPONSE
@@ -1988,7 +1998,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                     while(tag->auto_sync_next_read <= now) { tag->auto_sync_next_read += tag->auto_sync_read_ms; }
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Rescheduling auto-sync tag %d for next read in %dms.",
                            tag->tag_id, (int)(tag->auto_sync_next_read - now));
-                    tag->op = TAG_OP_READ_REQUEST;
+                    /* armed, not in flight -- see TAG_OP_READ_SCHEDULED. */
+                    tag->op = TAG_OP_READ_SCHEDULED;
                     tag->op_changed_time = now;
                     tag->request_start_time = now;
                     int idx = vector_find_index(plc->active_tags, tag);
@@ -2205,6 +2216,8 @@ static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag, int64_t now, int64_t *
             rc = PLCTAG_STATUS_OK;
             break;
 
+        /* A scheduled auto-sync read only reaches here once its op_time is due. */
+        case TAG_OP_READ_SCHEDULED: /* fall through */
         case TAG_OP_READ_REQUEST: rc = tag_op_read_request(plc, tag); break;
 
         case TAG_OP_READ_RESPONSE: rc = tag_op_read_response(plc, tag); break;
@@ -3301,8 +3314,9 @@ int mb_read_start(plc_tag_p p_tag) {
      * when we acquire plc->mutex below while already holding api_mutex.
      */
     /*
-     * Allow TAG_OP_IDLE (fresh read) and TAG_OP_READ_REQUEST (auto-sync tag
-     * sitting in active_tags waiting for a future op_time -- move it to now).
+     * Allow TAG_OP_IDLE (fresh read), TAG_OP_READ_SCHEDULED (auto-sync tag armed
+     * for a future op_time -- pull it forward to now) and TAG_OP_READ_REQUEST (due
+     * but not yet sent).
      * Return BUSY for any genuinely in-flight state.
      */
     if(tag->op == TAG_OP_READ_RESPONSE || tag->op == TAG_OP_WRITE_REQUEST || tag->op == TAG_OP_WRITE_RESPONSE) {
@@ -3362,7 +3376,14 @@ static int mb_tag_status(plc_tag_p p_tag) {
         return tag->status;
     }
 
-    if(tag->op != TAG_OP_IDLE) {
+    /*
+     * An auto-sync read that is merely armed for its next cycle is not an operation
+     * the caller is waiting on, so report idle. Deliberately state-based rather than
+     * comparing op_time against the clock: when the handler thread falls behind, the
+     * re-arm lands op_time only a hair into the future, so a time-based test would
+     * collapse to PENDING under exactly the load that makes this matter.
+     */
+    if(tag->op != TAG_OP_IDLE && tag->op != TAG_OP_READ_SCHEDULED) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Operation in progress, returning PLCTAG_STATUS_PENDING.");
         return PLCTAG_STATUS_PENDING;
     }
@@ -3515,6 +3536,7 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
                 wake_plc_thread(tag->plc);
                 break;
 
+            case TAG_OP_READ_SCHEDULED: /* fall through */
             case TAG_OP_READ_REQUEST: {
                 /* Auto-sync read queued but not yet sent; replace with write. */
                 int idx = vector_find_index(tag->plc->active_tags, tag);
@@ -3999,6 +4021,7 @@ static const char *op_to_str(tag_op_type_t op) {
     switch(op) {
         case TAG_OP_IDLE: return "IDLE"; break;
         case TAG_OP_READ_REQUEST: return "READ_REQUEST"; break;
+        case TAG_OP_READ_SCHEDULED: return "READ_SCHEDULED"; break;
         case TAG_OP_READ_RESPONSE: return "READ_RESPONSE"; break;
         case TAG_OP_WRITE_REQUEST: return "WRITE_REQUEST"; break;
         case TAG_OP_WRITE_RESPONSE: return "WRITE_RESPONSE"; break;
