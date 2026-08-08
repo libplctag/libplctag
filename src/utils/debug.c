@@ -81,13 +81,30 @@ static volatile uint32_t thread_num = 1;
  * unregister, and does its output holding no lock of ours at all.
  */
 static lock_t logger_callback_lock = LOCK_INIT;
-static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
+
+typedef void (*log_callback_func_t)(int32_t tag_id, int debug_level, const char *message);
 
 /*
- * Count of pdebug_impl() calls that have loaded a non-NULL log_callback_func and may
- * still be inside it. Only ever raised while a callback is registered, so once
- * debug_unregister_logger() clears the pointer this is guaranteed to drain to zero:
- * later callers see NULL and never touch it.
+ * Every read and write of this pointer happens under logger_callback_lock (see
+ * emit_log_line(), debug_register_logger(), debug_unregister_logger(), and
+ * debug_flush() below), so it needs neither `volatile` nor an atomic type of its
+ * own -- the spinlock's acquire/release already gives it the ordering a reader on
+ * another thread needs. What must NOT happen is calling through this pointer while
+ * holding the lock: the callback is caller-supplied and can block or do its own
+ * I/O, so holding any lock across the call would serialize every other thread's
+ * logging behind it. Instead, callers snapshot the pointer under the lock and
+ * invoke it afterward -- see the in-flight counter below for how that snapshot
+ * stays safe against a concurrent unregister.
+ */
+static log_callback_func_t log_callback_func = NULL;
+
+/*
+ * Count of emit_log_line() calls that took a non-NULL snapshot of log_callback_func
+ * and may still be inside the callback. Only ever raised while holding
+ * logger_callback_lock, and only when the snapshot is non-NULL, so
+ * debug_unregister_logger() -- which clears the pointer and then drains this to
+ * zero without releasing the lock -- is guaranteed no new snapshot can raise it
+ * again before the drain completes: doing so would require the same lock.
  */
 static atomic_int32_t log_callback_in_flight = ATOMIC_INT_STATIC_INIT;
 
@@ -212,35 +229,26 @@ static void ensure_stderr_buffering(void) {
 
 /*
  * Hand a finished log line to the registered callback, or to stderr if there is
- * none. Takes no spinlock: see the note on logger_callback_lock above for why
- * output must never run inside one.
- *
- * Coordinating with debug_unregister_logger() without a lock takes two steps.
- * Load the pointer, and if it is set, raise the in-flight count and load it a
- * second time. The atomics are full barriers, so by the time the second load
- * happens our increment is visible to everyone. That leaves unregister only two
- * possibilities: it cleared the pointer before our second load, and we see NULL
- * and fall back to stderr rather than calling into a callback the caller is
- * retiring; or it had not cleared it yet, in which case it must see our raised
- * count and wait for us to finish. Either way unregister cannot return while a
- * call to the callback it cleared is in flight.
+ * none. The callback itself runs outside logger_callback_lock: see the note on
+ * the lock above for why. The lock is only held long enough to snapshot the
+ * pointer and, if it is set, raise the in-flight count in the same critical
+ * section -- that pairing is what makes debug_unregister_logger()'s drain
+ * (which clears the pointer and waits out the count without releasing the
+ * lock) safe: no snapshot here can raise the count after the pointer is
+ * cleared, since taking one requires the same lock unregister is holding.
  */
 static void emit_log_line(int32_t tag_id, int debug_level, const char *output) {
-    void (*callback)(int32_t tag_id, int debug_level, const char *message) = log_callback_func;
+    log_callback_func_t callback = NULL;
+
+    spin_block(&logger_callback_lock) {
+        callback = log_callback_func;
+        if(callback) { atomic_add_int32(&log_callback_in_flight, 1); }
+    }
 
     if(callback) {
-        atomic_add_int32(&log_callback_in_flight, 1);
-
-        /* re-read now that our presence is published. */
-        callback = log_callback_func;
-
-        if(callback) { callback(tag_id, debug_level, output); }
-
+        callback(tag_id, debug_level, output);
         atomic_add_int32(&log_callback_in_flight, -1);
-
-        if(callback) { return; }
-
-        /* unregistered underneath us -- fall through and write it to stderr. */
+        return;
     }
 
     fputs(output, stderr);
