@@ -57,8 +57,18 @@
 #define DATA_TIMEOUT (5000)
 #define NUM_THREADS (10)
 #define LOOP_INTERVAL_MS (250)
-#define PRE_SHUTDOWN_WAIT_MS (2000)
-#define POST_SHUTDOWN_WAIT_MS (2000)
+#define DEFAULT_PRE_SHUTDOWN_WAIT_MS (2000)
+#define DEFAULT_POST_SHUTDOWN_WAIT_MS (2000)
+
+/*
+ * Both waits assume every worker thread has finished creating its tag before the
+ * next step runs. Two seconds is ample natively, but under an instrumentation
+ * tool a single tag creation takes seconds and the threads serialize, so the
+ * shutdown in step 3 lands mid-creation and every thread reports
+ * PLCTAG_ERR_TIMEOUT -- a property of the harness, not of the library. Rather
+ * than pick one number that has to suit both, let the caller stretch them.
+ */
+#define WAIT_MS_ENV_VAR "LIBPLCTAG_TEST_SHUTDOWN_WAIT_MS"
 
 /* Base tag path from command line */
 static char *base_tag_path = NULL;
@@ -107,6 +117,26 @@ static void parse_args(int argc, char **argv) {
 }
 
 
+/*
+ * Override for both settle-time waits, in milliseconds. Returns default_ms when
+ * unset, empty or not a positive number.
+ */
+static uint32_t wait_ms_from_env(uint32_t default_ms) {
+    const char *val = getenv(WAIT_MS_ENV_VAR);
+
+    if(!val || !*val) { return default_ms; }
+
+    int parsed = atoi(val);
+
+    if(parsed <= 0) {
+        fprintf(stderr, "Ignoring invalid %s=\"%s\", using %u ms.\n", WAIT_MS_ENV_VAR, val, default_ms);
+        return default_ms;
+    }
+
+    return (uint32_t)parsed;
+}
+
+
 int main(int argc, char **argv) {
     compat_thread_t threads[NUM_THREADS] = {0};
     thread_stats_t thread_stats[NUM_THREADS] = {0};
@@ -115,6 +145,8 @@ int main(int argc, char **argv) {
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
+    uint32_t pre_shutdown_wait_ms = wait_ms_from_env(DEFAULT_PRE_SHUTDOWN_WAIT_MS);
+    uint32_t post_shutdown_wait_ms = wait_ms_from_env(DEFAULT_POST_SHUTDOWN_WAIT_MS);
 
     /* Parse command line arguments */
     parse_args(argc, argv);
@@ -150,8 +182,8 @@ int main(int argc, char **argv) {
     /*
      * Step 2: Wait for threads to run
      */
-    fprintf(stderr, "\n=== Step 2: Waiting %d ms for threads to run ===\n", PRE_SHUTDOWN_WAIT_MS);
-    compat_sleep_ms(PRE_SHUTDOWN_WAIT_MS, NULL);
+    fprintf(stderr, "\n=== Step 2: Waiting %u ms for threads to run ===\n", pre_shutdown_wait_ms);
+    compat_sleep_ms(pre_shutdown_wait_ms, NULL);
 
     /*
      * Step 3: Shutdown the library
@@ -163,8 +195,8 @@ int main(int argc, char **argv) {
     /*
      * Step 4: Wait for threads to recover
      */
-    fprintf(stderr, "\n=== Step 4: Waiting %d ms for threads to recover ===\n", POST_SHUTDOWN_WAIT_MS);
-    compat_sleep_ms(POST_SHUTDOWN_WAIT_MS, NULL);
+    fprintf(stderr, "\n=== Step 4: Waiting %u ms for threads to recover ===\n", post_shutdown_wait_ms);
+    compat_sleep_ms(post_shutdown_wait_ms, NULL);
 
     /*
      * Step 5: Signal threads to terminate
