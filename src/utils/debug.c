@@ -63,17 +63,33 @@ static volatile uint32_t thread_num = 1;
 
 /* Logger callback and the lock guarding it. This must be a spinlock, not a real
  * mutex: mutex_lock_impl()/mutex_unlock_impl() call pdebug() themselves to trace
- * the lock attempt, and pdebug_impl() below takes this lock on every single call
- * -- using a real mutex here means every log call re-enters pdebug_impl() while
- * still inside this same critical section, recursing without ever completing the
- * original lock attempt. lock_acquire()/lock_release() are deliberately pdebug-free
- * for exactly this reason. lock_t is also valid from static initialization alone
- * (LOCK_INIT is just 0), unlike a mutex_p, which needs a runtime mutex_create()
- * -- and pdebug_impl()/debug_register_logger()/debug_unregister_logger() can all
- * run before initialize_modules() ever does, e.g. a caller may register a logger
- * as their very first API call. */
+ * the lock attempt, and register/unregister below take this lock -- using a real
+ * mutex here means those calls re-enter pdebug_impl() while still inside this same
+ * critical section, recursing without ever completing the original lock attempt.
+ * lock_acquire()/lock_release() are deliberately pdebug-free for exactly this
+ * reason. lock_t is also valid from static initialization alone (LOCK_INIT is just
+ * 0), unlike a mutex_p, which needs a runtime mutex_create() -- and pdebug_impl()/
+ * debug_register_logger()/debug_unregister_logger() can all run before
+ * initialize_modules() ever does, e.g. a caller may register a logger as their very
+ * first API call.
+ *
+ * IMPORTANT: pdebug_impl() must NOT take this lock. It is a pure spin with no
+ * yield, so a waiter burns CPU for as long as the holder takes. Emitting a log line
+ * means an fputs() and periodic fflush() -- a write(2) -- so holding the lock across
+ * output makes every thread in the process spin for the duration of another thread's
+ * syscall. Instead pdebug_impl() uses the in-flight counter below to coordinate with
+ * unregister, and does its output holding no lock of ours at all.
+ */
 static lock_t logger_callback_lock = LOCK_INIT;
 static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
+
+/*
+ * Count of pdebug_impl() calls that have loaded a non-NULL log_callback_func and may
+ * still be inside it. Only ever raised while a callback is registered, so once
+ * debug_unregister_logger() clears the pointer this is guaranteed to drain to zero:
+ * later callers see NULL and never touch it.
+ */
+static atomic_int32_t log_callback_in_flight = ATOMIC_INT_STATIC_INIT;
 
 /* Buffering control for stderr logging performance */
 static atomic_bool stderr_buffering_initialized = ATOMIC_BOOL_STATIC_INIT;
@@ -194,6 +210,50 @@ static void ensure_stderr_buffering(void) {
 }
 
 
+/*
+ * Hand a finished log line to the registered callback, or to stderr if there is
+ * none. Takes no spinlock: see the note on logger_callback_lock above for why
+ * output must never run inside one.
+ *
+ * Coordinating with debug_unregister_logger() without a lock takes two steps.
+ * Load the pointer, and if it is set, raise the in-flight count and load it a
+ * second time. The atomics are full barriers, so by the time the second load
+ * happens our increment is visible to everyone. That leaves unregister only two
+ * possibilities: it cleared the pointer before our second load, and we see NULL
+ * and fall back to stderr rather than calling into a callback the caller is
+ * retiring; or it had not cleared it yet, in which case it must see our raised
+ * count and wait for us to finish. Either way unregister cannot return while a
+ * call to the callback it cleared is in flight.
+ */
+static void emit_log_line(int32_t tag_id, int debug_level, const char *output) {
+    void (*callback)(int32_t tag_id, int debug_level, const char *message) = log_callback_func;
+
+    if(callback) {
+        atomic_add_int32(&log_callback_in_flight, 1);
+
+        /* re-read now that our presence is published. */
+        callback = log_callback_func;
+
+        if(callback) { callback(tag_id, debug_level, output); }
+
+        atomic_add_int32(&log_callback_in_flight, -1);
+
+        if(callback) { return; }
+
+        /* unregistered underneath us -- fall through and write it to stderr. */
+    }
+
+    fputs(output, stderr);
+
+    /* Flush periodically for better performance while ensuring timely output */
+    int32_t call_count = atomic_add_int32(&log_call_count, 1) + 1;
+    if(debug_level <= DEBUG_ERROR || (call_count % 100) == 0) {
+        /* Flush on errors (critical info) or every 100 log entries */
+        fflush(stderr);
+    }
+}
+
+
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
     va_list va;
     struct tm t;
@@ -232,27 +292,9 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     // NOLINTNEXTLINE
     /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
 
-    /* Check and call the callback inside the same critical section that
-     * debug_register_logger()/debug_unregister_logger() use to change it: this
-     * makes "check whether a callback is registered" and "call it" one atomic
-     * step, so unregister can never return while a call to the just-cleared
-     * callback is still in flight or about to start. */
-    spin_block(&logger_callback_lock) {
-        if(log_callback_func) {
-            log_callback_func(tag_id, debug_level, output);
-        } else {
-            fputs(output, stderr);
-
-            /* Flush periodically for better performance while ensuring timely output */
-            int32_t call_count = atomic_add_int32(&log_call_count, 1) + 1;
-            if(debug_level <= DEBUG_ERROR || (call_count % 100) == 0) {
-                /* Flush on errors (critical info) or every 100 log entries */
-                fflush(stderr);
-            }
-        }
-    }
-
     va_end(va);
+
+    emit_log_line(tag_id, debug_level, output);
 }
 
 
@@ -307,17 +349,24 @@ int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debu
 int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    /* Because pdebug_impl() checks-and-calls the callback inside this same
-     * lock, this cannot return while a call to the callback we're about to
-     * clear is in flight or about to start: either we get the lock first (and
-     * no in-flight call exists yet) or a caller already holding it finishes its
-     * check-and-call before we get in. No separate drain/wait is needed. */
     spin_block(&logger_callback_lock) {
         if(log_callback_func) {
             log_callback_func = NULL;
         } else {
             rc = PLCTAG_ERR_NOT_FOUND;
         }
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /*
+         * The pointer is clear, so no new caller can reach the callback. Wait out
+         * the ones that loaded it just before we cleared it, so this does not return
+         * while a call is still running -- the caller is free to tear down whatever
+         * the callback touches the moment we do. See emit_log_line() for how the two
+         * sides interlock. This drains: callers arriving from here on see NULL and
+         * never raise the count.
+         */
+        while(atomic_get_int32(&log_callback_in_flight) > 0) { sleep_ms(1); }
     }
 
     return rc;
