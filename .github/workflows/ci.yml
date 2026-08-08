@@ -638,12 +638,24 @@ jobs:
       # 100 minutes. Two genuinely stuck tests then outlived the whole job.
       # Observed worst case under Valgrind so far is 493s, which 1200s covers.
       #
-      # --max-workers 2 on a 4-CPU runner: Valgrind serializes a client's threads
-      # onto one core, so four of them plus four native servers oversubscribes the
-      # box badly. That contention is what pushed tests 19 and 47 past the
-      # library's own protocol timeouts (PLCTAG_ERR_TIMEOUT) -- a timeout the
-      # harness cannot extend, since --timeout-scale only moves the harness's kill
-      # budget and not timeouts baked into the tag strings.
+      # --max-workers 1, and --fair-sched=yes, both for the same reason.
+      #
+      # Valgrind serializes a client's threads onto a single core. The three
+      # test_shutdown-family tests spawn ~20 threads each, and measured against
+      # their own debug output they were executing at 0.2, 1.4 and 2.1 log lines
+      # per second while every other test in the same run managed 42 to 6230.
+      # Two of those thread-heavy tests happened to run concurrently, so each
+      # starved the other; a tag creation that should be near-instant spent 223
+      # seconds just reaching plc_tag_create()'s wait loop, then timed out there
+      # against a client-side budget the harness cannot extend (--timeout-scale
+      # only moves the harness's own kill budget, not timeouts compiled into the
+      # test or baked into a tag string).
+      #
+      # --fair-sched=yes replaces Valgrind's default scheduler, which is
+      # explicitly unfair and pathological for a lock-heavy multithreaded program.
+      # --max-workers 1 stops two such tests from starving each other. Serial
+      # execution costs less wall clock here than it appears to: the previous run
+      # spent 1200 of its 1228 seconds with one worker blocked on a single test.
       # Step budget sits below the job budget on purpose. A job that hits its own
       # timeout-minutes is cancelled outright and the always() upload step below is
       # not reliably reached -- so the run that hangs is exactly the run whose logs
@@ -657,8 +669,8 @@ jobs:
           python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs \
             --skip-groups stress,timing \
             --timeout-scale 4 \
-            --max-workers 2 \
-            --client-wrapper "valgrind --tool=memcheck --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
+            --max-workers 1 \
+            --client-wrapper "valgrind --tool=memcheck --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
 
       # The client's exit code carries no Valgrind information now, so this scan
       # is the only thing that turns a finding into a build failure.
