@@ -578,13 +578,15 @@ jobs:
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
-      # test_shutdown_restart waits a fixed settle time for its ten worker threads
-      # to finish creating tags before it shuts the library down. Two seconds is
-      # ample natively; under Valgrind a single create takes seconds and the
-      # threads serialize, so the shutdown landed mid-create and every thread
-      # reported PLCTAG_ERR_TIMEOUT. Measured worst case was the last tag
-      # appearing 29s after shutdown fired, so give it real headroom.
-      LIBPLCTAG_TEST_SHUTDOWN_WAIT_MS: "45000"
+      # test_shutdown_restart's two fixed timeouts are both far too short under
+      # Valgrind. Its ten worker threads serialize, so a single plc_tag_create()
+      # was measured spending 10-36s just reaching its wait loop -- then expiring
+      # against a 5s operation timeout before doing any work. The settle waits in
+      # steps 2 and 4 have to outlast that whole sequence, or the shutdown lands
+      # while creates are still in flight. Both are generous on purpose; they are
+      # fixed sleeps, so the cost is bounded and paid only by this one test.
+      LIBPLCTAG_TEST_OP_TIMEOUT_MS: "30000"
+      LIBPLCTAG_TEST_SHUTDOWN_WAIT_MS: "90000"
 
     steps:
       - name: "Checkout library source."

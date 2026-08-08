@@ -54,7 +54,7 @@
 #endif
 
 #define REQUIRED_VERSION 2, 5, 0
-#define DATA_TIMEOUT (5000)
+#define DEFAULT_DATA_TIMEOUT_MS (5000)
 #define NUM_THREADS (10)
 #define LOOP_INTERVAL_MS (250)
 #define DEFAULT_PRE_SHUTDOWN_WAIT_MS (2000)
@@ -69,6 +69,18 @@
  * than pick one number that has to suit both, let the caller stretch them.
  */
 #define WAIT_MS_ENV_VAR "LIBPLCTAG_TEST_SHUTDOWN_WAIT_MS"
+
+/*
+ * Timeout handed to plc_tag_create()/read()/write(). Five seconds is generous
+ * natively, but the ten worker threads serialize under an instrumentation tool
+ * and a single create was measured taking 10-36 seconds just to reach its wait
+ * loop -- so every thread timed out before doing any work. Overridable for the
+ * same reason as the settle waits above.
+ */
+#define OP_TIMEOUT_ENV_VAR "LIBPLCTAG_TEST_OP_TIMEOUT_MS"
+
+/* Set once in main() before any worker thread starts, so the threads only read it. */
+static uint32_t data_timeout_ms = DEFAULT_DATA_TIMEOUT_MS;
 
 /* Base tag path from command line */
 static char *base_tag_path = NULL;
@@ -118,18 +130,18 @@ static void parse_args(int argc, char **argv) {
 
 
 /*
- * Override for both settle-time waits, in milliseconds. Returns default_ms when
- * unset, empty or not a positive number.
+ * Read a millisecond override from the environment. Returns default_ms when the
+ * variable is unset, empty or not a positive number.
  */
-static uint32_t wait_ms_from_env(uint32_t default_ms) {
-    const char *val = getenv(WAIT_MS_ENV_VAR);
+static uint32_t ms_from_env(const char *var_name, uint32_t default_ms) {
+    const char *val = getenv(var_name);
 
     if(!val || !*val) { return default_ms; }
 
     int parsed = atoi(val);
 
     if(parsed <= 0) {
-        fprintf(stderr, "Ignoring invalid %s=\"%s\", using %u ms.\n", WAIT_MS_ENV_VAR, val, default_ms);
+        fprintf(stderr, "Ignoring invalid %s=\"%s\", using %u ms.\n", var_name, val, default_ms);
         return default_ms;
     }
 
@@ -145,8 +157,11 @@ int main(int argc, char **argv) {
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
-    uint32_t pre_shutdown_wait_ms = wait_ms_from_env(DEFAULT_PRE_SHUTDOWN_WAIT_MS);
-    uint32_t post_shutdown_wait_ms = wait_ms_from_env(DEFAULT_POST_SHUTDOWN_WAIT_MS);
+    uint32_t pre_shutdown_wait_ms = ms_from_env(WAIT_MS_ENV_VAR, DEFAULT_PRE_SHUTDOWN_WAIT_MS);
+    uint32_t post_shutdown_wait_ms = ms_from_env(WAIT_MS_ENV_VAR, DEFAULT_POST_SHUTDOWN_WAIT_MS);
+
+    /* set before any worker thread is created, so the threads only ever read it. */
+    data_timeout_ms = ms_from_env(OP_TIMEOUT_ENV_VAR, DEFAULT_DATA_TIMEOUT_MS);
 
     /* Parse command line arguments */
     parse_args(argc, argv);
@@ -276,7 +291,7 @@ static void *worker_thread(void *arg) {
      * Create initial tag
      */
     start_time = compat_time_ms();
-    tag_id = plc_tag_create(tag_string, DATA_TIMEOUT);
+    tag_id = plc_tag_create(tag_string, (int)data_timeout_ms);
     stats->initial_tag_create_time_ms = compat_time_ms() - start_time;
 
     if(tag_id < 0) {
@@ -301,7 +316,7 @@ static void *worker_thread(void *arg) {
             fprintf(stderr, "Thread %d: Attempting to recreate tag...\n", stats->thread_id);
 
             start_time = compat_time_ms();
-            tag_id = plc_tag_create(tag_string, DATA_TIMEOUT);
+            tag_id = plc_tag_create(tag_string, (int)data_timeout_ms);
             stats->recreate_time_ms = compat_time_ms() - start_time;
 
             if(tag_id < 0) {
@@ -320,7 +335,7 @@ static void *worker_thread(void *arg) {
         }
 
         /* Read the tag */
-        rc = plc_tag_read(tag_id, DATA_TIMEOUT);
+        rc = plc_tag_read(tag_id, (int)data_timeout_ms);
         if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
             fprintf(stderr, "Thread %d: Read error: %s\n", stats->thread_id, plc_tag_decode_error(rc));
             stats->error_count++;
@@ -345,7 +360,7 @@ static void *worker_thread(void *arg) {
         }
 
         /* Write the tag */
-        rc = plc_tag_write(tag_id, DATA_TIMEOUT);
+        rc = plc_tag_write(tag_id, (int)data_timeout_ms);
         if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
             fprintf(stderr, "Thread %d: Write error: %s\n", stats->thread_id, plc_tag_decode_error(rc));
             stats->error_count++;
