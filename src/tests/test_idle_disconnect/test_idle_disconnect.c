@@ -40,7 +40,7 @@
 #include <inttypes.h>
 
 #define REQUIRED_VERSION 2, 1, 10
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 15000 /* generous: refused-connect RST can take ~2s per attempt on slow CI runners (Windows ARM64) */
 #define NEW_TIMEOUT_MS 6000        /* 6 seconds */
 #define INVALID_TIMEOUT_MS 1000000 /* Way too high, should be clamped */
 #define NEAR_MAX_TIMEOUT_MS 28000  /* Just under 30000ms max */

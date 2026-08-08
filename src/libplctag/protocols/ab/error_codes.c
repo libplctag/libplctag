@@ -274,23 +274,25 @@ static struct error_code_entry error_code_table
           {-1, -1, PLCTAG_ERR_REMOTE_ERR, "Unknown error code.", "Unknown error code."}};
 
 
-static int lookup_error_code(uint8_t *data) {
+static int lookup_error_code(uint8_t *data, size_t data_size) {
     int index = 0;
     int primary_code = 0;
     int secondary_code = 0;
 
-    /* build the error status */
-    primary_code = (int)*data;
+    /* build the error status, but only read bytes the caller told us are actually there. */
+    if(data_size >= 1) {
+        primary_code = (int)*data;
 
-    if(primary_code != 0) {
-        int num_status_words = 0;
+        if(primary_code != 0 && data_size >= 2) {
+            int num_status_words = 0;
 
-        data++;
-        num_status_words = (int)*data;
-
-        if(num_status_words > 0) {
             data++;
-            secondary_code = (int)data[0] + (int)(data[1] << 8);
+            num_status_words = (int)*data;
+
+            if(num_status_words > 0 && data_size >= 4) {
+                data++;
+                secondary_code = (int)data[0] + (int)(data[1] << 8);
+            }
         }
     }
 
@@ -308,22 +310,22 @@ static int lookup_error_code(uint8_t *data) {
 }
 
 
-const char *decode_cip_error_short(uint8_t *data) {
-    int index = lookup_error_code(data);
+const char *decode_cip_error_short(uint8_t *data, size_t data_size) {
+    int index = lookup_error_code(data, data_size);
 
     return error_code_table[index].short_desc;
 }
 
 
-const char *decode_cip_error_long(uint8_t *data) {
-    int index = lookup_error_code(data);
+const char *decode_cip_error_long(uint8_t *data, size_t data_size) {
+    int index = lookup_error_code(data, data_size);
 
     return error_code_table[index].long_desc;
 }
 
 
-int decode_cip_error_code(uint8_t *data) {
-    int index = lookup_error_code(data);
+int decode_cip_error_code(uint8_t *data, size_t data_size) {
+    int index = lookup_error_code(data, data_size);
 
     return error_code_table[index].translated_code;
 }

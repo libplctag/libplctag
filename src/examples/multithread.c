@@ -54,9 +54,9 @@
  * access.
  */
 
-volatile int done = 0;
+static compat_atomic_int32_t done = {0};
 
-void interrupt_handler(void) { done = 1; }
+void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
 
 
 /* global to cheat on passing it to threads. */
@@ -72,7 +72,7 @@ void *thread_func(void *data) {
     int rc;
     int value;
 
-    while(!done) {
+    while(!compat_atomic_load_int32(&done)) {
         int64_t start;
         int64_t end;
 
@@ -190,7 +190,7 @@ int main(int argc, char **argv) {
     }
 
     /* wait until ^C */
-    while(!done) { compat_sleep_ms(100, NULL); }
+    while(!compat_atomic_load_int32(&done)) { compat_sleep_ms(100, NULL); }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
 

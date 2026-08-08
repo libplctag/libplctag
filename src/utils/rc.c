@@ -71,7 +71,12 @@ static mutex_p cleanup_mutex = NULL;
 static cond_p cleanup_cond = NULL;
 static vector_p cleanup_queue = NULL;
 static thread_p cleanup_thread = NULL;
-static volatile int cleanup_thread_running = 0;
+static atomic_int32_t cleanup_thread_running = ATOMIC_INT_STATIC_INIT;
+
+/* Set around the refcount_cleanup(header) call in the cleanup thread loop below.
+ * Needed because "queue length == 0" is not the same as "quiescent": a destructor
+ * can be running right now and about to queue more work. */
+static atomic_int32_t cleanup_processing = ATOMIC_INT_STATIC_INIT;
 
 static void refcount_cleanup(refcount_p rc);
 
@@ -192,7 +197,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
          * Queue the cleanup instead of doing it immediately.
          * This ensures cleanup happens in a separate thread, not in the caller's thread.
          */
-        if(cleanup_thread_running && cleanup_mutex && cleanup_queue) {
+        if(atomic_get_int32(&cleanup_thread_running) && cleanup_mutex && cleanup_queue) {
             int vec_len = 0;
             critical_block(cleanup_mutex) {
                 vec_len = vector_length(cleanup_queue);
@@ -249,7 +254,7 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
     (void)arg; /* Unused parameter */
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Cleanup thread starting.");
 
-    while(cleanup_thread_running) {
+    while(atomic_get_int32(&cleanup_thread_running)) {
         refcount_p header = NULL;
 
         cond_wait(cleanup_cond, 100); /* 100 millisecond timeout */
@@ -260,7 +265,9 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
             if(header) {
                 pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Processing cleanup for object %p allocated at %s:%d",
                        (void *)(header + 1), header->function_name, header->line_num);
+                atomic_set_int32(&cleanup_processing, 1);
                 refcount_cleanup(header);
+                atomic_set_int32(&cleanup_processing, 0);
             }
         } while(header != NULL);
     }
@@ -307,11 +314,11 @@ int refcount_startup(void) {
     }
 
     /* Start the cleanup thread */
-    cleanup_thread_running = 1;
+    atomic_set_int32(&cleanup_thread_running, 1);
     rc = thread_create(&cleanup_thread, refcount_cleanup_thread_func, 32 * 1024, NULL);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to create cleanup thread!");
-        cleanup_thread_running = 0;
+        atomic_set_int32(&cleanup_thread_running, 0);
         vector_destroy(cleanup_queue);
         cleanup_queue = NULL;
         cond_destroy(&cleanup_cond);
@@ -333,6 +340,40 @@ int refcount_startup(void) {
  *
  * This waits for the cleanup queue to drain before returning.
  */
+/*
+ * refcount_drain
+ *
+ * Wait until the cleanup queue is empty and no destructor is currently running,
+ * i.e. every rc_dec() queued so far -- and everything those destructors have in
+ * turn queued -- has fully finished. Used by shutdown to make sure every tag
+ * destructor (and whatever it transitively released) has completed before the
+ * library-instance object itself is torn down.
+ */
+int refcount_drain(int timeout_ms) {
+    int64_t end_time = time_ms() + timeout_ms;
+
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Starting.");
+
+    while(1) {
+        int queue_len = 0;
+
+        if(cleanup_mutex && cleanup_queue) { critical_block(cleanup_mutex) { queue_len = vector_length(cleanup_queue); } }
+
+        if(queue_len == 0 && !atomic_get_int32(&cleanup_processing)) {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Done, queue is quiescent.");
+            return PLCTAG_STATUS_OK;
+        }
+
+        if(time_ms() >= end_time) {
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Timed out waiting for cleanup queue to drain!");
+            return PLCTAG_ERR_TIMEOUT;
+        }
+
+        sleep_ms(5);
+    }
+}
+
+
 int refcount_teardown(void) {
     pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, 0, "Shutting down refcount cleanup infrastructure.");
 
@@ -340,7 +381,7 @@ int refcount_teardown(void) {
     if(cleanup_thread) {
         /* Signal the cleanup thread to exit */
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Signaling cleanup thread to exit.");
-        cleanup_thread_running = 0;
+        atomic_set_int32(&cleanup_thread_running, 0);
         if(cleanup_cond) { cond_signal(cleanup_cond); }
 
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Waiting for cleanup thread to exit.");

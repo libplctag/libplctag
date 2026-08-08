@@ -117,8 +117,13 @@ typedef struct plc_s {
     /* PCCC info */
     uint16_t pccc_seq_id;
 
-    /* debugging. */
-    int reject_fo_count;
+    /* debugging. Points at a single atomic_int32_t shared by every
+     * connection's copy of this struct (see tcp_server.c: each accepted
+     * connection gets its own memcpy'd plc_s), so the count of remaining
+     * ForwardOpen rejections persists across the client reconnecting with a
+     * new TCP session on every retry, instead of resetting to the original
+     * CLI value each time. */
+    atomic_int32_t *reject_fo_count;
 
     /* response delay */
     int response_delay;

@@ -215,6 +215,13 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 }
 
 
+int compat_cpu_count(void) {
+    long count = sysconf(_SC_NPROCESSORS_ONLN);
+
+    return (count > 0) ? (int)count : 1;
+}
+
+
 #elif defined(WINDOWS_PLATFORM)
 
 #    include <process.h>
@@ -472,9 +479,85 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 }
 
 
+int compat_cpu_count(void) {
+    SYSTEM_INFO sys_info;
+
+    GetSystemInfo(&sys_info);
+
+    return (sys_info.dwNumberOfProcessors > 0) ? (int)sys_info.dwNumberOfProcessors : 1;
+}
+
+
 #else
 #    error "Not a supported platform!"
 #endif
+
+
+#if defined(POSIX_PLATFORM)
+#    include <arpa/inet.h>
+#    include <netinet/in.h>
+#    include <sys/socket.h>
+#elif defined(WINDOWS_PLATFORM)
+#    include <winsock2.h>
+#    include <ws2tcpip.h>
+
+static compat_once_t wsa_startup_once;
+
+static void wsa_startup_once_func(void) {
+    WSADATA wsa_data;
+    WSAStartup(MAKEWORD(2, 2), &wsa_data);
+}
+#endif
+
+
+bool compat_wait_for_listener(const char *host, uint16_t port, uint32_t timeout_ms) {
+    int64_t deadline_ms = compat_time_ms() + (int64_t)timeout_ms;
+
+#if defined(WINDOWS_PLATFORM)
+    compat_thread_once(&wsa_startup_once, wsa_startup_once_func);
+#endif
+
+    do {
+        struct sockaddr_in addr;
+        int rc;
+
+#if defined(WINDOWS_PLATFORM)
+        SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if(sock == INVALID_SOCKET) { return false; }
+#else
+        int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if(sock < 0) { return false; }
+#endif
+
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+
+        if(inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+#if defined(WINDOWS_PLATFORM)
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            return false;
+        }
+
+        rc = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+
+#if defined(WINDOWS_PLATFORM)
+        closesocket(sock);
+#else
+        close(sock);
+#endif
+
+        if(rc == 0) { return true; }
+
+        compat_sleep_ms(100, NULL);
+    } while(compat_time_ms() < deadline_ms);
+
+    return false;
+}
+
 
 #define BUFFER_SIZE 1024
 

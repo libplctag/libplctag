@@ -66,7 +66,7 @@ struct {
 int num_tags = 0;
 
 
-volatile int terminate = 0;
+static compat_atomic_int32_t terminate = {0};
 
 
 int is_comment(const char *line) {
@@ -465,7 +465,7 @@ int start_reads(void) {
 }
 
 
-void interrupt_handler(void) { terminate = 1; }
+void interrupt_handler(void) { compat_atomic_store_int32(&terminate, 1); }
 
 void usage(void) {
     // NOLINTNEXTLINE
@@ -533,7 +533,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    while(!terminate) {
+    while(!compat_atomic_load_int32(&terminate)) {
         int num_tags_read = 0;
         int64_t start, end;
 

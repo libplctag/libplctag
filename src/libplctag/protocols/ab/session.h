@@ -55,7 +55,7 @@
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
 
-#    define SESSION_CONN_STATUS_RING_SIZE (8)
+#    define SESSION_CONN_STATUS_RING_SIZE (64)
 #    define SESSION_CONN_STATUS_RING_SIZE_MASK (SESSION_CONN_STATUS_RING_SIZE - 1)
 
 
@@ -122,7 +122,7 @@ struct ab_session_t {
     uint64_t packet_count;
 
     thread_p handler_thread;
-    volatile int terminating;
+    atomic_int32_t terminating;
     mutex_p session_mutex;
     cond_p session_wait_cond;
 
@@ -152,7 +152,7 @@ struct ab_request_t {
 
     /* flags for communicating with background thread */
     int resp_received;
-    int abort_request;
+    atomic_int32_t abort_request;
 
     /* debugging info */
     int tag_id;

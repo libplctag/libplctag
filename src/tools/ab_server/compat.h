@@ -85,6 +85,8 @@ typedef struct {
 #    define atomic_load_int32(ptr) InterlockedCompareExchange((volatile LONG *)&(ptr)->value, 0, 0)
 #    define atomic_store_int32(ptr, val) InterlockedExchange((volatile LONG *)&(ptr)->value, (LONG)(val))
 #    define atomic_inc_int32(ptr) InterlockedIncrement((volatile LONG *)&(ptr)->value)
+/* Returns the value from *before* the decrement, like GCC/Clang's __atomic_fetch_sub. */
+#    define atomic_dec_int32(ptr) InterlockedExchangeAdd((volatile LONG *)&(ptr)->value, -1)
 #    define atomic_load_int64(ptr) InterlockedCompareExchange64((volatile LONG64 *)&(ptr)->value, 0, 0)
 #    define atomic_store_int64(ptr, val) InterlockedExchange64((volatile LONG64 *)&(ptr)->value, (LONG64)(val))
 #else
@@ -98,6 +100,8 @@ typedef struct {
 #    define atomic_load_int32(ptr) __atomic_load_n(&(ptr)->value, __ATOMIC_SEQ_CST)
 #    define atomic_store_int32(ptr, val) __atomic_store_n(&(ptr)->value, (val), __ATOMIC_SEQ_CST)
 #    define atomic_inc_int32(ptr) __atomic_add_fetch(&(ptr)->value, 1, __ATOMIC_SEQ_CST)
+/* Returns the value from *before* the decrement. */
+#    define atomic_dec_int32(ptr) __atomic_fetch_sub(&(ptr)->value, 1, __ATOMIC_SEQ_CST)
 #    define atomic_load_int64(ptr) __atomic_load_n(&(ptr)->value, __ATOMIC_SEQ_CST)
 #    define atomic_store_int64(ptr, val) __atomic_store_n(&(ptr)->value, (val), __ATOMIC_SEQ_CST)
 #endif

@@ -64,6 +64,13 @@ static void parse_pccc_tag(const char *tag, plc_s *plc);
 static void parse_cip_tag(const char *tag, plc_s *plc);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
+/* tcp_server.c gives every accepted connection its own memcpy'd copy of the
+ * plc_s context (see plc_s.reject_fo_count), so the ForwardOpen-rejection
+ * countdown must live outside that struct to persist across the client
+ * reconnecting with a new TCP session on every retry. Every copy's
+ * reject_fo_count pointer points back at this one instance. */
+static atomic_int32_t g_reject_fo_count;
+
 
 #ifdef IS_WINDOWS
 
@@ -146,11 +153,12 @@ int main(int argc, const char **argv) {
     /* set up handler for ^C etc. */
     setup_break_handler();
 
-    //    log_set_level(LOG_LEVEL_DETAIL);
-
     /* clear out context to make sure we do not get gremlins */
     // NOLINTNEXTLINE
     memset(&plc, 0, sizeof(plc));
+
+    /* shared across every connection's copy of plc -- see plc_s.reject_fo_count. */
+    plc.reject_fo_count = &g_reject_fo_count;
 
     /* set the random seed. */
     srand((unsigned int)time(NULL));
@@ -159,6 +167,11 @@ int main(int argc, const char **argv) {
 
     /* open a server connection and listen on the right port. */
     server = tcp_server_create("0.0.0.0", (plc.port_str ? plc.port_str : "44818"), request_handler, &plc, sizeof(plc));
+    if(!server) {
+        /* tcp_server_create() already logged the specific reason. */
+        log_error("ERROR: Unable to start the server, exiting!");
+        return 1;
+    }
 
     tcp_server_start(server, &done);
 
@@ -220,7 +233,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     bool has_tag = false;
 
     /* make sure that the reject FO count is zero. */
-    plc->reject_fo_count = 0;
+    atomic_store_int32(plc->reject_fo_count, 0);
 
     for(int i = 0; i < argc; i++) {
         if(strncmp(argv[i], "--plc=", 6) == 0) {
@@ -232,8 +245,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
             }
 
             if(str_cmp_i(&(argv[i][6]), "ControlLogix") == 0) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Selecting ControlLogix simulator.\n");
+                log_info_always("Selecting ControlLogix simulator.");
                 plc->plc_type = PLC_CONTROL_LOGIX;
                 plc->path[0] = (uint8_t)0x00; /* filled in later. */
                 plc->path[1] = (uint8_t)0x00; /* filled in later. */
@@ -247,8 +259,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = true;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Micro800") == 0) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Selecting Micro8xx simulator.\n");
+                log_info_always("Selecting Micro8xx simulator.");
                 plc->plc_type = PLC_MICRO800;
                 plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
@@ -260,8 +271,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Omron") == 0) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Selecting Omron NJ/NX simulator.\n");
+                log_info_always("Selecting Omron NJ/NX simulator.");
                 plc->plc_type = PLC_OMRON;
                 plc->path[0] = (uint8_t)0x12;  /* Extended segment, port A */
                 plc->path[1] = (uint8_t)0x09;  /* 9 bytes length. */
@@ -285,8 +295,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Selecting PLC/5 simulator.\n");
+                log_info_always("Selecting PLC/5 simulator.");
                 plc->plc_type = PLC_PLC5;
                 plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
@@ -298,8 +307,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Selecting SLC 500 simulator.\n");
+                log_info_always("Selecting SLC 500 simulator.");
                 plc->plc_type = PLC_SLC;
                 plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
@@ -311,8 +319,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Selecting Micrologix simulator.\n");
+                log_info_always("Selecting Micrologix simulator.");
                 plc->plc_type = PLC_MICROLOGIX;
                 plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
@@ -346,12 +353,15 @@ void process_args(int argc, const char **argv, plc_s *plc) {
             has_tag = true;
         }
 
-        if(strcmp(argv[i], "--debug") == 0) { debug_on(); }
+        if(strcmp(argv[i], "--debug") == 0) {
+            debug_on();
+            log_set_level(LOG_LEVEL_DETAIL);
+        }
 
         if(strncmp(argv[i], "--reject_fo=", 12) == 0) {
             if(plc) {
                 log_info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
-                plc->reject_fo_count = atoi(&argv[i][12]);
+                atomic_store_int32(plc->reject_fo_count, atoi(&argv[i][12]));
             }
         }
 

@@ -609,11 +609,8 @@ const char *pccc_decode_error(uint8_t *error_ptr) {
 }
 
 
-/*
- * FIXME This does not check for data overruns!
- */
-
 uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length) {
+    uint8_t *data_start = data;
     uint32_t d_type;
     uint32_t d_size;
 
@@ -643,7 +640,8 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
     if(d_type & 0x08) {
         int size_bytes = d_type & 0x07;
 
-        if(size_bytes > 4) { return NULL; }
+        /* the extension bytes must actually be present in the data we were given. */
+        if(size_bytes > 4 || (int)(data - data_start) + size_bytes >= data_size) { return NULL; }
 
         d_type = 0;
 
@@ -658,7 +656,8 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
     if(d_size & 0x08) {
         int size_bytes = d_size & 0x07;
 
-        if(size_bytes > 4) { return NULL; }
+        /* the extension bytes must actually be present in the data we were given. */
+        if(size_bytes > 4 || (int)(data - data_start) + size_bytes >= data_size) { return NULL; }
 
         d_size = 0;
 
@@ -851,7 +850,6 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address) {
 
         case 'O':
         case 'o': /* Output */
-            /* FIXME - Check if 0x82 is correct instead of 0x8b */
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Found Output file.");
             address->file_type = PCCC_FILE_OUTPUT;
             address->element_size_bytes = 2;
@@ -1680,7 +1678,9 @@ int pccc_check_read_status(ab_tag_p tag) {
     do {
         if(cip_pccc->general_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
-                   cip_pccc->general_status, decode_cip_error_long((uint8_t *)&(cip_pccc->general_status)));
+                   cip_pccc->general_status,
+                   decode_cip_error_long((uint8_t *)&(cip_pccc->general_status),
+                                         cip_error_data_size((uint8_t *)&(cip_pccc->general_status), data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }

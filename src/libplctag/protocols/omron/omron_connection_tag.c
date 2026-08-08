@@ -96,6 +96,8 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
         return NULL;
     }
 
+    int new_conn = 0;
+
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_OMRON: tag->conn = rc_inc(((omron_tag_p)src_tag)->conn); break;
@@ -106,24 +108,8 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
         }
 
         rc = tag->conn ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
-        if(rc == PLCTAG_STATUS_OK) {
-            /* Cloned from an existing tag: start with current connection state. */
-            tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
-            tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
-        }
     } else {
-        int new_conn = 0;
         rc = conn_find_or_create(&tag->conn, attribs, &new_conn);
-        if(rc == PLCTAG_STATUS_OK) {
-            if(new_conn) {
-                tag->event_ring_read_idx = 0;
-                tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
-            } else {
-                /* Late join: conn already exists and may already be UP. */
-                tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
-                tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
-            }
-        }
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -131,6 +117,31 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
         tag->status = (int8_t)rc;
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
         return (plc_tag_p)tag;
+    }
+
+    if(new_conn) {
+        /* We just created this conn (conn_find_or_create() initializes
+         * connection_status to DOWN and ring[0] to a real DOWN entry before ever
+         * starting its handler thread), so we know its exact birth state without
+         * racing that thread for a snapshot: it may already have raced through
+         * CONNECTING -> UP by the time we get here (a fast local connection can do
+         * that before this thread is even scheduled again), and reading "current"
+         * values at that point would silently skip every transition that already
+         * happened, exactly like the joined-existing-conn case below -- except
+         * this tag was never really joining an existing conn, it just lost a
+         * scheduling race with the thread it started. */
+        tag->event_ring_read_idx = 0;
+        tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
+    } else {
+        /* Joining a conn that already existed (found by conn_find_or_create(), or
+         * shared via src_tag): take both values as one atomic snapshot under
+         * conn->mutex so we get a real, consistent point-in-time state rather than
+         * a read_idx from before a transition paired with a status from after it --
+         * see the comment in conn_set_connection_status(). */
+        critical_block(tag->conn->mutex) {
+            tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
+            tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
+        }
     }
 
     tag->first_tickler_run = true;
@@ -150,8 +161,14 @@ static int omron_connection_tag_abort(plc_tag_p tag) {
 static int omron_connection_tag_status(plc_tag_p raw_tag) {
     omron_connection_tag_p tag = (omron_connection_tag_p)raw_tag;
 
-    if(tag->vtable->tickler) { tag->vtable->tickler(raw_tag); }
-
+    /* Do NOT tickle here. omron_connection_tag_tickler() must have exactly one
+     * caller -- the generic tag_tickler_func() loop -- since it advances
+     * tag->event_ring_read_idx past whatever is currently in the ring on every
+     * call. plc_tag_create_impl() calls ->status() synchronously, in a tight
+     * loop, on the creating thread while waiting for tag creation to finish; if
+     * that also ticked, it could drain and mark ring entries as seen before the
+     * real tickler thread ever got a chance to deliver them, silently dropping
+     * the earliest connection-status events (e.g. CONNECTING). */
     return tag->status;
 }
 
@@ -253,6 +270,11 @@ static void omron_connection_tag_destructor(void *ptr) {
     if(tag->data) {
         mem_free(tag->data);
         tag->data = NULL;
+    }
+
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
     }
 
     pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_INFO, tag->tag_id, "Done.");

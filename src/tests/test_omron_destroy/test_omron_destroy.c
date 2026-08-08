@@ -53,6 +53,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef WINDOWS_PLATFORM
+#    include <process.h>
+#    define compat_getpid _getpid
+#else
+#    include <unistd.h>
+#    define compat_getpid getpid
+#endif
+
 #define REQUIRED_VERSION 2, 7, 0
 
 /* Timeout passed to plc_tag_read() after the server is killed — mirrors the
@@ -63,16 +71,35 @@
  * If it has not returned by this deadline the bug is present. */
 #define DESTROY_TIMEOUT_MS 10000
 
-#define TAG_ATTRIBS \
-    "protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx" \
+/*
+ * Port for this test's private server. Normally supplied on the command line by
+ * the parallel test runner, which allocates it from the same pool as every other
+ * server so it cannot collide with them. The default is only for running this
+ * test by hand; a hardcoded port here used to sit inside the range the runner
+ * hands out, which is a collision waiting to happen as the suite grows.
+ */
+#define DEFAULT_SERVER_PORT (44900)
+
+#define TAG_ATTRIBS_FMT \
+    "protocol=ab-eip&gateway=127.0.0.1:%d&path=18,127.0.0.1&plc=omron-njnx" \
     "&elem_count=1&name=TestDINTArray[0]"
 
+/* Capture the backgrounded server's PID into a pidfile keyed on this test
+ * process's own PID, so stop_server() kills exactly this instance --
+ * pkill/taskkill by image name would also kill any other ab_server instance
+ * running concurrently elsewhere in the test suite (see issue found by the
+ * parallel test runner: it collaterally SIGTERM'd every ab_server on the
+ * host). */
 #ifdef WINDOWS_PLATFORM
-#    define SERVER_START "start /B %s --plc=Omron --tag=TestDINTArray:DINT[10] >nul 2>&1"
-#    define SERVER_STOP  "taskkill /IM ab_server.exe /F >nul 2>&1"
+#    define SERVER_START \
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
+        "'--plc=Omron','--port=%d','--tag=TestDINTArray:DINT[10]').Id\" > ab_server_%d.pid"
+#    define SERVER_STOP "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
 #else
-#    define SERVER_START "%s --plc=Omron --tag=TestDINTArray:DINT[10] > /tmp/omron_destroy_test_server.log 2>&1 &"
-#    define SERVER_STOP  "pkill -TERM ab_server > /dev/null 2>&1"
+#    define SERVER_START \
+        "%s --plc=Omron --port=%d --tag=TestDINTArray:DINT[10] > /tmp/omron_destroy_test_server.log 2>&1 & echo $! > " \
+        "/tmp/ab_server_%d.pid"
+#    define SERVER_STOP "kill -TERM $(cat /tmp/ab_server_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_%d.pid"
 #endif
 
 #define log(...)                          \
@@ -88,20 +115,45 @@ typedef struct {
 } destroy_state_t;
 
 
-static void start_server(const char *ab_server_path) {
-    char cmd[1024] = {0};
-    snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_path);
-    if(system(cmd) != 0) {
-        log("Failed to start ab_server.\n");
-        exit(1);
-    }
-    compat_sleep_ms(2000, NULL);
+static void stop_server(int test_pid) {
+    char cmd[512] = {0};
+    snprintf(cmd, sizeof(cmd), SERVER_STOP, test_pid, test_pid);
+    system(cmd);
+    compat_sleep_ms(500, NULL);
 }
 
 
-static void stop_server(void) {
-    system(SERVER_STOP);
-    compat_sleep_ms(500, NULL);
+/*
+ * Unlike the harness-managed servers elsewhere in the suite, this test
+ * backgrounds ab_server itself via an extra shell fork/exec hop and gets
+ * no help from the harness's own retry-on-vanish logic (that only applies
+ * when the Python runner owns the server). A contended CI runner can push
+ * that extra hop past a naive one-shot wait, so retry once with a fresh
+ * server before giving up -- a real bug reproduces every time; a one-off
+ * scheduling delay does not.
+ */
+static void start_server(const char *ab_server_path, int test_pid, int server_port) {
+    char cmd[1024] = {0};
+    snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_path, server_port, test_pid);
+
+    for(int attempt = 0; attempt < 2; attempt++) {
+        if(system(cmd) != 0) {
+            log("Failed to start ab_server.\n");
+            exit(1);
+        }
+
+        /* range-checked against 1..65535 in main() before we get here. */
+        if(compat_wait_for_listener("127.0.0.1", (uint16_t)server_port, 30000)) {
+            return;
+        }
+
+        log("Warning: ab_server did not start listening on port %d in time%s.\n", server_port,
+            attempt == 0 ? ", retrying" : "");
+        stop_server(test_pid);
+    }
+
+    log("Error: ab_server did not start listening on port %d in time!\n", server_port);
+    exit(1);
 }
 
 
@@ -121,11 +173,26 @@ static void *destroy_thread_func(void *arg) {
 
 int main(int argc, char **argv) {
     if(argc < 2) {
-        log("Usage: %s <path/to/ab_server>\n", argv[0]);
+        log("Usage: %s <path/to/ab_server> [port]\n", argv[0]);
         return 1;
     }
 
     const char *ab_server_path = argv[1];
+
+    /* The runner passes an allocated port; fall back to the default when run by hand. */
+    int server_port = DEFAULT_SERVER_PORT;
+
+    if(argc >= 3) {
+        server_port = atoi(argv[2]);
+
+        if(server_port <= 0 || server_port > 65535) {
+            log("Invalid port \"%s\"!\n", argv[2]);
+            return 1;
+        }
+    }
+
+    char tag_attribs[256] = {0};
+    snprintf(tag_attribs, sizeof(tag_attribs), TAG_ATTRIBS_FMT, server_port);
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         log("Library version %d.%d.%d or later required.\n", REQUIRED_VERSION);
@@ -134,17 +201,16 @@ int main(int argc, char **argv) {
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
-    /* Clean up any leftover server from a previous run. */
-    stop_server();
+    int test_pid = (int)compat_getpid();
 
-    log("Starting Omron simulator...\n");
-    start_server(ab_server_path);
+    log("Starting Omron simulator on port %d...\n", server_port);
+    start_server(ab_server_path, test_pid, server_port);
 
     log("Creating Omron tag...\n");
-    int32_t tag = plc_tag_create(TAG_ATTRIBS, 5000);
+    int32_t tag = plc_tag_create(tag_attribs, 15000);
     if(tag < 0) {
         log("FAIL: could not create tag: %s\n", plc_tag_decode_error(tag));
-        stop_server();
+        stop_server(test_pid);
         return 1;
     }
 
@@ -153,13 +219,13 @@ int main(int argc, char **argv) {
     if(rc != PLCTAG_STATUS_OK) {
         log("FAIL: initial read failed: %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        stop_server();
+        stop_server(test_pid);
         return 1;
     }
     log("Initial read OK.\n");
 
     log("Killing server to simulate connection loss...\n");
-    stop_server();
+    stop_server(test_pid);
 
     /* Reproduce the user's exact sequence: a synchronous read that times out
      * because the connection is gone.  plc_tag_destroy is then called

@@ -49,6 +49,17 @@
 #include <utils/vector.h>
 
 
+/* byte offset of the UDT handle/type attribute within a Get_Attributes_List response payload */
+#define UDT_METADATA_HANDLE_OFFSET (28)
+
+/*
+ * size of the fixed-size fields preceding the CIP response in an identity reply:
+ * interface_handle (one uint32_le) followed by timeout, item_count, NAI type, NAI length,
+ * UDI type, and UDI length (six uint16_le fields).
+ */
+#define IDENTITY_RESPONSE_HEADER_SIZE ((int)(sizeof(uint32_le) + 6 * sizeof(uint16_le)))
+
+
 /* tag listing packet format is as follows for controller tags:
 
 CIP Tag Info command
@@ -398,6 +409,13 @@ int raw_tag_check_write_status_connected(ab_tag_p tag) {
     /* copy the data into the tag. */
     data_start = (uint8_t *)(&cip_resp->reply_service);
     data_end = tag->req->data + (tag->req->request_size);
+
+    if(data_end < data_start) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
     data_size = (int)(unsigned int)(data_end - data_start);
 
     tag_data_buffer = mem_realloc(tag->data, data_size);
@@ -440,7 +458,14 @@ int raw_tag_check_write_status_unconnected(ab_tag_p tag) {
 
     /* copy the data into the tag. */
     uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
-    uint8_t *data_end = data_start + le2h16(cip_resp->cpf_udi_item_length);
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
+
+    if(data_end < data_start) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
     int data_size = (int)(unsigned int)(data_end - data_start);
     uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
 
@@ -1185,12 +1210,22 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     hdr = (eip_encap *)(tag->req->data);
     data = (uint8_t *)(hdr + 1);
 
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
+
     /* Parse the response:
      * EIP header (28 bytes)
      * CPF header: interface_handle (4) + timeout (2) + item_count (2)
      * Item 1: Null Address Item (type + length = 4 bytes, no data)
      * Item 2: UDI (type + length + CIP response data)
      */
+
+    if((data_end - data) < IDENTITY_RESPONSE_HEADER_SIZE) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+               "Identity response is too short for the CPF and item headers!");
+        rc = PLCTAG_ERR_TOO_SMALL;
+        ab_tag_abort_request(tag);
+        return rc;
+    }
 
     // cpf_items = data;
     data += 4; /* skip interface handle */
@@ -1246,6 +1281,13 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* UDI data starts here - this is the CIP response */
     cip_response = data;
 
+    if(cip_response >= data_end) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP reply service byte!");
+        rc = PLCTAG_ERR_TOO_SMALL;
+        ab_tag_abort_request(tag);
+        return rc;
+    }
+
     /* Extract CIP response fields */
     reply_service = *cip_response;
     cip_response++;
@@ -1254,6 +1296,14 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     if(reply_service == (AB_EIP_CMD_UNCONNECTED_SEND | AB_EIP_CMD_CIP_OK)) {
         /* Skip reserved byte */
         cip_response++;
+
+        if(cip_response >= data_end) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                   "Identity response is too short for the Unconnected Send status byte!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            ab_tag_abort_request(tag);
+            return rc;
+        }
 
         /* Extract Unconnected Send status */
         cip_status = *cip_response;
@@ -1269,6 +1319,14 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
 
         /* Skip extended status size (1 byte) */
         cip_response++;
+
+        if(cip_response >= data_end) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                   "Identity response is too short for the embedded CIP reply service byte!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            ab_tag_abort_request(tag);
+            return rc;
+        }
 
         /* Now we should have the actual Get_Attributes_All response embedded */
         reply_service = *cip_response;
@@ -1287,6 +1345,13 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* Skip reserved byte */
     cip_response++;
 
+    if(cip_response >= data_end) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP status byte!");
+        rc = PLCTAG_ERR_TOO_SMALL;
+        ab_tag_abort_request(tag);
+        return rc;
+    }
+
     /* Extract CIP status */
     cip_status = *cip_response;
     cip_response++;
@@ -1301,10 +1366,17 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* Skip extended status size (1 byte) */
     cip_response++;
 
+    if(cip_response > data_end) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is truncated!");
+        rc = PLCTAG_ERR_TOO_SMALL;
+        ab_tag_abort_request(tag);
+        return rc;
+    }
+
     /* Calculate data size: remaining bytes after all CIP headers */
     data_size = item_length - (int)(cip_response - data);
 
-    if(data_size < 0) {
+    if(data_size < 0 || data_size > (int)(data_end - cip_response)) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Invalid response data size: %d", data_size);
         rc = PLCTAG_ERR_BAD_DATA;
         ab_tag_abort_request(tag);
@@ -1555,7 +1627,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
     data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = tag->req->data + tag->req->request_size;
 
     /* check the status */
     do {
@@ -1569,10 +1641,13 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         }
 
         if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
+
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
+                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }
 
@@ -1623,8 +1698,16 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 
             /* scan through the data to get the next ID to use. */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Scanning through data for next ID.");
-            while((data_end - current_entry_data) > 0) {
+            while((data_end - current_entry_data) >= (ptrdiff_t)sizeof(tag_list_entry)) {
                 tag_list_entry *current_entry = (tag_list_entry *)current_entry_data;
+                ptrdiff_t entry_size = (ptrdiff_t)sizeof(*current_entry) + (ptrdiff_t)le2h16(current_entry->string_len);
+
+                if(entry_size > (data_end - current_entry_data)) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                           "Tag list entry name length runs past the end of the response!");
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                    break;
+                }
 
                 /* first element is the symbol instance ID */
                 tag->next_id = (uint16_t)(le2h32(current_entry->instance_id) + 1);
@@ -1632,7 +1715,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Next ID: %d", tag->next_id);
 
                 /* skip past to the next instance. */
-                current_entry_data += (sizeof(*current_entry) + le2h16(current_entry->string_len));
+                current_entry_data += entry_size;
 
                 tag->elem_count++;
             }
@@ -2000,7 +2083,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = tag->req->data + tag->req->request_size;
 
     /* check the status */
     do {
@@ -2014,10 +2097,13 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
         }
 
         if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
+
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
+                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }
 
@@ -2038,6 +2124,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
             uint32_le tmp_u32;
             uint16_le tmp_u16;
             uint8_t *payload = (uint8_t *)(cip_resp + 1);
+            int min_payload_size = UDT_METADATA_HANDLE_OFFSET + (int)sizeof(uint16_le);
 
             /*
              * We are going to build a 14-byte fake header in the buffer:
@@ -2049,6 +2136,14 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
              * 10-11   16-bit UDT number of members (fields).
              * 12-13   16-bit UDT handle/type.
              */
+
+            if(payload_size < min_payload_size) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                       "UDT metadata response is too short, got %d bytes but need at least %d!", (int)payload_size,
+                       min_payload_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.",
                    new_size); /* MAGIC */
@@ -2081,12 +2176,16 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
             mem_copy(tag->data + 10, payload + 22, (int)(unsigned int)(sizeof(tmp_u16)));
 
             /* copy in the UDT number of members */
-            mem_copy(tag->data + 12, payload + 28, (int)(unsigned int)(sizeof(tmp_u16)));
+            mem_copy(tag->data + 12, payload + UDT_METADATA_HANDLE_OFFSET, (int)(unsigned int)(sizeof(tmp_u16)));
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "current size %d", tag->size);
             pdebug_dump_bytes(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, tag->data, tag->size);
+        } else if(partial_data) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Partial response, no data to process yet.");
         } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "UDT metadata response contained no data!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
         }
 
         /* set the return code */
@@ -2307,7 +2406,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = tag->req->data + tag->req->request_size;
 
     /* check the status */
     do {
@@ -2321,10 +2420,13 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
         }
 
         if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
+
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
+                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }
 

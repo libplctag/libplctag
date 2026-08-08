@@ -77,12 +77,21 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
     if(server) {
         SOCKET sock = socket_open_tcp_server(port);
 
-        if(sock >= 0) {
-            server->sock_fd = sock;
-        } else {
-            log_error("ERROR: Unable to open TCP socket, error: %s", err_to_string((int)sock));
+        if(sock == INVALID_SOCKET) {
+            /*
+             * Fail here rather than carrying on. Storing a bad descriptor left the
+             * accept loop polling something that was never opened: the process stayed
+             * alive and looked healthy while never accepting anything, so a caller
+             * waiting for the port to open (the test harness) waited out its whole
+             * startup timeout and reported a misleading "did not start listening in
+             * time" instead of the bind error -- with no chance to retry, because
+             * nothing ever exited. socket_open_tcp_server() logged the real reason.
+             */
+            free(server);
+            return NULL;
         }
 
+        server->sock_fd = sock;
         server->handler = handler;
         server->context = context;
         server->context_size = context_size;

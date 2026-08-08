@@ -9,6 +9,7 @@ on:
 jobs:
   ubuntu_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -17,25 +18,29 @@ jobs:
             libc: glibc
             runner: ubuntu-24.04
             cmake_flags: ""
-            apt_packages: "build-essential cmake"
+            apt_packages: "build-essential cmake clang"
+            compiler: clang
             artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
             runner: ubuntu-24.04
             cmake_flags: ""
             apt_packages: "build-essential cmake musl-tools musl-dev"
+            compiler: gcc
             artifact_suffix: "ubuntu_x64_musl"
           - arch: x86
             libc: glibc
             runner: ubuntu-24.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
+            compiler: gcc
             artifact_suffix: "ubuntu_x86"
           - arch: arm64
             libc: glibc
             runner: ubuntu-24.04-arm
             cmake_flags: ""
-            apt_packages: "build-essential cmake zip"
+            apt_packages: "build-essential cmake zip clang"
+            compiler: clang
             artifact_suffix: "ubuntu_arm64"
 
     env:
@@ -100,6 +105,8 @@ jobs:
             if [ -n "${CXXFLAGS}" ]; then
               CMAKE_EXTRA_FLAGS="${CMAKE_EXTRA_FLAGS} -DCMAKE_CXX_FLAGS='${CXXFLAGS}'"
             fi
+          elif [ "${{ matrix.compiler }}" = "clang" ]; then
+            CMAKE_EXTRA_FLAGS="-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
           fi
           # Set install prefix for proper Linux packaging
           if [ "${{ matrix.libc }}" = "glibc" ]; then
@@ -113,7 +120,7 @@ jobs:
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -198,16 +205,17 @@ jobs:
 
   macos_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
         include:
           - name: x64
-            runner: macos-15-intel
+            runner: macos-26-intel
             cmake_arch: x86_64
             artifact_suffix: "macos_x64"
           - name: arm64
-            runner: macos-15
+            runner: macos-26
             cmake_arch: arm64
             artifact_suffix: "macos_aarch64"
 
@@ -249,7 +257,7 @@ jobs:
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
-          bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
 
       - name: Upload test logs
         if: always()
@@ -283,8 +291,421 @@ jobs:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
 
+  ubuntu_mem_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      # detect_stack_use_after_return and strict_string_checks are both off by
+      # default and are what turn "happens to still read the right bytes" into a
+      # reported error. detect_invalid_pointer_pairs needs the
+      # -fsanitize=pointer-compare/pointer-subtract instrumentation, which
+      # clang_or_gcc.cmake probes for and enables where the runtime supports it
+      # (Linux only -- the Darwin ASan runtime has no such detector).
+      ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_stack_use_after_return=1:detect_leaks=1:strict_string_checks=1:detect_invalid_pointer_pairs=2:alloc_dealloc_mismatch=1"
+      LSAN_OPTIONS: "report_objects=1"
+      UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake clang
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, ASan/UBSan)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
+      - name: Run Simulator Tests under ASan/UBSan
+        timeout-minutes: 50
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_mem_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  ubuntu_thread_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      # second_deadlock_stack makes lock-order-inversion reports show both
+      # acquisition sites instead of one, and history_size=7 (the maximum) keeps
+      # enough per-thread history that the *previous* access in a race report
+      # still has a full stack rather than "failed to restore the stack".
+      TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1:history_size=7"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake clang
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, TSan)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
+      - name: Run Simulator Tests under TSan
+        timeout-minutes: 80
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_thread_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  macos_mem_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-26-intel
+          - arch: aarch64
+            runner: macos-26
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      # No detect_leaks or detect_invalid_pointer_pairs here: the Darwin ASan
+      # runtime ships neither LeakSanitizer nor an invalid-pointer-pair detector.
+      ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_stack_use_after_return=1:strict_string_checks=1:alloc_dealloc_mismatch=1"
+      UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, ASan/UBSan)
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=1 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
+      - name: Run Simulator Tests under ASan/UBSan
+        timeout-minutes: 50
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos_mem_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  macos_thread_sanitizer:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-26-intel
+          - arch: aarch64
+            runner: macos-26
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      # second_deadlock_stack makes lock-order-inversion reports show both
+      # acquisition sites instead of one, and history_size=7 (the maximum) keeps
+      # enough per-thread history that the *previous* access in a race report
+      # still has a full stack rather than "failed to restore the stack".
+      TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1:history_size=7"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (Debug, TSan)
+        run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=1 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
+      - name: Run Simulator Tests under TSan
+        timeout-minutes: 50
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-macos_thread_sanitizer_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
+  # Valgrind memcheck covers the one class ASan and TSan both miss: reads of
+  # uninitialized memory, e.g. the tail of a receive buffer left untouched by a
+  # truncated response. Linux only -- Valgrind has never supported macOS on
+  # ARM64 and is unmaintained on modern macOS generally.
+  #
+  # Valgrind serializes threads onto a single core and costs roughly 20-50x, so
+  # this job deliberately runs only the FUNCTIONAL group:
+  #   - TIMING tests assert on wall-clock behaviour (idle disconnect windows,
+  #     auto-sync intervals) and would fail on the slowdown alone, reporting
+  #     nothing about memory safety.
+  #   - STRESS tests open up to 200 connections/threads each, which Valgrind's
+  #     serialization turns into an hours-long run for no extra coverage --
+  #     FUNCTIONAL already walks every protocol decode path.
+  # Only the client is wrapped; the simulators run natively.
+  ubuntu_valgrind:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+      # test_shutdown_restart's two fixed timeouts are both far too short under
+      # Valgrind. Its ten worker threads serialize, so a single plc_tag_create()
+      # was measured spending 10-36s just reaching its wait loop -- then expiring
+      # against a 5s operation timeout before doing any work. The settle waits in
+      # steps 2 and 4 have to outlast that whole sequence, or the shutdown lands
+      # while creates are still in flight. Both are generous on purpose; they are
+      # fixed sleeps, so the cost is bounded and paid only by this one test.
+      LIBPLCTAG_TEST_OP_TIMEOUT_MS: "30000"
+      LIBPLCTAG_TEST_SHUTDOWN_WAIT_MS: "90000"
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake valgrind
+          valgrind --version
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      # No sanitizers: ASan's shadow-memory allocator and Valgrind's are
+      # mutually exclusive. Debug build for -O0 and full symbols so Valgrind's
+      # stacks name real lines.
+      #
+      # USE_VALGRIND=1 is required, not cosmetic. Turning the sanitizers off is
+      # exactly what re-enables -static in the toolchain, and Memcheck cannot
+      # interpose on a statically linked libc -- the first run of this job spent
+      # 2026 of its 2055 reported errors inside glibc's own allocator, thread
+      # cancellation, and AVX string routines because of it.
+      - name: Configure CMake (Debug, no sanitizers, dynamic link for Valgrind)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_VALGRIND=1 -DUSE_MEM_SANITIZERS=0 -DUSE_THREAD_SANITIZERS=0 -DUSE_SERVER_MEM_SANITIZERS=0 -DUSE_SERVER_THREAD_SANITIZERS=0 -DCMAKE_VERBOSE_MAKEFILE=On ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      # --errors-for-leak-kinds excludes "still reachable", which every library
+      # with process-lifetime globals reports and which is not a defect.
+      # --log-file keeps Valgrind's output out of each test's own log (so a
+      # failing test's log still reads normally) and gives the scan step below
+      # one file per client process.
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
+      # Deliberately NO --error-exitcode: it makes Valgrind's own findings
+      # override the client's exit status, which conflates two different
+      # questions. It reported every exit-0-expecting test as a failure while
+      # the expect_failure=True tests "passed" on a Valgrind error, so the run
+      # produced no usable signal in either direction. The "Check Valgrind
+      # summaries" step below is the sole authority on findings; the test's
+      # exit code is left to mean what it has always meant.
+      #
+      # --errors-for-leak-kinds=none: leaks are still reported in the logs for
+      # information, but do not count as errors. Valgrind is here for the class
+      # ASan and TSan both miss -- reads of uninitialized memory -- and leaks at
+      # exit are a separate concern that needs its own baseline before it can
+      # gate CI.
+      #
+      # --timeout-scale 4, not 20: the budget is a kill-switch, not an expected
+      # duration, and 20x on the already-generous 300s default gave each test
+      # 100 minutes. Two genuinely stuck tests then outlived the whole job.
+      # Observed worst case under Valgrind so far is 493s, which 1200s covers.
+      #
+      # --max-workers 1, and --fair-sched=yes, both for the same reason.
+      #
+      # Valgrind serializes a client's threads onto a single core. The three
+      # test_shutdown-family tests spawn ~20 threads each, and measured against
+      # their own debug output they were executing at 0.2, 1.4 and 2.1 log lines
+      # per second while every other test in the same run managed 42 to 6230.
+      # Two of those thread-heavy tests happened to run concurrently, so each
+      # starved the other; a tag creation that should be near-instant spent 223
+      # seconds just reaching plc_tag_create()'s wait loop, then timed out there
+      # against a client-side budget the harness cannot extend (--timeout-scale
+      # only moves the harness's own kill budget, not timeouts compiled into the
+      # test or baked into a tag string).
+      #
+      # --fair-sched=yes replaces Valgrind's default scheduler, which is
+      # explicitly unfair and pathological for a lock-heavy multithreaded program.
+      # --max-workers 1 stops two such tests from starving each other. Serial
+      # execution costs less wall clock here than it appears to: the previous run
+      # spent 1200 of its 1228 seconds with one worker blocked on a single test.
+      # Step budget sits below the job budget on purpose. A job that hits its own
+      # timeout-minutes is cancelled outright and the always() upload step below is
+      # not reliably reached -- so the run that hangs is exactly the run whose logs
+      # you lose, which is when you need them most. Killing the runner here instead
+      # leaves the job alive to upload what it has.
+      - name: Run Simulator Tests under Valgrind
+        timeout-minutes: 100
+        run: |
+          cd ${{ github.workspace }}
+          mkdir -p logs
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs \
+            --skip-groups stress,timing \
+            --timeout-scale 4 \
+            --max-workers 1 \
+            --client-wrapper "valgrind --tool=memcheck --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=none --child-silent-after-fork=yes --suppressions=${{ github.workspace }}/src/tests/valgrind.supp --log-file=${{ github.workspace }}/logs/valgrind-%p.log"
+
+      # The client's exit code carries no Valgrind information now, so this scan
+      # is the only thing that turns a finding into a build failure.
+      - name: Check Valgrind summaries
+        if: always()
+        run: |
+          cd ${{ github.workspace }}
+          if grep -l -E "ERROR SUMMARY: [1-9]" logs/valgrind-*.log 2>/dev/null; then
+            echo "::error::Valgrind reported errors in the logs listed above."
+            grep -h -A 20 -E "ERROR SUMMARY: [1-9]" logs/valgrind-*.log | head -200
+            exit 1
+          fi
+          echo "No Valgrind errors reported."
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_valgrind_${{ matrix.arch }}
+          path: |
+            logs/*.log
+          retention-days: 7
+
   windows_msvc_matrix:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -292,13 +713,13 @@ jobs:
           # MSVC toolchain variants
           - name: x64
             toolchain: msvc
-            runner: windows-2022
+            runner: windows-2025
             msvc_arch: amd64
             cmake_processor: AMD64
             artifact_suffix: "windows_x64"
           - name: x86
             toolchain: msvc
-            runner: windows-2022
+            runner: windows-2025
             msvc_arch: amd64_x86
             cmake_processor: Win32
             artifact_suffix: "windows_x86"
@@ -308,15 +729,19 @@ jobs:
             msvc_arch: arm64
             cmake_processor: ARM64
             artifact_suffix: "windows_arm64"
+            # This runner has shown far more scheduling jitter under 4-way parallel load
+            # than the other Windows legs (multi-second stalls tripping timing-sensitive
+            # reconnect tests); fewer concurrent workers gives each test more headroom.
+            max_workers: 2
           # MinGW toolchain variants (no ZIP artifacts)
           - name: x64_MinGW
             toolchain: mingw
-            runner: windows-2022
+            runner: windows-2025
             cmake_processor: AMD64
             artifact_suffix: "windows_x64_MinGW"
           - name: x86_MinGW
             toolchain: mingw
-            runner: windows-2022
+            runner: windows-2025
             cmake_processor: x86
             cmake_toolchain_file: cmake_toolchains/mingw_i686_windows.cmake
             artifact_suffix: "windows_x86_MinGW"
@@ -469,7 +894,12 @@ jobs:
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
       - name: Run Simulator Tests
-        run: bash src/tests/scripts/run_simulator_tests.sh '${{ env.DIST }}' logs
+        run: |
+          ARGS=()
+          if [ -n "${{ matrix.max_workers }}" ]; then
+            ARGS+=(--max-workers "${{ matrix.max_workers }}")
+          fi
+          python3 src/tests/scripts/run_simulator_tests_parallel.py '${{ env.DIST }}' logs "${ARGS[@]}"
         shell: bash
 
       - name: Upload test logs
@@ -509,6 +939,7 @@ jobs:
 
   ubuntu_arm_cross:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -669,8 +1100,70 @@ jobs:
           path: ${{ env.BUILD }}/release_zips/*.zip
           if-no-files-found: error
 
+  ubuntu_s390x_qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+      - name: "Checkout library source."
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
+
+      - name: Install s390x cross-compiler and QEMU user-mode emulation
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake gcc-s390x-linux-gnu g++-s390x-linux-gnu qemu-user-static binfmt-support
+
+      - name: Verify cross-compiler and QEMU
+        run: |
+          s390x-linux-gnu-gcc --version
+          s390x-linux-gnu-g++ --version
+          qemu-s390x-static --version
+
+      - name: Create build directory
+        run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+      - name: Configure CMake (s390x, big-endian, static)
+        run: |
+          cd ${{ env.BUILD }}
+          cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=s390x \
+            -DCMAKE_C_COMPILER=s390x-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=s390x-linux-gnu-g++ \
+            -DCMAKE_C_FLAGS='-static' \
+            -DCMAKE_CXX_FLAGS='-static' \
+            -DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-s390x-static \
+            -DCMAKE_VERBOSE_MAKEFILE=On \
+            ..
+
+      - name: Build
+        run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run Simulator Tests under QEMU (s390x, big-endian)
+        run: |
+          cd ${{ github.workspace }}
+          python3 src/tests/scripts/run_simulator_tests_parallel.py ${{ env.DIST }} logs
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-ubuntu_s390x_qemu
+          path: |
+            logs/*.log
+          retention-days: 7
+
   alpine_native:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -732,7 +1225,7 @@ jobs:
             echo "=== ALPINE CONTAINER SCRIPT START ==="
             echo "VERSION=$VERSION, MATRIX_ARCH=$MATRIX_ARCH"
             apk update && apk add --no-cache \
-              build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
+              build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar python3
 
             # Prepare build: preserve host-owned build dir, just clean contents
             mkdir -p /workspace/build || { echo "ERROR: Failed to create build directory" >&2; exit 1; }
@@ -757,7 +1250,7 @@ jobs:
             if [ -f /workspace/build/bin_dist/ab_server ]; then
               echo "=== RUNNING SIMULATOR TESTS ==="
               mkdir -p /workspace/logs
-              bash /workspace/src/tests/scripts/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
+              python3 /workspace/src/tests/scripts/run_simulator_tests_parallel.py /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
               cd /workspace/build
             else
               echo "=== TESTS SKIPPED (ab_server binary not found) ==="
@@ -1046,6 +1539,7 @@ jobs:
 
   debug_context:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -1139,8 +1633,13 @@ jobs:
         windows_msvc_matrix,
         ubuntu_arm_cross,
         alpine_native,
+        ubuntu_mem_sanitizer,
+        ubuntu_thread_sanitizer,
+        macos_mem_sanitizer,
+        macos_thread_sanitizer,
       ]
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
     env:

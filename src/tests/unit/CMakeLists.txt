@@ -1,32 +1,25 @@
 # Define a top-level unit test directory
 
-message("Building unit tests with CMocka.")
+message("Building unit tests with mini_mock (local CMocka-macro stand-in, see mini_mock.h).")
 
-# Fetch CMocka
-include(FetchContent)
-FetchContent_Declare(
-    cmocka
-    GIT_REPOSITORY https://git.cryptomilk.org/projects/cmocka.git
-    GIT_TAG        cmocka-1.1.7
-)
-# Suppress CMocka's own tests and examples from polluting our build
-set(UNIT_TESTING OFF CACHE BOOL "Disable CMocka tests" FORCE)
-set(WITH_EXAMPLES OFF CACHE BOOL "Disable CMocka examples" FORCE)
-# Build static cmocka: the project uses -fvisibility=hidden which hides cmocka's
-# internal symbols (_will_return etc.) in the shared library, breaking linking on
-# Linux. Setting BUILD_SHARED_LIBS=OFF makes cmocka's add_library() produce a
-# static archive where all symbols are accessible to the linker regardless of
-# visibility attributes.
-set(BUILD_SHARED_LIBS OFF)
-FetchContent_MakeAvailable(cmocka)
-
-# We want to mock out initialize_modules dependencies using GNU linker wraps
-set(MOCK_LINK_FLAGS 
-    "-Wl,--wrap=refcount_startup"
-    "-Wl,--wrap=lib_init"
-    "-Wl,--wrap=ab_init"
-    "-Wl,--wrap=mb_init"
-    "-Wl,--wrap=omron_init"
+# Redirect initialize_modules()'s dependencies to the mocks in test_init.c at compile
+# time. This works because init.c is listed in add_executable() below and so is compiled
+# here rather than taken from the prebuilt archive -- we control its preprocessing.
+#
+# The previous approach used -Wl,--wrap, which is GNU ld only and kept this test off
+# macOS and MSVC entirely. Plain -D uses no linker features at all, so it works
+# everywhere. See the comment in test_init.c for why link-order shadowing is not an
+# option (the mocked *_init functions share object files with the *_teardown functions
+# that destroy_modules() genuinely needs).
+#
+# Caveat: this only reaches code compiled into this target. Mocking a function called
+# from deep inside the prebuilt library would need something else.
+set(MOCK_DEFINITIONS
+    "refcount_startup=mock_refcount_startup"
+    "lib_init=mock_lib_init"
+    "ab_init=mock_ab_init"
+    "mb_init=mock_mb_init"
+    "omron_init=mock_omron_init"
 )
 
 # test_init: tests initialize_modules()
@@ -36,9 +29,8 @@ add_executable(test_init
 )
 
 # Add necessary includes
-target_include_directories(test_init PRIVATE 
+target_include_directories(test_init PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-    ${cmocka_SOURCE_DIR}/include
 )
 
 # If you have platform headers or utils
@@ -48,21 +40,30 @@ target_include_directories(test_init PRIVATE
     ${PLATFORM_SHIM_PATH}
 )
 
-# Link against cmocka (static archive when BUILD_SHARED_LIBS=OFF)
-target_link_libraries(test_init PRIVATE cmocka plctag_static ${EXTRA_LINKER_LIBS})
+target_link_libraries(test_init PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
-    if(NOT APPLE)
-        target_link_options(test_init PRIVATE ${MOCK_LINK_FLAGS})
-    endif()
-endif()
+target_compile_definitions(test_init PRIVATE ${MOCK_DEFINITIONS})
 
-# Register the unit test with CTest
+# test_platform_str: tests str_to_int()/str_to_float() in the platform shim.
+# No mocks, so no MOCK_DEFINITIONS -- it links and calls the real functions.
+add_executable(test_platform_str test_platform_str.c)
+
+target_include_directories(test_platform_str PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_platform_str PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# Register the unit tests with CTest
 add_test(NAME unit_test_init COMMAND test_init)
+add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init
+    DEPENDS test_init test_platform_str
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

@@ -63,9 +63,9 @@ typedef struct {
 } tag_state;
 
 
-volatile int done = 0;
+static compat_atomic_int32_t done = {0};
 
-void interrupt_handler(void) { done = 1; }
+void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
 
 static int num_threads = 0;
 static tag_state states[MAX_THREADS] = {0};
@@ -116,7 +116,7 @@ void *thread_func(void *data) {
     }
 
     while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
-        if(done) { break; }
+        if(compat_atomic_load_int32(&done)) { break; }
         compat_thread_yield();
     }
 
@@ -132,7 +132,7 @@ void *thread_func(void *data) {
     /* use extended callback to pass the thread index/id */
     plc_tag_register_callback_ex(tag, tag_callback, (void *)(intptr_t)tid);
 
-    while(!done) {
+    while(!compat_atomic_load_int32(&done)) {
         int64_t start;
         int64_t end;
 
@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
     }
 
     /* wait until ^C */
-    while(!done) { compat_sleep_ms(100, NULL); }
+    while(!compat_atomic_load_int32(&done)) { compat_sleep_ms(100, NULL); }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
 

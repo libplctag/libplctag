@@ -169,12 +169,15 @@ void destroy_modules(void) {
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
     omron_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
-    lib_teardown();
-
-    /* last so that we continue to process deferred destructors until the end. */
+    /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
+     * module: those destructors run tag teardown that touches the tag table, lookup
+     * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
+     * thread must be stopped and its queue drained while those are still alive. */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
     refcount_teardown();
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
+    lib_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
@@ -224,15 +227,21 @@ int initialize_modules(void) {
                 pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Library initialized by another thread.");
                 return PLCTAG_STATUS_OK;
 
+            /*
+             * Both waits below log at SPEW.  These are polling loops: with several
+             * application threads spinning here, an INFO-level message every 10ms
+             * floods the log and the contention on the log lock can starve the very
+             * threads whose progress is being waited on.
+             */
             case LIB_STATE_INITIALIZING:
                 /* Another thread is initializing, wait for it */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for another thread to complete initialization...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_SPEW, 0, "Waiting for another thread to complete initialization...");
                 sleep_ms(10);
                 break;
 
             case LIB_STATE_SHUTTING_DOWN:
                 /* Shutdown in progress, wait for it to complete */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for library shutdown to complete...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_SPEW, 0, "Waiting for library shutdown to complete...");
                 sleep_ms(10);
                 break;
 
@@ -248,7 +257,6 @@ int initialize_modules(void) {
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
 
-    /* Start the refcount cleanup thread first */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
     rc = refcount_startup();
     if(rc != PLCTAG_STATUS_OK) {
@@ -269,6 +277,7 @@ int initialize_modules(void) {
     rc = ab_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize AB module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -277,6 +286,7 @@ int initialize_modules(void) {
     rc = mb_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -285,12 +295,41 @@ int initialize_modules(void) {
     rc = omron_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
 
+    /* Publish the instance lib_init() built above -- making it visible to
+     * lib_instance_acquire() -- and start its tag tickler thread, now that every
+     * module has initialized successfully. Must happen before library_state is set
+     * to RUNNING below: see the comment on lib_instance_publish() in lib.c for why
+     * the tickler is started last. */
+    lib_instance_publish();
+
     /* hook the destructor */
+#if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)
+    /*
+     * Register the atexit() teardown for every build EXCEPT the Windows DLL.
+     *
+     * POSIX (shared or static) and the Windows STATIC library are linked into an
+     * executable, so atexit() runs during the executable's normal CRT exit while
+     * the process is still multithreaded — plc_tag_shutdown() can cleanly join
+     * the tag-tickler and refcount-cleanup threads. (Omitting it there leaves
+     * those threads running into CRT teardown and crashing, for programs that
+     * don't call plc_tag_shutdown() themselves.)
+     *
+     * NOT for the Windows DLL (LIBPLCTAG_STATIC undefined): there the atexit
+     * table is executed from the CRT's DLL_PROCESS_DETACH handler during
+     * LdrShutdownProcess, after the loader has already terminated every other
+     * thread. plc_tag_shutdown() would then spin forever in its tag-close /
+     * thread-join paths waiting on those now-dead workers, wedging the exiting
+     * process under the loader lock (it cannot even be force-killed). DLL callers
+     * must call plc_tag_shutdown() explicitly during orderly application
+     * shutdown, while the workers are alive; DllMain handles the FreeLibrary case.
+     */
     atexit(plc_tag_shutdown);
+#endif
 
     /* Transition to RUNNING - initialization complete */
     atomic_set_int32(&library_state, LIB_STATE_RUNNING);

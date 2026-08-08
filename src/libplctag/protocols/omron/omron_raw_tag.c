@@ -234,6 +234,13 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
         /* copy the data into the tag. */
         uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
         uint8_t *data_end = tag->req->data + (tag->req->request_size);
+
+        if(data_end < data_start) {
+            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
+            omron_tag_abort(tag);
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
         int data_size = (int)(unsigned int)(data_end - data_start);
         uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
 
@@ -285,7 +292,14 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
     if(rc == PLCTAG_STATUS_OK) {
         /* copy the data into the tag. */
         uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
-        uint8_t *data_end = data_start + le2h16(cip_resp->cpf_udi_item_length);
+        uint8_t *data_end = tag->req->data + tag->req->request_size;
+
+        if(data_end < data_start) {
+            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
+            omron_tag_abort(tag);
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
         int data_size = (int)(unsigned int)(data_end - data_start);
         uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
 

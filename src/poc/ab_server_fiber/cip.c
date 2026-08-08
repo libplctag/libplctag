@@ -606,8 +606,16 @@ static Bytes handle_forward_open(Arena *a, uint8_t svc, Bytes svc_path, Bytes sv
     sess->server_connection_id = s_conn_id_counter++;
     if(s_conn_id_counter == 0) { s_conn_id_counter = 1; }
 
+    /*
+     * Advance in uint16_t explicitly and skip zero, matching the connection-id
+     * counter above. A bare ++ on a uint16_t promotes to int and narrows again
+     * on store, which -fsanitize=implicit-integer-truncation reports once the
+     * value reaches 65535, and the wrap would otherwise land on zero.
+     */
     static uint16_t s_conn_seq_counter = 1;
-    sess->server_connection_seq = s_conn_seq_counter++;
+    sess->server_connection_seq = s_conn_seq_counter;
+    s_conn_seq_counter = (uint16_t)(s_conn_seq_counter + 1);
+    if(s_conn_seq_counter == 0) { s_conn_seq_counter = 1; }
 
     /* Extract packet size limits from connection params. */
     uint32_t pkt_mask = (svc == CIP_SRV_FORWARD_OPEN) ? 0x1FFu : 0x0FFFu;

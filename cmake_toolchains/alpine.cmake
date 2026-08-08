@@ -173,7 +173,7 @@ if(NOT APPLE AND ALPINE_STATIC_FLAGS)
 endif()
 
 # Disable sanitizers for static builds as they don't work well with musl static linking
-if(USE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND ALPINE_STATIC_FLAGS)
+if((USE_MEM_SANITIZERS OR USE_THREAD_SANITIZERS) AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND ALPINE_STATIC_FLAGS)
     message(WARNING "Disabling sanitizers for Alpine static build as they don't work well with musl static linking.")
     # Clear sanitizer flags that might have been set in clang_or_gcc.cmake
     string(REGEX REPLACE "-fsanitize=[a-zA-Z,]*" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
