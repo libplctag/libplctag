@@ -249,9 +249,6 @@ int main(int argc, char **argv) {
     /* now test a write */
     for(i = 0; i < elem_count; i++) { TestDINTArray[i]++; }
 
-    printf("Turn off logging.\n");
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
-
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
