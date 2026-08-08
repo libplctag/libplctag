@@ -350,21 +350,28 @@ int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
     spin_block(&logger_callback_lock) {
-        if(log_callback_func) {
-            log_callback_func = NULL;
-        } else {
+        if(!log_callback_func) {
             rc = PLCTAG_ERR_NOT_FOUND;
+            break;
         }
-    }
 
-    if(rc == PLCTAG_STATUS_OK) {
+        log_callback_func = NULL;
+
         /*
          * The pointer is clear, so no new caller can reach the callback. Wait out
          * the ones that loaded it just before we cleared it, so this does not return
          * while a call is still running -- the caller is free to tear down whatever
          * the callback touches the moment we do. See emit_log_line() for how the two
-         * sides interlock. This drains: callers arriving from here on see NULL and
-         * never raise the count.
+         * sides interlock.
+         *
+         * This has to drain inside the lock. Outside it, debug_register_logger()
+         * could install a new callback the instant the pointer went NULL, and the
+         * loggers picking that one up would keep the count above zero -- in a chatty
+         * program, indefinitely. Holding the lock means the only calls that can
+         * raise the count are the ones already retiring, so it always reaches zero.
+         * A concurrent register spins here for the length of one callback, which is
+         * acceptable on an administrative path that runs once at startup or
+         * shutdown; the loggers being waited for take no lock and are free to finish.
          */
         while(atomic_get_int32(&log_callback_in_flight) > 0) { sleep_ms(1); }
     }
