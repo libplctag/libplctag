@@ -46,6 +46,7 @@
 #include <netinet/tcp.h>
 #include <platform.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -886,8 +887,26 @@ extern int lock_acquire_try(lock_t *lock) {
     }
 }
 
+/*
+ * Spin briefly, then start yielding.
+ *
+ * A bare spin only pays off when the holder is running on another core and will
+ * release within a few cycles. If it is descheduled, or blocked in a syscall, or
+ * the process is being serialized onto one core -- an oversubscribed machine, or
+ * running under Valgrind, which lets exactly one thread run at a time -- then
+ * spinning burns the waiter's whole timeslice and actively delays the holder it is
+ * waiting on. Yielding hands the CPU to the holder instead, so the worst case
+ * degrades to "slow" rather than to a livelock that scales with the thread count.
+ */
 int lock_acquire(lock_t *lock) {
-    while(!lock_acquire_try(lock));
+    int spins = 0;
+
+    while(!lock_acquire_try(lock)) {
+        if(++spins >= 100) { /* MAGIC */
+            sched_yield();
+            spins = 0;
+        }
+    }
 
     return 1;
 }

@@ -953,8 +953,27 @@ extern int lock_acquire_try(lock_t *lock) {
 }
 
 
+/*
+ * Spin briefly, then start yielding.
+ *
+ * A bare spin only pays off when the holder is running on another core and will
+ * release within a few cycles. If it is descheduled, or blocked in a syscall, or
+ * the process is being serialized onto one core, then spinning burns the waiter's
+ * whole timeslice and actively delays the holder it is waiting on. Yielding hands
+ * the CPU to the holder instead, so the worst case degrades to "slow" rather than
+ * to a livelock that scales with the thread count.
+ */
 extern int lock_acquire(lock_t *lock) {
-    while(!lock_acquire_try(lock));
+    int spins = 0;
+
+    while(!lock_acquire_try(lock)) {
+        if(++spins >= 100) { /* MAGIC */
+            /* SwitchToThread() yields only to another thread on this core, so fall
+             * back to a zero-length sleep, which will also consider other cores. */
+            if(!SwitchToThread()) { Sleep(0); }
+            spins = 0;
+        }
+    }
 
     return 1;
 }
