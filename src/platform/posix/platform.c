@@ -46,6 +46,7 @@
 #include <netinet/tcp.h>
 #include <platform.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -435,6 +436,13 @@ extern int str_to_int(const char *str, int *val) {
     char *endptr;
     long int tmp_val;
 
+    /*
+     * strtol() only ever sets errno, it never clears it, so a stale ERANGE left
+     * behind by any earlier library or system call would be read back below as
+     * this conversion's own failure. Clear it first so the check means something.
+     */
+    errno = 0;
+
     tmp_val = strtol(str, &endptr, 0);
 
     if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
@@ -454,6 +462,12 @@ extern int str_to_int(const char *str, int *val) {
 extern int str_to_float(const char *str, float *val) {
     char *endptr;
     float tmp_val;
+
+    /*
+     * See str_to_int() above. This one matters more: the ERANGE test also covers
+     * underflow-to-zero, so a stale ERANGE would reject a plain "0" as an error.
+     */
+    errno = 0;
 
     tmp_val = strtof(str, &endptr);
 
@@ -873,8 +887,26 @@ extern int lock_acquire_try(lock_t *lock) {
     }
 }
 
+/*
+ * Spin briefly, then start yielding.
+ *
+ * A bare spin only pays off when the holder is running on another core and will
+ * release within a few cycles. If it is descheduled, or blocked in a syscall, or
+ * the process is being serialized onto one core -- an oversubscribed machine, or
+ * running under Valgrind, which lets exactly one thread run at a time -- then
+ * spinning burns the waiter's whole timeslice and actively delays the holder it is
+ * waiting on. Yielding hands the CPU to the holder instead, so the worst case
+ * degrades to "slow" rather than to a livelock that scales with the thread count.
+ */
 int lock_acquire(lock_t *lock) {
-    while(!lock_acquire_try(lock));
+    int spins = 0;
+
+    while(!lock_acquire_try(lock)) {
+        if(++spins >= 100) { /* MAGIC */
+            sched_yield();
+            spins = 0;
+        }
+    }
 
     return 1;
 }
@@ -954,10 +986,11 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* FIXME - should this be a BAD_PARAM error instead as it was? */
     if(timeout_ms <= 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms,
-               func, line_num);
-        return PLCTAG_ERR_BAD_PARAM;
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Timeout must be a positive value but was %d in call from %s:%d!",
+               timeout_ms, func, line_num);
+        return PLCTAG_ERR_TIMEOUT;
     }
 
     if(pthread_mutex_lock(&(c->mutex))) {
@@ -987,7 +1020,11 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
                 rc = PLCTAG_ERR_TIMEOUT;
                 break;
             } else if(wait_rc != 0) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error %d waiting on condition variable!", errno);
+                /*
+                 * pthread_cond_timedwait() returns the error directly and never touches
+                 * errno, so wait_rc is the only meaningful value to report here.
+                 */
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error %d waiting on condition variable!", wait_rc);
                 rc = PLCTAG_ERR_BAD_STATUS;
                 break;
             } else {
@@ -1040,9 +1077,15 @@ int cond_signal_impl(const char *func, int line_num, cond_p c) {
 
     c->flag = 1;
 
-    if(pthread_cond_signal(&(c->cond))) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Signal of condition var returned error %d in call at %s:%d!", errno, func,
-               line_num);
+    /*
+     * pthread_cond_signal() returns the error directly and never touches errno, so
+     * capture the return value rather than reporting an unrelated stale errno.
+     */
+    int signal_rc = pthread_cond_signal(&(c->cond));
+
+    if(signal_rc) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Signal of condition var returned error %d in call at %s:%d!", signal_rc,
+               func, line_num);
         rc = PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -1198,16 +1241,18 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     sock_opt = 1;
 
     if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
+        /* report before close(), which sets errno of its own on failure. */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting socket reuse option, errno: %d", errno);
+        close(fd);
         return PLCTAG_ERR_OPEN;
     }
 
 #ifdef BSD_OS_TYPE
     /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
     if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
+        /* report before close(), which sets errno of its own on failure. */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
+        close(fd);
         return PLCTAG_ERR_OPEN;
     }
 #endif
@@ -1239,8 +1284,9 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     /* set no delay for TCP connections.  Send immediately. */
     sock_opt = 1;
     if(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
+        /* report before close(), which sets errno of its own on failure. */
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting TCP_NODELAY option, errno: %d", errno);
+        close(fd);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1312,8 +1358,8 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
         if(rc == 0) {
             /* instantly connected. */
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Connected instantly to %s:%d.", inet_ntoa(*((struct in_addr *)&ips[i])),
-                   port);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Connected instantly to %s:%d.",
+                   inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_OK;
         } else if(rc < 0 && (errno == EINPROGRESS)) {
@@ -1369,12 +1415,12 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 
     FD_SET(sock->fd, &write_set);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d", sock->fd,
-           timeout_ms);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d",
+           sock->fd, timeout_ms);
     select_rc = select(sock->fd + 1, NULL, &write_set, NULL, &tv);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d", select_rc,
-           FD_ISSET(sock->fd, &write_set));
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d",
+           select_rc, FD_ISSET(sock->fd, &write_set));
 
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
@@ -1401,7 +1447,9 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
                 break;
 
             case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                pdebug(
+                    DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
+                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
@@ -1662,7 +1710,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                 break;
 
             case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                pdebug(
+                    DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
+                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                 return PLCTAG_ERR_BAD_PARAM;
                 break;
 
@@ -1680,17 +1730,19 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Done.");
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "socket_wait_event: Final result=0x%x before return, TIMEOUT bit=%d, events=0x%x",
-           result, (result & SOCK_EVENT_TIMEOUT) ? 1 : 0, events);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0,
+           "socket_wait_event: Final result=0x%x before return, TIMEOUT bit=%d, events=0x%x", result,
+           (result & SOCK_EVENT_TIMEOUT) ? 1 : 0, events);
     log_event_bits("socket_wait_event: result", result);
     log_event_bits("socket_wait_event: requested_events", events);
 
     /* Log result at INFO level for visibility */
     if(result != SOCK_EVENT_NONE) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "fd=%d returning events=0x%x (requested=0x%x) %s%s%s%s%s%s", sock->fd, result,
-               events, (result & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "", (result & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "",
-               (result & SOCK_EVENT_CONNECT) ? "CONNECT " : "", (result & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "",
-               (result & SOCK_EVENT_ERROR) ? "ERROR " : "", (result & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "fd=%d returning events=0x%x (requested=0x%x) %s%s%s%s%s%s", sock->fd,
+               result, events, (result & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "",
+               (result & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "", (result & SOCK_EVENT_CONNECT) ? "CONNECT " : "",
+               (result & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "", (result & SOCK_EVENT_ERROR) ? "ERROR " : "",
+               (result & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
     }
 
     return result;
@@ -1851,7 +1903,9 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
                     break;
 
                 case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    pdebug(
+                        DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
+                        "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
@@ -1984,7 +2038,9 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
                     break;
 
                 case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    pdebug(
+                        DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
+                        "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
@@ -2005,13 +2061,13 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 #ifdef BSD_OS_TYPE
         /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
         rc = (int)write(s->fd, buf, (size_t)size);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), write() returned %d for fd=%d (requested %d bytes)", rc, s->fd,
-               size);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), write() returned %d for fd=%d (requested %d bytes)", rc,
+               s->fd, size);
 #else
         /* on Linux, we use MSG_NOSIGNAL */
         rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), send() returned %d for fd=%d (requested %d bytes)", rc, s->fd,
-               size);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), send() returned %d for fd=%d (requested %d bytes)", rc,
+               s->fd, size);
 #endif
 
         if(rc < 0) {
@@ -2024,10 +2080,11 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
                 return PLCTAG_ERR_WRITE;
             }
         } else if(rc > 0 && rc < size) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), partial write on fd=%d: wrote %d of %d bytes", s->fd, rc,
-                   size);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), partial write on fd=%d: wrote %d of %d bytes", s->fd,
+                   rc, size);
         } else if(rc == size) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), complete write on fd=%d: wrote all %d bytes", s->fd, size);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), complete write on fd=%d: wrote all %d bytes", s->fd,
+                   size);
         }
     }
 
@@ -2114,7 +2171,8 @@ int sock_create_event_wakeup_channel(sock_p sock) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to open waker pipe!");
             switch(errno) {
                 case EAFNOSUPPORT:
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "The specified addresss family is not supported on this machine!");
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
+                           "The specified addresss family is not supported on this machine!");
                     break;
 
                 case EFAULT:
@@ -2162,15 +2220,15 @@ int sock_create_event_wakeup_channel(sock_p sock) {
 #ifdef BSD_OS_TYPE
         /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
         if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d",
-                   errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0,
+                   "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
             rc = PLCTAG_ERR_OPEN;
             break;
         }
 
         if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d",
-                   errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0,
+                   "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
             rc = PLCTAG_ERR_OPEN;
             break;
         }

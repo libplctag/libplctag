@@ -41,31 +41,50 @@
 
 
 #define REQUIRED_VERSION 2, 5, 5
-#define TAG_ATTRIBS_TMPL \
-    "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"
-#define DATA_TIMEOUT (5000)
+#define DEFAULT_TAG_ATTRIBS \
+    "protocol=ab_eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+/* Generous: under sanitizer overhead with several other tests hitting the
+ * same long-lived server, CI runners don't guarantee prompt scheduling. This
+ * only bounds the failure path -- a healthy create returns as soon as it
+ * succeeds, however fast that is -- so this doesn't slow down a normal run,
+ * only how long a transient stall is tolerated before giving up. */
+#define DATA_TIMEOUT (20000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
-#define READ_PERIOD_MS (200)
+#define NUM_TAGS (10)
 
 static compat_atomic_int32_t read_start_count = {0};
 static compat_atomic_int32_t read_complete_count = {0};
 static compat_atomic_int32_t write_start_count = {0};
 static compat_atomic_int32_t write_complete_count = {0};
 
-
 static void *reader_function(void *tag_arg);
 static void *writer_function(void *tag_arg);
 static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 
 
-#define NUM_TAGS (10)
+static const char *parse_args(int argc, char **argv) {
+    const char *tag_attribs = DEFAULT_TAG_ATTRIBS;
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_attribs = &argv[i][6]; }
+    }
+
+    return tag_attribs;
+}
 
 
-int main(void) {
+int main(int argc, char **argv) {
+    /* May or may not contain a "%d" placeholder -- AB uses one distinct tag
+     * per thread (name=...[%d]); Modbus points every thread at the same
+     * register. snprintf() with an unused extra vararg is well-defined, so
+     * one code path covers both: if there's no %d, i is simply ignored and
+     * every thread gets the identical string. */
+    const char *tag_attribs = parse_args(argc, argv);
     int rc = PLCTAG_STATUS_OK;
+    char tag_attr_str[512] = {0};
     compat_thread_t read_threads[NUM_TAGS];
     compat_thread_t write_threads[NUM_TAGS];
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
@@ -93,7 +112,8 @@ int main(void) {
         int32_t tag_id = PLCTAG_ERR_CREATE;
 
         // NOLINTNEXTLINE
-        tag_id = plc_tag_create_ex(TAG_ATTRIBS_TMPL, tag_callback, NULL, DATA_TIMEOUT);
+        snprintf(tag_attr_str, sizeof(tag_attr_str), tag_attribs, i);
+        tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, DATA_TIMEOUT);
 
         if(tag_id <= 0) {
             // NOLINTNEXTLINE
@@ -257,28 +277,28 @@ void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            compat_atomic_add_int32(&read_complete_count, 1);
+            compat_atomic_inc_int32(&read_complete_count);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic read operation completed with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            compat_atomic_add_int32(&read_start_count, 1);
+            compat_atomic_inc_int32(&read_start_count);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic read operation started with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            compat_atomic_add_int32(&write_complete_count, 1);
+            compat_atomic_inc_int32(&write_complete_count);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic write operation completed with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            compat_atomic_add_int32(&write_start_count, 1);
+            compat_atomic_inc_int32(&write_start_count);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic write operation started with status %s.\n", tag_id,
                     plc_tag_decode_error(status));

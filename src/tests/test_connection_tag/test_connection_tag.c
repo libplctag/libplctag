@@ -109,7 +109,10 @@
  * ---------------------------------------------------------------------- */
 
 typedef struct {
-    int32_t tag_id;                         /* written once before callbacks start; plain int */
+    /* For logging only; the callback identifies its tag_state_t via userdata,
+     * not by looking this up, since events can be dispatched before the
+     * create loop below stores the returned tag_id here. */
+    compat_atomic_int32_t tag_id;
     compat_atomic_int32_t next_expected_idx;
     compat_atomic_int32_t failed;
     compat_atomic_int32_t completed;
@@ -204,14 +207,6 @@ static const char *conn_status_name(int32_t s) {
     }
 }
 
-static tag_state_t *find_tag_state(int32_t tag_id) {
-    int i;
-    for(i = 0; i < num_tags; i++) {
-        if(tag_states[i].tag_id == tag_id) { return &tag_states[i]; }
-    }
-    return NULL;
-}
-
 /* Advance a tag's expected-state machine from within the callback. */
 static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
     int idx = compat_atomic_load_int32(&ts->next_expected_idx);
@@ -231,7 +226,7 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
 
         if(new_idx >= num_expected_states) { compat_atomic_store_int32(&ts->completed, 1); }
     } else {
-        fprintf(stderr, "ERROR [tag %d]: expected %s but got %s (at index %d).\n", (int)ts->tag_id,
+        fprintf(stderr, "ERROR [tag %d]: expected %s but got %s (at index %d).\n", (int)compat_atomic_load_int32(&ts->tag_id),
                 conn_status_name(expected_states[idx]), conn_status_name(conn_status), idx);
         compat_atomic_store_int32(&ts->failed, 1);
     }
@@ -255,6 +250,10 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
  * ---------------------------------------------------------------------- */
 
 static void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
+    /* userdata is the tag's own tag_state_t*, set at plc_tag_create_ex() time.
+     * Looking this up later by tag_id instead would race: the library can
+     * dispatch early events (CONNECTING, UP) on another thread before the
+     * creating thread stores the returned tag_id into a lookup table. */
     tag_state_t *ts = (tag_state_t *)userdata;
     int32_t rc, ws;
 
@@ -262,7 +261,6 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
 
     switch(event) {
         case PLCTAG_EVENT_CREATED:
-            ts->tag_id = tag_id;
             fprintf(stderr, "[tag %d] CREATED: %s\n", (int)tag_id, plc_tag_decode_error(status));
             break;
 
@@ -467,7 +465,7 @@ int main(int argc, char **argv) {
     for(i = 0; i < num_tags; i++) {
         int32_t tag;
 
-        tag_states[i].tag_id = 0;
+        compat_atomic_store_int32(&tag_states[i].tag_id, 0);
         compat_atomic_store_int32(&tag_states[i].next_expected_idx, 0);
         compat_atomic_store_int32(&tag_states[i].failed, 0);
         compat_atomic_store_int32(&tag_states[i].completed, 0);
@@ -480,7 +478,7 @@ int main(int argc, char **argv) {
             if(data_tag) { plc_tag_destroy(data_tag); }
             return 1;
         }
-        tag_states[i].tag_id = tag;
+        compat_atomic_store_int32(&tag_states[i].tag_id, tag);
         tag_handles[i] = tag;
     }
 

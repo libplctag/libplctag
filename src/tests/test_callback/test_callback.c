@@ -37,10 +37,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define REQUIRED_VERSION 2, 5, 0
 
-#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
+#define DEFAULT_TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
 #define DATA_TIMEOUT 5000
 
 typedef int32_t DINT;
@@ -104,7 +105,18 @@ void log_callback(int32_t tag_id, int debug_level, const char *message) {
     fprintf(stderr, "Log message of level %d for tag %d: %s", debug_level, tag_id, message);
 }
 
-int main(void) {
+static const char *parse_args(int argc, char **argv) {
+    const char *tag_path = DEFAULT_TAG_PATH;
+
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_path = &argv[i][6]; }
+    }
+
+    return tag_path;
+}
+
+int main(int argc, char **argv) {
+    const char *tag_path = parse_args(argc, argv);
     int32_t tag = 0;
     int rc;
     int i;
@@ -168,7 +180,7 @@ int main(void) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
+    tag = plc_tag_create(tag_path, DATA_TIMEOUT);
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
@@ -237,9 +249,6 @@ int main(void) {
 
     /* now test a write */
     for(i = 0; i < elem_count; i++) { TestDINTArray[i]++; }
-
-    printf("Turn off logging.\n");
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {

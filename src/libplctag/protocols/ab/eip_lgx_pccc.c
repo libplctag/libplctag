@@ -303,7 +303,7 @@ static int check_read_status(ab_tag_p tag) {
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
 
-        data_end = (tag->req->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
+        data_end = tag->req->data + tag->req->request_size;
 
         if(le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected EIP packet type received: %d!",
@@ -321,7 +321,9 @@ static int check_read_status(ab_tag_p tag) {
 
         if(pccc->general_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
-                   pccc->general_status, decode_cip_error_long((uint8_t *)&(pccc->general_status)));
+                   pccc->general_status,
+                   decode_cip_error_long((uint8_t *)&(pccc->general_status),
+                                         cip_error_data_size((uint8_t *)&(pccc->general_status), data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -360,8 +362,8 @@ static int check_read_status(ab_tag_p tag) {
         type_end = data;
 
         /* copy data into the tag. */
-        if((data_end - data) > tag->size) {
-            rc = PLCTAG_ERR_TOO_LARGE;
+        if(data > data_end || (data_end - data) > tag->size) {
+            rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
@@ -373,7 +375,18 @@ static int check_read_status(ab_tag_p tag) {
         if(!tag->pre_write_read) { mem_copy(tag->data, data, (int)(data_end - data)); }
 
         /* copy type data into tag. */
+        if(type_start > type_end) {
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
         tag->encoded_type_info_size = (int)(type_end - type_start);
+
+        if(tag->encoded_type_info_size > (int)sizeof(tag->encoded_type_info)) {
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
         mem_copy(tag->encoded_type_info, type_start, tag->encoded_type_info_size);
 
         // /* have the IO thread take care of the request buffers */

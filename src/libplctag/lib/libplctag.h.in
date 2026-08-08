@@ -376,6 +376,7 @@ typedef enum {
      * sub-request. */
     PLCTAG_EVENT_DATA_SENT = 9,
 
+
     /* Connection status events */
     PLCTAG_EVENT_CONN_STATUS_OFFSET = 100,        /* Base offset for connection status change events */
     PLCTAG_EVENT_CONN_STATUS_UP = 100,            /* Connected and ready for operations */

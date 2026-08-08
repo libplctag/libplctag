@@ -36,13 +36,14 @@
 #include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <utils/debug.h>
 #include <utils/atomic_utils.h>
+#include <utils/debug.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #    include <windows.h>
@@ -55,26 +56,75 @@
  * Debugging support.
  */
 
-typedef void (*log_func_t)(int32_t tag_id, int debug_level, const char *message);
 
-static atomic_int32_t global_debug_level = DEBUG_NONE;
-static atomic_int32_t thread_num = 1;
-static atomic_ptr_t log_callback_func = NULL;
+static atomic_int32_t global_debug_level = ATOMIC_INT_STATIC_INIT; /* DEBUG_NONE == 0 */
+static lock_t thread_num_lock = LOCK_INIT;
+static volatile uint32_t thread_num = 1;
+
+/* Logger callback and the lock guarding it. This must be a spinlock, not a real
+ * mutex: mutex_lock_impl()/mutex_unlock_impl() call pdebug() themselves to trace
+ * the lock attempt, and register/unregister below take this lock -- using a real
+ * mutex here means those calls re-enter pdebug_impl() while still inside this same
+ * critical section, recursing without ever completing the original lock attempt.
+ * lock_acquire()/lock_release() are deliberately pdebug-free for exactly this
+ * reason. lock_t is also valid from static initialization alone (LOCK_INIT is just
+ * 0), unlike a mutex_p, which needs a runtime mutex_create() -- and pdebug_impl()/
+ * debug_register_logger()/debug_unregister_logger() can all run before
+ * initialize_modules() ever does, e.g. a caller may register a logger as their very
+ * first API call.
+ *
+ * IMPORTANT: pdebug_impl() must NOT take this lock. It is a pure spin with no
+ * yield, so a waiter burns CPU for as long as the holder takes. Emitting a log line
+ * means an fputs() and periodic fflush() -- a write(2) -- so holding the lock across
+ * output makes every thread in the process spin for the duration of another thread's
+ * syscall. Instead pdebug_impl() uses the in-flight counter below to coordinate with
+ * unregister, and does its output holding no lock of ours at all.
+ */
+static lock_t logger_callback_lock = LOCK_INIT;
+
+typedef void (*log_callback_func_t)(int32_t tag_id, int debug_level, const char *message);
+
+/*
+ * Every read and write of this pointer happens under logger_callback_lock (see
+ * emit_log_line(), debug_register_logger(), debug_unregister_logger(), and
+ * debug_flush() below), so it needs neither `volatile` nor an atomic type of its
+ * own -- the spinlock's acquire/release already gives it the ordering a reader on
+ * another thread needs. What must NOT happen is calling through this pointer while
+ * holding the lock: the callback is caller-supplied and can block or do its own
+ * I/O, so holding any lock across the call would serialize every other thread's
+ * logging behind it. Instead, callers snapshot the pointer under the lock and
+ * invoke it afterward -- see the in-flight counter below for how that snapshot
+ * stays safe against a concurrent unregister.
+ */
+static log_callback_func_t log_callback_func = NULL;
+
+/*
+ * Count of emit_log_line() calls that took a non-NULL snapshot of log_callback_func
+ * and may still be inside the callback. Only ever raised while holding
+ * logger_callback_lock, and only when the snapshot is non-NULL, so
+ * debug_unregister_logger() -- which clears the pointer and then drains this to
+ * zero without releasing the lock -- is guaranteed no new snapshot can raise it
+ * again before the drain completes: doing so would require the same lock.
+ */
+static atomic_int32_t log_callback_in_flight = ATOMIC_INT_STATIC_INIT;
 
 /* Buffering control for stderr logging performance */
-static atomic_int32_t stderr_buffering_initialized = 0;
-// static lock_t stderr_init_lock = LOCK_INIT;
-static atomic_int32_t log_call_count = 0;
+static atomic_bool stderr_buffering_initialized = ATOMIC_BOOL_STATIC_INIT;
+static atomic_int32_t log_call_count = ATOMIC_INT_STATIC_INIT;
 
 
 /* Module name lookup table is now defined in debug_generated.h */
 
-/* Per-module debug levels - indexed directly by debug_module_t value. */
+/* Per-module debug levels - indexed directly by debug_module_t value. Written by
+ * set_debug_level()/debug_module_set_level()/debug_set_all_modules() (rarely, from
+ * application code) and read by debug_is_enabled() (constantly, on every pdebug()
+ * call from every thread), so this needs real atomics, not just volatile. Static
+ * storage duration zero-initializes every element to 0 == DEBUG_NONE. */
 static atomic_int32_t debug_module_levels[DEBUG_MODULE_COUNT];
 
 
 bool debug_is_enabled(debug_module_t module, int level) {
-    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= (int)debug_module_levels[module];
+    return level > DEBUG_NONE && (unsigned)module < DEBUG_MODULE_COUNT && level <= atomic_get_int32(&debug_module_levels[module]);
 }
 
 
@@ -86,9 +136,7 @@ static THREAD_LOCAL uint32_t this_thread_num = 0;
 
 
 int set_debug_level(int level) {
-    int old_level = global_debug_level;
-
-    atomic_set_int32(&global_debug_level, level);
+    int old_level = atomic_set_int32(&global_debug_level, level);
 
     /* Push the global level into every module slot so the inline
      * debug_is_enabled() check needs only a single array lookup. */
@@ -98,16 +146,17 @@ int set_debug_level(int level) {
 }
 
 
-int get_debug_level(void) { return global_debug_level; }
+int get_debug_level(void) { return atomic_get_int32(&global_debug_level); }
+
 
 
 void debug_module_set_level(debug_module_t module, int level) {
-    if(module >= 0 && (unsigned)module < DEBUG_MODULE_COUNT) { atomic_set_int32(&debug_module_levels[module], level); }
+    if((unsigned)module < DEBUG_MODULE_COUNT) { atomic_set_int32(&debug_module_levels[module], level); }
 }
 
 
 int debug_module_get_level(debug_module_t module) {
-    if(module >= 0 && (unsigned)module < DEBUG_MODULE_COUNT) { return atomic_get_int32(&debug_module_levels[module]); }
+    if((unsigned)module < DEBUG_MODULE_COUNT) { return atomic_get_int32(&debug_module_levels[module]); }
     return DEBUG_NONE;
 }
 
@@ -117,20 +166,13 @@ void debug_set_all_modules(int level) {
 }
 
 
+
 static uint32_t get_thread_id(void) {
-    if(this_thread_num == 0) {
-        /* is this UB? */
-        int32_t new_num = atomic_add_int32(&thread_num, 1);
-
-        /* clamp the range */
-        if(new_num < 1 || new_num > (INT32_MAX / 2)) {
-            /* only reset if someone else has not already done so */
-            atomic_compare_and_set_int32(&thread_num, new_num, 1); /* reset to 1 to avoid overflow and keep IDs positive. */
+    if(!this_thread_num) {
+        spin_block(&thread_num_lock) {
+            this_thread_num = thread_num;
+            thread_num++;
         }
-
-        this_thread_num = (uint32_t)new_num;
-
-        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, 0, "Assigned thread ID %" PRId32 " to new thread.", new_num);
     }
 
     return this_thread_num;
@@ -176,29 +218,57 @@ static int64_t time_us(void) {
 
 
 static void ensure_stderr_buffering(void) {
-    /* Initialize stderr buffering once for better performance */
-    if(!atomic_compare_and_set_int32(&stderr_buffering_initialized, 0, 1)) {
+    /* Initialize stderr buffering exactly once. The thread that wins the
+     * compare-and-set performs the setup; everyone else just proceeds. */
+    if(atomic_compare_and_set_bool(&stderr_buffering_initialized, false, true) == false) {
         /* Set stderr to full buffering with 8KB buffer for better performance */
         setvbuf(stderr, NULL, _IOFBF, 8192);
-        atomic_set_int32(&stderr_buffering_initialized, 1);
     }
 }
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
-                        ...) {
+
+/*
+ * Hand a finished log line to the registered callback, or to stderr if there is
+ * none. The callback itself runs outside logger_callback_lock: see the note on
+ * the lock above for why. The lock is only held long enough to snapshot the
+ * pointer and, if it is set, raise the in-flight count in the same critical
+ * section -- that pairing is what makes debug_unregister_logger()'s drain
+ * (which clears the pointer and waits out the count without releasing the
+ * lock) safe: no snapshot here can raise the count after the pointer is
+ * cleared, since taking one requires the same lock unregister is holding.
+ */
+static void emit_log_line(int32_t tag_id, int debug_level, const char *output) {
+    log_callback_func_t callback = NULL;
+
+    spin_block(&logger_callback_lock) {
+        callback = log_callback_func;
+        if(callback) { atomic_add_int32(&log_callback_in_flight, 1); }
+    }
+
+    if(callback) {
+        callback(tag_id, debug_level, output);
+        atomic_add_int32(&log_callback_in_flight, -1);
+        return;
+    }
+
+    fputs(output, stderr);
+
+    /* Flush periodically for better performance while ensuring timely output */
+    int32_t call_count = atomic_add_int32(&log_call_count, 1) + 1;
+    if(debug_level <= DEBUG_ERROR || (call_count % 100) == 0) {
+        /* Flush on errors (critical info) or every 100 log entries */
+        fflush(stderr);
+    }
+}
+
+
+extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
     va_list va;
     struct tm t;
     time_t epoch;
     int64_t epoch_us;
     int remainder_us;
     const char *module_name = format_module_name(module);
-
-    /* type punning is evil */
-    union {
-        void *as_ptr;
-        log_func_t as_func;
-    } log_func_union;
-
     char prefix[1000]; /* MAGIC */
     char output[1000];
 
@@ -230,29 +300,16 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     // NOLINTNEXTLINE
     /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
 
-    /* output via the log function if available */
-    log_func_union.as_ptr = atomic_get_ptr(&log_callback_func);
-    if(log_func_union.as_func) {
-        log_func_union.as_func(tag_id, debug_level, output);
-    } else {
-        fputs(output, stderr);
-
-        /* Flush periodically for better performance while ensuring timely output */
-        log_call_count++;
-        if(debug_level <= DEBUG_ERROR || (log_call_count % 100) == 0) {
-            /* Flush on errors (critical info) or every 100 log entries */
-            fflush(stderr);
-        }
-    }
-
     va_end(va);
+
+    emit_log_line(tag_id, debug_level, output);
 }
 
 
 #define COLUMNS (16)
 
-void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, uint8_t *data,
-                            int count) {
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
+                            uint8_t *data, int count) {
     int max_row, row, column;
     char row_buf[(COLUMNS * 3) + 5 + 1];
 
@@ -282,12 +339,15 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
 }
 
 
-int debug_register_logger(log_func_t log_callback) {
+int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message)) {
     int rc = PLCTAG_STATUS_OK;
 
-    if(atomic_compare_and_set_ptr(&log_callback_func, NULL, (void *)log_callback)) {
-        /* already set, do not overwrite */
-        rc = PLCTAG_ERR_DUPLICATE;
+    spin_block(&logger_callback_lock) {
+        if(!log_callback_func) {
+            log_callback_func = log_callback_func_arg;
+        } else {
+            rc = PLCTAG_ERR_DUPLICATE;
+        }
     }
 
     return rc;
@@ -295,15 +355,45 @@ int debug_register_logger(log_func_t log_callback) {
 
 
 int debug_unregister_logger(void) {
-    /* atomic_set_ptr swaps in NULL and returns the previous callback; if there
-     * was none, there was nothing to unregister. */
-    void *prev = atomic_set_ptr(&log_callback_func, NULL);
+    int rc = PLCTAG_STATUS_OK;
 
-    return prev ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_FOUND;
+    spin_block(&logger_callback_lock) {
+        if(!log_callback_func) {
+            rc = PLCTAG_ERR_NOT_FOUND;
+            break;
+        }
+
+        log_callback_func = NULL;
+
+        /*
+         * The pointer is clear, so no new caller can reach the callback. Wait out
+         * the ones that loaded it just before we cleared it, so this does not return
+         * while a call is still running -- the caller is free to tear down whatever
+         * the callback touches the moment we do. See emit_log_line() for how the two
+         * sides interlock.
+         *
+         * This has to drain inside the lock. Outside it, debug_register_logger()
+         * could install a new callback the instant the pointer went NULL, and the
+         * loggers picking that one up would keep the count above zero -- in a chatty
+         * program, indefinitely. Holding the lock means the only calls that can
+         * raise the count are the ones already retiring, so it always reaches zero.
+         * A concurrent register spins here for the length of one callback, which is
+         * acceptable on an administrative path that runs once at startup or
+         * shutdown; the loggers being waited for take no lock and are free to finish.
+         */
+        while(atomic_get_int32(&log_callback_in_flight) > 0) { sleep_ms(1); }
+    }
+
+    return rc;
 }
 
 
 void debug_flush(void) {
     /* Flush stderr to ensure all buffered log output is written */
-    if(!atomic_get_ptr(&log_callback_func)) { fflush(stderr); }
+    bool has_logger = false;
+    spin_block(&logger_callback_lock) { has_logger = (log_callback_func != NULL); }
+
+    if(!has_logger) { fflush(stderr); }
 }
+
+

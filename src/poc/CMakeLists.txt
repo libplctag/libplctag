@@ -6,7 +6,7 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
 endif()
 
-# When building for x86, libyafl's project() resets CMAKE_SYSTEM_PROCESSOR to the
+# When cross-compiling, libyafl's project() can reset CMAKE_SYSTEM_PROCESSOR to the
 # host value. Override the triple so libyafl picks the right toolchain and assembly.
 if(BUILD_32_BIT AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(TRIPLE "i386-pc-linux-gnu")
@@ -14,6 +14,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR STREQUAL 
     set(TRIPLE "i386-pc-windows-msvc")
 elseif(BUILD_32_BIT AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(TRIPLE "i386-pc-windows-gnu")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER MATCHES "s390x")
+    # Keyed off the compiler name, not CMAKE_SYSTEM_PROCESSOR: that's the exact
+    # variable libyafl's project() call can reset, per the comment above.
+    set(TRIPLE "s390x-ibm-linux-gnu")
 endif()
 
 # Build POC programs

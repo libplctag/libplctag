@@ -229,5 +229,10 @@ static void omron_device_tag_destructor(void *ptr) {
         tag->data = NULL;
     }
 
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
+    }
+
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Done.");
 }

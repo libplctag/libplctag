@@ -502,6 +502,13 @@ extern int str_to_int(const char *str, int *val) {
     char *endptr;
     long int tmp_val;
 
+    /*
+     * strtol() only ever sets errno, it never clears it, so a stale ERANGE left
+     * behind by any earlier library or system call would be read back below as
+     * this conversion's own failure. Clear it first so the check means something.
+     */
+    errno = 0;
+
     tmp_val = strtol(str, &endptr, 0);
 
     if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
@@ -522,6 +529,12 @@ extern int str_to_float(const char *str, float *val) {
     char *endptr;
     double tmp_val_d;
     float tmp_val;
+
+    /*
+     * See str_to_int() above. This one matters more: the ERANGE test also covers
+     * underflow-to-zero, so a stale ERANGE would reject a plain "0" as an error.
+     */
+    errno = 0;
 
     /* Windows does not have strtof() */
     tmp_val_d = strtod(str, &endptr);
@@ -940,8 +953,27 @@ extern int lock_acquire_try(lock_t *lock) {
 }
 
 
+/*
+ * Spin briefly, then start yielding.
+ *
+ * A bare spin only pays off when the holder is running on another core and will
+ * release within a few cycles. If it is descheduled, or blocked in a syscall, or
+ * the process is being serialized onto one core, then spinning burns the waiter's
+ * whole timeslice and actively delays the holder it is waiting on. Yielding hands
+ * the CPU to the holder instead, so the worst case degrades to "slow" rather than
+ * to a livelock that scales with the thread count.
+ */
 extern int lock_acquire(lock_t *lock) {
-    while(!lock_acquire_try(lock));
+    int spins = 0;
+
+    while(!lock_acquire_try(lock)) {
+        if(++spins >= 100) { /* MAGIC */
+            /* SwitchToThread() yields only to another thread on this core, so fall
+             * back to a zero-length sleep, which will also consider other cores. */
+            if(!SwitchToThread()) { Sleep(0); }
+            spins = 0;
+        }
+    }
 
     return 1;
 }
@@ -1008,12 +1040,12 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* FIXME - should this be BAD_PARAM as it orginally was? */
     if(timeout_ms <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Timeout must be a positive value but was %d in call from %s:%d!",
                timeout_ms, func, line_num);
-        return PLCTAG_ERR_BAD_PARAM;
+        return PLCTAG_ERR_TIMEOUT;
     }
-
 
     EnterCriticalSection(&(c->cs));
 
@@ -1247,8 +1279,14 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     sock_opt = 1;
 
     if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, (int)sizeof(sock_opt))) {
+        /*
+         * Winsock reports through WSAGetLastError(), not errno, and closesocket()
+         * overwrites the thread's last-error value -- so capture it first.
+         */
+        int sock_err = WSAGetLastError();
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket reuse option, WSA error: %d", sock_err);
         closesocket(fd);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket reuse option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1256,14 +1294,26 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     timeout.tv_usec = 0;
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, (int)sizeof(timeout))) {
+        /*
+         * Winsock reports through WSAGetLastError(), not errno, and closesocket()
+         * overwrites the thread's last-error value -- so capture it first.
+         */
+        int sock_err = WSAGetLastError();
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket receive timeout option, WSA error: %d", sock_err);
         closesocket(fd);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket receive timeout option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, (int)sizeof(timeout))) {
+        /*
+         * Winsock reports through WSAGetLastError(), not errno, and closesocket()
+         * overwrites the thread's last-error value -- so capture it first.
+         */
+        int sock_err = WSAGetLastError();
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket send timeout option, WSA error: %d", sock_err);
         closesocket(fd);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket send timeout option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1305,14 +1355,21 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     /* set no delay for TCP connections.  Send immediately. */
     sock_opt = 1;
     if(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&sock_opt, sizeof(sock_opt))) {
+        /*
+         * Winsock reports through WSAGetLastError(), not errno, and closesocket()
+         * overwrites the thread's last-error value -- so capture it first.
+         */
+        int sock_err = WSAGetLastError();
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting TCP_NODELAY option, WSA error: %d", sock_err);
         closesocket(fd);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error setting TCP_NODELAY option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
     /* set the socket to non-blocking. */
     if(ioctlsocket(fd, (long)FIONBIO, &non_blocking)) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error getting socket options, errno: %d", errno);
+        /* Winsock reports through WSAGetLastError(), not errno. */
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error setting socket to non-blocking, WSA error: %d", WSAGetLastError());
         closesocket(fd);
         return PLCTAG_ERR_OPEN;
     }

@@ -282,15 +282,21 @@ int initialize_modules(void) {
                 pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Library initialized by another thread.");
                 return PLCTAG_STATUS_OK;
 
+            /*
+             * Both waits below log at SPEW.  These are polling loops: with several
+             * application threads spinning here, an INFO-level message every 10ms
+             * floods the log and the contention on the log lock can starve the very
+             * threads whose progress is being waited on.
+             */
             case LIB_STATE_INITIALIZING:
                 /* Another thread is initializing, wait for it */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for another thread to complete initialization...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_SPEW, 0, "Waiting for another thread to complete initialization...");
                 sleep_ms(10);
                 break;
 
             case LIB_STATE_SHUTTING_DOWN:
                 /* Shutdown in progress, wait for it to complete */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for library shutdown to complete...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_SPEW, 0, "Waiting for library shutdown to complete...");
                 sleep_ms(10);
                 break;
 
@@ -306,7 +312,6 @@ int initialize_modules(void) {
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
 
-    /* Start the refcount cleanup thread first */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
     rc = refcount_startup();
     if(rc != PLCTAG_STATUS_OK) {
@@ -328,6 +333,7 @@ int initialize_modules(void) {
     rc = ab_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize AB module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -338,6 +344,7 @@ int initialize_modules(void) {
     rc = mb_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -348,6 +355,7 @@ int initialize_modules(void) {
     rc = omron_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
+        lib_instance_discard_pending();
         atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
     }
@@ -372,6 +380,13 @@ int initialize_modules(void) {
         return rc;
     }
 #endif
+
+    /* Publish the instance lib_init() built above -- making it visible to
+     * lib_instance_acquire() -- and start its tag tickler thread, now that every
+     * module has initialized successfully. Must happen before library_state is set
+     * to RUNNING below: see the comment on lib_instance_publish() in lib.c for why
+     * the tickler is started last. */
+    lib_instance_publish();
 
     /* hook the destructor */
 #if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)

@@ -667,6 +667,11 @@ void omron_tag_destroy(omron_tag_p tag) {
         tag->data = NULL;
     }
 
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
+    }
+
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Finished releasing all tag resources.");
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "done");

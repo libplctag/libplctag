@@ -50,7 +50,12 @@
 #define REQUIRED_VERSION 2, 4, 1
 
 #define DATA_TIMEOUT (5000)
-#define TAG_CREATE_TIMEOUT (5000)
+/* Generous: the initial connect (TCP handshake + session registration) is a
+ * one-time cost that can badly overrun DATA_TIMEOUT under CI scheduling
+ * delays -- observed on a CI runner where the session handler thread didn't
+ * even start running until 2.5s after tag creation began, unlike the
+ * steady-state reads below which are genuinely fast once connected. */
+#define TAG_CREATE_TIMEOUT (15000)
 #define RETRY_TIMEOUT (10000)
 
 #define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59:1502&path=0&elem_count=2&name=hr10"
