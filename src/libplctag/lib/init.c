@@ -227,15 +227,21 @@ int initialize_modules(void) {
                 pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Library initialized by another thread.");
                 return PLCTAG_STATUS_OK;
 
+            /*
+             * Both waits below log at SPEW.  These are polling loops: with several
+             * application threads spinning here, an INFO-level message every 10ms
+             * floods the log and the contention on the log lock can starve the very
+             * threads whose progress is being waited on.
+             */
             case LIB_STATE_INITIALIZING:
                 /* Another thread is initializing, wait for it */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for another thread to complete initialization...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_SPEW, 0, "Waiting for another thread to complete initialization...");
                 sleep_ms(10);
                 break;
 
             case LIB_STATE_SHUTTING_DOWN:
                 /* Shutdown in progress, wait for it to complete */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Waiting for library shutdown to complete...");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_SPEW, 0, "Waiting for library shutdown to complete...");
                 sleep_ms(10);
                 break;
 
