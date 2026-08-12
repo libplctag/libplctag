@@ -107,7 +107,8 @@ extern const enip_dialect_t enip_logix_dialect;
  * verbatim (OMRON-SPECIFIC-DESIGN.md §1: same path encoding, same Read/Write
  * Tag services, same CIP Common Format reply framing) -- the only difference
  * is requested_cip_size (§2.2). Byte-fragment mode for oversized single
- * elements (§3) and tag/UDT enumeration (§5) are out of MVP scope. */
+ * elements (§3) comes with the shared build/apply; tag/UDT enumeration (§5)
+ * is OMRON's own (build_listing/apply_listing in dialects/omron/). */
 extern const enip_dialect_t enip_omron_dialect;
 
 /* PLC-5 / SLC500 / MicroLogix PCCC dialect (Execute-PCCC, CIP service 0x4B).

@@ -65,7 +65,42 @@ struct enip_connection_t {
     char *path;
     char *model; /* optional; overrides identity-based classification (§ model=) */
     int tcp_port;
+
+    /*
+     * Encoded length of `path` as a CIP route, measured once at create while
+     * the arena is still empty. On the unconnected path the route rides every
+     * request, so it is part of cip_overhead.
+     */
+    size_t route_len;
+
+    /*
+     * Bytes of framing between max_cip_packet_size and the CIP payload one
+     * request may use: the Connected Data Item plus sequence number when
+     * connected, the Unconnected Data Item plus any Unconnected_Send envelope
+     * and route when not. Set with is_connected_path, so every window and
+     * batch budget stays a single subtraction.
+     */
+    size_t cip_overhead;
+
+    /*
+     * Transport for tag requests. Connected means ForwardOpen at bring-up and
+     * a Connected Data Item over SendUnitData per request; unconnected means
+     * no ForwardOpen and an Unconnected_Send over SendRRData per request.
+     *
+     * Bring-up (RegisterSession, Identity) is unconnected either way, so this
+     * is provisional until on_identity_reply decides it from
+     * enip_plc_prefers_connected(c->plc_type) or from connected_pref.
+     */
     bool is_connected_path;
+
+    /*
+     * use_connected_msg= as supplied: connected_pref_set false means the
+     * attribute was absent and the identified PLC family chooses. Both are in
+     * the registry key (conn_key_matches) because the choice is not known
+     * until Identity returns, so connections must be keyed on the request.
+     */
+    bool connected_pref_set;
+    bool connected_pref;
 
     /* Large Forward Open (0x5B) try/fallback (ENIP-SESSION-DESIGN.md §16.4):
      * try_large_fo is what the *next* step_open() attempt should use, reset

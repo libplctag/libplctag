@@ -1,3 +1,11 @@
+> **DEPRECATED.** This document predates the current EtherNet/IP design and is
+> retained for historical reference only. The authoritative design is
+> [ENIP-SESSION-DESIGN.md](../src/libplctag/protocols/enip/ENIP-SESSION-DESIGN.md). Do not use this document to guide new work.
+>
+> Specifically superseded: the two-phase connection-scope metadata inventory is
+> abandoned (the shipped design probes per tag at open, §11), and the linear
+> vector-first plan this document fed into has itself been deleted.
+
 # Generic EtherNetIP + Modbus Scheduler Implementation Plan
 
 Date: 2026-05-24

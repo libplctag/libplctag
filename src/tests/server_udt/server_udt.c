@@ -138,6 +138,57 @@ int main(void) {
         plc_tag_destroy(udt_tag);
     }
 
+    printf("\n=== Test 5: the same tag reads identically connected and unconnected ===\n");
+
+    /*
+     * plc=ControlLogix makes the endpoint report a Logix identity, which the
+     * client classifies as a family that prefers connected messaging, so
+     * use_connected_msg= is what actually separates these two reads. They also
+     * land on separate connections: the attribute is part of the registry key.
+     */
+    snprintf(attr, sizeof(attr), "protocol=ab-eip&role=server&gateway=0.0.0.0:%d&name=Counter&elem_type=DINT&elem_count=1",
+             TEST_PORT);
+    int32_t srv4 = plc_tag_create(attr, TIMEOUT_MS);
+    CHECK(srv4 >= 0, "create DINT server tag Counter");
+
+    if(srv4 >= 0) {
+        plc_tag_set_int32(srv4, 0, 0x5A5A1234);
+        CHECK(plc_tag_write(srv4, TIMEOUT_MS) == PLCTAG_STATUS_OK, "push seeded value to the served buffer");
+
+        snprintf(attr, sizeof(attr),
+                 "protocol=enip-tcp&gateway=127.0.0.1:%d&path=1,0&plc=ControlLogix&elem_count=1&name=Counter"
+                 "&use_connected_msg=1",
+                 TEST_PORT);
+        int32_t cli_conn = plc_tag_create(attr, TIMEOUT_MS);
+        CHECK(cli_conn >= 0, "create connected client tag");
+
+        snprintf(attr, sizeof(attr),
+                 "protocol=enip-tcp&gateway=127.0.0.1:%d&path=1,0&plc=ControlLogix&elem_count=1&name=Counter"
+                 "&use_connected_msg=0",
+                 TEST_PORT);
+        int32_t cli_unconn = plc_tag_create(attr, TIMEOUT_MS);
+        CHECK(cli_unconn >= 0, "create unconnected client tag");
+
+        if(cli_conn >= 0 && cli_unconn >= 0) {
+            CHECK(plc_tag_read(cli_conn, TIMEOUT_MS) == PLCTAG_STATUS_OK, "connected read");
+            CHECK(plc_tag_get_int32(cli_conn, 0) == 0x5A5A1234, "connected read returns the served value");
+
+            CHECK(plc_tag_read(cli_unconn, TIMEOUT_MS) == PLCTAG_STATUS_OK, "unconnected read");
+            CHECK(plc_tag_get_int32(cli_unconn, 0) == 0x5A5A1234, "unconnected read returns the served value");
+
+            /* A write proves the Unconnected_Send envelope is sized right in
+             * both directions, not just for the smaller read request. */
+            plc_tag_set_int32(cli_unconn, 0, 0x0BADCAFE);
+            CHECK(plc_tag_write(cli_unconn, TIMEOUT_MS) == PLCTAG_STATUS_OK, "unconnected write");
+            CHECK(plc_tag_read(srv4, TIMEOUT_MS) == PLCTAG_STATUS_OK, "pull the served buffer back into the server tag");
+            CHECK(plc_tag_get_int32(srv4, 0) == 0x0BADCAFE, "server tag sees the unconnected write");
+        }
+
+        if(cli_conn >= 0) { plc_tag_destroy(cli_conn); }
+        if(cli_unconn >= 0) { plc_tag_destroy(cli_unconn); }
+        plc_tag_destroy(srv4);
+    }
+
     plc_tag_destroy(srv1);
     plc_tag_destroy(srv2);
 

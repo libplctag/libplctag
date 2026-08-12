@@ -860,28 +860,53 @@ ints, `/* */` comments, `static` for internal, `extern` only in headers). All
 encode/decode goes through `utils/bytes.h` over a per-cycle `Arena`; all logging
 through `utils/debug.h` with `DEBUG_MODULE_ENIP` (add it to `debug.h` if absent).
 
-The old implementation now lives in `attic/` and must not be wired into the build.
-Lift only small helpers, re-checked against this spec.
-
 ### 14.0 File list
+
+The tree is split four ways: `common/` is direction-agnostic codec shared by the
+client and the device simulator, `client/` is this document's subject, `server/`
+is the simulator runtime (see `SERVER_TAGS.md`), and `dialects/` holds the
+per-manufacturer plug-ins reached only through `enip_dialect_t` (§16a.4). Each
+dialect keeps its client half and its simulator half in one directory.
 
 ```text
 enip/
-  CMakeLists.txt        builds the new sources into the libplctag target
-  enip.h                protocol entry points (declared extern) + opaque types
-  enip.c                init/teardown, attribute → protocol dispatch, registry
-  enip_session.h        connection type (opaque), session API used by enip_tag
-  enip_session.c        socket, IO thread, scheduler, EIP encap, lifetime  (largest)
-  enip_cpf.h/.c         Common Packet Format wrap/unwrap
-  enip_cip.h/.c         CIP path encode, ForwardOpen/Close, Read/Write/ReadFrag
-  enip_type.h/.c        CIP type code → element size + tag_byte_order_t fill
-  enip_tag.h            tag struct + op/state enums
-  enip_tag.c            vtable, create, attribs, value accessors, open sequence
+  CMakeLists.txt                 ENIP_PROTOCOL_SOURCES (client) + ENIP_SERVER_SOURCES
+  common/                        direction-free: no I/O, no thread, no connection state
+    eip.{h,c}                    EIP encapsulation header encode/decode, command codes
+    cpf.{h,c}                    Common Packet Format wrap/unwrap
+    cip.{h,c}                    CIP request dispatch + object registry (server-facing)
+    cip_path.{h,c}               IOI / symbolic + logical path encode and decode
+    identity.{h,c}               CIP Identity payload encode/decode, product-name catalog
+    plc_type.h                   enip_plc_type_t — the one family enum both directions use
+    plc_classify.{h,c}           Identity reply → enip_plc_type_t
+  client/
+    enip.{h,c}                   module entry points; thin forwarders (§14.1)
+    enip_session.{h,c}           socket, IO thread, scheduler, EIP encap, lifetime (largest)
+    enip_connection_internal.h   full struct enip_connection_t; enip_session.c + dialects only
+    enip_dialect.h               the per-connection dialect vtable (§16a.4)
+    enip_eip.{h,c}               client-side EIP framing helpers
+    enip_cip.{h,c}               CIP path encode, ForwardOpen/Close, Read/Write/ReadFrag
+    enip_type.{h,c}              CIP type code → element size + tag_byte_order_t fill
+    enip_tag.{h,c}               tag struct, op enum, vtable, create, accessors, open
+    enip_pccc_addr.{h,c}         PCCC logical address ("N7:0", "F8:0") parse → pccc_addr_t
+    enip_discover.{h,c}          enip-udp List Identity scan; its own tag struct and vtable
+  server/                        device simulator runtime — see SERVER_TAGS.md
+  dialects/
+    rockwell/                    logix_client.c (build/apply) + ab_listing.c (simulator)
+    omron/                       omron_client.c (listing hooks) + omron_listing.c (simulator)
+    pccc/                        pccc_client.c (Execute-PCCC) + pccc.{h,c} (simulator)
 ```
 
-`enip_tag.h` includes `attic`-free headers only: `lib/tag.h`,
-`enip_session.h`. `enip_session.c` is the only file that includes the socket
-platform header and spawns a thread.
+`enip_session.c` is the only client file that includes the socket platform
+header and spawns a thread. `enip_connection_internal.h` is the one deliberate
+crack in the opaque-connection rule: `enip_session.c` and the three
+`dialects/*/…_client.c` files see the full struct, everything else sees the
+opaque type from `enip_session.h`.
+
+**Note on the subsection names below.** §14.1–§14.9 were written before the
+directory split and still use the flat pre-split filenames. They remain correct
+as *function* specs; for the file each one now lives in, read `enip_cpf.h/.c` as
+`common/cpf.{h,c}` and prefix every other `enip_*` name with `client/`.
 
 ### 14.1 `enip.h` / `enip.c` — protocol entry and registry
 
@@ -1235,75 +1260,143 @@ blocks on the create-time OPEN_PROBE, returns a ready tag, `plc_tag_read` +
 blocking-read stall). Everything after that is additive and does not touch the
 core.
 
-
-## 16. Implementation Status (as of 2026-06-19)
+## 16. Implementation Status (as of 2026-08-12)
 
 ### 16.1 Completed
 
-All of §15.2 (MVP scope) is shipped and working against real hardware:
+All of §15.2 (MVP scope) is shipped and working against real hardware, plus a
+large amount that §15.3 originally deferred. The core engine:
 
-- IO thread non-blocking state machine: CONN_CONNECT → CONN_REGISTER → CONN_OPEN →
-  CONN_READY → CONN_SENDING → CONN_WAITING (§5)
-- ForwardOpen / ForwardClose on the connected path (§15.1)
+- IO thread non-blocking state machine: CONN_CONNECT → CONN_REGISTER →
+  CONN_IDENTITY → CONN_OPEN → CONN_READY → CONN_SENDING → CONN_WAITING (§5)
+- ForwardOpen / ForwardClose on the connected path (§15.1), plus a polite
+  UnregisterSession on clean shutdown
+- **Both transports for tag data.** Connected: ForwardOpen, then every request
+  in a Connected Data Item over SendUnitData. Unconnected: no ForwardOpen at
+  all, every request an `Unconnected_Send` (0x52) carrying the route over
+  SendRRData. Bring-up (RegisterSession, Identity) is unconnected either way,
+  so the choice is made in `on_identity_reply` from
+  `enip_plc_prefers_connected(c->plc_type)` — Logix and OMRON NJ/NX want a
+  connection, everything else including an unrecognized device does not. A
+  `use_connected_msg=` attribute overrides that per tag and is part of the
+  connection registry key, so the two transports never share a connection.
+  Both funnel through `wrap_tag_frame`, and `c->cip_overhead` carries the
+  envelope difference into every window and batch budget, so 0x0A batching,
+  windowing and fragmentation work the same on either.
 - `ENIP_OP_OPEN_PROBE` — discovers `elem_size`, `type_header`, `window_elems`,
   `write_window_elems`; raises `PLCTAG_EVENT_CREATED` (§11.2)
 - `ENIP_OP_OPEN_BULK` — windowed bulk read of remaining elements from element 1
   onward (§11.2)
-- `ENIP_OP_READ` — windowed reads respecting `window_elems`; loops
-  CONN_WAITING → CONN_SENDING for multi-window tags
-- `ENIP_OP_WRITE` — windowed writes respecting `write_window_elems`; same
-  continuation pattern
+- `ENIP_OP_READ` / `ENIP_OP_WRITE` — windowed, respecting `window_elems` /
+  `write_window_elems`; loop CONN_WAITING → CONN_SENDING for multi-window tags
 - auto-sync read and write re-scheduling (§3, `op_time += interval`)
 - Scheduler: sorted intrusive doubly-linked list, `pick_batch`, sched_mutex
   discipline, abort, rc lifetime (§3, §6, §7, §8, §13)
-- **CIP Multiple Service Packet (0x0A) batching** — implemented beyond the
-  original §15.3 deferral list. `pick_batch` accumulates batch-eligible (single-
-  window READ or WRITE) tags up to the CIP payload budget; `build_batch_request`
-  wraps them in a 0x0A request; `handle_batch_reply` / `complete_batch` distribute
-  per-tag sub-replies. OPEN_PROBE/OPEN_BULK tags are never batch-eligible.
+- **CIP Multiple Service Packet (0x0A) batching** — beyond the original §15.3
+  deferral list. `pick_batch` accumulates batch-eligible (single-window READ or
+  WRITE) tags up to the CIP payload budget; `build_batch_request` wraps them in a
+  0x0A request; `handle_batch_reply` / `complete_batch` distribute per-tag
+  sub-replies. OPEN_PROBE/OPEN_BULK and fragmented tags are never batch-eligible.
 - `lib.c` fairness fix: `tag->read_in_flight` is cleared in
   `plc_tag_generic_handle_event_callbacks` when the `PLCTAG_EVENT_CREATED` handler
   fires. Without this, auto-sync tags whose tickler fired before OPEN_PROBE
   completed had `read_in_flight` permanently stuck set, starving them of all
   subsequent reads.
+- `PLCTAG_EVENT_DATA_SENT` — the outbound mirror of `DATA_RECEIVED`, raised once
+  per EIP packet from the single `step_sending` completion point, so batch and
+  fragmented writes are covered without per-callsite duplication.
+
+Auto-detection and dialects (§16a, and the two dialect-specific documents):
+
+- Identity query during bring-up; `common/plc_classify.c` maps the reply to
+  `enip_plc_type_t`; `enip_dialect_select()` picks the connection's dialect. **No
+  `plc=` attribute is required** — `model=` exists only as an override.
+- `enip_logix_dialect` / `enip_omron_dialect` (shares Logix `build`/`apply`
+  verbatim, differing only in `requested_cip_size`) / `enip_pccc_dialect`
+  (selected per *tag*, not per connection — see `enip_dialect.h`).
+- Large Forward Open (0x5B) try/fallback with per-connection memory of a 0x08
+  rejection.
+- Byte-granular fragmentation for a single oversized element (§16a.6):
+  ReadFrag/WriteFrag with a `frag_offset` cursor, `frag_align` default 8.
+- PCCC families (PLC-5 / SLC / MicroLogix) end to end: `enip_pccc_addr.c` parses
+  the logical address, `dialects/pccc/pccc_client.c` encodes Execute-PCCC (0x4B),
+  including bit writes and chunking of requests that do not fit one PCCC packet.
+- Tag and UDT enumeration for **both** dialects — `@tags` and `@udt/<id>`.
+  Rockwell walks Symbol class 0x6B / Template class 0x6C
+  (`dialects/rockwell/ab_listing.c` on the simulator side); OMRON walks its
+  Variable / Variable Type objects with sibling and nested-member continuation
+  (`dialects/omron/omron_listing.c`). PCCC enumerates via the File 0 system
+  directory.
+
+Surrounding API surface:
+
+- Special tag names: `@connection` (status ring + `CONN_STATUS_*` events),
+  `@identity`, `@tags`, `@udt/<id>`.
+- `enip-udp` discovery (`client/enip_discover.c`): `gateway=<ip>[/cidr][:port]`,
+  unicast or directed broadcast List Identity, one `PLCTAG_EVENT_DATA_RECEIVED`
+  per record with the buffer updated before the callback runs. This tag type has
+  its own struct and vtable — it is **not** an `enip_tag_t` (see `lib/tag.h`).
+- Formatted-data / schema API (`plc_tag_get_formatted_data` and friends),
+  `PLCTAG_FORMAT_RAW` + `PLCTAG_FORMAT_CBOR`, rendered from raw bytes plus a
+  schema. The whole surface is physically absent from the installed header when
+  `LIBPLCTAG_FEATURE_ENIP` is off (`libplctag.h.in` is configured, not copied).
+- `role=server` tags on `enip-tcp`, backed by the folded-in device simulator
+  under `server/`, including UDT template registration via the `udt=` attribute.
 
 ### 16.2 Verified by tests
 
-- `test_fairness` with 200 tags against the `ab_server` emulator (scheduler
-  correctness, no starvation).
-- `test_fairness` with 100 tags against real L81E ControlLogix at
-  `gateway=10.206.1.40:44818 path=1,4 auto_sync_read_ms=200`, 10-second run:
-  all 100 tags received 51–52 completions (spread ≤ 1), std dev 0.34,
-  min/max ratio 0.981.
-- `tag_rw2` read/write against real hardware for scalar DINTs and large arrays.
+In-sandbox, no hardware (all pass; these are the regression net for refactors):
+
+- `server_tag_basic`, `server_udt`, `devsim_with_plctag` — `role=server` tags
+  served to an `enip-tcp` client tag in the same process.
+- `omron_udt_walk` — the OMRON `@udt` sibling/nested walk over real wire bytes.
+- `omron_aphyt_metadata` — APHYT-COMPAT-PLAN.md Phases 1–2, driving
+  `cip_dispatch_unconnected()` directly with hand-built CIP requests.
+- `server_udt` test 5 — the same served DINT read over both transports plus an
+  unconnected write, which is what fails if the `Unconnected_Send` envelope or
+  its budget accounting is wrong.
+
+Against real hardware (`src/tests/scripts/run_enip_tests.sh`, ControlLogix at
+`10.206.1.40` path `1,4`, plus MicroLogix and PLC-5 for the PCCC path):
+
+- `test_fairness` with 100 tags, `auto_sync_read_ms=200`, 10-second run: all 100
+  tags received 51–52 completions (spread ≤ 1), std dev 0.34, min/max 0.981.
+- `test_fairness` with 200 tags against the `ab_server` emulator.
+- `tag_rw2` read/write for scalar DINTs and large arrays.
+
+**Gap worth naming:** CI (`.github/workflows/ci.yml`) never sets
+`LIBPLCTAG_FEATURE_ENIP`, so none of this tree is compiled, let alone tested, on
+push. The feature also defaults to `0` in the top-level `CMakeLists.txt`. Until
+that changes, "it builds" is a claim only about whoever last ran a local
+ENIP-enabled configure.
 
 ### 16.3 Still deferred
 
 | item | notes |
 |---|---|
-| **Unconnected path** | `is_connected_path` is hard-wired `true` at create time (enip_session.c:212). The unconnected CPF wrap (`enip_cpf_wrap_unconnected`) is already called for the ForwardOpen request itself, but tag data reads/writes always use the connected `SendUnitData` path. Tags that need routing via `Unconnected_Send` (§14.5) are not yet supported. |
-| **Min-heap scheduler** | The scheduler remains an O(n)-insert sorted linked list as designed in §3. This is intentional: the fairness tests confirm the list is sufficient for current tag counts. A min-heap upgrade is available if profiling shows it matters. |
+| **Multi-dim linearization helpers** | §16a.5's `enip_dims_to_linear`/`enip_linear_to_dims` are still unwritten, and the tag still has no `dimensions[]`. This is what blocks the next item. |
+| **Arrays of oversized elements** | §16a.6 fragmentation handles `elem_count <= 1` only. An array whose *individual* elements each exceed the buffer still fails `PLCTAG_ERR_TOO_LARGE` at OPEN_PROBE, because per-element fragmentation interleaved with array windowing needs the helpers above. |
+| **STRING / UDT reads through plain `plc_tag_read`** | The generic client can address them but cannot present them as typed data; only `@udt/<id>`'s raw walk gets at the definition. This is also what prevents exercising fragmentation in-sandbox — `device_sim` has no aggregate or STRING wire type, so nothing local can produce a `CIP_STATUS_FRAG` reply. |
+| **`@listidentity` alias** | Specified in ENIP-UDP-DISCOVERY-EVENTS-DESIGN.md, not implemented: `enip_discover.c` accepts only the exact name `@identity`. |
+| **JSON format, and schemas for `@tags`/`@udt`** | `PLCTAG_FORMAT_CBOR` covers identity. The listing tags have no schema at all, so a caller gets raw dialect-specific wire bytes back from `@tags`/`@udt` and must parse them itself. |
+| **`enip-udp` read hang** | Open bug, reproduced on real hardware: a `protocol=enip-udp` client read never returns. Not a regression — it has never worked. |
+| **Min-heap scheduler** | The scheduler remains an O(n)-insert sorted linked list as designed in §3. Intentional: the fairness runs above confirm the list is sufficient at current tag counts. Upgrade if profiling ever says otherwise. |
 
-The single-element-too-large case (ReadFrag) is now folded into the planned
-multi-dialect work below rather than tracked as a standalone item.
+### 16.4 Multi-dialect (manufacturer) support — status
 
-### 16.4 Planned — multi-dialect (manufacturer) support
-
-The architecture for supporting Rockwell (Logix/Micro800) and OMRON (NJ/NX)
-without per-vendor `if/else` in the common core is specified in §16a and detailed
-in [ROCKWELL-SPECIFIC-DESIGN.md](ROCKWELL-SPECIFIC-DESIGN.md) and
-[OMRON-SPECIFIC-DESIGN.md](OMRON-SPECIFIC-DESIGN.md). None of it is built yet;
-the shipped code is the fits-the-buffer symbolic path (which already serves both
-vendors). Planned, in build order:
+The architecture is specified in §16a and detailed in
+[ROCKWELL-SPECIFIC-DESIGN.md](ROCKWELL-SPECIFIC-DESIGN.md) and
+[OMRON-SPECIFIC-DESIGN.md](OMRON-SPECIFIC-DESIGN.md). All of it is built except
+the last row.
 
 | item | status | notes |
 |---|---|---|
-| **`enip_dialect_t` seam** | done | §16a.4: per-connection `build`/`apply` function pointers + `requested_cip_size`/`max_batch_cap`, selected from CIP Identity (`enip_dialect_select`) or overridden by `model=`. `enip_logix_dialect`/`enip_omron_dialect`/`enip_pccc_dialect` in `enip_session.c`. |
-| **Capability cleanups (no new features)** | done | `parse_forward_open_reply` now sets `max_cip_packet_size` from what was actually requested (accepted, not restated in the reply — ForwardOpen with a Variable size type is accept/reject, not negotiate-down). Micro800 still rides `enip_logix_dialect` (no per-model dialect split; see below), so `max_batch_cap = 1` for it specifically has not been done. |
-| **Large Forward Open + try/fallback** | done | `build_forward_open(c, use_large)`: every connection always attempts Large FO (`0x5B`) first, requesting `c->dialect->requested_cip_size`; `on_open_reply` falls back to standard FO (`0x54`, 504 bytes) once on CIP status `0x08` and remembers not to retry Large on that connection's later reconnects. `enip_logix_dialect`/`enip_omron_dialect` request 4002/1892 bytes respectively (vendor documentation, not independently verified against real hardware — see the dialects' definitions in `enip_session.c`). No per-catalog-model dialect split (e.g. NX701's higher documented ceiling, or a genuinely Large-FO-incapable pre-"E" Micro800) — the try/fallback makes an optimistic per-family request safe either way, just not optimal for every model in a family. |
-| **Multi-dim linearization helpers** | planned | §16a.5: `enip_dims_to_linear`/`enip_linear_to_dims` (common, DINT dims), ported from `ab_server/cip.c`. Tag gains `int32_t dimensions[3]; uint8_t num_dimensions;`. |
-| **Byte-granular fragmentation** (single element > buffer) | done (Rockwell/OMRON; OMRON shares the Logix build/apply) | §16a.6: OPEN_PROBE now always issues ReadFrag (`0x52`, offset 0) instead of plain ReadTag; a `CIP_STATUS_FRAG` reply switches the tag into `ENIP_OP_OPEN_PROBE_FRAG`, which grows `t->data` via `mem_realloc` as fragments arrive (mirrors the classic `protocols/ab` driver's `check_read_status_connected`), until the final (status-0) fragment sets `elem_count=1`, `fragmented_elem=1`, and computes `frag_write_chunk` (the fixed aligned WriteFrag chunk size, `floor(usable/frag_align)*frag_align`, `frag_align` defaulting to 8 per §16a.6). Post-open `plc_tag_read`/`plc_tag_write` on such a tag reuse the same `frag_offset` cursor via `ENIP_OP_READ`/`ENIP_OP_WRITE`'s `fragmented_elem` branches (ReadFrag/WriteFrag `0x52`/`0x53`), resetting the cursor at the start of each call. Fragmented tags are excluded from Multiple Service Packet batching (`is_batch_eligible`). Scope limitation carried over from the design: only `elem_count<=1` (a single scalar/aggregate/string tag) is supported -- an array whose *individual* elements are each oversized still fails `PLCTAG_ERR_TOO_LARGE` at OPEN_PROBE, since per-element fragmentation interleaved with array windowing was out of scope here. Not live-tested against a real oversized element: `device_sim`/`role=server` has no aggregate or STRING wire type yet (only fixed-size CIP atomics + PCCC), so nothing in the local test harness can produce a `CIP_STATUS_FRAG` reply to exercise this end-to-end; verified instead by full regression (no behavior change for existing tests, including new large-array coverage) plus code-level review against the proven classic-driver algorithm. Multi-dim linearization helpers (§16a.5, needed for windowing a fragmented element *within* a multi-dim array) remain undone, consistent with the array-of-oversized-elements limitation above. |
-| **Tag / UDT enumeration** | planned, build last | vendor §5: per-dialect `list_tags`. OMRON instance-list (`0x5F`)/Variable (`0x6B`)/Variable Type (`0x6C`) walk; Rockwell Symbol (`0x6B`, svc `0x55`)/Template (`0x6C`) decode. Not needed for named read/write. |
+| **`enip_dialect_t` seam** | done | §16a.4: per-connection `build`/`apply` function pointers + `requested_cip_size`/`max_batch_cap`, selected from CIP Identity (`enip_dialect_select`) or overridden by `model=`. The vtable is in `client/enip_dialect.h`; the three implementations are in `dialects/*/…_client.c`, not in `enip_session.c`. |
+| **Capability cleanups (no new features)** | done | `parse_forward_open_reply` sets `max_cip_packet_size` from what was actually requested (accepted, not restated in the reply — ForwardOpen with a Variable size type is accept/reject, not negotiate-down). Micro800 still rides `enip_logix_dialect` (no per-model dialect split), so `max_batch_cap = 1` for it specifically has not been done. |
+| **Large Forward Open + try/fallback** | done | `build_forward_open(c, use_large)`: every connection attempts Large FO (`0x5B`) first, requesting `c->dialect->requested_cip_size`; `on_open_reply` falls back to standard FO (`0x54`, 504 bytes) once on CIP status `0x08` and remembers not to retry Large on that connection's later reconnects. Logix/OMRON request 4002/1892 bytes respectively — vendor documentation, not independently verified against real hardware. No per-catalog-model split (NX701's higher documented ceiling, a genuinely Large-FO-incapable pre-"E" Micro800); the try/fallback makes an optimistic per-family request safe either way, just not optimal for every model. |
+| **Byte-granular fragmentation** (single element > buffer) | done | §16a.6. OPEN_PROBE always issues ReadFrag (`0x52`, offset 0); a `CIP_STATUS_FRAG` reply switches the tag into `ENIP_OP_OPEN_PROBE_FRAG`, growing `t->data` as fragments arrive, until the final (status-0) fragment sets `elem_count=1`, `fragmented_elem=1`, and computes `frag_write_chunk` = `floor(usable/frag_align)*frag_align`. Post-open reads/writes reuse the same cursor. **Never live-tested** — see the STRING/UDT row in §16.3 for why nothing local can produce a `CIP_STATUS_FRAG` reply. Verified only by full regression (no behavior change) plus code review against the classic `protocols/ab` algorithm. |
+| **Tag / UDT enumeration** | done | Both dialects, client and simulator halves. Rockwell: Symbol class `0x6B` service `0x55` + Template class `0x6C`. OMRON: `GetInstanceListEx2` (`0x5F`) on class `0x6A` + Variable Type `0x6C`, with the sibling/nested member walk bounded by `udt_walk_pending[32]`. The client accumulates raw reply bytes only — there is no decode into a typed structure and no CBOR schema (§16.3). |
+| **Multi-dim linearization helpers** | planned | §16a.5: `enip_dims_to_linear`/`enip_linear_to_dims` (common, DINT dims), ported from `ab_server/cip.c`. Tag gains `int32_t dimensions[3]; uint8_t num_dimensions;`. The one genuinely unstarted item, and the blocker for arrays of oversized elements. |
 
 ---
 

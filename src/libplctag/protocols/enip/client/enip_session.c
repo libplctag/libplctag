@@ -79,9 +79,18 @@
 /* Requested/negotiated CIP payload size for the standard ForwardOpen (0x43F8). */
 #define ENIP_FO_CIP_SIZE ((size_t)504)
 
-/* EIP header (24) + connected CPF overhead (22). */
+/* EIP header (24) + connected CPF overhead (22). Also used to size rx_cap on
+ * the unconnected path, where the real CPF overhead is smaller -- over-sizing
+ * the receive buffer is harmless, under-sizing it drops replies. */
 #define ENIP_FRAMING_OVERHEAD \
     (EIP_HEADER_SIZE + CPF_HEADER_SIZE + CPF_CONNECTED_ADDR_ITEM_SIZE + CPF_CONNECTED_DATA_ITEM_SIZE + CPF_CONN_SEQ_NUM_SIZE)
+
+/* Unconnected_Send (0x52) envelope around an embedded message: service(1) +
+ * path_size_words(1) + Connection Manager path(4) + priority/ticks(1) +
+ * timeout_ticks(1) + embedded_len(2), then after the embedded message a
+ * route_path_size(1) + reserved(1). The odd-length alignment pad before the
+ * route is counted too, so the number is a ceiling for any embedded length. */
+#define ENIP_UNCONN_SEND_OVERHEAD ((size_t)13)
 
 /* Backing store for the per-connection arena; covers rx_cap (max_cip_packet_size
  * + ENIP_FRAMING_OVERHEAD) and tx-side scratch. Building a write request
@@ -194,6 +203,8 @@ static inline bool is_network_op_kind(enip_tag_p t) {
 
 static Bytes build_forward_open(enip_connection_t *c, bool use_large);
 static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes);
+static Bytes wrap_unconnected_frame(enip_connection_t *c, Bytes embedded);
+static Bytes wrap_tag_frame(enip_connection_t *c, Bytes cip_req);
 static Bytes build_forward_close(enip_connection_t *c);
 static int32_t step_identity(enip_connection_t *c);
 static Bytes build_identity_request(enip_connection_t *c);
@@ -203,11 +214,46 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
  * Registry / lifecycle
  * ============================================================================ */
 
-static bool conn_key_matches(enip_connection_t *c, const char *gateway, const char *path, int port) {
-    return c->tcp_port == port && str_cmp(c->gateway, gateway) == 0 && str_cmp(c->path, path) == 0;
+/*
+ * Select the transport for tag requests and size the per-request framing
+ * budget that follows from it. Called with false during create (bring-up is
+ * unconnected on both paths) and again from on_identity_reply once the PLC
+ * family is known.
+ */
+/*
+ * How many sub-requests one Multiple Service Packet may hold, from the CIP
+ * payload now available. Both transports need this: connected sizes it after
+ * ForwardOpen, unconnected after Identity. Never zero -- pick_batch dispatches
+ * even a single tag through the batch path.
+ */
+static void set_batch_limit(enip_connection_t *c) {
+    size_t cip_payload = (c->max_cip_packet_size > c->cip_overhead) ? (c->max_cip_packet_size - c->cip_overhead) : 0;
+    size_t sub_space = (cip_payload > ENIP_MS_REQ_FIXED) ? (cip_payload - ENIP_MS_REQ_FIXED) : 0;
+    size_t computed_max = sub_space / ENIP_MS_MIN_SUB_REQ_SIZE;
+
+    if(computed_max > ENIP_BATCH_ARRAY_SIZE) { computed_max = ENIP_BATCH_ARRAY_SIZE; }
+    if(computed_max < 1) { computed_max = 1; }
+
+    c->max_batch = (uint16_t)computed_max;
 }
 
-static enip_connection_t *create_connection(const char *gateway, const char *path, const char *model, int port) {
+static void set_path_mode(enip_connection_t *c, bool connected) {
+    c->is_connected_path = connected;
+
+    if(connected) {
+        c->cip_overhead = CIP_CONNECTED_ITEM_OVERHEAD;
+    } else {
+        c->cip_overhead = CPF_UNCONNECTED_DATA_ITEM_SIZE + (c->route_len ? ENIP_UNCONN_SEND_OVERHEAD + c->route_len : 0);
+    }
+}
+
+static bool conn_key_matches(enip_connection_t *c, const char *gateway, const char *path, int port, bool pref_set, bool pref) {
+    return c->tcp_port == port && c->connected_pref_set == pref_set && (!pref_set || c->connected_pref == pref)
+           && str_cmp(c->gateway, gateway) == 0 && str_cmp(c->path, path) == 0;
+}
+
+static enip_connection_t *create_connection(const char *gateway, const char *path, const char *model, int port, bool pref_set,
+                                            bool pref) {
     enip_connection_t *c = rc_alloc((int)sizeof(enip_connection_t), conn_destructor);
     if(!c) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to allocate connection!");
@@ -222,7 +268,8 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
      * gateway/path, which are required and checked below). */
     c->model = (model && model[0] != '\0') ? str_dup(model) : NULL;
     c->tcp_port = port;
-    c->is_connected_path = true;
+    c->connected_pref_set = pref_set;
+    c->connected_pref = pref;
     c->try_large_fo = true;
 
     if(!c->gateway || !c->path) {
@@ -247,6 +294,20 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
         rc_dec(c);
         return NULL;
     }
+
+    /*
+     * Measure the route once, while the arena is still empty. A malformed path
+     * is not diagnosed here -- bring-up reports it where the route is actually
+     * built.
+     */
+    if(c->path[0] != '\0') {
+        Bytes route = enip_cip_encode_route(&c->arena, c->path);
+        c->route_len = bytes_is_null(route) ? 0 : route.len;
+        arena_reset(&c->arena);
+    }
+
+    /* Bring-up is unconnected either way; on_identity_reply settles this. */
+    set_path_mode(c, false);
 
     c->state = CONN_CONNECT;
     c->resume_state = CONN_CONNECT;
@@ -287,6 +348,15 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
      * first tag set, same as path/gateway themselves. */
     const char *model = attr_get_str(attribs, "model", NULL);
 
+    /*
+     * use_connected_msg= overrides the transport the identified PLC family
+     * would pick (enip_plc_prefers_connected). Same attribute name as
+     * protocols/ab, but no default here: absent means "let the family decide",
+     * which ab could not express because it has no auto-detection.
+     */
+    bool connected_pref_set = (attr_get_str(attribs, "use_connected_msg", NULL) != NULL);
+    bool connected_pref = (attr_get_int(attribs, "use_connected_msg", 0) != 0);
+
     if(is_new_out) { *is_new_out = false; }
 
     if(!gateway_raw || str_length(gateway_raw) == 0) {
@@ -318,7 +388,7 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
         enip_connection_t *c = s_conns;
 
         while(c != NULL) {
-            if(conn_key_matches(c, gateway, path, port)) {
+            if(conn_key_matches(c, gateway, path, port, connected_pref_set, connected_pref)) {
                 result = rc_inc(c);
                 break;
             }
@@ -326,7 +396,7 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
         }
 
         if(!result) {
-            result = create_connection(gateway, path, model, port);
+            result = create_connection(gateway, path, model, port, connected_pref_set, connected_pref);
             if(result && is_new_out) { *is_new_out = true; }
         }
     }
@@ -536,8 +606,8 @@ static void pick_batch(enip_connection_t *c, int64_t now, int64_t *wait_ms) {
             break;
         }
 
-        size_t req_budget = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - ENIP_MS_REQ_FIXED;
-        size_t resp_budget = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - ENIP_MS_RESP_FIXED;
+        size_t req_budget = c->max_cip_packet_size - c->cip_overhead - ENIP_MS_REQ_FIXED;
+        size_t resp_budget = c->max_cip_packet_size - c->cip_overhead - ENIP_MS_RESP_FIXED;
 
         enip_tag_p batch_tail = NULL;
         uint16_t count = 0;
@@ -1170,7 +1240,7 @@ static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes pa
         uint16_t seq = 0;
         Bytes cip;
 
-        if(!cpf_unwrap(payload, true, NULL, &seq, &cip)) {
+        if(!cpf_unwrap(payload, c->is_connected_path, NULL, &seq, &cip)) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to unwrap connected CPF reply!");
             status = (int8_t)PLCTAG_ERR_BAD_REPLY;
         } else if(t->kind == ENIP_TAG_KIND_LISTING || t->kind == ENIP_TAG_KIND_UDT) {
@@ -1331,7 +1401,7 @@ static int32_t apply_open_probe(enip_connection_t *c, enip_tag_p t, uint8_t stat
 
     /* §11.3: window = clamp((cap - overhead - header_len) / elem_size, 1, elem_count) */
     uint32_t window = (uint32_t)(
-        (c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD - CIP_READ_REPLY_OVERHEAD - (size_t)header_len) / elem_size);
+        (c->max_cip_packet_size - c->cip_overhead - CIP_READ_REPLY_OVERHEAD - (size_t)header_len) / elem_size);
     if(window < 1) { window = 1; }
     if(window > t->elem_count) { window = t->elem_count; }
     t->window_elems = window;
@@ -1347,7 +1417,7 @@ static int32_t apply_open_probe(enip_connection_t *c, enip_tag_p t, uint8_t stat
         write_path_len += (max_index <= 0xFFu) ? 2 : (max_index <= 0xFFFFu) ? 4 : 6;
     }
 
-    size_t write_overhead = CIP_CONNECTED_ITEM_OVERHEAD + CIP_WRITE_REQUEST_OVERHEAD + write_path_len + (size_t)header_len;
+    size_t write_overhead = c->cip_overhead + CIP_WRITE_REQUEST_OVERHEAD + write_path_len + (size_t)header_len;
 
     uint32_t write_window = 1;
     if(write_overhead + (size_t)elem_size <= c->max_cip_packet_size) {
@@ -1411,7 +1481,7 @@ static int32_t apply_open_probe_frag(enip_connection_t *c, enip_tag_p t, uint8_t
     {
         size_t fixed = (size_t)1 /* service */ + 1 /* path_size_words */ + (size_t)t->path.len + (size_t)t->type_header_len
                      + 2 /* elem_count */ + 4 /* byte_offset */;
-        size_t cap = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
+        size_t cap = c->max_cip_packet_size - c->cip_overhead;
         size_t usable = (cap > fixed) ? (cap - fixed) : 0;
         size_t frag_chunk = (usable / t->frag_align) * t->frag_align;
         t->frag_write_chunk = (frag_chunk > 0) ? (uint32_t)frag_chunk : (uint32_t)t->frag_align;
@@ -1616,6 +1686,62 @@ static Bytes dialect_build(enip_connection_t *c, enip_tag_p t, size_t budget) {
     return d->build(c, t, bytes_from_buf(buf, budget));
 }
 
+/* Wrap one CIP message for unconnected delivery: with a configured route it
+ * goes inside an Unconnected_Send (0x52) carrying that route, mirroring AB;
+ * with no route the bare message is the Unconnected Data Item's contents.
+ * Returns the complete SendRRData frame, or bytes_null() on arena exhaustion
+ * or a bad route string. Used both during bring-up (Identity) and, on the
+ * unconnected path, for every tag request. */
+static Bytes wrap_unconnected_frame(enip_connection_t *c, Bytes embedded) {
+    Arena *a = &c->arena;
+
+    Bytes cip_payload;
+
+    if(c->path[0] == '\0') {
+        cip_payload = embedded;
+    } else {
+        Bytes route = enip_cip_encode_route(a, c->path);
+        if(bytes_is_null(route)) { return bytes_null(); }
+
+        uint8_t route_words = (uint8_t)(route.len / 2);
+
+        /* Unconnected_Send: service, path size words + Connection Manager path,
+         * priority/ticks, timeout ticks, embedded message length. */
+        Bytes us_hdr = bytes_pack(a, BYTES_LE, (uint8_t)CIP_UNCONN_SEND, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06,
+                                   (uint8_t)0x24, (uint8_t)0x01, (uint8_t)0x0A, (uint8_t)0x05, (uint16_t)embedded.len);
+        if(bytes_is_null(us_hdr)) { return bytes_null(); }
+
+        /* optional pad byte to word-align after an odd-length message, then
+         * route path size (words) + reserved byte. */
+        Bytes route_hdr = (embedded.len & 1)
+                              ? bytes_pack(a, BYTES_LE, (uint8_t)0x00, route_words, (uint8_t)0x00)
+                              : bytes_pack(a, BYTES_LE, route_words, (uint8_t)0x00);
+        if(bytes_is_null(route_hdr)) { return bytes_null(); }
+
+        cip_payload = bytes_concat(a, us_hdr, embedded, route_hdr, route);
+        if(bytes_is_null(cip_payload)) { return bytes_null(); }
+    }
+
+    Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
+    if(bytes_is_null(cpf)) { return bytes_null(); }
+
+    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+}
+
+/* The single funnel every tag request leaves through, single or batched: a
+ * Connected Data Item over SendUnitData when the connection has a CIP
+ * connection, an Unconnected_Send/SendRRData frame when it does not. The
+ * per-request budget both callers size against is
+ * max_cip_packet_size - c->cip_overhead, which already accounts for whichever
+ * envelope this picks. */
+static Bytes wrap_tag_frame(enip_connection_t *c, Bytes cip_req) {
+    if(!c->is_connected_path) { return wrap_unconnected_frame(c, cip_req); }
+
+    Bytes cpf = cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, cip_req);
+
+    return enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
+}
+
 /* Build the tx frame for c->in_flight's current op and transition to
  * CONN_SENDING (or, on a build error, complete_tag + CONN_READY).
  * Caller holds t->api_mutex. */
@@ -1642,7 +1768,7 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
     } else if(t->op != ENIP_OP_IDLE) {
         /* Every other live op (OPEN_PROBE/OPEN_PROBE_FRAG/OPEN_BULK/READ/WRITE)
          * is a plain dialect-encoded data request. */
-        req = dialect_build(c, t, c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD);
+        req = dialect_build(c, t, c->max_cip_packet_size - c->cip_overhead);
     }
 
     if(bytes_is_null(req)) {
@@ -1652,8 +1778,7 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t) {
         return PLCTAG_STATUS_OK;
     }
 
-    Bytes cpf = cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, req);
-    Bytes frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
+    Bytes frame = wrap_tag_frame(c, req);
 
     if(bytes_is_null(frame)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to wrap request for op %d!", t->op);
@@ -1701,7 +1826,7 @@ static int32_t build_batch_request(enip_connection_t *c) {
      * each sub-request directly into its slot in this single buffer, so the
      * whole batch costs one budget-sized allocation instead of one per tag
      * (max_batch can reach ~54, which would blow the arena). */
-    size_t budget = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
+    size_t budget = c->max_cip_packet_size - c->cip_overhead;
     size_t header_size = ENIP_MS_REQ_FIXED + (size_t)2 * c->batch_count;
     uint8_t *ms_buf = (uint8_t *)arena_alloc(&c->arena, budget);
     bool build_ok = (ms_buf != NULL && header_size <= budget);
@@ -1728,9 +1853,7 @@ static int32_t build_batch_request(enip_connection_t *c) {
         bytes_pack_into(bytes_from_buf(ms_buf, ENIP_MS_REQ_FIXED), BYTES_LE, (uint8_t)CIP_MULTI_SVC, (uint8_t)0x02,
                        (uint8_t)0x20, (uint8_t)0x02, (uint8_t)0x24, (uint8_t)0x01, c->batch_count);
 
-        Bytes ms = bytes_from_buf(ms_buf, cursor);
-        Bytes cpf = cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, ms);
-        frame = enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
+        frame = wrap_tag_frame(c, bytes_from_buf(ms_buf, cursor));
     }
 
     t = c->batch_head;
@@ -1780,7 +1903,7 @@ static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes 
 
     uint16_t seq = 0;
     Bytes cip;
-    if(!cpf_unwrap(payload, true, NULL, &seq, &cip)) {
+    if(!cpf_unwrap(payload, c->is_connected_path, NULL, &seq, &cip)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: unable to unwrap CPF!");
         complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
         c->state = CONN_READY;
@@ -2109,11 +2232,7 @@ static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_by
     c->max_cip_packet_size = c->requested_cip_size ? c->requested_cip_size : ENIP_FO_CIP_SIZE;
     c->rx_cap = c->max_cip_packet_size + ENIP_FRAMING_OVERHEAD;
 
-    size_t cip_payload = c->max_cip_packet_size - CIP_CONNECTED_ITEM_OVERHEAD;
-    size_t sub_space = (cip_payload > ENIP_MS_REQ_FIXED) ? (cip_payload - ENIP_MS_REQ_FIXED) : 0;
-    size_t computed_max = sub_space / ENIP_MS_MIN_SUB_REQ_SIZE;
-    if(computed_max > ENIP_BATCH_ARRAY_SIZE) { computed_max = ENIP_BATCH_ARRAY_SIZE; }
-    c->max_batch = (uint16_t)computed_max;
+    set_batch_limit(c);
 
     return PLCTAG_STATUS_OK;
 }
@@ -2156,9 +2275,9 @@ static Bytes build_forward_close(enip_connection_t *c) {
  * Identity (CIP Identity object, class 0x01 / instance 1, Get_Attributes_All)
  * ============================================================================ */
 
-/* Build a Get_Attributes_All on the Identity object. With no routing path the
- * bare CIP request goes in the Unconnected Data Item; with a path it is wrapped
- * in an Unconnected_Send (0x52) carrying the route, mirroring AB. */
+/* Build a Get_Attributes_All on the Identity object, sent unconnected during
+ * bring-up (before any ForwardOpen, and the only pre-READY traffic on the
+ * unconnected path). */
 static Bytes build_identity_request(enip_connection_t *c) {
     Arena *a = &c->arena;
 
@@ -2167,37 +2286,7 @@ static Bytes build_identity_request(enip_connection_t *c) {
                                  (uint8_t)0x01);
     if(bytes_is_null(embedded)) { return bytes_null(); }
 
-    Bytes cip_payload;
-
-    if(c->path[0] == '\0') {
-        cip_payload = embedded;
-    } else {
-        Bytes route = enip_cip_encode_route(a, c->path);
-        if(bytes_is_null(route)) { return bytes_null(); }
-
-        uint8_t route_words = (uint8_t)(route.len / 2);
-
-        /* Unconnected_Send: service, path size words + Connection Manager path,
-         * priority/ticks, timeout ticks, embedded message length. */
-        Bytes us_hdr = bytes_pack(a, BYTES_LE, (uint8_t)CIP_UNCONN_SEND, (uint8_t)0x02, (uint8_t)0x20, (uint8_t)0x06,
-                                   (uint8_t)0x24, (uint8_t)0x01, (uint8_t)0x0A, (uint8_t)0x05, (uint16_t)embedded.len);
-        if(bytes_is_null(us_hdr)) { return bytes_null(); }
-
-        /* optional pad byte to word-align after an odd-length message, then
-         * route path size (words) + reserved byte. */
-        Bytes route_hdr = (embedded.len & 1)
-                              ? bytes_pack(a, BYTES_LE, (uint8_t)0x00, route_words, (uint8_t)0x00)
-                              : bytes_pack(a, BYTES_LE, route_words, (uint8_t)0x00);
-        if(bytes_is_null(route_hdr)) { return bytes_null(); }
-
-        cip_payload = bytes_concat(a, us_hdr, embedded, route_hdr, route);
-        if(bytes_is_null(cip_payload)) { return bytes_null(); }
-    }
-
-    Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
-    if(bytes_is_null(cpf)) { return bytes_null(); }
-
-    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+    return wrap_unconnected_frame(c, embedded);
 }
 
 static int32_t step_identity(enip_connection_t *c) {
@@ -2301,12 +2390,31 @@ static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes p
     c->dialect = enip_dialect_select(c->plc_type);
     c->identity_valid = true;
 
+    /*
+     * Transport choice, now that the family is known: unconnected unless this
+     * family wants a CIP connection, or the caller said otherwise.
+     */
+    set_path_mode(c, c->connected_pref_set ? c->connected_pref : enip_plc_prefers_connected(c->plc_type));
+
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0,
            "Identity: vendor=0x%04X device_type=0x%04X product=0x%04X rev=%u.%u serial=0x%08X.", c->ident_vendor_id,
            c->ident_device_type, c->ident_product_code, c->ident_rev_major, c->ident_rev_minor, c->ident_serial);
     pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: PLC family = %s.", plc_classify_name(c->plc_type));
+    pdebug(DEBUG_MODULE_ENIP, DEBUG_INFO, 0, "Identity: messaging = %s.", c->is_connected_path ? "connected" : "unconnected");
 
-    c->state = CONN_OPEN;
+    if(c->is_connected_path) {
+        c->state = CONN_OPEN;
+        return;
+    }
+
+    /*
+     * No ForwardOpen on the unconnected path, so nothing else will size the
+     * receive buffer: max_cip_packet_size keeps its ENIP_FO_CIP_SIZE default,
+     * which is what an unconnected request may carry.
+     */
+    c->rx_cap = c->max_cip_packet_size + ENIP_FRAMING_OVERHEAD;
+    set_batch_limit(c);
+    c->state = CONN_READY;
 }
 
 /* ============================================================================

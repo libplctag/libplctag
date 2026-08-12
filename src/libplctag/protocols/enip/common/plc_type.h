@@ -79,10 +79,25 @@ static inline bool bytes_has_prefix(Bytes name, const char *prefix) {
  * for @tags listing (PCCC has no equivalent to Logix's class 0x6B symbol
  * object; its own analogous mechanism is the File 0 system directory, a
  * plain PCCC word-range read -- see enip_pccc_build_listing in
- * enip_session.c) independently of the connection's regular data-path
+ * dialects/pccc/pccc_client.c) independently of the connection's regular data-path
  * dialect, which stays Logix-shaped (enip_dialect_select never returns
  * enip_pccc_dialect at the connection level; PCCC data ops are selected
  * per-tag, not per-connection -- see enip_dialect.h). */
 static inline bool enip_plc_is_pccc(enip_plc_type_t pt) {
     return pt == ENIP_PLC_PLC5 || pt == ENIP_PLC_SLC || pt == ENIP_PLC_MLGX;
+}
+
+/* True for families that should talk over a CIP connection (ForwardOpen +
+ * SendUnitData) rather than unconnected messaging. Unconnected is the default
+ * for everything else, including ENIP_PLC_UNKNOWN: it needs no ForwardOpen and
+ * works against any CIP device, where a connection is a negotiation the target
+ * may refuse. Only the two families that genuinely want the larger negotiated
+ * packet and the lower per-request overhead opt in -- matching the classic
+ * driver, which forces use_connected_msg=0 for PLC-5/SLC/MicroLogix and
+ * Micro800 and defaults it on only for Logix.
+ *
+ * A user-supplied use_connected_msg= attribute overrides this; see
+ * enip_session_create. */
+static inline bool enip_plc_prefers_connected(enip_plc_type_t pt) {
+    return pt == ENIP_PLC_LGX || pt == ENIP_PLC_OMRON_NJNX;
 }
