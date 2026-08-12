@@ -1,0 +1,32 @@
+[
+  {
+    "label": "CMake: Configure Debug ENIP SERVER",
+    "command": "cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug -DLIBPLCTAG_FEATURE_ENIP:BOOL=On -DLIBPLCTAG_FEATURE_SERVER:BOOL=On",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "CMake: Configure Debug MSan/UBSan",
+    "command": "cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug -DUSE_MEM_SANITIZERS:BOOL=On -DLIBPLCTAG_FEATURE_ENIP:BOOL=On -DLIBPLCTAG_FEATURE_SERVER:BOOL=On",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "CMake: Configure Debug TSan",
+    "command": "cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug -DUSE_THREAD_SANITIZERS:BOOL=On -DLIBPLCTAG_FEATURE_SERVER:BOOL=On",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "CMake: Configure MinSizeRel",
+    "command": "cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=MinSizeRel",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "CMake: Build",
+    "command": "cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  }
+]
