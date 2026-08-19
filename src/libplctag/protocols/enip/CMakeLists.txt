@@ -14,8 +14,6 @@ set(ENIP_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_type.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_cip.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_eip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_eip.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_dialect.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_connection_internal.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/client/enip_session.h"

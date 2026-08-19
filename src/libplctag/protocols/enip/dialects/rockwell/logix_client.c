@@ -146,9 +146,11 @@ extern int32_t enip_logix_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_re
 }
 
 /* Rockwell (ROCKWELL-SPECIFIC-DESIGN.md): @tags/@udt request for t's current
- * op, CIP class 0x6B (symbol) / 0x6C (template). read_off is the byte cursor
- * into the accumulated buffer; list_next_id is the symbol instance id (@tags)
- * or template id (@udt); list_total is the @udt field-definition byte target.
+ * op, CIP class 0x6B (symbol) / 0x6C (template). The UDT_FIELDS byte cursor
+ * is t->size - 14 (the synthetic header apply_listing writes below) rather
+ * than a separate tracked field (0.1) -- t->size already advances by exactly
+ * the bytes accumulated. list_next_id is the symbol instance id (@tags) or
+ * template id (@udt); list_total is the @udt field-definition byte target.
  * enip_dialect_t.build_listing for enip_logix_dialect. */
 static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t) {
     switch(t->op) {
@@ -157,8 +159,9 @@ static Bytes enip_logix_build_listing(Arena *a, enip_tag_p t) {
         case ENIP_OP_UDT_META: return enip_cip_udt_meta(a, (uint16_t)t->list_next_id);
 
         case ENIP_OP_UDT_FIELDS: {
-            uint32_t remaining = (t->list_total > t->read_off) ? (t->list_total - t->read_off) : 0;
-            return enip_cip_udt_fields(a, (uint16_t)t->list_next_id, t->read_off, (uint16_t)remaining);
+            uint32_t got = (t->size > 14) ? ((uint32_t)t->size - 14) : 0;
+            uint32_t remaining = (t->list_total > got) ? (t->list_total - got) : 0;
+            return enip_cip_udt_fields(a, (uint16_t)t->list_next_id, got, (uint16_t)remaining);
         }
 
         default: return bytes_null();
@@ -174,13 +177,7 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
 
     if(t->op == ENIP_OP_LIST) {
         if(data.len > 0) {
-            size_t need = (size_t)t->read_off + data.len;
-            uint8_t *buf = mem_realloc(t->data, (int)need);
-            if(!buf) { return PLCTAG_ERR_NO_MEM; }
-            t->data = buf;
-            bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
-            t->read_off = (uint32_t)need;
-            t->size = (int32_t)need;
+            if(!tag_data_append((plc_tag_p)t, &t->buf_cap, data)) { return PLCTAG_ERR_NO_MEM; }
 
             /* Walk this packet's entries to find the highest instance id. Each
              * entry is a 22-byte fixed prefix (instance_id u32, symbol_type u16,
@@ -214,9 +211,7 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
         bytes_unpack(bytes_from_buf(data.data + 22, 2), BYTES_LE, &num_members);
         bytes_unpack(bytes_from_buf(data.data + 28, 2), BYTES_LE, &handle);
 
-        uint8_t *buf = mem_realloc(t->data, 14);
-        if(!buf) { return PLCTAG_ERR_NO_MEM; }
-        t->data = buf;
+        if(!tag_data_reserve((plc_tag_p)t, &t->buf_cap, 14)) { return PLCTAG_ERR_NO_MEM; }
         Bytes hdr = bytes_from_buf(t->data, 14);
         bytes_pack_into(hdr, BYTES_LE, (uint16_t)t->list_next_id, (uint32_t)desc_words, (uint32_t)inst_size,
                         (uint16_t)num_members, (uint16_t)handle);
@@ -225,7 +220,6 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
         /* field-definition byte target (per the template docs), rounded up to 4. */
         uint32_t total = (4 * desc_words) - 23;
         t->list_total = (total + 3) & ~(uint32_t)3;
-        t->read_off = 0;
 
         /* transition to reading the field definition bytes. */
         t->op = ENIP_OP_UDT_FIELDS;
@@ -236,13 +230,7 @@ static int32_t enip_logix_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
 
     if(t->op == ENIP_OP_UDT_FIELDS) {
         if(data.len > 0) {
-            size_t need = (size_t)14 + t->read_off + data.len;
-            uint8_t *buf = mem_realloc(t->data, (int)need);
-            if(!buf) { return PLCTAG_ERR_NO_MEM; }
-            t->data = buf;
-            bytes_pack_into(bytes_from_buf(t->data + 14 + t->read_off, data.len), BYTES_LE, data);
-            t->read_off += (uint32_t)data.len;
-            t->size = (int32_t)need;
+            if(!tag_data_append((plc_tag_p)t, &t->buf_cap, data)) { return PLCTAG_ERR_NO_MEM; }
         }
 
         if(cip_status == CIP_STATUS_FRAG) { *more = true; }

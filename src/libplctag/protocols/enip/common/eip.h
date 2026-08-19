@@ -80,6 +80,22 @@ extern Bytes eip_encode_hdr(Arena *a, eip_hdr_t *hdr);
  * is overwritten with payload.len. Returns bytes_null() on arena exhaustion. */
 extern Bytes eip_encode(Arena *a, eip_hdr_t *hdr, Bytes payload);
 
+/* Convenience wrapper over eip_encode() for the common case of a fresh
+ * header with everything but cmd/session_handle/payload zeroed -- every
+ * client request and every server reply is exactly this. */
+static inline Bytes eip_frame(Arena *a, uint16_t cmd, uint32_t session_handle, Bytes payload) {
+    eip_hdr_t hdr = {
+        .cmd = cmd,
+        .payload_len = 0,
+        .session_handle = session_handle,
+        .status = 0,
+        .sender_context = 0,
+        .options = 0,
+    };
+
+    return eip_encode(a, &hdr, payload);
+}
+
 /* Split a received frame into header and payload (zero-copy slice of `in`).
  * Returns false if in.len < EIP_HEADER_SIZE or in.len < EIP_HEADER_SIZE +
  * hdr->payload_len. */

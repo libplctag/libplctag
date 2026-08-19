@@ -71,11 +71,15 @@ Bytes bytes_concat_impl(Arena *a, int count, ...) {
     size_t total_len = 0;
 
     va_start(args, count);
+    bool any_null = false;
     for(int i = 0; i < count; i++) {
         Bytes b = va_arg(args, Bytes);
+        if(bytes_is_null(b)) { any_null = true; }
         total_len += b.len;
     }
     va_end(args);
+
+    if(any_null) { return (Bytes){NULL, 0}; }
 
     uint8_t *mem = (uint8_t *)arena_alloc(a, total_len);
     if(!mem) { return (Bytes){NULL, 0}; }
@@ -84,7 +88,7 @@ Bytes bytes_concat_impl(Arena *a, int count, ...) {
     va_start(args, count);
     for(int i = 0; i < count; i++) {
         Bytes b = va_arg(args, Bytes);
-        if(b.data) { memcpy(mem + offset, b.data, b.len); }
+        memcpy(mem + offset, b.data, b.len);
         offset += b.len;
     }
     va_end(args);

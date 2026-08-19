@@ -57,13 +57,26 @@ target_include_directories(test_platform_str PRIVATE
 
 target_link_libraries(test_platform_str PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_bytes: covers utils/bytes.c, notably bytes_concat() null-absorption (D6).
+add_executable(test_bytes test_bytes.c)
+
+target_include_directories(test_bytes PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_bytes PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # Register the unit tests with CTest
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
+add_test(NAME unit_test_bytes COMMAND test_bytes)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str
+    DEPENDS test_init test_platform_str test_bytes
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

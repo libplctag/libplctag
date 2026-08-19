@@ -278,9 +278,10 @@ static int32_t enip_pccc_apply(enip_connection_t *c, enip_tag_p t, Bytes cip_rep
  * platforms' read wire format shares (max 255) -- see build below.
  *
  * t->list_next_id (reset to 0 by enip_listing_tag_read) is the next 16-bit
- * WORD offset into File 0; t->read_off is the accumulated raw byte length in
- * t->data -- both fields shared with Logix's own @tags use of the same
- * LISTING-kind tag (enip_dialect_t's listing seam, enip_dialect.h). The raw
+ * WORD offset into File 0 -- shared with Logix's own @tags use of the same
+ * LISTING-kind tag (enip_dialect_t's listing seam, enip_dialect.h); the
+ * accumulated raw byte length in t->data is t->size itself (0.1: no separate
+ * cursor field). The raw
  * buffer is bare concatenated native records, no per-record framing (matches
  * ENIP-METADATA-AND-DISCOVERY-DESIGN.md's raw-is-canonical model); parsed
  * access is via plc_tag_get_formatted_data(tag, PLCTAG_FORMAT_CBOR, ...)
@@ -352,14 +353,8 @@ static int32_t enip_pccc_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes d
     size_t payload_len = data.len - PCCC_REPLY_HDR;
 
     if(payload_len > 0) {
-        size_t need = (size_t)t->read_off + payload_len;
-        uint8_t *buf = mem_realloc(t->data, (int)need);
-        if(!buf) { return PLCTAG_ERR_NO_MEM; }
-        t->data = buf;
-        bytes_pack_into(bytes_from_buf(t->data + t->read_off, payload_len), BYTES_LE,
-                       bytes_from_buf(data.data + PCCC_REPLY_HDR, payload_len));
-        t->read_off = (uint32_t)need;
-        t->size = (int32_t)need;
+        Bytes payload = bytes_from_buf(data.data + PCCC_REPLY_HDR, payload_len);
+        if(!tag_data_append((plc_tag_p)t, &t->buf_cap, payload)) { return PLCTAG_ERR_NO_MEM; }
         t->list_next_id += (uint32_t)(payload_len / 2); /* advance the word cursor */
     }
 

@@ -1,10 +1,9 @@
-#pragma once
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever    *
  * you choose.                                                             *
  *                                                                         *
  * MPL 2.0:                                                                *
@@ -33,51 +32,35 @@
  ***************************************************************************/
 
 /*
- * EIP encapsulation header encode/decode (design doc §14.3).
- *
- * 24-byte little-endian header:
- *   offset  0  uint16  command
- *   offset  2  uint16  length (payload bytes following the header)
- *   offset  4  uint32  session_handle
- *   offset  8  uint32  status (0 in requests)
- *   offset 12  uint64  sender_context
- *   offset 20  uint32  options (0 in requests)
+ * test_bytes -- covers ENIP-REDESIGN-PLAN.md D6/0.3: bytes_concat() must
+ * absorb a null member instead of producing a non-null buffer with
+ * uninitialized bytes in it.
  */
 
-#include <stdbool.h>
-#include <stdint.h>
+#include <assert.h>
+#include <stdio.h>
 #include <utils/arena.h>
 #include <utils/bytes.h>
-#include <libplctag/protocols/enip/common/eip.h>
 
-/* Header struct + encode/decode + command constants live in common/eip.h
- * (single codec shared with the server's eip_dispatch). This alias keeps
- * the client's well-known type name at its many call sites. */
-typedef eip_hdr_t enip_eip_hdr_t;
+int main(void) {
+    Arena a;
+    assert(arena_init(&a, 256) == 0);
 
-#define ENIP_EIP_HEADER_SIZE        EIP_HEADER_SIZE
-#define ENIP_CMD_LIST_IDENTITY      EIP_CMD_LIST_IDENTITY
-#define ENIP_CMD_REGISTER_SESSION   EIP_CMD_REGISTER_SESSION
-#define ENIP_CMD_UNREGISTER_SESSION EIP_CMD_UNREGISTER_SESSION
-#define ENIP_CMD_UNCONNECTED_SEND   EIP_CMD_UNCONNECTED_SEND /* SendRRData   */
-#define ENIP_CMD_CONNECTED_SEND     EIP_CMD_CONNECTED_SEND   /* SendUnitData */
+    uint8_t data[3] = {1, 2, 3};
+    Bytes ok = bytes_from_buf(data, sizeof(data));
 
-/* Build a RegisterSession request (command 0x0065, session_handle=0,
- * protocol_version=1, options=0). */
-extern Bytes enip_eip_register_session(Arena *a);
+    Bytes both_ok = bytes_concat(&a, ok, ok);
+    assert(!bytes_is_null(both_ok));
+    assert(both_ok.len == 6);
 
-/* Build a List Identity request (command 0x0063, session_handle=0, empty
- * payload). Connectionless -- sent over UDP before any session exists
- * (unicast or broadcast); see client/enip_discover.c. */
-extern Bytes enip_eip_list_identity(Arena *a);
+    Bytes with_null = bytes_concat(&a, ok, bytes_null());
+    assert(bytes_is_null(with_null));
 
-/* Build an UnregisterSession request (command 0x0066, no payload). The target
- * sends no reply to this command -- fire-and-forget, same as the server's
- * handle_unregister_session (common/eip.c). */
-extern Bytes enip_eip_unregister_session(Arena *a, uint32_t session_handle);
+    Bytes null_first = bytes_concat(&a, bytes_null(), ok);
+    assert(bytes_is_null(null_first));
 
-/* Wrap a CPF frame in a SendRRData request (command 0x006F, unconnected). */
-extern Bytes enip_eip_send_rr_data(Arena *a, uint32_t session_handle, Bytes cpf);
+    arena_free(&a);
 
-/* Wrap a CPF frame in a SendUnitData request (command 0x0070, connected). */
-extern Bytes enip_eip_send_unit_data(Arena *a, uint32_t session_handle, Bytes cpf);
+    printf("test_bytes: OK\n");
+    return 0;
+}

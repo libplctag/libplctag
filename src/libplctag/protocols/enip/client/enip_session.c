@@ -54,8 +54,8 @@
 #include <libplctag/protocols/enip/client/enip_cip.h>
 #include <libplctag/protocols/enip/client/enip_connection_internal.h>
 #include <libplctag/protocols/enip/client/enip_dialect.h>
-#include <libplctag/protocols/enip/client/enip_eip.h>
 #include <libplctag/protocols/enip/client/enip_session.h>
+#include <libplctag/protocols/enip/common/eip.h>
 #include <libplctag/protocols/enip/client/enip_tag.h>
 #include <libplctag/protocols/enip/client/enip_type.h>
 #include <libplctag/protocols/enip/common/cpf.h>
@@ -169,7 +169,7 @@ static int32_t build_tag_request(enip_connection_t *c, enip_tag_p t);
 static int32_t build_batch_request(enip_connection_t *c);
 static void complete_tag(enip_connection_t *c, enip_tag_p t, int8_t status);
 static void complete_batch(enip_connection_t *c, int8_t status);
-static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static void handle_batch_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload);
 static void reset_connection(enip_connection_t *c);
 static void idle_disconnect(enip_connection_t *c);
 static void set_conn_status(enip_connection_t *c, uint8_t status);
@@ -183,10 +183,10 @@ static int32_t step_close(enip_connection_t *c);
 static int32_t step_sending(enip_connection_t *c);
 static int32_t step_waiting(enip_connection_t *c);
 
-static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr);
-static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
-static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
-static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static void on_register_reply(enip_connection_t *c, eip_hdr_t *hdr);
+static void on_open_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload);
+static void on_close_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload);
+static void handle_tag_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload);
 static const enip_dialect_t *listing_dialect_for(enip_connection_t *c);
 
 /* A tag that issues network ops via pick_batch (vs. the special tags that the
@@ -208,7 +208,7 @@ static Bytes wrap_tag_frame(enip_connection_t *c, Bytes cip_req);
 static Bytes build_forward_close(enip_connection_t *c);
 static int32_t step_identity(enip_connection_t *c);
 static Bytes build_identity_request(enip_connection_t *c);
-static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload);
+static void on_identity_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload);
 
 /* ============================================================================
  * Registry / lifecycle
@@ -335,7 +335,7 @@ static enip_connection_t *create_connection(const char *gateway, const char *pat
     return c;
 }
 
-enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
+extern enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
     const char *gateway_raw = attr_get_str(attribs, "gateway", NULL);
     /* "path" is optional: a device reachable directly over Ethernet (no
      * backplane/DH+ bridging hop -- the common case for a MicroLogix/SLC/PLC-5
@@ -406,7 +406,7 @@ enip_connection_t *enip_session_create(attr attribs, bool *is_new_out) {
     return result;
 }
 
-int32_t enip_session_module_init(void) {
+extern int32_t enip_session_module_init(void) {
     if(mutex_create(&s_registry_mutex) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to create registry mutex!");
         return PLCTAG_ERR_CREATE;
@@ -417,7 +417,7 @@ int32_t enip_session_module_init(void) {
     return PLCTAG_STATUS_OK;
 }
 
-void enip_session_module_teardown(void) {
+extern void enip_session_module_teardown(void) {
     /* Connections are referenced by tags; by teardown time all tags should
      * already have been destroyed, but walk defensively and drop our
      * (nonexistent) extra refs is not needed -- just ensure the mutex is
@@ -768,7 +768,7 @@ static int64_t next_special_wait(enip_connection_t *c, int64_t now, int64_t cap)
     return wait;
 }
 
-int32_t enip_session_schedule(enip_connection_t *c, enip_tag_p t, uint8_t op, int64_t op_time) {
+extern int32_t enip_session_schedule(enip_connection_t *c, enip_tag_p t, uint8_t op, int64_t op_time) {
     critical_block(c->sched_mutex) {
         t->op = op;
 
@@ -795,7 +795,7 @@ int32_t enip_session_schedule(enip_connection_t *c, enip_tag_p t, uint8_t op, in
     return PLCTAG_STATUS_PENDING;
 }
 
-int32_t enip_session_unschedule(enip_connection_t *c, enip_tag_p t) {
+extern int32_t enip_session_unschedule(enip_connection_t *c, enip_tag_p t) {
     critical_block(c->sched_mutex) {
         if(t->scheduled && t != c->in_flight) {
             sched_unlink(c, t);
@@ -810,32 +810,32 @@ int32_t enip_session_unschedule(enip_connection_t *c, enip_tag_p t) {
     return PLCTAG_STATUS_OK;
 }
 
-void enip_session_tag_detach(enip_connection_t *c, enip_tag_p t) {
+extern void enip_session_tag_detach(enip_connection_t *c, enip_tag_p t) {
     critical_block(c->sched_mutex) {
         if(t->scheduled) { sched_unlink(c, t); }
     }
 }
 
-size_t enip_session_max_cip(enip_connection_t *c) { return c->max_cip_packet_size; }
+extern size_t enip_session_max_cip(enip_connection_t *c) { return c->max_cip_packet_size; }
 
-int enip_session_get_status(enip_connection_t *c) { return (int)c->conn_status; }
+extern int enip_session_get_status(enip_connection_t *c) { return (int)c->conn_status; }
 
 /* Cached CIP Identity payload (raw Get_Attributes_All response). Returns false
  * until the bring-up identity query has completed. */
-bool enip_session_get_identity(enip_connection_t *c, uint8_t **data_out, uint16_t *len_out) {
+extern bool enip_session_get_identity(enip_connection_t *c, uint8_t **data_out, uint16_t *len_out) {
     if(!c || !c->identity_valid) { return false; }
     if(data_out) { *data_out = c->identity_data; }
     if(len_out) { *len_out = c->identity_len; }
     return true;
 }
 
-enip_plc_type_t enip_session_get_plc_type(enip_connection_t *c) { return c ? c->plc_type : ENIP_PLC_UNKNOWN; }
+extern enip_plc_type_t enip_session_get_plc_type(enip_connection_t *c) { return c ? c->plc_type : ENIP_PLC_UNKNOWN; }
 
-int enip_session_get_inactivity_timeout(enip_connection_t *c) { return (int)c->inactivity_timeout_ms; }
+extern int enip_session_get_inactivity_timeout(enip_connection_t *c) { return (int)c->inactivity_timeout_ms; }
 
 /* Clamp to [ENIP_MIN, ENIP_MAX]; returns PLCTAG_ERR_OUT_OF_BOUNDS (and still
  * stores the clamped value) if the request was out of range. */
-int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_value) {
+extern int enip_session_set_inactivity_timeout(enip_connection_t *c, int new_value) {
     int64_t v = (int64_t)new_value;
     int rc = PLCTAG_STATUS_OK;
 
@@ -879,9 +879,9 @@ static void set_conn_status(enip_connection_t *c, uint8_t status) {
     }
 }
 
-int32_t enip_session_conn_status_idx(enip_connection_t *c) { return atomic_get_int32(&c->conn_status_ring_write_idx); }
+extern int32_t enip_session_conn_status_idx(enip_connection_t *c) { return atomic_get_int32(&c->conn_status_ring_write_idx); }
 
-bool enip_session_next_conn_status(enip_connection_t *c, int32_t *read_idx, int32_t *status_out) {
+extern bool enip_session_next_conn_status(enip_connection_t *c, int32_t *read_idx, int32_t *status_out) {
     if(*read_idx == atomic_get_int32(&c->conn_status_ring_write_idx)) { return false; }
 
     *read_idx = (*read_idx + 1) & ENIP_CONN_STATUS_RING_MASK;
@@ -947,7 +947,7 @@ static int32_t step_connect(enip_connection_t *c) {
 static int32_t step_register(enip_connection_t *c) {
     arena_reset(&c->arena);
 
-    Bytes frame = enip_eip_register_session(&c->arena);
+    Bytes frame = eip_frame(&c->arena, EIP_CMD_REGISTER_SESSION, 0, bytes_pack(&c->arena, BYTES_LE, (uint16_t)1, (uint16_t)0));
     if(bytes_is_null(frame)) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Unable to build RegisterSession request!");
         reset_connection(c);
@@ -1074,12 +1074,12 @@ static int32_t step_sending(enip_connection_t *c) {
 static int32_t step_waiting(enip_connection_t *c) {
     size_t needed = 0;
 
-    if(c->rx_len < ENIP_EIP_HEADER_SIZE) {
-        needed = ENIP_EIP_HEADER_SIZE - c->rx_len;
+    if(c->rx_len < EIP_HEADER_SIZE) {
+        needed = EIP_HEADER_SIZE - c->rx_len;
     } else {
         uint16_t plen = 0;
         bytes_unpack(bytes_from_buf(c->rx_buf, c->rx_len), BYTES_LE, BYTES_SKIP(2), &plen);
-        size_t total = ENIP_EIP_HEADER_SIZE + plen;
+        size_t total = EIP_HEADER_SIZE + plen;
 
         if(total > c->rx_cap) {
             pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Reply packet (%zu bytes) exceeds rx buffer (%zu bytes)!", total,
@@ -1104,16 +1104,16 @@ static int32_t step_waiting(enip_connection_t *c) {
 
         c->rx_len += (size_t)rc;
 
-        if(c->rx_len < ENIP_EIP_HEADER_SIZE) { return PLCTAG_STATUS_PENDING; }
+        if(c->rx_len < EIP_HEADER_SIZE) { return PLCTAG_STATUS_PENDING; }
     }
 
     uint16_t plen = 0;
     bytes_unpack(bytes_from_buf(c->rx_buf, c->rx_len), BYTES_LE, BYTES_SKIP(2), &plen);
-    size_t total = ENIP_EIP_HEADER_SIZE + plen;
+    size_t total = EIP_HEADER_SIZE + plen;
 
     if(c->rx_len < total) { return PLCTAG_STATUS_PENDING; }
 
-    enip_eip_hdr_t hdr;
+    eip_hdr_t hdr;
     Bytes payload;
 
     if(!eip_decode(bytes_from_buf(c->rx_buf, total), &hdr, &payload)) {
@@ -1137,7 +1137,7 @@ static int32_t step_waiting(enip_connection_t *c) {
     return PLCTAG_STATUS_OK;
 }
 
-static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr) {
+static void on_register_reply(enip_connection_t *c, eip_hdr_t *hdr) {
     if(hdr->status != 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "RegisterSession failed, status 0x%08" PRIx32 ".", hdr->status);
         reset_connection(c);
@@ -1150,7 +1150,7 @@ static void on_register_reply(enip_connection_t *c, enip_eip_hdr_t *hdr) {
     c->state = c->identity_valid ? CONN_OPEN : CONN_IDENTITY;
 }
 
-static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+static void on_open_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload) {
     if(hdr->status != 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardOpen SendRRData failed, status 0x%08" PRIx32 ".", hdr->status);
         reset_connection(c);
@@ -1191,7 +1191,7 @@ static void on_open_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes paylo
 
 /* ForwardClose reply during idle teardown: log any rejection but tear the
  * socket down regardless -- we are going idle either way. */
-static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+static void on_close_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload) {
     if(hdr->status != 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "ForwardClose SendRRData failed, status 0x%08" PRIx32 ".", hdr->status);
     } else {
@@ -1211,7 +1211,7 @@ static void on_close_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payl
     idle_disconnect(c);
 }
 
-static void handle_tag_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+static void handle_tag_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload) {
     if(c->batch_count >= 2) {
         handle_batch_reply(c, hdr, payload);
         return;
@@ -1302,6 +1302,7 @@ extern uint32_t write_window_count(enip_tag_p t) {
 static void frag_reset(enip_tag_p t) {
     if(t->data) { mem_free(t->data); t->data = NULL; }
     t->size = 0;
+    t->buf_cap = 0;
     t->frag_offset = 0;
 }
 
@@ -1314,12 +1315,7 @@ static void frag_reset(enip_tag_p t) {
  * (apply_open_probe_frag). Returns false (t->data/size/frag_offset
  * unchanged) only on allocation failure. */
 static bool frag_append(enip_tag_p t, const uint8_t *src, uint32_t chunk) {
-    size_t new_size = (size_t)t->size + (size_t)chunk;
-    uint8_t *buf = mem_realloc(t->data, (int)new_size);
-    if(!buf) { return false; }
-    bytes_pack_into(bytes_from_buf(buf + t->size, (size_t)chunk), BYTES_LE, bytes_from_buf(src, chunk));
-    t->data = buf;
-    t->size = (int32_t)new_size;
+    if(!tag_data_append((plc_tag_p)t, &t->buf_cap, bytes_from_buf(src, chunk))) { return false; }
     t->frag_offset += chunk;
     return true;
 }
@@ -1396,6 +1392,7 @@ static int32_t apply_open_probe(enip_connection_t *c, enip_tag_p t, uint8_t stat
 
     t->data = buf;
     t->size = (int32_t)total_size;
+    t->buf_cap = total_size;
 
     bytes_pack_into(bytes_from_buf(t->data, (size_t)total_size), BYTES_LE, bytes_from_buf(data.data + header_len, elem_size));
 
@@ -1548,12 +1545,10 @@ static int32_t apply_read(enip_connection_t *c, enip_tag_p t, uint8_t status, By
         size_t needed = dest_off + (size_t)chunk;
 
         if(needed > (size_t)t->size) {
-            uint8_t *buf = mem_realloc(t->data, (int)needed);
-            if(!buf) {
+            if(!tag_data_reserve((plc_tag_p)t, &t->buf_cap, needed)) {
                 pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, t->tag_id, "Unable to grow tag data buffer!");
                 return PLCTAG_ERR_NO_MEM;
             }
-            t->data = buf;
             t->size = (int32_t)needed;
             t->elem_size = (uint32_t)needed;
         }
@@ -1653,7 +1648,7 @@ extern int32_t apply_tag_reply(enip_connection_t *c, enip_tag_p t, uint8_t statu
 /* §16a.4 dialect selection from the classified PLC family. PCCC families are
  * distinguished by name at tag create (ENIP_TAG_KIND_PCCC), not here -- see
  * enip_pccc_dialect's comment in enip_dialect.h. */
-const enip_dialect_t *enip_dialect_select(enip_plc_type_t plc_type) {
+extern const enip_dialect_t *enip_dialect_select(enip_plc_type_t plc_type) {
     if(plc_type == ENIP_PLC_OMRON_NJNX) { return &enip_omron_dialect; }
     return &enip_logix_dialect;
 }
@@ -1725,7 +1720,7 @@ static Bytes wrap_unconnected_frame(enip_connection_t *c, Bytes embedded) {
     Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
     if(bytes_is_null(cpf)) { return bytes_null(); }
 
-    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+    return eip_frame(a, EIP_CMD_UNCONNECTED_SEND, c->session_handle, cpf);
 }
 
 /* The single funnel every tag request leaves through, single or batched: a
@@ -1739,7 +1734,7 @@ static Bytes wrap_tag_frame(enip_connection_t *c, Bytes cip_req) {
 
     Bytes cpf = cpf_wrap_connected(&c->arena, c->cip_conn_id, ++c->conn_seq, cip_req);
 
-    return enip_eip_send_unit_data(&c->arena, c->session_handle, cpf);
+    return eip_frame(&c->arena, EIP_CMD_CONNECTED_SEND, c->session_handle, cpf);
 }
 
 /* Build the tx frame for c->in_flight's current op and transition to
@@ -1893,7 +1888,7 @@ static void complete_batch(enip_connection_t *c, int8_t status) {
     c->batch_complete_idx = 0;
 }
 
-static void handle_batch_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+static void handle_batch_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload) {
     if(hdr->status != 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "handle_batch_reply: SendUnitData status 0x%08" PRIx32 ".", hdr->status);
         complete_batch(c, (int8_t)PLCTAG_ERR_BAD_REPLY);
@@ -2091,7 +2086,7 @@ static void send_unregister_session(enip_connection_t *c) {
 
     arena_reset(&c->arena);
 
-    Bytes frame = enip_eip_unregister_session(&c->arena, c->session_handle);
+    Bytes frame = eip_frame(&c->arena, EIP_CMD_UNREGISTER_SESSION, c->session_handle, bytes_null());
     if(bytes_is_null(frame)) { return; }
 
     socket_write(c->sock, frame.data, (int)frame.len, 0);
@@ -2193,7 +2188,7 @@ static Bytes build_forward_open(enip_connection_t *c, bool use_large) {
     Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
     if(bytes_is_null(cpf)) { return bytes_null(); }
 
-    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+    return eip_frame(a, EIP_CMD_UNCONNECTED_SEND, c->session_handle, cpf);
 }
 
 static int32_t parse_forward_open_reply(enip_connection_t *c, Bytes cip_reply_bytes) {
@@ -2268,7 +2263,7 @@ static Bytes build_forward_close(enip_connection_t *c) {
     Bytes cpf = cpf_wrap_unconnected(a, cip_payload);
     if(bytes_is_null(cpf)) { return bytes_null(); }
 
-    return enip_eip_send_rr_data(a, c->session_handle, cpf);
+    return eip_frame(a, EIP_CMD_UNCONNECTED_SEND, c->session_handle, cpf);
 }
 
 /* ============================================================================
@@ -2308,7 +2303,7 @@ static int32_t step_identity(enip_connection_t *c) {
     return PLCTAG_STATUS_OK;
 }
 
-static void on_identity_reply(enip_connection_t *c, enip_eip_hdr_t *hdr, Bytes payload) {
+static void on_identity_reply(enip_connection_t *c, eip_hdr_t *hdr, Bytes payload) {
     if(hdr->status != 0) {
         pdebug(DEBUG_MODULE_ENIP, DEBUG_WARN, 0, "Identity SendRRData failed, status 0x%08" PRIx32 ".", hdr->status);
         reset_connection(c);

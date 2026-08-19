@@ -342,10 +342,8 @@ static int32_t enip_identity_tag_copy(plc_tag_p tag) {
 
     if(!enip_session_get_identity(t->conn, &data, &len)) { return PLCTAG_STATUS_PENDING; }
 
-    uint8_t *buf = mem_realloc(tag->data, (int)len);
-    if(!buf) { return PLCTAG_ERR_NO_MEM; }
+    if(!tag_data_reserve(tag, &t->buf_cap, (size_t)len)) { return PLCTAG_ERR_NO_MEM; }
 
-    tag->data = buf;
     tag->size = (int)len;
     bytes_pack_into(bytes_from_buf(tag->data, (size_t)len), BYTES_LE, bytes_from_buf(data, len));
 

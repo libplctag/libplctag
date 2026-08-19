@@ -55,7 +55,8 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/enip/client/enip_discover.h>
-#include <libplctag/protocols/enip/client/enip_eip.h>
+#include <libplctag/protocols/enip/client/enip_tag.h> /* tag_data_reserve (0.1) */
+#include <libplctag/protocols/enip/common/eip.h>
 #include <libplctag/protocols/enip/common/identity.h>
 #include <platform.h>
 #include <utils/arena.h>
@@ -97,6 +98,7 @@ struct enip_discover_tag_t {
     int32_t discover_wait_ms;
 
     uint32_t record_count; /* library-tracked; not stored in tag->data (design doc §8) */
+    size_t buf_cap;        /* allocated size of tag->data; tag_data_reserve (0.1) */
 
     enip_discover_seen_t *seen; /* dedup set for the current/last scan */
     size_t seen_count, seen_cap;
@@ -122,7 +124,7 @@ typedef struct enip_discover_tag_t *enip_discover_tag_p;
  * Shared raw record encode (enip_discover.h)
  * ============================================================================ */
 
-size_t enip_identity_raw_record_size(uint8_t name_len) { return (size_t)24 + name_len; }
+extern size_t enip_identity_raw_record_size(uint8_t name_len) { return (size_t)24 + name_len; }
 
 bool enip_identity_write_raw_record(Bytes dest, size_t *pos, uint32_t ip_host, uint16_t port_host, uint16_t vendor_id,
                                     uint16_t device_type, uint16_t product_code, uint8_t revision_major,
@@ -278,15 +280,9 @@ static void enip_discover_add_record(enip_discover_tag_p t, uint32_t src_ip_host
 
         size_t rec_size = enip_identity_raw_record_size(name_len);
         size_t need = (size_t)tag->size + rec_size;
-        uint8_t *nbuf = mem_realloc(tag->data, (int)need);
-        if(!nbuf) { break; } /* OOM: original tag->data untouched (realloc semantics); drop this record */
+        if(!tag_data_reserve(tag, &t->buf_cap, need)) { break; } /* OOM: drop this record, keep the scan going */
 
-        /* Repoint immediately: a successful realloc may have already
-         * invalidated the old tag->data pointer, so tag->data must never be
-         * left referring to it past this point regardless of what follows. */
-        tag->data = nbuf;
-
-        Bytes dest = bytes_from_buf(nbuf + tag->size, rec_size);
+        Bytes dest = bytes_from_buf(tag->data + tag->size, rec_size);
         size_t rec_pos = 0;
         if(enip_identity_write_raw_record(dest, &rec_pos, src_ip_host, reply_port, vendor_id, device_type, product_code,
                                           rev_major, rev_minor, status, serial, state, name, name_len)) {
@@ -314,11 +310,11 @@ static void enip_discover_add_record(enip_discover_tag_p t, uint32_t src_ip_host
  * accumulate it. Malformed or non-matching datagrams are silently ignored
  * (best-effort collection; one bad packet must not abort the scan). */
 static void enip_discover_handle_datagram(enip_discover_tag_p t, Bytes payload, const char *src_host) {
-    enip_eip_hdr_t hdr;
+    eip_hdr_t hdr;
     Bytes eip_payload;
 
     if(!eip_decode(payload, &hdr, &eip_payload)) { return; }
-    if(hdr.cmd != ENIP_CMD_LIST_IDENTITY || hdr.status != 0) { return; }
+    if(hdr.cmd != EIP_CMD_LIST_IDENTITY || hdr.status != 0) { return; }
 
     /* CPF body: item_count(u16LE), item_type(u16LE), item_len(u16LE), item body.
      * List Identity always answers with exactly one type-0x000C item. */
@@ -396,7 +392,7 @@ static void enip_discover_run_scan(enip_discover_tag_p t) {
     {
         Arena scratch;
         if(arena_init(&scratch, 256) == 0) {
-            Bytes frame = enip_eip_list_identity(&scratch);
+            Bytes frame = eip_frame(&scratch, EIP_CMD_LIST_IDENTITY, 0, bytes_null());
             if(!bytes_is_null(frame)) {
                 char target_str[32];
                 enip_discover_format_ipv4(t->target_ip_host, target_str, sizeof(target_str));

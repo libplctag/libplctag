@@ -121,13 +121,7 @@ static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
         uint8_t status_byte = 0;
         bytes_unpack(data, BYTES_LE, &instance_count, &status_byte);
 
-        size_t need = (size_t)t->read_off + data.len;
-        uint8_t *buf = mem_realloc(t->data, (int)need);
-        if(!buf) { return PLCTAG_ERR_NO_MEM; }
-        t->data = buf;
-        bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
-        t->read_off = (uint32_t)need;
-        t->size = (int32_t)need;
+        if(!tag_data_append((plc_tag_p)t, &t->buf_cap, data)) { return PLCTAG_ERR_NO_MEM; }
 
         t->list_next_id += instance_count;
         if(status_byte != 0 && instance_count > 0) { *more = true; }
@@ -137,13 +131,7 @@ static int32_t enip_omron_apply_listing(enip_tag_p t, uint8_t cip_status, Bytes 
 
     if(t->op == ENIP_OP_UDT_META) {
         if(data.len > 0) {
-            size_t need = (size_t)t->read_off + data.len;
-            uint8_t *buf = mem_realloc(t->data, (int)need);
-            if(!buf) { return PLCTAG_ERR_NO_MEM; }
-            t->data = buf;
-            bytes_pack_into(bytes_from_buf(t->data + t->read_off, data.len), BYTES_LE, data);
-            t->read_off = (uint32_t)need;
-            t->size = (int32_t)need;
+            if(!tag_data_append((plc_tag_p)t, &t->buf_cap, data)) { return PLCTAG_ERR_NO_MEM; }
         }
 
         if(cip_status == CIP_STATUS_FRAG) {

@@ -70,6 +70,7 @@ struct enip_tag_t {
     /* TAG_BASE_STRUCT must stay first: enip_tag_t "is a" plc_tag_t. */
 
     enip_connection_t *conn; /* holds an rc ref; released in destructor; common to all variants */
+    size_t buf_cap;          /* allocated size of `data`, tracked by tag_data_reserve/_append (0.1) */
 
     /* Per-variant fields. The active member is selected by `kind` below: a
      * data tag uses the data variant; @connection uses the conn_status variant;
@@ -142,3 +143,51 @@ struct enip_tag_t {
 
 extern plc_tag_p enip_tag_create_impl(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                        void *userdata, plc_tag_p src_tag);
+
+/* ============================================================================
+ * Tag data sink (0.1). Grows tag->data in place, doubling from a floor of 64,
+ * for the accumulate-a-reply-into-tag->data pattern every listing/UDT walk
+ * and the @identity copy share. Built entirely on the existing bounds-checked
+ * Bytes API -- bytes_pack_into() already refuses to write past the slice it
+ * is given, so tag_data_reserve() only has to keep that slice large enough.
+ *
+ * Both take `plc_tag_p` + a `size_t *cap` out-parameter rather than
+ * `enip_tag_p` because enip_discover_tag_t (client/enip_discover.c) is a
+ * separate TAG_BASE_STRUCT type with its own `data`/`size`/buf_cap and shares
+ * this same growth pattern until Phase 1.5 folds it into enip_tag_t.
+ *
+ * Invariant: never cache a `Bytes` slice of tag->data across a reserve --
+ * mem_realloc() may move the block, so each append recomputes its slice from
+ * the (possibly new) tag->data pointer.
+ */
+static inline bool tag_data_reserve(plc_tag_p tag, size_t *cap, size_t need) {
+    if(need > (size_t)INT32_MAX) { return false; }
+    if(need <= *cap) { return true; }
+
+    size_t new_cap = (*cap == 0) ? (size_t)64 : *cap;
+    while(new_cap < need) { new_cap *= 2; }
+    if(new_cap > (size_t)INT32_MAX) { new_cap = (size_t)INT32_MAX; }
+
+    uint8_t *buf = (uint8_t *)mem_realloc(tag->data, (int)new_cap);
+    if(!buf) { return false; }
+
+    tag->data = buf;
+    *cap = new_cap;
+
+    return true;
+}
+
+/* Append src at tag->size, growing as needed, and advance tag->size. */
+static inline bool tag_data_append(plc_tag_p tag, size_t *cap, Bytes src) {
+    if(src.len == 0) { return true; }
+
+    size_t need = (size_t)tag->size + src.len;
+    if(!tag_data_reserve(tag, cap, need)) { return false; }
+
+    Bytes dest = bytes_slice(bytes_from_buf(tag->data, *cap), (size_t)tag->size, src.len);
+    if(bytes_is_null(bytes_pack_into(dest, BYTES_LE, src))) { return false; }
+
+    tag->size = (int32_t)need;
+
+    return true;
+}
