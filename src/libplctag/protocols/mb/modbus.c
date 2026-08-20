@@ -59,6 +59,8 @@
  * byte-count/exception-code byte. check_read_response()/check_write_response() read up to
  * this offset unconditionally. */
 #define MODBUS_MIN_RESPONSE_SIZE (MODBUS_MBAP_SIZE + 3)
+/* Modbus registers are addressed with 16 bits, so this is the most that can exist. */
+#define MAX_MODBUS_ELEM_COUNT (65536)
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 #define MAX_MODBUS_PDU_PAYLOAD (253) /* everything after the server address */
@@ -481,6 +483,17 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
     if(elem_count < 0) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Element count should not be a negative value!");
         return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * elem_count comes from the attribute string, so cap it.  Modbus registers are
+     * addressed with 16 bits, so more than 65536 of them is meaningless, and without
+     * this the elem_count * reg_size below can overflow or ask for a huge allocation.
+     */
+    if(elem_count > MAX_MODBUS_ELEM_COUNT) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Element count %d is larger than the maximum of %d!", elem_count,
+               MAX_MODBUS_ELEM_COUNT);
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");

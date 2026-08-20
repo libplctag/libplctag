@@ -2610,6 +2610,15 @@ int recv_eip_response(ab_session_p session, int timeout) {
     session->data_size = 0;
     data_needed = sizeof(eip_encap);
 
+    /*
+     * Clear the buffer before reading into it.  Response handlers cast this buffer to
+     * header structs, and a short response leaves whatever the previous response put
+     * there.  Every length check guarding those casts is then the only thing between a
+     * truncated packet and a PLC-groomed value being read as a status or connection ID.
+     * Zeroing makes that failure mode boring instead of exploitable.
+     */
+    mem_set(session->data, 0, (int)session->data_capacity);
+
     do {
         rc = socket_read(session->sock, session->data + session->data_offset, (int)(data_needed - session->data_offset),
                          SOCKET_WAIT_TIMEOUT_MS);
