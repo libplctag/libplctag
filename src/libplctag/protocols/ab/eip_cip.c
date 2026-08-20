@@ -1408,11 +1408,27 @@ static int check_read_status_connected(ab_tag_p tag) {
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
 
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
             /* copy the data into the tag and realloc if we need more space. */
             if(payload_size + tag->offset > tag->size) {
+                /* a PLC can keep returning fragments forever.  Do not grow without bound. */
+                if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
+                           (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
 
@@ -1588,11 +1604,27 @@ static int check_read_status_unconnected(ab_tag_p tag) {
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
 
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
             /* copy the data into the tag and realloc if we need more space. */
             if(payload_size + tag->offset > tag->size) {
+                /* a PLC can keep returning fragments forever.  Do not grow without bound. */
+                if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
+                           (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
 

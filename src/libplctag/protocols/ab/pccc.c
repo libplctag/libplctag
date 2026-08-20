@@ -1364,6 +1364,42 @@ void encode_data(uint8_t *data, int *index, int val) {
 
 
 /*
+ * pccc_check_response_size
+ *
+ * Every PCCC response handler casts the request buffer to a chain of headers and
+ * then reads fields out of it.  The generic check in check_request_status() only
+ * knows about the CIP response headers, so validate the PCCC-specific chain here,
+ * in one place, before any handler dereferences it.
+ *
+ * DH+ responses arrive behind a connected CPF header, everything else behind an
+ * unconnected one.
+ */
+int pccc_check_response_size(ab_tag_p tag, bool is_dhp) {
+    int min_size = 0;
+
+    if(!tag || !tag->req) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, (tag ? tag->tag_id : 0), "Called without a request in flight!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(is_dhp) {
+        min_size = (int)(sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_cmd_resp));
+    } else {
+        min_size = (int)(sizeof(eip_cpf_uc_header) + sizeof(cip_pccc_resp) + sizeof(pccc_cmd_resp));
+    }
+
+    if(tag->req->request_size < min_size) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
+               "Response of %d bytes is too short to hold a %s response header of %d bytes!", tag->req->request_size,
+               (is_dhp ? "DH+ PCCC" : "PCCC"), min_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
  * tag_status
  *
  * get the tag status.
@@ -1665,6 +1701,14 @@ int pccc_check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
+
+    rc = pccc_check_response_size(tag, false);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->read_in_progress = 0;
+        tag->read_complete = 1;
+        return rc;
+    }
 
     /* get the header pointers */
     eip_cpf_uc_header *eip_cpf = (eip_cpf_uc_header *)(tag->req->data);
@@ -2313,6 +2357,13 @@ int pccc_check_write_status(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
+    rc = pccc_check_response_size(tag, false);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->write_in_progress = 0;
+        return rc;
+    }
+
     /* the request reference is valid. */
 
     pccc = (pccc_resp *)(tag->req->data);
@@ -2641,6 +2692,14 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
+
+    rc = pccc_check_response_size(tag, true);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->read_in_progress = 0;
+        tag->read_complete = 1;
+        return rc;
+    }
 
     /* get the header pointers */
     eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
@@ -3273,6 +3332,13 @@ int pccc_dhp_check_write_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
+
+    rc = pccc_check_response_size(tag, true);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->write_in_progress = 0;
+        return rc;
+    }
 
     /* the request reference is valid. */
 

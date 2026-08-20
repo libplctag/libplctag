@@ -1927,9 +1927,20 @@ int process_requests(ab_session_p session) {
 
                 if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
                     eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
-                    uint16_t udi_item_length = le2h16(resp->cpf_udi_item_length);
+                    uint16_t udi_item_length = 0;
                     size_t response_overhead = 0;
                     size_t response_size = 0;
+
+                    /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
+                    if((size_t)session->data_size < sizeof(*resp)) {
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                               "Unconnected response of %u bytes is too short to hold a CIP response of %d bytes!",
+                               session->data_size, (int)sizeof(*resp));
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                        break;
+                    }
+
+                    udi_item_length = le2h16(resp->cpf_udi_item_length);
 
                     multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
 
@@ -1959,9 +1970,20 @@ int process_requests(ab_session_p session) {
                     }
                 } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
                     eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
-                    uint16_t cdi_item_length = le2h16(resp->cpf_cdi_item_length);
+                    uint16_t cdi_item_length = 0;
                     size_t response_overhead = 0;
                     size_t response_size = 0;
+
+                    /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
+                    if((size_t)session->data_size < sizeof(*resp)) {
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                               "Connected response of %u bytes is too short to hold a CIP response of %d bytes!",
+                               session->data_size, (int)sizeof(*resp));
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                        break;
+                    }
+
+                    cdi_item_length = le2h16(resp->cpf_cdi_item_length);
 
                     multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
 
@@ -2916,6 +2938,22 @@ int receive_forward_open_response(ab_session_p session) {
     fo_resp = (eip_forward_open_response_t *)(session->data);
 
     do {
+        /*
+         * recv_eip_response() only guarantees that we got an EIP header.  We are about to
+         * read the CIP reply status, so require everything up to and including status_size.
+         * An error reply legitimately stops there -- it carries extended status instead of
+         * the connection IDs -- so do not demand the whole struct here.  The buffer is not
+         * cleared between packets, so a short response would otherwise be read as stale
+         * data from the previous one.
+         */
+        if((size_t)session->data_size < offsetof(eip_forward_open_response_t, orig_to_targ_conn_id)) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Forward Open response of %u bytes is too short to hold the CIP reply status at %d bytes!",
+                   session->data_size, (int)offsetof(eip_forward_open_response_t, orig_to_targ_conn_id));
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
         if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -2983,6 +3021,15 @@ int receive_forward_open_response(ab_session_p session) {
                 }
             }
 
+            break;
+        }
+
+        /* a success reply must carry the connection IDs and the rest of the fixed fields. */
+        if((size_t)session->data_size < sizeof(*fo_resp)) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Successful Forward Open response of %u bytes is too short to hold the connection data of %d bytes!",
+                   session->data_size, (int)sizeof(*fo_resp));
+            rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
@@ -3085,6 +3132,18 @@ int recv_forward_close_resp(ab_session_p session) {
     fo_resp = (eip_forward_close_resp_t *)(session->data);
 
     do {
+        /*
+         * As in the Forward Open case, we only know we got an EIP header so far.  We read
+         * no further than general_status here, so the CIP reply status prefix is enough.
+         */
+        if((size_t)session->data_size < offsetof(eip_forward_close_resp_t, conn_serial_number)) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Forward Close response of %u bytes is too short to hold the CIP reply status at %d bytes!",
+                   session->data_size, (int)offsetof(eip_forward_close_resp_t, conn_serial_number));
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
         if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;

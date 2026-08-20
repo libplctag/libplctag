@@ -1362,6 +1362,13 @@ static int check_read_status_connected(omron_tag_p tag) {
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
 
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
@@ -1561,6 +1568,13 @@ static int check_read_status_unconnected(omron_tag_p tag) {
 
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
+
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
 
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);

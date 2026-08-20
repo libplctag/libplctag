@@ -977,9 +977,32 @@ int omron_check_request_status(omron_tag_p tag) {
         switch(le2h16(eip_header->encap_command)) {
             case OMRON_EIP_CONNECTED_SEND:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received a connected send EIP packet.");
+
+                /*
+                 * The response must hold the EIP header, the connected CPF header and at
+                 * least a minimal CIP response.  The handlers below cast the buffer to
+                 * this type and read its fields, so check the length here, once, before
+                 * any of them touch it.
+                 */
+                if((size_t)req->request_size < sizeof(eip_cip_co_resp)) {
+                    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+                           "Connected response of %d bytes is too short to hold a CIP response of %d bytes!", req->request_size,
+                           (int)sizeof(eip_cip_co_resp));
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                }
+
                 break;
             case OMRON_EIP_UNCONNECTED_SEND:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received an unconnected send EIP packet.");
+
+                /* as above, but for the unconnected CPF header. */
+                if((size_t)req->request_size < sizeof(eip_cip_uc_resp)) {
+                    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+                           "Unconnected response of %d bytes is too short to hold a CIP response of %d bytes!", req->request_size,
+                           (int)sizeof(eip_cip_uc_resp));
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                }
+
                 break;
             default:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received an unknown EIP packet type %04" PRIx16 ".",
