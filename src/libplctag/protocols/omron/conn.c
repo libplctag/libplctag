@@ -1838,6 +1838,28 @@ int process_requests(omron_conn_p conn) {
                     break;
                 }
 
+                /*
+                 * The count word and the offset array that follows it are both past the
+                 * fixed part of the response we checked above, and the array is sized by a
+                 * count the PLC controls.  A short response with a large count would have us
+                 * reading offsets out of the buffer to decide whether the offsets are in the
+                 * buffer, so bound the whole header before touching any of it.
+                 */
+                {
+                    size_t offsets_start =
+                        (size_t)((uint8_t *)multi_resp - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
+                    size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
+
+                    if(conn->data_size < 0 || offsets_start > (size_t)conn->data_size
+                       || offsets_size > (size_t)conn->data_size - offsets_start) {
+                        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+                               "Response of %d bytes is too short to hold %d packed response offsets!", conn->data_size,
+                               num_bundled_requests);
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                        break;
+                    }
+                }
+
                 /* we have multiple requests, sanity check the data. */
                 if(le2h16(multi_resp->request_count) == num_bundled_requests) {
                     size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - conn->data);
@@ -1969,6 +1991,24 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
         /* this is a packed response. */
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Got multiple response packet, subpacket %d", sub_packet);
 
+        uint8_t *buf_end = conn->data + conn->data_size;
+
+        /*
+         * The response count, the offsets and encap_length all come from the wire.  Check
+         * that the offset array itself is inside the data we received BEFORE reading any
+         * offset out of it -- otherwise the read that decides whether the array is in bounds
+         * is itself out of bounds.
+         */
+        size_t offsets_start = (size_t)((uint8_t *)multi - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
+        size_t offsets_size = (size_t)total_responses * sizeof(uint16_le);
+
+        if(sub_packet < 0 || sub_packet >= (int)total_responses || conn->data_size < 0
+           || offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
+                   "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Our result offset is %d bytes.",
                (int)le2h16(multi->request_offsets[sub_packet]));
 
@@ -1983,16 +2023,14 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
         }
 
         /*
-         * The offsets and encap_length above all come from the wire.  Bound pkt_start/pkt_end
-         * against the bytes we actually received before trusting them as a memcpy source range.
+         * Now bound pkt_start/pkt_end against the bytes we actually received before trusting
+         * them as a memcpy source range.  Comparing pointers directly is UB, so compare the
+         * integer values instead.
          */
-        uint8_t *buf_end = conn->data + conn->data_size;
-
-        if(sub_packet < 0 || sub_packet >= (int)total_responses
-           || (uint8_t *)(&multi->request_offsets[total_responses]) > buf_end || pkt_start < (uint8_t *)(&multi->request_count)
-           || pkt_start > buf_end || pkt_end < pkt_start || pkt_end > buf_end) {
+        if((intptr_t)pkt_start < (intptr_t)(&multi->request_count) || (intptr_t)pkt_start > (intptr_t)buf_end
+           || (intptr_t)pkt_end < (intptr_t)pkt_start || (intptr_t)pkt_end > (intptr_t)buf_end) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                   "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
+                   "Packed response sub-packet %d has an out of bounds data range!", sub_packet);
             return PLCTAG_ERR_OUT_OF_BOUNDS;
         }
 

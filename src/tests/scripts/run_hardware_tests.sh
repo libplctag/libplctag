@@ -50,8 +50,10 @@ if [[ ! -d $TEST_DIR ]]; then
     exit 1
 fi
 
-# test for the executables.
-EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_connection_tag test_idle_disconnect test_modbus_multiple test_reconnect_after_outage_async test_reconnect_after_outage_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress get_identity"
+# Test for the executables.  Only the ones this script actually runs are listed: a missing
+# entry aborts the whole run, so requiring binaries we never invoke just breaks the script
+# whenever an unrelated test is renamed.
+EXECUTABLES="get_identity list_tags_logix string_non_standard_udt string_standard tag_rw2 test_callback_ex_async test_connection_tag test_idle_disconnect test_raw_cip test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -399,6 +401,29 @@ else
     let SUCCESSES++
 fi
 
+
+let TEST++
+echo -n "Test $TEST: extended callbacks with async tag creation (ControlLogix)... "
+$VALGRIND$TEST_DIR/test_callback_ex_async "--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_type=DINT&elem_count=10&name=TestBigArray" > "$LOG_DIR/${TEST}_callback_ex_async_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: shutdown with reads and writes in flight (ControlLogix)... "
+# the "%d" is filled in per thread, so each of the ten threads gets its own array element.
+$VALGRIND$TEST_DIR/test_shutdown '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20' > "$LOG_DIR/${TEST}_shutdown_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "Test $TEST: connection tag connection state transitions (ControlLogix)... "

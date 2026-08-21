@@ -2627,20 +2627,30 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "byte_offset = %d", byte_offset);
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "copy_size = %d", copy_size);
 
-            mem_copy(tag->data + byte_offset, &plc->read_data[9], copy_size);
-
-            /* are we done? */
-            if(tag->size > (byte_offset + copy_size)) {
-                /* Not yet. */
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Not done reading entire tag.");
-                partial_read = 1;
+            /*
+             * byte_offset comes from our own request numbering, but forming tag->data + byte_offset
+             * past the end of the buffer is UB even when copy_size has been clamped to zero.
+             */
+            if(byte_offset < 0 || byte_offset > tag->size) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Byte offset %d is outside a tag of %d bytes!", byte_offset,
+                       tag->size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
             } else {
-                /* read is done. */
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Read is complete.");
-                partial_read = 0;
-            }
+                mem_copy(tag->data + byte_offset, &plc->read_data[9], copy_size);
 
-            rc = PLCTAG_STATUS_OK;
+                /* are we done? */
+                if(tag->size > (byte_offset + copy_size)) {
+                    /* Not yet. */
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Not done reading entire tag.");
+                    partial_read = 1;
+                } else {
+                    /* read is done. */
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Read is complete.");
+                    partial_read = 0;
+                }
+
+                rc = PLCTAG_STATUS_OK;
+            }
         }
 
         /* either way, clean up the PLC buffer. */

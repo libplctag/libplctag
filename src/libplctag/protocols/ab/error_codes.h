@@ -47,5 +47,6 @@ extern int decode_cip_error_code(uint8_t *data, size_t data_size);
  * than letting a negative pointer difference wrap around to a huge size_t.
  */
 static inline size_t cip_error_data_size(uint8_t *data, uint8_t *buf_end) {
-    return (data < buf_end) ? (size_t)(buf_end - data) : 0;
+    /* comparing pointers directly is UB, so compare the integer values instead. */
+    return ((intptr_t)data < (intptr_t)buf_end) ? (size_t)((intptr_t)buf_end - (intptr_t)data) : 0;
 }

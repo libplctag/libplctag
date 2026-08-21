@@ -538,11 +538,29 @@ uint16_t pccc_calculate_crc16(uint8_t *data, int size) {
 }
 
 
-const char *pccc_decode_error(uint8_t *error_ptr) {
-    uint8_t error = *error_ptr;
+const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size) {
+    uint8_t error = 0;
+
+    /*
+     * error_size is how many bytes the response actually has starting at error_ptr.  The
+     * PLC picks the status byte and the response length independently, so a hostile PLC
+     * can send 0xF0 in a response too short to hold the extended status that follows it.
+     * Check before each read rather than trusting the status byte to imply the length.
+     */
+    if(error_size < 1) {
+        return "PCCC response too short to contain a status byte!";
+    }
+
+    error = *error_ptr;
 
     /* extended error? */
-    if(error == 0xF0) { error = *(error_ptr + 3); }
+    if(error == 0xF0) {
+        if(error_size < 4) {
+            return "PCCC response too short to contain an extended status code!";
+        }
+
+        error = *(error_ptr + 3);
+    }
 
     switch(error) {
         case 1: return "Error converting block address."; break;
@@ -1731,7 +1749,8 @@ int pccc_check_read_status(ab_tag_p tag) {
 
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status, pccc_decode_error(&pccc_cmd->pccc_status));
+                   pccc_cmd->pccc_status,
+                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -2368,6 +2387,8 @@ int pccc_check_write_status(ab_tag_p tag) {
 
     pccc = (pccc_resp *)(tag->req->data);
 
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
+
     /* fake exception */
     do {
         if(pccc->general_status != AB_EIP_OK) {
@@ -2378,7 +2399,7 @@ int pccc_check_write_status(ab_tag_p tag) {
 
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status));
+                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -2712,7 +2733,8 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
     do {
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status, pccc_decode_error(&pccc_cmd->pccc_status));
+                   pccc_cmd->pccc_status,
+                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -3346,11 +3368,14 @@ int pccc_dhp_check_write_status(ab_tag_p tag) {
     eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
     pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(eip_cpf + 1);
 
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
+
     /* fake exceptions */
     do {
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status, pccc_decode_error(&pccc_cmd->pccc_status));
+                   pccc_cmd->pccc_status,
+                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }

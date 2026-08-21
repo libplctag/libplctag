@@ -4961,6 +4961,38 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
                 break;
         }
 
+        /*
+         * The count word comes from the PLC.  On the wire it is a signed value: a DINT for
+         * Logix strings and an INT for standard CIP strings, so a hostile or broken PLC can
+         * return a negative count or one that claims more characters than the string can
+         * hold.  Callers use this value to index and to size allocations, so reject bad
+         * counts here rather than letting them out of this function.
+         */
+        if(string_length < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "String count word at offset %d is negative, %d!", offset,
+                   string_length);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
+        /*
+         * Both STRING and LOGIX_STRING are fixed-length: the character array is str_max_capacity
+         * bytes no matter what the count word says.  When the string is fixed length that
+         * capacity is the real limit, otherwise the only limit is the tag buffer itself.
+         */
+        if(tag->byte_order->str_is_fixed_length && (unsigned int)string_length > tag->byte_order->str_max_capacity) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
+                   "String count word %d at offset %d exceeds the string capacity of %u characters!", string_length, offset,
+                   tag->byte_order->str_max_capacity);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
+        /* the tag buffer is the outer bound in every case, fixed length or not. */
+        if(!tag_range_is_valid(tag, offset + (int)(tag->byte_order->str_count_word_bytes), string_length)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
+                   "String count word %d at offset %d is out of bounds for a tag of %d bytes!", string_length, offset,
+                   tag->size);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
     } else {
         if(tag->byte_order->str_is_zero_terminated) {
             /* slow, but hopefully correct. */
@@ -4968,11 +5000,31 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
             /*
              * note that this will count the correct length of a string that runs up against
              * the end of the tag buffer.
+             *
+             * The string may sit in the middle of a larger UDT, so the end of the tag buffer
+             * is only the outer bound.  If the string is fixed length then its own character
+             * array ends well before that and the scan must stop there instead, otherwise a
+             * PLC that omits the terminator makes us count the bytes of the next field.
              */
-            for(int i = offset + (int)(tag->byte_order->str_count_word_bytes); i < tag->size; i++) {
+            int str_start = offset + (int)(tag->byte_order->str_count_word_bytes);
+            int scan_end = tag->size;
+
+            /* str_start is bounded by tag->size above, so the subtraction cannot overflow. */
+            if(tag->byte_order->str_is_fixed_length
+               && tag->byte_order->str_max_capacity <= (unsigned int)(tag->size - str_start)) {
+                scan_end = str_start + (int)(tag->byte_order->str_max_capacity);
+            }
+
+            for(int i = str_start; i < scan_end; i++) {
                 size_t char_index =
                     (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                     + (size_t)(unsigned int)offset + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+
+                /*
+                 * the byte swap can push the index one past the loop bound, so check the
+                 * index we actually use, not the one we counted with.
+                 */
+                if(char_index >= (size_t)(unsigned int)scan_end) { break; }
 
                 if(tag->data[char_index] == (uint8_t)0) {
                     /* found the end. */

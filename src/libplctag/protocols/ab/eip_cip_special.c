@@ -1288,7 +1288,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* UDI data starts here - this is the CIP response */
     cip_response = data;
 
-    if(cip_response >= data_end) {
+    if((intptr_t)cip_response >= (intptr_t)data_end) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP reply service byte!");
         rc = PLCTAG_ERR_TOO_SMALL;
         ab_tag_abort_request(tag);
@@ -1304,7 +1304,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         /* Skip reserved byte */
         cip_response++;
 
-        if(cip_response >= data_end) {
+        if((intptr_t)cip_response >= (intptr_t)data_end) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Identity response is too short for the Unconnected Send status byte!");
             rc = PLCTAG_ERR_TOO_SMALL;
@@ -1327,7 +1327,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         /* Skip extended status size (1 byte) */
         cip_response++;
 
-        if(cip_response >= data_end) {
+        if((intptr_t)cip_response >= (intptr_t)data_end) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Identity response is too short for the embedded CIP reply service byte!");
             rc = PLCTAG_ERR_TOO_SMALL;
@@ -1352,7 +1352,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* Skip reserved byte */
     cip_response++;
 
-    if(cip_response >= data_end) {
+    if((intptr_t)cip_response >= (intptr_t)data_end) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP status byte!");
         rc = PLCTAG_ERR_TOO_SMALL;
         ab_tag_abort_request(tag);
@@ -1373,7 +1373,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* Skip extended status size (1 byte) */
     cip_response++;
 
-    if(cip_response > data_end) {
+    if((intptr_t)cip_response > (intptr_t)data_end) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is truncated!");
         rc = PLCTAG_ERR_TOO_SMALL;
         ab_tag_abort_request(tag);
