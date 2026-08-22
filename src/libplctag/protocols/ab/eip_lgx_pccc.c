@@ -167,6 +167,9 @@ int tag_read_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
+
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
     do {
@@ -298,7 +301,7 @@ static int check_read_status(ab_tag_p tag) {
         int pccc_res_type;
         int pccc_res_length;
 
-        rc = pccc_check_response_size(tag, false);
+        rc = pccc_check_response_header(tag, false);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         pccc = (pccc_resp *)(tag->req->data);
@@ -421,6 +424,9 @@ int tag_write_start(ab_tag_p tag) {
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
@@ -553,7 +559,7 @@ static int check_write_status(ab_tag_p tag) {
     do {
         pccc_resp *pccc = NULL;
 
-        rc = pccc_check_response_size(tag, false);
+        rc = pccc_check_response_header(tag, false);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         pccc = (pccc_resp *)(tag->req->data);

@@ -253,6 +253,13 @@ struct modbus_tag_t {
     /* transaction ID of current pending request (0 = none) */
     uint16_t pending_transaction_id;
 
+    /*
+     * Function code of the request in flight.  A server answering a holding-register read with
+     * a coil response hands back bit-packed data that we would copy into the tag as words, so
+     * the reply has to name the same function we asked for.
+     */
+    uint8_t req_fn_code;
+
     /* timestamp when the operation last changed */
     int64_t op_changed_time;
 
@@ -2342,6 +2349,26 @@ int receive_response(modbus_plc_p plc) {
             return PLCTAG_ERR_TOO_SMALL;
         }
 
+        /*
+         * The MBAP header is fixed by the spec, so check it here where the whole packet is in
+         * hand rather than leaving it to the per-tag handlers.  A non-zero protocol identifier
+         * is not Modbus/TCP at all, and a reply carrying somebody else's unit ID is a reply to
+         * somebody else -- neither is data we should hand to a tag.
+         */
+        if(plc->read_data[2] != 0 || plc->read_data[3] != 0) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Response protocol identifier is %u, expected zero!",
+                   (unsigned int)((plc->read_data[2] << 8) + plc->read_data[3]));
+            plc->read_data_len = 0;
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        if(plc->read_data[6] != plc->server_id) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Response is for unit %u but we are talking to unit %u!",
+                   (unsigned int)plc->read_data[6], (unsigned int)plc->server_id);
+            plc->read_data_len = 0;
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Updated last_packet_time_ms=%" PRId64 " (received full packet).",
@@ -2561,6 +2588,7 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     plc->write_data_len++;
 
     tag->seq_id = seq_id;
+    tag->req_fn_code = plc->write_data[7];
     atomic_set_bool(&plc->flags.request_ready, true);
     plc->request_tag_id = tag->tag_id;
 
@@ -2600,6 +2628,30 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* the operation is complete regardless of the outcome. */
         // tag->flags.operation_complete = 1;
+
+        /*
+         * The transaction ID only says the server is answering this request.  It does not say
+         * it is answering the question we asked: the function code has to match too, or we
+         * decode a coil bitmap as register words.  An exception reply sets the high bit and is
+         * otherwise the same code.
+         */
+        if((plc->read_data[7] & (uint8_t)0x7F) != tag->req_fn_code) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Got function code %u in response to function code %u!",
+                   (unsigned int)(plc->read_data[7] & (uint8_t)0x7F), (unsigned int)tag->req_fn_code);
+
+            plc->read_data_len = 0;
+            atomic_set_bool(&plc->flags.response_ready, false);
+
+            tag->seq_id = 0;
+            tag->read_complete = 1;
+            tag->read_in_flight = 0;
+            tag->request_num = 0;
+            tag->status = (int8_t)PLCTAG_ERR_BAD_DATA;
+
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+            return PLCTAG_ERR_BAD_DATA;
+        }
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);
@@ -2808,6 +2860,7 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     plc->write_data_len += request_payload_size;
 
     tag->seq_id = (uint16_t)(unsigned int)seq_id;
+    tag->req_fn_code = plc->write_data[7];
     atomic_set_bool(&plc->flags.request_ready, true);
     plc->request_tag_id = tag->tag_id;
 
@@ -2848,6 +2901,25 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* this is our response, so the operation is complete regardless of the status. */
         // tag->flags.operation_complete = 1;
+
+        /* as in the read case, the reply has to name the function we actually asked for. */
+        if((plc->read_data[7] & (uint8_t)0x7F) != tag->req_fn_code) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Got function code %u in response to function code %u!",
+                   (unsigned int)(plc->read_data[7] & (uint8_t)0x7F), (unsigned int)tag->req_fn_code);
+
+            plc->read_data_len = 0;
+            atomic_set_bool(&plc->flags.response_ready, false);
+
+            tag->seq_id = 0;
+            tag->request_num = 0;
+            tag->write_complete = 1;
+            tag->write_in_flight = 0;
+            tag->status = (int8_t)PLCTAG_ERR_BAD_DATA;
+
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+            return PLCTAG_ERR_BAD_DATA;
+        }
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);

@@ -1870,6 +1870,16 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
     int elements_per_packet = 0;
     int element_size = 0;
 
+    /*
+     * elem_size is derived from the PLC's response as tag->size / tag->elem_count, so a PLC
+     * that returns fewer bytes than the tag has elements drives it to zero.  It is the
+     * divisor below, so check it here.
+     */
+    if(tag->elem_size <= 0) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Tag element size of %d bytes is not usable!", tag->elem_size);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
     8 bytes as the unit */
     if(tag->elem_size < 8) {

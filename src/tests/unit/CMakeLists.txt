@@ -57,13 +57,49 @@ target_include_directories(test_platform_str PRIVATE
 
 target_link_libraries(test_platform_str PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_tag_name_bounds: tests the CIP tag name encoder's bounds checks.
+# Tag creation encodes the name before any network I/O, so this needs no PLC.
+add_executable(test_tag_name_bounds test_tag_name_bounds.c)
+
+target_include_directories(test_tag_name_bounds PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_tag_name_bounds PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# test_eip_response_validation: checks that a response whose EIP header does not answer the
+# request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
+# because the library's own socket shim is internal, so it is skipped on Windows.
+set(EXTRA_UNIT_TESTS "")
+
+if(NOT WIN32)
+    add_executable(test_eip_response_validation test_eip_response_validation.c)
+
+    target_include_directories(test_eip_response_validation PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+        ${PLATFORM_SHIM_PATH}
+    )
+
+    target_link_libraries(test_eip_response_validation PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+    add_test(NAME unit_test_eip_response_validation COMMAND test_eip_response_validation)
+
+    set(EXTRA_UNIT_TESTS test_eip_response_validation)
+endif()
+
 # Register the unit tests with CTest
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
+add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str
+    DEPENDS test_init test_platform_str test_tag_name_bounds ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

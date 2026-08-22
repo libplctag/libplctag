@@ -125,7 +125,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
         slice_set_uint16_le(output, 2, (uint16_t)slice_len(response));
         slice_set_uint32_le(output, 4, plc->session_handle);
         slice_set_uint32_le(output, 8, (uint32_t)0); /* status == 0 -> no error */
-        slice_set_uin64_le(output, 12, plc->sender_context);
+        slice_set_uin64_le(output, 12, header.sender_context);
         slice_set_uint32_le(output, 20, header.options);
 
         /* The payload is already in place. */
@@ -141,7 +141,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
         slice_set_uint16_le(output, 2, (uint16_t)0); /* no payload. */
         slice_set_uint32_le(output, 4, plc->session_handle);
         slice_set_uint32_le(output, 8, (uint32_t)(int32_t)slice_get_err(response)); /* status */
-        slice_set_uin64_le(output, 12, plc->sender_context);
+        slice_set_uin64_le(output, 12, header.sender_context);
         slice_set_uint32_le(output, 20, header.options);
 
         return slice_from_slice(output, 0, EIP_HEADER_SIZE);

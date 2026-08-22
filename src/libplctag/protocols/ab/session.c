@@ -971,6 +971,17 @@ int session_open_socket(ab_session_p session) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
+    /*
+     * A reconnect reuses this session, so drop the identity of the connection that just
+     * went away.  Otherwise the checks in recv_eip_response() compare the new session's
+     * RegisterSession reply against the old handle and reject it, and the session can
+     * never come back up.
+     */
+    session->session_handle = 0;
+    session->req_encap_command = 0;
+    session->req_seq_id = 0;
+    session->req_sent = false;
+
     /* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
@@ -2361,6 +2372,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     int current_offset = 0;
     uint8_t *pkt_start = NULL;
     int pkt_len = 0;
+    size_t pkt_offset = 0;
     uint8_t *first_pkt_data = NULL;
     uint8_t *next_pkt_data = NULL;
 
@@ -2394,20 +2406,36 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     packed_req = (eip_cip_co_req *)(session->data);
 
     /* make room in the request packet in the session for the header. */
-    pkt_start = (uint8_t *)(&packed_req->cpf_conn_seq_num) + sizeof(packed_req->cpf_conn_seq_num);
+    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - session->data)
+                 + sizeof(packed_req->cpf_conn_seq_num);
     pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
 
-    /* point to where we want the current packet to start. */
-    first_pkt_data = pkt_start + header_size;
-
-    /* bounds check before shifting data forward to make room for the multi-request header. */
-    if((first_pkt_data + pkt_len) > (session->data + session->data_capacity)) {
+    /*
+     * Bounds check before shifting data forward to make room for the multi-request header.
+     *
+     * Do this in offsets rather than pointers.  Forming first_pkt_data + pkt_len is itself
+     * undefined when the result would land outside the buffer, so a pointer comparison cannot
+     * be what decides whether it does -- the compiler may assume the addition stayed in bounds
+     * and fold the test away.  Each subtraction below is guarded by the term before it so none
+     * of them can wrap.
+     *
+     * pkt_len is signed and comes from a length field, so reject a negative one here too: it
+     * would move the destination backwards and hand mem_move() a negative size.
+     */
+    if(pkt_len < 0 || header_size < 0 || pkt_offset > (size_t)session->data_capacity
+       || (size_t)header_size > (size_t)session->data_capacity - pkt_offset
+       || (size_t)pkt_len > (size_t)session->data_capacity - pkt_offset - (size_t)header_size) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, requests[0]->tag_id,
                "Bundled request header does not fit in the session buffer of %u bytes!", session->data_capacity);
         return PLCTAG_ERR_TOO_LARGE;
     }
+
+    pkt_start = session->data + pkt_offset;
+
+    /* point to where we want the current packet to start. */
+    first_pkt_data = pkt_start + header_size;
 
     /* move the data over to make room */
     mem_move(first_pkt_data, pkt_start, pkt_len);
@@ -2447,8 +2475,11 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "packet %d is of length %d.", i,
                pkt_len);
 
-        /* bounds check before copying this request's payload into the session buffer. */
-        if((next_pkt_data + pkt_len) > (session->data + session->data_capacity)) {
+        /* as above: bound in offsets, and reject a negative length. */
+        pkt_offset = (size_t)(next_pkt_data - session->data);
+
+        if(pkt_len < 0 || pkt_offset > (size_t)session->data_capacity
+           || (size_t)pkt_len > (size_t)session->data_capacity - pkt_offset) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
                    "Bundled requests do not fit in the session buffer of %u bytes!", session->data_capacity);
             return PLCTAG_ERR_TOO_LARGE;
@@ -2564,6 +2595,24 @@ int send_eip_request(ab_session_p session, int timeout) {
 
     session->data_offset = 0;
     session->packet_count++;
+
+    /*
+     * Remember what we are asking for.  recv_eip_response() has to be able to tell an answer
+     * to this request from an unrelated packet, and the only identity the encapsulation layer
+     * gives us is the command and the sender context we echo back.
+     */
+    if(session->data_size >= sizeof(eip_encap)) {
+        eip_encap *out_header = (eip_encap *)(session->data);
+
+        session->req_encap_command = le2h16(out_header->encap_command);
+        session->req_seq_id = le2h64(out_header->encap_sender_context);
+        session->req_sent = true;
+    } else {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Packet of %u bytes is too small to hold an EIP header!",
+               session->data_size);
+        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_ERR_TOO_SMALL, PLCTAG_ERR_TOO_SMALL);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
     /* send the packet */
     do {
@@ -2707,6 +2756,60 @@ int recv_eip_response(ab_session_p session, int timeout) {
 
     session->resp_seq_id = le2h64(((eip_encap *)(session->data))->encap_sender_context);
     session->data_size = data_needed;
+
+    /*
+     * Everything downstream of here decides how to parse this buffer from fields the PLC
+     * chose.  Before any of that, make sure this packet is actually the answer to the request
+     * we sent: the encapsulation layer gives us three things to check and all three are free.
+     *
+     * The command matters most.  The connected and unconnected CPF headers are different
+     * lengths, so a reply that changes the command out from under us moves every field the
+     * handlers read, including the CIP status they branch on.
+     */
+    {
+        eip_encap *resp_header = (eip_encap *)(session->data);
+        uint16_t resp_command = le2h16(resp_header->encap_command);
+        uint32_t resp_handle = le2h32(resp_header->encap_session_handle);
+
+        if(session->req_sent && resp_command != session->req_encap_command) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received EIP command %04" PRIx16 " in response to command %04" PRIx16
+                   "!", resp_command, session->req_encap_command);
+            final_rc = PLCTAG_ERR_BAD_DATA;
+            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            return final_rc;
+        }
+
+        /*
+         * Once the session is registered every packet carries our handle.  A zero handle means
+         * we are still registering, so there is nothing to compare against yet.
+         */
+        if(session->session_handle != 0 && resp_handle != session->session_handle) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Received a response for session handle %" PRIx32 " but this session is %" PRIx32 "!", resp_handle,
+                   session->session_handle);
+            final_rc = PLCTAG_ERR_BAD_DATA;
+            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            return final_rc;
+        }
+
+        /*
+         * The target echoes the sender context on SendRRData.  That is what tells a reply to
+         * the request we are waiting on from a late reply to one that already timed out --
+         * without it a stale response gets applied to whichever tag is in flight now.
+         *
+         * Connected sends do not get this check: we do not fill the field in for them, so there
+         * is nothing meaningful to echo.  Their identity is the connection ID and the connection
+         * sequence number in the CPF header, which the tag layer checks instead.
+         */
+        if(session->req_sent && resp_command == AB_EIP_UNCONNECTED_SEND && session->resp_seq_id != session->req_seq_id) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Received a response with sender context %" PRIx64 " but we sent %" PRIx64 "!", session->resp_seq_id,
+                   session->req_seq_id);
+            final_rc = PLCTAG_ERR_BAD_DATA;
+            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            return final_rc;
+        }
+    }
 
     rc = PLCTAG_STATUS_OK;
 
@@ -3025,8 +3128,9 @@ int receive_forward_open_response(ab_session_p session) {
             } else {
                 rc = PLCTAG_ERR_REMOTE_ERR;
 
+                /* comparing pointers directly is UB, so compare the integer values instead. */
                 if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2
-                   && (&fo_resp->status_size + 5) <= (session->data + session->data_size)) {
+                   && (intptr_t)(&fo_resp->status_size + 5) <= (intptr_t)(session->data + session->data_size)) {
                     /* we might have an error that tells us the actual size to use. */
                     uint8_t *data = &fo_resp->status_size;
                     int extended_status = data[1] | (data[2] << 8);

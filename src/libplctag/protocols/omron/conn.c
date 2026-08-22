@@ -762,6 +762,17 @@ int conn_open_socket(omron_conn_p conn) {
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting.");
 
+    /*
+     * A reconnect reuses this conn, so drop the identity of the connection that just went
+     * away.  Otherwise the checks in recv_eip_response() compare the new conn's
+     * RegisterSession reply against the old handle and reject it, and the conn can never
+     * come back up.
+     */
+    conn->conn_handle = 0;
+    conn->req_encap_command = 0;
+    conn->req_seq_id = 0;
+    conn->req_sent = false;
+
     /* Open a socket for communication with the gateway. */
     rc = socket_create(&(conn->sock));
 
@@ -2137,6 +2148,7 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
     int current_offset = 0;
     uint8_t *pkt_start = NULL;
     int pkt_len = 0;
+    size_t pkt_offset = 0;
     uint8_t *first_pkt_data = NULL;
     uint8_t *next_pkt_data = NULL;
 
@@ -2171,20 +2183,36 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
     packed_req = (eip_cip_co_req *)(conn->data);
 
     /* make room in the request packet in the conn for the header. */
-    pkt_start = (uint8_t *)(&packed_req->cpf_conn_seq_num) + sizeof(packed_req->cpf_conn_seq_num);
+    pkt_offset =
+        (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - conn->data) + sizeof(packed_req->cpf_conn_seq_num);
     pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
 
-    /* point to where we want the current packet to start. */
-    first_pkt_data = pkt_start + header_size;
-
-    /* bounds check before shifting data forward to make room for the multi-request header. */
-    if((first_pkt_data + pkt_len) > (conn->data + conn->data_capacity)) {
+    /*
+     * Bounds check before shifting data forward to make room for the multi-request header.
+     *
+     * Do this in offsets rather than pointers.  Forming first_pkt_data + pkt_len is itself
+     * undefined when the result would land outside the buffer, so a pointer comparison cannot
+     * be what decides whether it does -- the compiler may assume the addition stayed in bounds
+     * and fold the test away.  Each subtraction below is guarded by the term before it so none
+     * of them can wrap.
+     *
+     * pkt_len is signed and comes from a length field, so reject a negative one here too: it
+     * would move the destination backwards and hand mem_move() a negative size.
+     */
+    if(pkt_len < 0 || header_size < 0 || pkt_offset > (size_t)conn->data_capacity
+       || (size_t)header_size > (size_t)conn->data_capacity - pkt_offset
+       || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset - (size_t)header_size) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, requests[0]->tag_id,
                "Bundled request header does not fit in the conn buffer of %u bytes!", conn->data_capacity);
         return PLCTAG_ERR_TOO_LARGE;
     }
+
+    pkt_start = conn->data + pkt_offset;
+
+    /* point to where we want the current packet to start. */
+    first_pkt_data = pkt_start + header_size;
 
     /* move the data over to make room */
     mem_move(first_pkt_data, pkt_start, pkt_len);
@@ -2221,8 +2249,11 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet %d is of length %d.", i, pkt_len);
 
-        /* bounds check before copying this request's payload into the conn buffer. */
-        if((next_pkt_data + pkt_len) > (conn->data + conn->data_capacity)) {
+        /* as above: bound in offsets, and reject a negative length. */
+        pkt_offset = (size_t)(next_pkt_data - conn->data);
+
+        if(pkt_len < 0 || pkt_offset > (size_t)conn->data_capacity
+           || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
                    "Bundled requests do not fit in the conn buffer of %u bytes!", conn->data_capacity);
             return PLCTAG_ERR_TOO_LARGE;
@@ -2333,6 +2364,22 @@ int send_eip_request(omron_conn_p conn, int timeout) {
 
     conn->data_offset = 0;
     conn->packet_count++;
+
+    /*
+     * Remember what we are asking for.  recv_eip_response() has to be able to tell an answer
+     * to this request from an unrelated packet, and the only identity the encapsulation layer
+     * gives us is the command and the sender context we echo back.
+     */
+    if(conn->data_size >= sizeof(eip_encap)) {
+        eip_encap *out_header = (eip_encap *)(conn->data);
+
+        conn->req_encap_command = le2h16(out_header->encap_command);
+        conn->req_seq_id = le2h64(out_header->encap_sender_context);
+        conn->req_sent = true;
+    } else {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Packet of %u bytes is too small to hold an EIP header!", conn->data_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
     /* send the packet */
     do {
@@ -2457,6 +2504,55 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
 
     conn->resp_seq_id = le2h64(((eip_encap *)(conn->data))->encap_sender_context);
     conn->data_size = data_needed;
+
+    /*
+     * Everything downstream of here decides how to parse this buffer from fields the PLC
+     * chose.  Before any of that, make sure this packet is actually the answer to the request
+     * we sent: the encapsulation layer gives us three things to check and all three are free.
+     *
+     * The command matters most.  The connected and unconnected CPF headers are different
+     * lengths, so a reply that changes the command out from under us moves every field the
+     * handlers read, including the CIP status they branch on.
+     */
+    {
+        eip_encap *resp_header = (eip_encap *)(conn->data);
+        uint16_t resp_command = le2h16(resp_header->encap_command);
+        uint32_t resp_handle = le2h32(resp_header->encap_conn_handle);
+
+        if(conn->req_sent && resp_command != conn->req_encap_command) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+                   "Received EIP command %04" PRIx16 " in response to command %04" PRIx16 "!", resp_command,
+                   conn->req_encap_command);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /*
+         * Once the connection is registered every packet carries our handle.  A zero handle
+         * means we are still registering, so there is nothing to compare against yet.
+         */
+        if(conn->conn_handle != 0 && resp_handle != conn->conn_handle) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+                   "Received a response for connection handle %" PRIx32 " but this connection is %" PRIx32 "!", resp_handle,
+                   conn->conn_handle);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /*
+         * The target echoes the sender context on SendRRData.  That is what tells a reply to
+         * the request we are waiting on from a late reply to one that already timed out --
+         * without it a stale response gets applied to whichever tag is in flight now.
+         *
+         * Connected sends do not get this check: we do not fill the field in for them, so there
+         * is nothing meaningful to echo.  Their identity is the connection ID and the connection
+         * sequence number in the CPF header, which the tag layer checks instead.
+         */
+        if(conn->req_sent && resp_command == OMRON_EIP_UNCONNECTED_SEND && conn->resp_seq_id != conn->req_seq_id) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+                   "Received a response with sender context %" PRIx64 " but we sent %" PRIx64 "!", conn->resp_seq_id,
+                   conn->req_seq_id);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+    }
 
     rc = PLCTAG_STATUS_OK;
 
