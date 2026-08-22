@@ -1133,7 +1133,8 @@ static inline void conn_set_connection_status(omron_conn_p conn, int32_t new_sta
             int32_t cur_idx = atomic_get_int32(&conn->conn_event_ring_write_idx);
             int32_t event_type = new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET;
 
-            if(conn->conn_event_ring[cur_idx].event_type == event_type && conn->conn_event_ring[cur_idx].status == PLCTAG_STATUS_OK) {
+            if(conn->conn_event_ring[cur_idx].event_type == event_type
+               && conn->conn_event_ring[cur_idx].status == PLCTAG_STATUS_OK) {
                 break;
             }
 
@@ -1779,8 +1780,8 @@ int process_requests(omron_conn_p conn) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
-                        rc = CIP.decode_cip_error_code(&(resp->status), cip_error_data_size(&resp->status,
-                                                                                            conn->data + conn->data_size));
+                        rc = CIP.decode_cip_error_code(&(resp->status),
+                                                       cip_error_data_size(&resp->status, conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
                         break;
@@ -1807,8 +1808,8 @@ int process_requests(omron_conn_p conn) {
                     /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
                     if((size_t)conn->data_size < sizeof(*resp)) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
-                               "Connected response of %u bytes is too short to hold a CIP response of %d bytes!",
-                               conn->data_size, (int)sizeof(*resp));
+                               "Connected response of %u bytes is too short to hold a CIP response of %d bytes!", conn->data_size,
+                               (int)sizeof(*resp));
                         rc = PLCTAG_ERR_TOO_SMALL;
                         break;
                     }
@@ -1823,8 +1824,8 @@ int process_requests(omron_conn_p conn) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
-                        rc = CIP.decode_cip_error_code(&(resp->status), cip_error_data_size(&resp->status,
-                                                                                            conn->data + conn->data_size));
+                        rc = CIP.decode_cip_error_code(&(resp->status),
+                                                       cip_error_data_size(&resp->status, conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
                         break;
@@ -2020,8 +2021,8 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
 
         /* FIXME - conn->data_size is uint32_t, so that test is always false.  Check carefully
          * before removing it: the bounds below depend on data_size being sane. */
-        if(sub_packet < 0 || sub_packet >= (int)total_responses || conn->data_size < 0
-           || offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
+        if(sub_packet < 0 || sub_packet >= (int)total_responses || conn->data_size < 0 || offsets_start > (size_t)conn->data_size
+           || offsets_size > (size_t)conn->data_size - offsets_start) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
                    "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
             return PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -2191,8 +2192,7 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
     packed_req = (eip_cip_co_req *)(conn->data);
 
     /* make room in the request packet in the conn for the header. */
-    pkt_offset =
-        (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - conn->data) + sizeof(packed_req->cpf_conn_seq_num);
+    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - conn->data) + sizeof(packed_req->cpf_conn_seq_num);
     pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
@@ -2427,8 +2427,7 @@ int send_eip_request(omron_conn_p conn, int timeout) {
         // if(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size) {
         //     sleep_ms(1);
         // }
-    } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size
-            && timeout_time > time_ms());
+    } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size && timeout_time > time_ms());
 
     if(atomic_get_int32(&conn->terminating)) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Connection is terminating.");

@@ -95,11 +95,11 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 #define MIN_PAYLOAD_SIZE_PCCC (92)
 #define MIN_PAYLOAD_SIZE_CIP (500)
 
-#define MIN_PAYLOAD_SIZE(session)                                                                    \
-    (((session)->plc_type == AB_PLC_PLC5 || (session)->plc_type == AB_PLC_SLC                        \
-      || (session)->plc_type == AB_PLC_MLGX || (session)->plc_type == AB_PLC_LGX_PCCC)               \
-         ? MIN_PAYLOAD_SIZE_PCCC                                                                     \
-         : MIN_PAYLOAD_SIZE_CIP)
+#define MIN_PAYLOAD_SIZE(session)                                                                                   \
+    (((session)->plc_type == AB_PLC_PLC5 || (session)->plc_type == AB_PLC_SLC || (session)->plc_type == AB_PLC_MLGX \
+      || (session)->plc_type == AB_PLC_LGX_PCCC) ?                                                                  \
+         MIN_PAYLOAD_SIZE_PCCC :                                                                                    \
+         MIN_PAYLOAD_SIZE_CIP)
 
 /* make sure we try hard to get a good payload size */
 #define GET_MAX_PAYLOAD_SIZE(session)                                \
@@ -789,8 +789,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
      * route is a handful of hops, so this rejects nothing that describes real hardware.
      */
     if(path && str_length(path) >= MAX_CONN_PATH) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Path string is longer than the maximum of %d bytes!",
-               MAX_CONN_PATH - 1);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Path string is longer than the maximum of %d bytes!", MAX_CONN_PATH - 1);
         return AB_SESSION_NULL;
     }
 
@@ -1982,8 +1981,8 @@ int process_requests(ab_session_p session) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
-                        rc = decode_cip_error_code(&(resp->status), cip_error_data_size(&resp->status,
-                                                                                        session->data + session->data_size));
+                        rc = decode_cip_error_code(&(resp->status),
+                                                   cip_error_data_size(&resp->status, session->data + session->data_size));
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
                         break;
@@ -2030,7 +2029,8 @@ int process_requests(ab_session_p session) {
 
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Response status=%u", resp->status);
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP error %s (%s).",
-                               decode_cip_error_long(&resp->status, status_size), decode_cip_error_short(&resp->status, status_size));
+                               decode_cip_error_long(&resp->status, status_size),
+                               decode_cip_error_short(&resp->status, status_size));
                         rc = decode_cip_error_code(&(resp->status), status_size);
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
@@ -2433,8 +2433,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     packed_req = (eip_cip_co_req *)(session->data);
 
     /* make room in the request packet in the session for the header. */
-    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - session->data)
-                 + sizeof(packed_req->cpf_conn_seq_num);
+    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - session->data) + sizeof(packed_req->cpf_conn_seq_num);
     pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
@@ -2819,8 +2818,9 @@ int recv_eip_response(ab_session_p session, int timeout) {
         uint32_t resp_handle = le2h32(resp_header->encap_session_handle);
 
         if(session->req_sent && resp_command != session->req_encap_command) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received EIP command %04" PRIx16 " in response to command %04" PRIx16
-                   "!", resp_command, session->req_encap_command);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+                   "Received EIP command %04" PRIx16 " in response to command %04" PRIx16 "!", resp_command,
+                   session->req_encap_command);
             final_rc = PLCTAG_ERR_BAD_DATA;
             session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
             return final_rc;
@@ -3145,8 +3145,8 @@ int receive_forward_open_response(ab_session_p session) {
          */
         if((size_t)session->data_size < offsetof(eip_forward_open_response_t, orig_to_targ_conn_id)) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                   "Forward Open response of %u bytes is too short to hold the CIP reply status at %d bytes!",
-                   session->data_size, (int)offsetof(eip_forward_open_response_t, orig_to_targ_conn_id));
+                   "Forward Open response of %u bytes is too short to hold the CIP reply status at %d bytes!", session->data_size,
+                   (int)offsetof(eip_forward_open_response_t, orig_to_targ_conn_id));
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }

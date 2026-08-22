@@ -325,7 +325,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
      * element size, so a zero here is a division by zero later.
      */
     if(tag->elem_count < 1) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be at least one, was %d!", tag->elem_count);
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be at least one, was %d!",
+               tag->elem_count);
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
     }
@@ -961,8 +962,7 @@ static int check_cpf_connected(omron_tag_p tag, omron_request_p req) {
      * orig_connection_id is just the local placeholder, we send connection ID zero on the
      * wire, and the target echoes zero back -- there is no connection identity to check.
      */
-    if(tag->conn && tag->conn->targ_connection_id != 0
-       && le2h32(resp->cpf_orig_conn_id) != tag->conn->orig_connection_id) {
+    if(tag->conn && tag->conn->targ_connection_id != 0 && le2h32(resp->cpf_orig_conn_id) != tag->conn->orig_connection_id) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
                "Connected response is for connection %" PRIx32 " but ours is %" PRIx32 "!", le2h32(resp->cpf_orig_conn_id),
                tag->conn->orig_connection_id);
