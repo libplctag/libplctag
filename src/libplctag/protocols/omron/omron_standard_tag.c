@@ -1362,6 +1362,13 @@ static int check_read_status_connected(omron_tag_p tag) {
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
 
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
@@ -1561,6 +1568,13 @@ static int check_read_status_unconnected(omron_tag_p tag) {
 
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
+
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
 
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
@@ -1828,6 +1842,17 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
 
     int element_size = 0;
     int elements_per_packet = 0;
+
+    /*
+     * elem_size is derived from the PLC's response as tag->size / tag->elem_count, so a PLC
+     * that returns fewer bytes than the tag has elements drives it to zero.  It is the
+     * divisor below, so check it here.
+     */
+    if(tag->elem_size <= 0) {
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Tag element size of %d bytes is not usable!",
+               tag->elem_size);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
     /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
      8 bytes as the unit */

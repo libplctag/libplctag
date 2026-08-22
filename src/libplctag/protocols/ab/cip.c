@@ -601,6 +601,13 @@ int cip_encode_tag_name(ab_tag_p tag, const char *name) {
                 skip_whitespace(name, &name_index);
             } while(rc == PLCTAG_STATUS_OK && name[name_index] == ',' && num_dimensions < 3);
 
+            /* pass up the real reason rather than reporting it as a bad bracket below. */
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Unable to parse numeric segment at %d in tag name %s!",
+                       name_index, name);
+                return rc;
+            }
+
             /* must terminate with a closing ']' */
             if(name[name_index] != ']') {
                 pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id,
@@ -695,10 +702,22 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
         return PLCTAG_ERR_NO_MATCH;
     }
 
+    /*
+     * The segment type, the length byte and the first character are written before the
+     * bounded loop below, so make sure all three fit.  The caller only checks the encoded
+     * index between segments, not within one.
+     */
+    if(encoded_i > MAX_TAG_NAME - 3) {
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Encoded tag name is too long at position %d in the tag name!",
+               name_i);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     /* start building the encoded symbolic segment. */
     tag->encoded_name[encoded_i] = 0x91; /* start of symbolic segment. */
     encoded_i++;
     seg_len_index = encoded_i;
+    tag->encoded_name[seg_len_index] = 0; /* the loop below counts up from zero, do not trust what was here. */
     tag->encoded_name[seg_len_index]++;
     encoded_i++;
 
@@ -757,6 +776,33 @@ int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, in
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Numeric segment must be greater than or equal to zero, was %d!",
                (int)val);
         return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * strtol() returns a long, which is wider than the 32 bits the largest segment encoding
+     * holds on many platforms.  Reject anything that would be silently truncated rather than
+     * quietly addressing a different array element than the caller asked for.
+     */
+    if(val > (long)INT32_MAX) {
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Numeric segment must be less than or equal to %ld!",
+               (long)INT32_MAX);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * Work out how much room the encoding needs and check it before writing anything.  The
+     * caller only checks the encoded index once per segment group, but an array reference
+     * such as "[a,b,c]" calls this three times, so the index can run well past the end of
+     * the buffer between those checks.
+     */
+    {
+        int segment_size = (val > 0xFFFF ? 6 : (val > 0xFF ? 4 : 2));
+
+        if(*encoded_index > MAX_TAG_NAME - segment_size) {
+            pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id,
+                   "Encoded tag name is too long to hold a numeric segment at position %d in the tag name!", *name_index);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
     }
 
     /* bump name_index. */

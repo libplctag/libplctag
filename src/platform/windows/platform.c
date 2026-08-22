@@ -46,6 +46,7 @@
 
 #include <errno.h>
 #include <io.h>
+#include <limits.h>
 #include <math.h>
 #include <process.h>
 #include <stdio.h>
@@ -518,7 +519,16 @@ extern int str_to_int(const char *str, int *val) {
 
     if(endptr == str) { return -1; }
 
-    /* FIXME - this will truncate long values. */
+    /*
+     * long is wider than int on some platforms, so strtol() can return values that do not
+     * survive the cast.  Reject those rather than handing the caller a truncated value it
+     * cannot distinguish from a real one.
+     */
+    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+        return -1;
+    }
+
     *val = (int)tmp_val;
 
     return 0;

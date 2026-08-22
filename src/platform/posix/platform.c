@@ -452,7 +452,16 @@ extern int str_to_int(const char *str, int *val) {
 
     if(endptr == str) { return -1; }
 
-    /* FIXME - this will truncate long values. */
+    /*
+     * long is wider than int on most 64-bit platforms, so strtol() happily returns values
+     * that do not survive the cast.  Without this check "4294967296" converts to zero on
+     * LP64 and the caller has no way to tell that from a real zero.  Reject instead.
+     */
+    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+        return -1;
+    }
+
     *val = (int)tmp_val;
 
     return 0;

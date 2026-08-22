@@ -51,6 +51,14 @@
 
 #define DEFAULT_MAX_REQUESTS (10) /* number of requests and request sizes to allocate by default. */
 
+/*
+ * Hard ceiling on the size of a tag's data buffer.  A PLC can keep returning
+ * partial (fragmented) responses forever, and each fragment grows the tag
+ * buffer.  Refuse to grow past this so a misbehaving or hostile PLC cannot
+ * drive us out of memory.
+ */
+#define AB_MAX_TAG_DATA_SIZE (8 * 1024 * 1024)
+
 
 /* AB Constants*/
 #define AB_EIP_OK (0)

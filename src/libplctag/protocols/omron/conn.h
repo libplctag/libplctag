@@ -102,6 +102,15 @@ struct omron_conn_t {
 
     uint64_t resp_seq_id;
 
+    /*
+     * What we last put on the wire.  The response has to be an answer to the request we
+     * actually sent, so these are snapshotted from the outgoing packet in send_eip_request()
+     * and checked against the incoming one in recv_eip_response().
+     */
+    uint16_t req_encap_command;
+    uint64_t req_seq_id;
+    bool req_sent;
+
     /* data for receiving messages */
     uint32_t data_offset;
     uint32_t data_capacity;

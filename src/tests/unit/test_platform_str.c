@@ -96,6 +96,39 @@ static void test_str_to_int_still_detects_overflow(void **state) {
 }
 
 
+/*
+ * A value that fits in a long but not in an int must be reported, not truncated.  On LP64
+ * "4294967296" casts to zero, which a caller cannot tell from a real zero -- and callers do
+ * divide by what they get back.
+ */
+static void test_str_to_int_rejects_values_wider_than_int(void **state) {
+    (void)state;
+
+    int val = 12345;
+
+    errno = 0;
+
+    assert_int_equal(str_to_int("4294967296", &val), -1);
+    assert_int_equal(val, 12345); /* unchanged on failure. */
+
+    errno = 0;
+
+    assert_int_equal(str_to_int("-4294967296", &val), -1);
+    assert_int_equal(val, 12345);
+
+    /* the boundary values themselves must still convert. */
+    errno = 0;
+
+    assert_int_equal(str_to_int("2147483647", &val), 0);
+    assert_int_equal(val, 2147483647);
+
+    errno = 0;
+
+    assert_int_equal(str_to_int("-2147483648", &val), 0);
+    assert_int_equal(val, -2147483647 - 1);
+}
+
+
 /* A string with no digits at all is still an error. */
 static void test_str_to_int_rejects_non_numeric(void **state) {
     (void)state;
@@ -113,6 +146,7 @@ int main(void) {
         cmocka_unit_test(test_str_to_int_ignores_stale_errno),
         cmocka_unit_test(test_str_to_float_ignores_stale_errno),
         cmocka_unit_test(test_str_to_int_still_detects_overflow),
+        cmocka_unit_test(test_str_to_int_rejects_values_wider_than_int),
         cmocka_unit_test(test_str_to_int_rejects_non_numeric),
     };
 

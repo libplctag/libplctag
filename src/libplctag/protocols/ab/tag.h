@@ -87,6 +87,13 @@ struct ab_tag_t {
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
     int encoded_type_info_size;
 
+    /*
+     * TNS of the PCCC request we last put on the wire.  The response has to carry the same
+     * one, otherwise a late reply to a request that already timed out gets applied to
+     * whatever operation is in flight now.
+     */
+    uint16_t req_pccc_seq_num;
+
     /* number of elements and size of each in the tag. */
     pccc_file_t file_type;
     elem_type_t elem_type;

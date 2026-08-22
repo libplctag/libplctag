@@ -2604,6 +2604,27 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
 }
 
 
+/*
+ * tag_range_is_valid
+ *
+ * Is a field of count bytes starting at offset entirely inside the tag buffer?
+ *
+ * The offset and the count both come from the calling application, so they are
+ * assumed hostile.  Note what this deliberately does NOT do: it never computes
+ * offset + count.  That sum can exceed INT_MAX, and signed overflow is undefined
+ * behavior -- a bounds check that overflows to a negative value happily reports
+ * that a wildly out-of-range access is fine.  Instead every operand is forced
+ * non-negative first, which makes tag->size - offset provably in range, and the
+ * comparison is done against the space remaining.
+ */
+static inline bool tag_range_is_valid(plc_tag_p tag, int offset, int count) {
+    if(offset < 0 || count < 0 || tag->size < 0) { return false; }
+
+    /* both operands are now in [0, INT32_MAX], so this subtraction cannot overflow. */
+    return count <= tag->size - offset;
+}
+
+
 static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
     int res = 0;
     int real_offset = 0;
@@ -2625,8 +2646,9 @@ static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
             real_offset = offset_bit;
         }
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "selecting bit %d with offset %d in byte %d (%x).", real_offset,
-               (real_offset % 8), (real_offset / 8), tag->data[real_offset / 8]);
+        /* note: do not log tag->data[real_offset / 8] until the offset has been checked below. */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "selecting bit %d with offset %d in byte %d.", real_offset,
+               (real_offset % 8), (real_offset / 8));
 
         if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
             res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
@@ -2698,8 +2720,9 @@ static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
             real_offset = offset_bit;
         }
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Setting bit %d with offset %d in byte %d (%x).", real_offset,
-               (real_offset % 8), (real_offset / 8), tag->data[real_offset / 8]);
+        /* note: do not log tag->data[real_offset / 8] until the offset has been checked below. */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Setting bit %d with offset %d in byte %d.", real_offset,
+               (real_offset % 8), (real_offset / 8));
 
         if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
             if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
@@ -2766,7 +2789,7 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint64_t))) {
                 res = ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0)
                       + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8)
                       + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16)
@@ -2818,7 +2841,7 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint64_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0) & 0xFF);
@@ -2875,7 +2898,7 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset) {
 
         if(!tag->is_bit) {
             critical_block(tag->api_mutex) {
-                if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
+                if(tag_range_is_valid(tag, offset, (int)sizeof(int64_t))) {
                     res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0)
                                     + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8)
                                     + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16)
@@ -2927,7 +2950,7 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(int64_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0) & 0xFF);
@@ -2982,7 +3005,7 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint32_t))) {
                 res = ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0)
                       + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8)
                       + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16)
@@ -3028,7 +3051,7 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint32_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0) & 0xFF);
@@ -3079,7 +3102,7 @@ LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(int32_t))) {
                 res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0)
                                 + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8)
                                 + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16)
@@ -3126,7 +3149,7 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(int32_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0) & 0xFF);
@@ -3177,7 +3200,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint16_t))) {
                 res = (uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0)
                                  + ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
 
@@ -3223,7 +3246,7 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint16_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0) & 0xFF);
@@ -3273,7 +3296,7 @@ LIB_EXPORT int16_t plc_tag_get_int16(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(int16_t))) {
                 res = (int16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0)
                                 + ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
                 tag->status = PLCTAG_STATUS_OK;
@@ -3319,7 +3342,7 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(int16_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0) & 0xFF);
@@ -3369,7 +3392,7 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint8_t))) {
                 res = tag->data[offset];
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -3413,7 +3436,7 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint8_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset] = val;
@@ -3462,7 +3485,7 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(uint8_t))) {
                 res = (int8_t)tag->data[offset];
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -3507,7 +3530,7 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
         }
 
         if(!tag->is_bit) {
-            if((offset >= 0) && (offset + ((int)sizeof(int8_t)) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, (int)sizeof(int8_t))) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 tag->data[offset] = val;
@@ -3561,7 +3584,7 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset) {
             break;
         }
 
-        if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
+        if(tag_range_is_valid(tag, offset, (int)sizeof(double))) {
             uint64_t ures = ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0)
                             + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8)
                             + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16)
@@ -3617,7 +3640,7 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
             break;
         }
 
-        if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
+        if(tag_range_is_valid(tag, offset, (int)sizeof(double))) {
             if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
             uint64_t val;
@@ -3676,7 +3699,7 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset) {
             break;
         }
 
-        if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
+        if(tag_range_is_valid(tag, offset, (int)sizeof(float))) {
             uint32_t ures = (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0)
                                        + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8)
                                        + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16)
@@ -3728,7 +3751,7 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
             break;
         }
 
-        if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
+        if(tag_range_is_valid(tag, offset, (int)sizeof(float))) {
             if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
             uint32_t val;
@@ -3794,11 +3817,28 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
+    if(!buffer || buffer_length < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Buffer is null or has a negative length!");
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     /* set all buffer bytes to zero. */
     mem_set(buffer, 0, buffer_length);
 
     critical_block(tag->api_mutex) {
         int string_length = get_string_length_unsafe(tag, string_start_offset);
+
+        /* a bad start offset shows up as a negative length here.  Do not treat it as a count. */
+        if(string_length < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Unable to get the string length, error %s!",
+                   plc_tag_decode_error(string_length));
+            tag->status = (int8_t)string_length;
+            rc = string_length;
+            break;
+        }
 
         /* determine the maximum number of characters/bytes to copy. */
         if(buffer_length < string_length) {
@@ -4265,7 +4305,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
-            if((offset >= 0) && ((offset + buffer_size) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, buffer_size)) {
                 if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
                 int i;
@@ -4327,7 +4367,7 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
-            if((offset >= 0) && ((offset + buffer_size) <= tag->size)) {
+            if(tag_range_is_valid(tag, offset, buffer_size)) {
                 int i;
                 for(i = 0; i < buffer_size; i++) { buffer[i] = tag->data[offset + i]; }
 
@@ -4854,10 +4894,21 @@ int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    total_length = (int)(tag->byte_order->str_count_word_bytes)
-                   + (tag->byte_order->str_is_fixed_length ? (int)(tag->byte_order->str_max_capacity) :
-                                                             get_string_length_unsafe(tag, string_start_offset))
-                   + (tag->byte_order->str_is_zero_terminated ? (int)1 : (int)0) + (int)(tag->byte_order->str_pad_bytes);
+    if(tag->byte_order->str_is_fixed_length) {
+        total_length = (int)(tag->byte_order->str_max_capacity);
+    } else {
+        total_length = get_string_length_unsafe(tag, string_start_offset);
+
+        /* a bad start offset shows up as a negative length.  Pass the error up, do not sum it. */
+        if(total_length < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to get the string length, error %s!",
+                   plc_tag_decode_error(total_length));
+            return total_length;
+        }
+    }
+
+    total_length += (int)(tag->byte_order->str_count_word_bytes)
+                    + (tag->byte_order->str_is_zero_terminated ? (int)1 : (int)0) + (int)(tag->byte_order->str_pad_bytes);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Done with length %d.", total_length);
 
@@ -4875,6 +4926,17 @@ int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset) {
 
 int get_string_length_unsafe(plc_tag_p tag, int offset) {
     int string_length = 0;
+
+    /*
+     * The offset comes from the application and reaches tag->data[] directly below,
+     * so bounds check it here.  The count word is read first, so the buffer must hold
+     * at least that many bytes at the offset.
+     */
+    if(!tag_range_is_valid(tag, offset, (int)tag->byte_order->str_count_word_bytes)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "String start offset %d is out of bounds for a tag of %d bytes!",
+               offset, tag->size);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
 
     if(tag->byte_order->str_is_counted) {
         switch(tag->byte_order->str_count_word_bytes) {
@@ -4899,6 +4961,38 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
                 break;
         }
 
+        /*
+         * The count word comes from the PLC.  On the wire it is a signed value: a DINT for
+         * Logix strings and an INT for standard CIP strings, so a hostile or broken PLC can
+         * return a negative count or one that claims more characters than the string can
+         * hold.  Callers use this value to index and to size allocations, so reject bad
+         * counts here rather than letting them out of this function.
+         */
+        if(string_length < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "String count word at offset %d is negative, %d!", offset,
+                   string_length);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
+        /*
+         * Both STRING and LOGIX_STRING are fixed-length: the character array is str_max_capacity
+         * bytes no matter what the count word says.  When the string is fixed length that
+         * capacity is the real limit, otherwise the only limit is the tag buffer itself.
+         */
+        if(tag->byte_order->str_is_fixed_length && (unsigned int)string_length > tag->byte_order->str_max_capacity) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
+                   "String count word %d at offset %d exceeds the string capacity of %u characters!", string_length, offset,
+                   tag->byte_order->str_max_capacity);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
+        /* the tag buffer is the outer bound in every case, fixed length or not. */
+        if(!tag_range_is_valid(tag, offset + (int)(tag->byte_order->str_count_word_bytes), string_length)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
+                   "String count word %d at offset %d is out of bounds for a tag of %d bytes!", string_length, offset,
+                   tag->size);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
     } else {
         if(tag->byte_order->str_is_zero_terminated) {
             /* slow, but hopefully correct. */
@@ -4906,11 +5000,31 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
             /*
              * note that this will count the correct length of a string that runs up against
              * the end of the tag buffer.
+             *
+             * The string may sit in the middle of a larger UDT, so the end of the tag buffer
+             * is only the outer bound.  If the string is fixed length then its own character
+             * array ends well before that and the scan must stop there instead, otherwise a
+             * PLC that omits the terminator makes us count the bytes of the next field.
              */
-            for(int i = offset + (int)(tag->byte_order->str_count_word_bytes); i < tag->size; i++) {
+            int str_start = offset + (int)(tag->byte_order->str_count_word_bytes);
+            int scan_end = tag->size;
+
+            /* str_start is bounded by tag->size above, so the subtraction cannot overflow. */
+            if(tag->byte_order->str_is_fixed_length
+               && tag->byte_order->str_max_capacity <= (unsigned int)(tag->size - str_start)) {
+                scan_end = str_start + (int)(tag->byte_order->str_max_capacity);
+            }
+
+            for(int i = str_start; i < scan_end; i++) {
                 size_t char_index =
                     (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                     + (size_t)(unsigned int)offset + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+
+                /*
+                 * the byte swap can push the index one past the loop bound, so check the
+                 * index we actually use, not the one we counted with.
+                 */
+                if(char_index >= (size_t)(unsigned int)scan_end) { break; }
 
                 if(tag->data[char_index] == (uint8_t)0) {
                     /* found the end. */

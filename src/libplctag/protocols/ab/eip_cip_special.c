@@ -410,7 +410,7 @@ int raw_tag_check_write_status_connected(ab_tag_p tag) {
     data_start = (uint8_t *)(&cip_resp->reply_service);
     data_end = tag->req->data + (tag->req->request_size);
 
-    if(data_end < data_start) {
+    if((intptr_t)data_end < (intptr_t)data_start) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
@@ -460,7 +460,7 @@ int raw_tag_check_write_status_unconnected(ab_tag_p tag) {
     uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
     uint8_t *data_end = tag->req->data + tag->req->request_size;
 
-    if(data_end < data_start) {
+    if((intptr_t)data_end < (intptr_t)data_start) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
@@ -1164,6 +1164,13 @@ int identity_tag_check_read_status_connected(ab_tag_p tag) {
     /* copy the response data into the tag buffer, including the CIP response header */
     data_start = (uint8_t *)(&cip_resp->reply_service);
     data_end = tag->req->data + (tag->req->request_size);
+
+    if((intptr_t)data_end < (intptr_t)data_start) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
     data_size = (int)(unsigned int)(data_end - data_start);
 
     /* allocate/reallocate the tag data buffer */
@@ -1281,7 +1288,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* UDI data starts here - this is the CIP response */
     cip_response = data;
 
-    if(cip_response >= data_end) {
+    if((intptr_t)cip_response >= (intptr_t)data_end) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP reply service byte!");
         rc = PLCTAG_ERR_TOO_SMALL;
         ab_tag_abort_request(tag);
@@ -1297,7 +1304,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         /* Skip reserved byte */
         cip_response++;
 
-        if(cip_response >= data_end) {
+        if((intptr_t)cip_response >= (intptr_t)data_end) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Identity response is too short for the Unconnected Send status byte!");
             rc = PLCTAG_ERR_TOO_SMALL;
@@ -1320,7 +1327,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         /* Skip extended status size (1 byte) */
         cip_response++;
 
-        if(cip_response >= data_end) {
+        if((intptr_t)cip_response >= (intptr_t)data_end) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Identity response is too short for the embedded CIP reply service byte!");
             rc = PLCTAG_ERR_TOO_SMALL;
@@ -1345,7 +1352,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* Skip reserved byte */
     cip_response++;
 
-    if(cip_response >= data_end) {
+    if((intptr_t)cip_response >= (intptr_t)data_end) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP status byte!");
         rc = PLCTAG_ERR_TOO_SMALL;
         ab_tag_abort_request(tag);
@@ -1366,7 +1373,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     /* Skip extended status size (1 byte) */
     cip_response++;
 
-    if(cip_response > data_end) {
+    if((intptr_t)cip_response > (intptr_t)data_end) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is truncated!");
         rc = PLCTAG_ERR_TOO_SMALL;
         ab_tag_abort_request(tag);
@@ -1661,6 +1668,15 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         if(payload_size > 0) {
             uint8_t *current_entry_data = data;
             int new_size = (int)payload_size + tag->offset;
+
+            /* a PLC can keep returning fragments forever.  Do not grow without bound. */
+            if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                       "Tag list data size of %d bytes is larger than the maximum of %d bytes!",
+                       (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                rc = PLCTAG_ERR_TOO_LARGE;
+                break;
+            }
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Received %d bytes of tag list data.  Partial: %s",
                    (int)payload_size, partial_data ? "yes" : "no");
@@ -2440,6 +2456,15 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
         if(payload_size > 0) {
             uint8_t *new_buffer = NULL;
             int new_size = (int)(tag->size) + (int)payload_size;
+
+            /* a PLC can keep returning fragments forever.  Do not grow without bound. */
+            if(((ptrdiff_t)tag->size + payload_size) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                       "UDT field data size of %d bytes is larger than the maximum of %d bytes!",
+                       (int)((ptrdiff_t)tag->size + payload_size), AB_MAX_TAG_DATA_SIZE);
+                rc = PLCTAG_ERR_TOO_LARGE;
+                break;
+            }
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.",
                    new_size);
