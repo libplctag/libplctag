@@ -53,8 +53,16 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_TYPE_ULINT ((tag_type_t)0x00C9) /* Unsigned 64–bit integer value */
 #define TAG_CIP_TYPE_REAL ((tag_type_t)0x00CA)  /* 32–bit floating point value, IEEE format */
 #define TAG_CIP_TYPE_LREAL ((tag_type_t)0x00CB) /* 64–bit floating point value, IEEE format */
-#define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0)       /* CIP STRING: 2-byte count word + 82 chars = 84 bytes. */
-#define TAG_CIP_TYPE_SHORT_STRING ((tag_type_t)0x00DA) /* SHORT_STRING: 1-byte count + 82 chars = 83 bytes. */
+#define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0) /* CIP STRING: 2-byte count word + 82 chars = 84 bytes. */
+
+/*
+ * SHORT_STRING is a 1-byte count followed by that many characters, and it is *not* fixed
+ * length: a real Micro800 returns only the count byte and the valid characters, so the size on
+ * the wire varies per string.  The count is one byte, so 255 characters is the hard ceiling
+ * (the PLC's own internal limit is lower but undocumented).  This simulator stores each element
+ * in a full-size slot rather than packing them, so the slot is the worst case.
+ */
+#define TAG_CIP_TYPE_SHORT_STRING ((tag_type_t)0x00DA)
 
 /*
  * Logix "STRING" is not a CIP type at all -- it is a UDT, and the wire encoding is a structure
@@ -72,7 +80,7 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_STRUCT_HANDLE_STRING ((uint16_t)0x0FCE)
 
 #define TAG_CIP_SIZE_STRING (84)
-#define TAG_CIP_SIZE_SHORT_STRING (83)
+#define TAG_CIP_SIZE_SHORT_STRING (256) /* 1 count byte + up to 255 characters. */
 #define TAG_CIP_SIZE_LOGIX_STRING (88)
 
 /* longest encoded type is the 4-byte abbreviated struct above. */

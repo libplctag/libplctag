@@ -367,12 +367,21 @@ def build_manifest() -> Manifest:
                         "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
                         "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]",
                         "--tag=TestReal:REAL[1]", "--tag=TestLReal:LREAL[1]",
-                        "--tag=TestLint:LINT[1]", "--tag=TestSint:SINT[1]"],
+                        "--tag=TestLint:LINT[1]", "--tag=TestSint:SINT[1]",
+                        "--tag=TestString:STRING[4]"],
         startup_wait_s=3,
     )
     gw = "127.0.0.1:{PORT}"
 
     sec = m.section("controllogix_fast", server=fast_server)
+    # "STRING" is a different type on each PLC family: a UDT sent as an abbreviated struct
+    # (a0 02 ce 0f) on Logix, SHORT_STRING on Micro800, the plain CIP STRING on Omron.  The
+    # element stride differs with it (88/83/84 bytes), so writing one element of an array and
+    # reading its neighbours back is what actually pins the encoding down.
+    sec.test("Logix STRING UDT read/write and element stride",
+              [exe("tag_rw2"), "--type=string",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=4&name=TestString",
+               "--debug=4", "--write=str_zero,str_one,HelloWorld,str_three"], F)
     sec.test("basic unconnected tag read/write",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=10&name=TestBigArray&use_connected_msg=0",
@@ -648,7 +657,8 @@ def build_manifest() -> Manifest:
     # --- Micro800 section ----------------------------------------------------
     micro800_server = ServerSpec(
         exe_path=exe("ab_server"),
-        args_template=["--debug", "--plc=Micro800", "--port={PORT}", "--tag=TestDINTArray:DINT[10]"],
+        args_template=["--debug", "--plc=Micro800", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
+                        "--tag=TestString:STRING[4]"],
         startup_wait_s=1,
     )
 
@@ -656,11 +666,24 @@ def build_manifest() -> Manifest:
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
+    # Micro800's STRING is a SHORT_STRING: a 1-byte count and that many characters, up to 255.
+    # Two things have to be spelled out by hand here.  First, the library maps every AB CIP PLC
+    # onto the Logix 88-byte string definition (eip_cip.c cip_tag_byte_order), so it does not
+    # know about SHORT_STRING at all.  Second, a real Micro800 returns only the count byte and
+    # the valid characters, while ab_server stores every element in a full-size 256-byte slot,
+    # so the definition below is fixed-length to match the simulator, not the hardware.
+    sec.test("Micro800 SHORT_STRING read/write",
+              [exe("tag_rw2"), "--type=string",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4&name=TestString"
+               "&str_is_counted=1&str_count_word_bytes=1&str_is_fixed_length=1&str_total_length=256"
+               "&str_max_capacity=255&str_pad_bytes=0&str_is_zero_terminated=0",
+               "--debug=4", "--write=str_zero,str_one,ShortStr,str_three"], F)
 
     # --- Omron section ---------------------------------------------------------
     omron_server = ServerSpec(
         exe_path=exe("ab_server"),
-        args_template=["--debug", "--plc=Omron", "--port={PORT}", "--tag=TestDINTArray:DINT[10]"],
+        args_template=["--debug", "--plc=Omron", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
+                        "--tag=TestString:STRING[4]"],
         startup_wait_s=1,
     )
     ogw = "127.0.0.1:{PORT}"
@@ -669,6 +692,10 @@ def build_manifest() -> Manifest:
     sec.test("basic Omron read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
+    sec.test("Omron CIP STRING read/write",
+              [exe("tag_rw2"), "--type=string",
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=TestString",
+               "--debug=4", "--write=str_zero,str_one,CipStr,str_three"], F)
     sec.test("Omron thread stress",
               [exe("thread_stress"), "10", f"protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], S)
     sec.test("idle disconnect and reconnect with runtime timeout change (Omron)",

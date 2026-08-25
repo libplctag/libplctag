@@ -927,7 +927,6 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     uint32_t num_indexes = CIP_TAG_MAX_INDEXES;
     uint32_t indexes[CIP_TAG_MAX_INDEXES] = {0};
     size_t parse_offset = 0;
-    uint16_t request_element_type = 0;
     uint16_t request_element_count = 0;
     size_t request_fragment_start_byte_offset = 0;
     size_t request_start_byte_offset = 0;
@@ -973,13 +972,25 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
         return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
 
-    request_element_type = slice_get_uint16_le(cip_service_payload, parse_offset);
-    parse_offset += 2;
-
-    if(request_element_type != tag->tag_type) {
-        log_info("Request element type does not match tag type!");
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    /*
+     * The encoded type is as wide as the tag's own encoding: two bytes for an atomic type, four
+     * for a structure.  Compare the bytes rather than a uint16 -- a struct's first two bytes are
+     * the 0xA0 marker and a length, which is not a type code at all, and reading only two bytes
+     * would leave parse_offset short and desynchronize everything after it.
+     */
+    if(slice_len(cip_service_payload) < parse_offset + tag->type_info_size) {
+        log_info("Insufficient data in the CIP write request payload for the encoded type!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
+
+    for(size_t i = 0; i < tag->type_info_size; i++) {
+        if(slice_get_uint8(cip_service_payload, parse_offset + i) != tag->type_info[i]) {
+            log_info("Request element type does not match tag type!");
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+    }
+
+    parse_offset += tag->type_info_size;
 
     /* get the element count and the optional request byte offset. */
     request_element_count = slice_get_uint16_le(cip_service_payload, parse_offset);
