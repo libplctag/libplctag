@@ -105,6 +105,7 @@ apt-get install -y --no-install-recommends \
     ca-certificates \
     rsync \
     psmisc \
+    python3 \
     gdb >/dev/null 2>&1
 rm -rf /var/lib/apt/lists/*
 
@@ -130,7 +131,7 @@ cd "${WORKSPACE}"
 WORKSPACE_LOG_DIR="${WORKSPACE}/test_logs"
 mkdir -p "${WORKSPACE_LOG_DIR}"
 echo "Running simulator tests..."
-if ./src/tests/scripts/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}"; then
+if python3 ./src/tests/scripts/run_simulator_tests_parallel.py build/bin_dist "${WORKSPACE_LOG_DIR}" --max-stress=200; then
     TEST_RESULT=0
 else
     TEST_RESULT=$?

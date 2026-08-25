@@ -124,6 +124,18 @@ static THREAD_FUNC(tag_tickler_func);
 static int plc_tag_abort_impl(plc_tag_p tag);
 static int set_tag_byte_order(plc_tag_p tag, attr attribs);
 static int check_byte_order_str(const char *byte_order, int length, int32_t tag_id);
+/*
+ * Upper bound on the string size attributes (str_max_capacity, str_total_length,
+ * str_pad_bytes).
+ *
+ * These come from the application's attribute string and used to accept anything up to
+ * INT_MAX.  They are stored as unsigned int and then summed to validate str_total_length,
+ * so two large values wrapped that sum and let a nonsensical string definition through.
+ * Real string formats are tiny -- a Logix STRING is 82 characters plus a 4-byte count --
+ * so this cap is far above anything legitimate while keeping the sum from overflowing.
+ */
+#define MAX_STR_SIZE_PARAM (65536)
+
 static int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset);
 static int get_string_length_unsafe(plc_tag_p tag, int offset);
 static int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int new_split_index);
@@ -4618,11 +4630,19 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* how many bytes is the string count word? */
         if(attr_get_str(attribs, "str_count_word_bytes", NULL)) {
             str_param = attr_get_int(attribs, "str_count_word_bytes", 0);
-            if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4 || str_param == 8) {
+
+            /*
+             * Only 1, 2 and 4 are accepted.  Eight used to be allowed here, but no string
+             * format in the wild uses a count word that wide and nothing downstream can read
+             * or write one: both switches on this value handle 1/2/4 and fall through to an
+             * error for anything else.  Accepting it here only produced tags whose sizes were
+             * computed with a width that every accessor then refused to use.
+             */
+            if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4) {
                 tag->byte_order->str_count_word_bytes = (unsigned int)str_param;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                       "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, 4, or 8!");
+                       "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, or 4!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4630,11 +4650,11 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* What is the string maximum capacity */
         if(attr_get_str(attribs, "str_max_capacity", NULL)) {
             str_param = attr_get_int(attribs, "str_max_capacity", 0);
-            if(str_param >= 0) {
+            if(str_param >= 0 && str_param <= MAX_STR_SIZE_PARAM) {
                 tag->byte_order->str_max_capacity = (unsigned int)str_param;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                       "Tag string attribute str_max_capacity must be missing, 0, or positive!");
+                       "Tag string attribute str_max_capacity must be missing, or between 0 and %d!", MAX_STR_SIZE_PARAM);
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4642,11 +4662,11 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* What is the string total length */
         if(attr_get_str(attribs, "str_total_length", NULL)) {
             str_param = attr_get_int(attribs, "str_total_length", 0);
-            if(str_param >= 0) {
+            if(str_param >= 0 && str_param <= MAX_STR_SIZE_PARAM) {
                 tag->byte_order->str_total_length = (unsigned int)str_param;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                       "Tag string attribute str_total_length must be missing, 0, or positive!");
+                       "Tag string attribute str_total_length must be missing, or between 0 and %d!", MAX_STR_SIZE_PARAM);
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -4654,11 +4674,11 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* What is the string padding length */
         if(attr_get_str(attribs, "str_pad_bytes", NULL)) {
             str_param = attr_get_int(attribs, "str_pad_bytes", 0);
-            if(str_param >= 0) {
+            if(str_param >= 0 && str_param <= MAX_STR_SIZE_PARAM) {
                 tag->byte_order->str_pad_bytes = (unsigned int)str_param;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                       "Tag string attribute str_pad_bytes must be missing, 0, or positive!");
+                       "Tag string attribute str_pad_bytes must be missing, or between 0 and %d!", MAX_STR_SIZE_PARAM);
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }

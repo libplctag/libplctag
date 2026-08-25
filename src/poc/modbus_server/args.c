@@ -264,7 +264,12 @@ util_err_t args_parse(int argc, const char *argv[],
             pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: unknown flag '%s'", flag_name);
             result->error = UTIL_EARGS_UNKNOWN_FLAG;
             result->error_detail = "flag not recognized";
-            result->error_debug_name = flag_name;
+            /*
+             * Point at the argv entry, not the flag_name buffer: that is a local array in this
+             * loop and its lifetime ends at the return below, so the caller would be reading a
+             * dangling stack pointer.  argv outlives every caller.
+             */
+            result->error_debug_name = arg;
             result->error_flag_index = -1;
             return UTIL_EARGS_UNKNOWN_FLAG;
         }

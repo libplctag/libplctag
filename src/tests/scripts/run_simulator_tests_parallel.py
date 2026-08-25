@@ -298,6 +298,7 @@ def kill_stray_servers() -> None:
 REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
+    "test_callback_destroy",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect",
     "test_modbus_multiple", "test_omron_destroy", "test_raw_cip", "test_reconnect_after_outage_async",
@@ -445,6 +446,9 @@ def build_manifest() -> Manifest:
                "--cycles=2",
                f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
                "--idle-timeout-ms=5000"], T)
+    sec.test("destroy tag from inside its own callback (AB/EIP)",
+              [exe("test_callback_destroy"),
+               f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
     sec.test("create-from-tag API (17 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
@@ -530,6 +534,65 @@ def build_manifest() -> Manifest:
               None, T, depends_on=reject_fo_test.id, ports_needed=0,
               check=CheckSpec(log_file=reject_fo_test.log_file,
                                pattern=r"Forward Open command failed", expected=1))
+
+    # A partial-transfer status with no payload is legitimate -- packing several requests into
+    # one packet leaves the later ones only a bare CIP header -- so a few in a row must be
+    # tolerated, but an endless run of them makes no forward progress and used to spin the
+    # client forever re-asking for the same fragment.
+    empty_frag_transient_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--empty_frag=3"],
+        startup_wait_s=1,
+    )
+    sec.test("transient empty fragment responses recover",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=2"], T, server=empty_frag_transient_server)
+
+    empty_frag_stuck_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--empty_frag=1000"],
+        startup_wait_s=1,
+    )
+    empty_frag_stuck_test = sec.test("endless empty fragment responses give up instead of looping",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=2"], F, server=empty_frag_stuck_server, expect_failure=True)
+    sec.test("check the stuck transfer reported no forward progress",
+              None, T, depends_on=empty_frag_stuck_test.id, ports_needed=0,
+              check=CheckSpec(log_file=empty_frag_stuck_test.log_file,
+                               pattern=r"not making progress", expected=1))
+
+    # A ForwardOpen can be refused with extended status 0x0109, "connection size not
+    # supported", offering a size to retry with.  A sane offer must be accepted; one below the
+    # protocol's own per-request overhead must not, or the size arithmetic downstream underflows.
+    reject_size_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--reject_size=2", "--supported_size=508"],
+        startup_wait_s=1,
+    )
+    sec.test("ForwardOpen size rejection renegotiates down and succeeds",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=2"], T, server=reject_size_server)
+
+    tiny_size_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--reject_size=1", "--supported_size=16"],
+        startup_wait_s=1,
+    )
+    tiny_size_test = sec.test("ForwardOpen offering an unusably small size is refused, then recovers",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=2"], F, server=tiny_size_server)
+    sec.test("check the tiny connection size was rejected",
+              None, T, depends_on=tiny_size_test.id, ports_needed=0,
+              check=CheckSpec(log_file=tiny_size_test.log_file,
+                               pattern=r"below the \d+ bytes this protocol needs", expected=1))
 
     # --delay= applied to every response (including session register and
     # ForwardOpen, not just reads -- see ab_server's request_handler) paired
@@ -623,6 +686,35 @@ def build_manifest() -> Manifest:
                "--cycles=2",
                f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
                "--idle-timeout-ms=5000"], T)
+    # Omron carries its own copy of the fragment-progress guard, so it needs its own coverage;
+    # the AB tests above run entirely different code.  Both cases need a dedicated server since
+    # --empty_frag counts down across the whole process.
+    omron_empty_frag_transient_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Omron", "--port={PORT}",
+                        "--tag=TestBigArray:DINT[2000]", "--empty_frag=3"],
+        startup_wait_s=1,
+    )
+    sec.test("transient empty fragment responses recover (Omron)",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestBigArray",
+               "--debug=2"], T, server=omron_empty_frag_transient_server)
+
+    omron_empty_frag_stuck_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Omron", "--port={PORT}",
+                        "--tag=TestBigArray:DINT[2000]", "--empty_frag=1000"],
+        startup_wait_s=1,
+    )
+    omron_empty_frag_stuck_test = sec.test("endless empty fragment responses give up instead of looping (Omron)",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestBigArray",
+               "--debug=2"], F, server=omron_empty_frag_stuck_server, expect_failure=True)
+    sec.test("check the stuck transfer reported no forward progress (Omron)",
+              None, T, depends_on=omron_empty_frag_stuck_test.id, ports_needed=0,
+              check=CheckSpec(log_file=omron_empty_frag_stuck_test.log_file,
+                               pattern=r"not making progress", expected=1))
+
     sec.test("@connection tag late join (Omron)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",

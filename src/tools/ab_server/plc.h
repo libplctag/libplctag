@@ -42,19 +42,41 @@
 typedef uint16_t tag_type_t;
 
 /* CIP data types. */
-#define TAG_CIP_TYPE_BOOL ((tag_type_t)0x00C1)   /* 8-bit boolean value */
-#define TAG_CIP_TYPE_SINT ((tag_type_t)0x00C2)   /* Signed 8–bit integer value */
-#define TAG_CIP_TYPE_INT ((tag_type_t)0x00C3)    /* Signed 16–bit integer value */
-#define TAG_CIP_TYPE_DINT ((tag_type_t)0x00C4)   /* Signed 32–bit integer value */
-#define TAG_CIP_TYPE_LINT ((tag_type_t)0x00C5)   /* Signed 64–bit integer value */
-#define TAG_CIP_TYPE_USINT ((tag_type_t)0x00C6)  /* Unsigned 8–bit integer value */
-#define TAG_CIP_TYPE_UINT ((tag_type_t)0x00C7)   /* Unsigned 16–bit integer value */
-#define TAG_CIP_TYPE_UDINT ((tag_type_t)0x00C8)  /* Unsigned 32–bit integer value */
-#define TAG_CIP_TYPE_ULINT ((tag_type_t)0x00C9)  /* Unsigned 64–bit integer value */
-#define TAG_CIP_TYPE_REAL ((tag_type_t)0x00CA)   /* 32–bit floating point value, IEEE format */
-#define TAG_CIP_TYPE_LREAL ((tag_type_t)0x00CB)  /* 64–bit floating point value, IEEE format */
-#define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0) /* 88-byte string, with 82 bytes of data, 4-byte count and 2 bytes of padding \
-                                                  */
+#define TAG_CIP_TYPE_BOOL ((tag_type_t)0x00C1)  /* 8-bit boolean value */
+#define TAG_CIP_TYPE_SINT ((tag_type_t)0x00C2)  /* Signed 8–bit integer value */
+#define TAG_CIP_TYPE_INT ((tag_type_t)0x00C3)   /* Signed 16–bit integer value */
+#define TAG_CIP_TYPE_DINT ((tag_type_t)0x00C4)  /* Signed 32–bit integer value */
+#define TAG_CIP_TYPE_LINT ((tag_type_t)0x00C5)  /* Signed 64–bit integer value */
+#define TAG_CIP_TYPE_USINT ((tag_type_t)0x00C6) /* Unsigned 8–bit integer value */
+#define TAG_CIP_TYPE_UINT ((tag_type_t)0x00C7)  /* Unsigned 16–bit integer value */
+#define TAG_CIP_TYPE_UDINT ((tag_type_t)0x00C8) /* Unsigned 32–bit integer value */
+#define TAG_CIP_TYPE_ULINT ((tag_type_t)0x00C9) /* Unsigned 64–bit integer value */
+#define TAG_CIP_TYPE_REAL ((tag_type_t)0x00CA)  /* 32–bit floating point value, IEEE format */
+#define TAG_CIP_TYPE_LREAL ((tag_type_t)0x00CB) /* 64–bit floating point value, IEEE format */
+#define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0)       /* CIP STRING: 2-byte count word + 82 chars = 84 bytes. */
+#define TAG_CIP_TYPE_SHORT_STRING ((tag_type_t)0x00DA) /* SHORT_STRING: 1-byte count + 82 chars = 83 bytes. */
+
+/*
+ * Logix "STRING" is not a CIP type at all -- it is a UDT, and the wire encoding is a structure
+ * marker rather than a type code:
+ *
+ *     A0 02 CE 0F
+ *      |  |  \--/-- struct handle, 0x0FCE, which is also the UDT's CIP object ID.
+ *      |  \-------- two bytes of handle follow.
+ *      \----------- this is an abbreviated struct type.
+ *
+ * The UDT is { DINT LEN at offset 0; SINT DATA[82] at offset 4 } == 88 bytes.  Control- and
+ * CompactLogix use this; Micro800 uses SHORT_STRING and Omron uses the CIP STRING above.
+ */
+#define TAG_CIP_TYPE_ABBREV_STRUCT ((uint8_t)0xA0)
+#define TAG_CIP_STRUCT_HANDLE_STRING ((uint16_t)0x0FCE)
+
+#define TAG_CIP_SIZE_STRING (84)
+#define TAG_CIP_SIZE_SHORT_STRING (83)
+#define TAG_CIP_SIZE_LOGIX_STRING (88)
+
+/* longest encoded type is the 4-byte abbreviated struct above. */
+#define TAG_TYPE_INFO_MAX (4)
 
 /* PCCC data types.   FIXME */
 #define TAG_PCCC_TYPE_BIT ((uint8_t)0x85)    /* 1-bit boolean value as unsigned 16-bit integer */
@@ -67,6 +89,16 @@ struct tag_def_s {
     struct tag_def_s *next_tag;
     char *name;
     tag_type_t tag_type;
+
+    /*
+     * The encoded type exactly as it goes on the wire, because it is not always derivable from
+     * tag_type: an atomic type is its type byte plus a pad byte, but a structure is a 4-byte
+     * abbreviated-struct descriptor with no single type code.  Read responses emit these bytes
+     * and write requests must match them.  Unused by the PCCC tags, which have their own types.
+     */
+    uint8_t type_info[TAG_TYPE_INFO_MAX];
+    size_t type_info_size;
+
     size_t elem_size;
     size_t elem_count;
     size_t data_file_num;
@@ -117,13 +149,33 @@ typedef struct plc_s {
     /* PCCC info */
     uint16_t pccc_seq_id;
 
-    /* debugging. Points at a single atomic_int32_t shared by every
+    /*
+     * debugging. Points at a single atomic_int32_t shared by every
      * connection's copy of this struct (see tcp_server.c: each accepted
      * connection gets its own memcpy'd plc_s), so the count of remaining
      * ForwardOpen rejections persists across the client reconnecting with a
      * new TCP session on every retry, instead of resetting to the original
-     * CLI value each time. */
+     * CLI value each time.
+     */
     atomic_int32_t *reject_fo_count;
+
+    /*
+     * As above: shared across every connection's copy of this struct.
+     *
+     * empty_frag_count makes the next N read responses come back with a partial-transfer
+     * status and no payload at all.  That is what a real PLC sends when several requests are
+     * packed into one packet and the earlier ones consume all the room, so it exercises the
+     * client's handling of a legitimate response that makes no forward progress.
+     *
+     * reject_size_count makes the next N ForwardOpen requests fail with extended status
+     * 0x0109 (connection size not supported) and offer a smaller size, which is how a real
+     * PLC negotiates the client down.
+     */
+    atomic_int32_t *empty_frag_count;
+    atomic_int32_t *reject_size_count;
+
+    /* size offered back with the 0x0109 rejection above. */
+    uint16_t reject_size_supported;
 
     /* response delay */
     int response_delay;

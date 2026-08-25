@@ -89,6 +89,7 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 #define CIP_ERR_EXTENDED ((uint8_t)0xff)
 
 #define CIP_ERR_EX_DUPLICATE_CONN ((uint16_t)0x0100)
+#define CIP_ERR_EX_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_INVALID_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_TOO_LONG ((uint16_t)0x2105)
 
@@ -98,7 +99,10 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 
 #define CIP_RESPONSE_HEADER_SIZE ((size_t)4)
 #define CIP_RESPONSE_HEADER_EXT_ERR_SIZE ((size_t)6)
-#define CIP_RESPONSE_TYPE_INFO_SIZE ((size_t)2) /* FIXME - this should come from the tag */
+/*
+ * Encoded type size is per-tag now (tag_def_s.type_info_size): two bytes for an atomic type,
+ * four for a structure such as the Logix STRING UDT.
+ */
 #define CIP_MIN_ATOMIC_ELEMENT_SIZE \
     ((size_t)8) /* size to use if element size of tag is big.  Prevents splitting of atomic values. */
 
@@ -117,6 +121,7 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 
 
 static slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
+static slice_s make_cip_log_error_size(slice_s output, uint8_t cip_cmd, uint16_t supported_size);
 
 static slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                    plc_s *plc);
@@ -518,6 +523,19 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
      * territory on every later ForwardOpen for the life of the process;
      * harmless since nothing else reads the value, add a CAS-at-zero floor
      * if that ever needs to change. */
+    /* debugging: tell the client the size it asked for is unsupported and offer a smaller
+     * one.  Extended status 0x0109 is how a real PLC negotiates the client down, and the
+     * offered size is what the client is expected to retry with. */
+    {
+        int32_t reject_size_remaining = atomic_dec_int32(plc->reject_size_count);
+
+        if(reject_size_remaining > 0) {
+            log_info("Rejecting the connection size for debugging, offering %u bytes. %d to go.", plc->reject_size_supported,
+                     reject_size_remaining - 1);
+            return make_cip_log_error_size(output, cip_service, plc->reject_size_supported);
+        }
+    }
+
     int32_t reject_remaining = atomic_dec_int32(plc->reject_fo_count);
     if(reject_remaining > 0) {
         log_info("Forward open request being bounced for debugging. %d to go.", reject_remaining - 1);
@@ -804,16 +822,28 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     }
 
     /* check the payload space.  */
-    if(slice_len(output) < (CIP_RESPONSE_HEADER_SIZE + CIP_RESPONSE_TYPE_INFO_SIZE + min_data_element_size)) {
+    if(slice_len(output) < (CIP_RESPONSE_HEADER_SIZE + tag->type_info_size + min_data_element_size)) {
         log_info("Insufficient space in the output buffer for the response!");
         return make_cip_log_error(output, cip_service, CIP_ERR_FRAG, false, 0);
     }
 
+    /* debugging: answer with a partial-transfer status and no data at all.  See the note on
+     * plc_s.empty_frag_count -- this is the shape a real PLC produces when packed requests
+     * leave no room, and it makes no forward progress. */
+    {
+        int32_t empty_frag_remaining = atomic_dec_int32(plc->empty_frag_count);
+
+        if(empty_frag_remaining > 0) {
+            log_info("Returning an empty fragment response for debugging. %d to go.", empty_frag_remaining - 1);
+            return make_cip_log_error(output, cip_service, CIP_ERR_FRAG, false, 0);
+        }
+    }
+
     /* peel off space for the header and type info and payload. */
     cip_response_header_slice = slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE);
-    cip_response_type_info_slice = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE, CIP_RESPONSE_TYPE_INFO_SIZE);
-    cip_response_payload_slice = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE + CIP_RESPONSE_TYPE_INFO_SIZE,
-                                                  slice_len(output) - (CIP_RESPONSE_HEADER_SIZE + CIP_RESPONSE_TYPE_INFO_SIZE));
+    cip_response_type_info_slice = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE, tag->type_info_size);
+    cip_response_payload_slice = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE + tag->type_info_size,
+                                                  slice_len(output) - (CIP_RESPONSE_HEADER_SIZE + tag->type_info_size));
 
     /* make sure we have enough space for at least one element. */
     if(slice_len(cip_response_payload_slice) < min_data_element_size) {
@@ -857,8 +887,8 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     slice_set_uint8(cip_response_header_slice, 2, (needs_fragmentation ? CIP_ERR_FRAG : CIP_OK)); /* status */
     slice_set_uint8(cip_response_header_slice, 3, 0);                                             /* no extended error */
 
-    /* fill in the tag data type */
-    slice_set_uint16_le(cip_response_type_info_slice, 0, tag->tag_type);
+    /* fill in the tag data type, as many bytes as this tag's encoding needs. */
+    for(size_t i = 0; i < tag->type_info_size; i++) { slice_set_uint8(cip_response_type_info_slice, i, tag->type_info[i]); }
 
     /* Calculate and record request latency */
     int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
@@ -1054,6 +1084,26 @@ slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, boo
     }
 
     return slice_from_slice(output, 0, result_size);
+}
+
+
+/*
+ * A ForwardOpen rejection that says "that connection size is not supported, but this one is".
+ *
+ * The layout matters to the client: general status 0x01 marks an extended error, the size
+ * byte counts 16-bit words of extended status, and the client reads the extended status and
+ * the supported size from the four bytes that follow it.  Real PLCs use this to negotiate a
+ * client down to a size they can actually serve.
+ */
+slice_s make_cip_log_error_size(slice_s output, uint8_t cip_cmd, uint16_t supported_size) {
+    slice_set_uint8(output, 0, cip_cmd | CIP_DONE);
+    slice_set_uint8(output, 1, 0); /* reserved, must be zero. */
+    slice_set_uint8(output, 2, CIP_ERR_EXT_ERR);
+    slice_set_uint8(output, 3, 2); /* two 16-bit words of extended status follow. */
+    slice_set_uint16_le(output, 4, CIP_ERR_EX_CONN_SIZE);
+    slice_set_uint16_le(output, 6, supported_size);
+
+    return slice_from_slice(output, 0, 8);
 }
 
 
