@@ -34,6 +34,7 @@
 #include "eip.h"
 #include "cpf.h"
 #include "err.h"
+#include "fault.h"
 #include "slice.h"
 #include "utils.h"
 #include "log.h"
@@ -120,12 +121,37 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
     }
 
     if(!slice_has_err(response)) {
+        uint16_t response_command = header.command;
+        uint32_t response_session = plc->session_handle;
+        uint64_t response_context = header.sender_context;
+
+        /*
+         * Fault injection.  The length field still describes the bytes actually sent, because a
+         * response whose length does not match its contents makes the client wait for data that
+         * never comes and time out, which tests nothing.  Only the fields the client checks
+         * against what it sent are corrupted here.
+         */
+        if(fault_fires(plc, FAULT_EIP_CMD)) { response_command = (uint16_t)(header.command + 1); }
+
+        /*
+         * Never corrupt the handle in the RegisterSession reply: that reply is where the client
+         * learns the handle in the first place, so corrupting it just teaches the client the
+         * wrong value and every later packet then agrees with it.  The check being tested only
+         * applies once the client has a handle to compare against.
+         */
+        if(header.command != EIP_REGISTER_SESSION && fault_fires(plc, FAULT_SESSION)) {
+            response_session = plc->session_handle ^ (uint32_t)0xA5A5A5A5;
+        }
+
+        /* the client only checks the echoed context on unconnected sends. */
+        if(fault_fires(plc, FAULT_CONTEXT)) { response_context = header.sender_context ^ (uint64_t)0xA5A5A5A5A5A5A5A5ULL; }
+
         /* build response */
-        slice_set_uint16_le(output, 0, header.command);
+        slice_set_uint16_le(output, 0, response_command);
         slice_set_uint16_le(output, 2, (uint16_t)slice_len(response));
-        slice_set_uint32_le(output, 4, plc->session_handle);
+        slice_set_uint32_le(output, 4, response_session);
         slice_set_uint32_le(output, 8, (uint32_t)0); /* status == 0 -> no error */
-        slice_set_uin64_le(output, 12, header.sender_context);
+        slice_set_uin64_le(output, 12, response_context);
         slice_set_uint32_le(output, 20, header.options);
 
         /* The payload is already in place. */

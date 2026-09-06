@@ -53,13 +53,25 @@ tag_byte_order_t plc5_tag_byte_order = {.is_allocated = 0,
                                         .int16_order = {0, 1},
                                         .int32_order = {0, 1, 2, 3},
                                         .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-                                        .float32_order = {2, 3, 0, 1}, /* yes, it is that weird. */
+                                        /*
+                                         * Yes, it is that weird, and it is correct: the PLC/5
+                                         * stores the two halves of a 32-bit float in the
+                                         * opposite order, high word first, with the bytes
+                                         * inside each word left alone.  A word swap, not a byte
+                                         * swap.  Verified against hardware -- do not "fix" it.
+                                         */
+                                        .float32_order = {2, 3, 0, 1},
                                         .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
 
                                         .str_is_defined = 1,
                                         .str_is_counted = 1,
                                         .str_is_fixed_length = 1,
                                         .str_is_zero_terminated = 0,
+                                        /*
+                                         * Confirmed against hardware: writing "ABCDEFGH" to ST18:0
+                                         * puts 08 00 42 41 44 43 46 45 48 47 on the wire, i.e. the
+                                         * characters swapped within each 16-bit word.
+                                         */
                                         .str_is_byte_swapped = 1,
 
                                         .str_pad_to_multiple_bytes = 2,

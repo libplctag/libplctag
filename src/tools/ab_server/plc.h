@@ -91,7 +91,44 @@ typedef uint16_t tag_type_t;
 #define TAG_PCCC_TYPE_INT ((uint8_t)0x89)    /* Signed 16–bit integer value */
 #define TAG_PCCC_TYPE_DINT ((uint8_t)0x91)   /* Signed 32–bit integer value */
 #define TAG_PCCC_TYPE_REAL ((uint8_t)0x8a)   /* 32–bit floating point value, IEEE format */
-#define TAG_PCCC_TYPE_STRING ((uint8_t)0x8d) /* 82-byte string with 2-byte count word. */
+/*
+ * The PCCC/DF1 string is its own type, unrelated to the CIP STRING above: a 2-byte count word
+ * followed by 82 characters, 84 bytes in all, and the characters are byte-swapped within each
+ * word.  The library's matching definition is in eip_plc5_pccc.c / eip_slc_pccc.c, and the
+ * field layout is the ST file in pccc.c's file-type table.
+ */
+#define TAG_PCCC_TYPE_STRING ((uint8_t)0x8d)
+#define TAG_PCCC_SIZE_STRING (84)
+
+/*
+ * Deliberate corruption of outgoing responses, so the client's response-validation code can be
+ * tested.  The other fault-injection flags (--reject_fo, --reject_size, --empty_frag, --delay)
+ * all send well-formed responses that merely say "no"; these send malformed ones.  The
+ * machinery that arms and fires them lives in fault.c; the enum is here because plc_s below
+ * needs one counter per kind.
+ *
+ * Note what is *not* here: there is no way to make the packet shorter than an EIP header.  The
+ * client sizes its second read from the encapsulation length field, so a response that is
+ * simply cut short leaves the client waiting for bytes that never arrive and it times out
+ * rather than rejecting anything.  Every corruption below therefore keeps the packet coherent
+ * at every layer outside the one being attacked -- see FAULT_SHORT_CPF and FAULT_SHORT_CIP,
+ * which shrink the response but fix up the lengths around it.
+ */
+typedef enum {
+    FAULT_NONE = 0,
+    FAULT_CPF_COUNT,  /* claim a CPF item count other than two. */
+    FAULT_CPF_TYPE,   /* claim an address item type that is neither CAI nor NAI. */
+    FAULT_CONN_ID,    /* answer a connected send with the wrong connection ID. */
+    FAULT_ITEM_LEN,   /* declare a CPF data item length that disagrees with the packet. */
+    FAULT_SHORT_CPF,  /* end the response right after the CPF header, lengths adjusted to match. */
+    FAULT_SHORT_CIP,  /* leave a CIP payload too short to hold a CIP response header. */
+    FAULT_EIP_CMD,    /* answer with a different EIP command than the one sent. */
+    FAULT_SESSION,    /* answer with a session handle other than the registered one. */
+    FAULT_CONTEXT,    /* echo back a sender context other than the one that was sent. */
+    FAULT_PCCC_REPLY, /* answer a PCCC request with an unexpected reply code. */
+    FAULT_PCCC_TNS,   /* answer a PCCC request with a transaction number we never sent. */
+    FAULT_MAX
+} fault_kind_t;
 
 struct tag_def_s {
     struct tag_def_s *next_tag;
@@ -129,7 +166,11 @@ struct tag_def_s {
 
 typedef struct tag_def_s tag_def_s;
 
-typedef enum { PLC_CONTROL_LOGIX, PLC_MICRO800, PLC_OMRON, PLC_PLC5, PLC_SLC, PLC_MICROLOGIX } plc_type_t;
+/*
+ * PLC_LGX_PCCC is a ControlLogix reached through the PCCC mapping: CIP framing and a CIP
+ * routing path to the CPU, but PCCC data files and PCCC typed read/write commands on top.
+ */
+typedef enum { PLC_CONTROL_LOGIX, PLC_MICRO800, PLC_OMRON, PLC_PLC5, PLC_SLC, PLC_MICROLOGIX, PLC_LGX_PCCC } plc_type_t;
 
 /* Define the context that is passed around. */
 typedef struct plc_s {
@@ -184,6 +225,12 @@ typedef struct plc_s {
 
     /* size offered back with the 0x0109 rejection above. */
     uint16_t reject_size_supported;
+
+    /*
+     * One counter per fault_kind_t, for the deliberate response corruptions behind --corrupt.
+     * Shared across every connection's copy of this struct, as above.
+     */
+    atomic_int32_t *fault_counts[FAULT_MAX];
 
     /* response delay */
     int response_delay;

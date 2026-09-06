@@ -330,6 +330,20 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
         return (plc_tag_p)tag;
     }
 
+    /*
+     * The CIP read and write services carry the element count in a two-byte field, and every
+     * place that builds one casts to uint16_t explicitly, so nothing downstream objects to a
+     * larger value -- the count simply wraps and the PLC is asked for a different number of
+     * elements than the caller asked for.  There is no size check here of the kind ab_common.c
+     * has because an Omron tag learns its size from the PLC rather than from the attributes.
+     */
+    if(tag->elem_count > UINT16_MAX) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be no more than %d, was %d!", UINT16_MAX,
+               tag->elem_count);
+        tag->status = PLCTAG_ERR_TOO_LARGE;
+        return (plc_tag_p)tag;
+    }
+
     tag->size = 0;
     tag->data = NULL;
 

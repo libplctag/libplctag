@@ -286,6 +286,10 @@ else
     let SUCCESSES++
 fi
 
+# No ST test for the Micrologix: the test PLC has no ST file, so str_is_byte_swapped in
+# slc_tag_byte_order stays unconfirmed for the SLC family.  Add a test here if a Micrologix or
+# SLC500 with a string file ever joins the bench.
+
 let TEST++
 echo -n "Test $TEST: B data file PLC5 tag read/write... "
 $VALGRIND$TEST_DIR/tag_rw2 --type=uint16 '--tag=protocol=ab-eip&gateway=10.206.1.38&plc=plc5&elem_count=1&name=B3:0' --debug=4 --write=0 > "$LOG_DIR/${TEST}_plc5.log" 2>&1
@@ -330,6 +334,30 @@ else
     let SUCCESSES++
 fi
 
+
+let TEST++
+echo -n "Test $TEST: ST data file PLC5 tag write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=string '--tag=protocol=ab-eip&gateway=10.206.1.38&plc=plc5&elem_count=1&name=ST18:0' --write=ABCDEFGH --debug=4 > "$LOG_DIR/${TEST}_plc5_st_write.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+# Same check as the Micrologix pair above, but against plc5_tag_byte_order, which is a separate
+# table.  Expect 08 00 42 41 44 43 46 45 48 47 in the raw dump if the swap is correct.
+let TEST++
+echo -n "Test $TEST: ST data file PLC5 tag read... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=string '--tag=protocol=ab-eip&gateway=10.206.1.38&plc=plc5&elem_count=1&name=ST18:0' --debug=4 > "$LOG_DIR/${TEST}_plc5_st_read.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "Test $TEST: basic DH+ bridging... "

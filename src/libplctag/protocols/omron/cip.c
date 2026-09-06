@@ -620,6 +620,17 @@ int encode_tag_name(omron_tag_p tag, const char *name) {
         }
     }
 
+    /*
+     * The loop above stops as soon as the encoded name fills the buffer, which leaves the rest of
+     * the name unparsed and looks exactly like a malformed name to the check below.  Say what
+     * actually happened instead, and with the error code that fits it.
+     */
+    if(name_index < name_len && encoded_index >= MAX_TAG_NAME) {
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, tag->tag_id, "Encoded tag name is too long at position %d in the tag name!",
+               name_index);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     if(name_index != name_len) {
         pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, tag->tag_id,
                "Bad tag name format.  Tag must end with a bit identifier if one is present.");
@@ -724,6 +735,18 @@ int parse_symbolic_segment(omron_tag_p tag, const char *name, int *encoded_index
 
     /* get the rest of the name. */
     while((isalnum(name[name_i]) || name[name_i] == ':' || name[name_i] == '_') && (encoded_i < (MAX_TAG_NAME - 1))) {
+        /*
+         * The segment length is a single byte, so a symbolic segment cannot hold more than 255
+         * characters.  Without this the counter below wraps back to zero and the PLC gets a
+         * zero-length segment followed by the rest of the name as stray path bytes.
+         */
+        if(tag->encoded_name[seg_len_index] == 0xFF) {
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, tag->tag_id,
+                   "Symbolic segment starting at position %d in the tag name is longer than the maximum of 255 characters!",
+                   name_start);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
         tag->encoded_name[encoded_i] = (uint8_t)name[name_i];
         encoded_i++;
         tag->encoded_name[seg_len_index]++;

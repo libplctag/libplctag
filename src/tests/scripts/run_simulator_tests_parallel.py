@@ -122,6 +122,10 @@ class CheckSpec:
     log_file: str
     pattern: str
     expected: int
+    # An exact count is the right assertion for "this happened once".  Some checks can only say
+    # "at least once": when the client retries a failing operation the same warning is logged
+    # once per attempt, and the number of attempts is timing-dependent.
+    at_least: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -324,9 +328,10 @@ def run_check(check: CheckSpec) -> tuple[bool, str]:
             count = sum(1 for line in f if pattern.search(line))
     except FileNotFoundError:
         return False, f"log file not found: {check.log_file}"
-    if count == check.expected:
-        return True, f"found {count} PLC creation entries in {check.log_file}"
-    return False, f"expected {check.expected} PLC creation entries, found {count} in {check.log_file}"
+    if (count >= check.expected) if check.at_least else (count == check.expected):
+        return True, f"found {count} matches in {check.log_file}"
+    return False, (f"expected {'at least ' if check.at_least else ''}{check.expected} matches, "
+                   f"found {count} in {check.log_file}")
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +518,42 @@ def build_manifest() -> Manifest:
                f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=99999&name=TestBigArray",
                "--debug=4"], F, expect_failure=True)
 
+    # The rest of this section covers the attribute-string checks added by the untrusted-input
+    # work.  Every one of them fires during tag creation or encoding, before anything reaches the
+    # wire, so the server here is only along for the ride.  Each test asserts on the specific
+    # warning as well as the failure, because "this tag failed" on its own would still pass if the
+    # check were deleted and something later happened to reject the tag for an unrelated reason.
+    def bad_attr(section, name, tag_attrs, pattern, elem_type="sint32"):
+        t = section.test(name, [exe("tag_rw2"), f"--type={elem_type}", f"--tag={tag_attrs}", "--debug=4"],
+                         F, expect_failure=True)
+        section.test(f"check: {name}", None, F, depends_on=t.id, ports_needed=0,
+                     check=CheckSpec(log_file=t.log_file, pattern=pattern, expected=1))
+
+    ab_lgx = f"protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix"
+
+    bad_attr(sec, "AB zero element count", f"{ab_lgx}&elem_count=0&name=TestBigArray",
+             r"Element count must be at least one, was 0!")
+    bad_attr(sec, "AB negative element count", f"{ab_lgx}&elem_count=-1&name=TestBigArray",
+             r"Element count must be at least one, was -1!")
+    # MAX_CONN_PATH is 260, so 300 characters is over the limit with room to spare.
+    bad_attr(sec, "AB over-long gateway",
+             "protocol=ab-eip&gateway=" + ("a" * 300) + "&path=1,0&plc=ControlLogix&name=TestBigArray",
+             r"Gateway string is missing or longer than the maximum of \d+ bytes!")
+    bad_attr(sec, "AB over-long path", f"protocol=ab-eip&gateway={egw}&path=" + ("1," * 150) + "0&plc=ControlLogix&name=TestBigArray",
+             r"Path string is longer than the maximum of \d+ bytes!")
+    # Two separate limits on the encoded name, so two tests.  One segment cannot exceed 255
+    # characters because its length is a single byte -- that counter used to wrap silently at 256
+    # and hand the PLC a zero-length segment followed by the name as stray path bytes.
+    bad_attr(sec, "AB over-long tag name segment", f"{ab_lgx}&name=" + ("A" * 300),
+             r"is longer than the maximum of 255 characters!")
+    # The whole encoded name has to fit MAX_TAG_NAME too.  Each "A." costs four encoded bytes
+    # (segment type, length, character, pad), so 100 of them overruns the 260-byte buffer.
+    bad_attr(sec, "AB over-long encoded tag name", f"{ab_lgx}&name=" + ".".join(["A"] * 100),
+             r"Encoded tag name is too long")
+    # A numeric segment is encoded in at most 32 bits, so this one cannot be represented.
+    bad_attr(sec, "AB out-of-range numeric segment", f"{ab_lgx}&name=TestBigArray[4294967296]",
+             r"Numeric segment must be less than or equal to")
+
     # ab_server's --reject_fo=N used to have a bug (fixed): reject_fo_count
     # lived in plc_s, which tcp_server.c copies fresh into every accepted TCP
     # connection, so the decrement never persisted across the client's
@@ -602,6 +643,52 @@ def build_manifest() -> Manifest:
               None, T, depends_on=tiny_size_test.id, ports_needed=0,
               check=CheckSpec(log_file=tiny_size_test.log_file,
                                pattern=r"below the \d+ bytes this protocol needs", expected=1))
+
+    # --corrupt=<kind>[:<count>] makes the server send deliberately malformed responses, which is
+    # the only way to reach the library's response-validation checks: every other fault-injection
+    # flag sends a well-formed response that merely says "no".  A plain DINT array is used
+    # throughout because none of these failures has anything to do with the tag.
+    #
+    # The count is large enough to cover the retries the client makes, and each test asserts on
+    # the specific warning rather than just the failure -- otherwise deleting a check would still
+    # "pass" as long as something later rejected the tag.
+    def corrupt_test(section, name, kind, gateway, tag_attrs, pattern, elem_type="sint32", plc_args=None,
+                     tag_def="TestDINTArray:DINT[10]"):
+        server = ServerSpec(
+            exe_path=exe("ab_server"),
+            args_template=(plc_args or []) + ["--debug", "--port={PORT}", f"--tag={tag_def}",
+                                              f"--corrupt={kind}:100"],
+            startup_wait_s=1,
+        )
+        t = section.test(name, [exe("tag_rw2"), f"--type={elem_type}", f"--tag={tag_attrs}", "--debug=4"],
+                         F, server=server, expect_failure=True)
+        # at_least: the client retries, and each attempt logs the warning again.
+        section.test(f"check: {name}", None, F, depends_on=t.id, ports_needed=0,
+                     check=CheckSpec(log_file=t.log_file, pattern=pattern, expected=1, at_least=True))
+
+    ab_corrupt_tag = f"protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestDINTArray"
+    ab_corrupt_args = ["--plc=ControlLogix", "--path=1,0"]
+
+    corrupt_test(sec, "AB CPF item count", "cpf_count", egw, ab_corrupt_tag,
+                 r"Connected response has 3 CPF items, expected 2!", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB CPF item type", "cpf_type", egw, ab_corrupt_tag,
+                 r"Connected response CPF item types are 00ff/00b1, expected 00a1/00b1!", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB connection ID mismatch", "conn_id", egw, ab_corrupt_tag,
+                 r"Connected response is for connection [0-9a-f]+ but ours is [0-9a-f]+!", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB CPF data item length mismatch", "item_len", egw, ab_corrupt_tag,
+                 r"Connected data item claims \d+ bytes but the response is \d+ bytes", plc_args=ab_corrupt_args)
+    # short_cpf lands on the ForwardOpen reply, which the client length-checks before the CIP
+    # layer ever sees it; short_cip is connected-only, so it reaches the read response instead.
+    corrupt_test(sec, "AB ForwardOpen reply too short", "short_cpf", egw, ab_corrupt_tag,
+                 r"Forward Open response of \d+ bytes is too short", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB connected response too short for a CIP reply", "short_cip", egw, ab_corrupt_tag,
+                 r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB wrong EIP command in reply", "eip_cmd", egw, ab_corrupt_tag,
+                 r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB wrong EIP session handle", "session", egw, ab_corrupt_tag,
+                 r"Received a response for session handle [0-9a-f]+ but this session is", plc_args=ab_corrupt_args)
+    corrupt_test(sec, "AB wrong sender context echoed", "context", egw, ab_corrupt_tag,
+                 r"Received a response with sender context [0-9a-f]+ but we sent", plc_args=ab_corrupt_args)
 
     # --delay= applied to every response (including session register and
     # ForwardOpen, not just reads -- see ab_server's request_handler) paired
@@ -696,6 +783,59 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=string",
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=TestString",
                "--debug=4", "--write=str_zero,str_one,CipStr,str_three"], F)
+    # The Omron module has its own copies of the attribute checks -- same wording, different
+    # module tag in the log -- so they need their own tests rather than riding on the AB ones.
+    # Note that omron_common.c only guards the element count; it has no elem_size or overall
+    # tag-size check of the kind ab_common.c grew, because every Omron tag is Logix-class and
+    # gets its size from the PLC.
+    omron_njnx = f"protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx"
+
+    bad_attr(sec, "Omron zero element count", f"{omron_njnx}&elem_count=0&name=TestDINTArray",
+             r"Element count must be at least one, was 0!")
+    bad_attr(sec, "Omron negative element count", f"{omron_njnx}&elem_count=-1&name=TestDINTArray",
+             r"Element count must be at least one, was -1!")
+    # The CIP element count field is two bytes wide and every builder casts to uint16_t
+    # explicitly, so without this bound the count wraps silently and the PLC is asked for the
+    # wrong number of elements.  65536 is the first value that wraps -- to zero.
+    bad_attr(sec, "Omron element count past the 16-bit request field",
+             f"{omron_njnx}&elem_count=65536&name=TestDINTArray",
+             r"Element count must be no more than 65535, was 65536!")
+    bad_attr(sec, "Omron over-long gateway",
+             "protocol=ab-eip&gateway=" + ("a" * 300) + "&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
+             r"Gateway string is missing or longer than the maximum of \d+ bytes!")
+    bad_attr(sec, "Omron over-long path",
+             f"protocol=ab-eip&gateway={ogw}&path=" + ("1," * 150) + "0&plc=omron-njnx&name=TestDINTArray",
+             r"Path string is longer than the maximum of \d+ bytes!")
+    bad_attr(sec, "Omron over-long tag name segment", f"{omron_njnx}&name=" + ("A" * 300),
+             r"is longer than the maximum of 255 characters!")
+    bad_attr(sec, "Omron over-long encoded tag name", f"{omron_njnx}&name=" + ".".join(["A"] * 100),
+             r"Encoded tag name is too long")
+    bad_attr(sec, "Omron out-of-range numeric segment", f"{omron_njnx}&name=TestDINTArray[4294967296]",
+             r"Numeric segment must be less than or equal to")
+
+    # The Omron module has its own copies of the response checks, so they need their own tests.
+    omron_corrupt_tag = f"protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray"
+    omron_corrupt_args = ["--plc=Omron"]
+
+    corrupt_test(sec, "Omron CPF item count", "cpf_count", ogw, omron_corrupt_tag,
+                 r"Connected response has 3 CPF items, expected 2!", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron CPF item type", "cpf_type", ogw, omron_corrupt_tag,
+                 r"Connected response CPF item types are 00ff/00b1, expected 00a1/00b1!", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron connection ID mismatch", "conn_id", ogw, omron_corrupt_tag,
+                 r"Connected response is for connection [0-9a-f]+ but ours is [0-9a-f]+!", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron CPF data item length mismatch", "item_len", ogw, omron_corrupt_tag,
+                 r"Connected data item claims \d+ bytes but the response is \d+ bytes", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron ForwardOpen reply too short", "short_cpf", ogw, omron_corrupt_tag,
+                 r"Forward Open response of \d+ bytes is too short", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron connected response too short for a CIP reply", "short_cip", ogw, omron_corrupt_tag,
+                 r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron wrong EIP command in reply", "eip_cmd", ogw, omron_corrupt_tag,
+                 r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron wrong EIP connection handle", "session", ogw, omron_corrupt_tag,
+                 r"Received a response for connection handle [0-9a-f]+ but this connection is", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron wrong sender context echoed", "context", ogw, omron_corrupt_tag,
+                 r"Received a response with sender context [0-9a-f]+ but we sent", plc_args=omron_corrupt_args)
+
     sec.test("Omron thread stress",
               [exe("thread_stress"), "10", f"protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], S)
     sec.test("idle disconnect and reconnect with runtime timeout change (Omron)",
@@ -771,7 +911,7 @@ def build_manifest() -> Manifest:
     micrologix_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Micrologix", "--port={PORT}",
-                        "--tag=B3[10]", "--tag=N7[10]", "--tag=L19[10]"],
+                        "--tag=B3[10]", "--tag=N7[10]", "--tag=L19[10]", "--tag=ST18[4]"],
         startup_wait_s=1,
     )
     mgw = "127.0.0.1:{PORT}"
@@ -793,10 +933,132 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--write=1", "--debug=4"],
               F, expect_failure=True)  # this write should NOT succeed
 
+    # The PCCC/DF1 string is a separate type from the CIP one -- 0x8d, 2-byte count, 82
+    # characters, 84 bytes total.  Written one element at a time on purpose: four of them is
+    # 336 bytes, which overflows the 244-byte PCCC packet and fails PLCTAG_ERR_TOO_LARGE.
+    st_test = sec.test("ST string data file Micrologix tag read/write",
+              [exe("tag_rw2"), "--type=string",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=ST18:1",
+               "--write=ABCDEFGH", "--debug=4"], F)
+    sec.test("check the ST string round-trips through the 84-byte PCCC element",
+              None, T, depends_on=st_test.id, ports_needed=0,
+              check=CheckSpec(log_file=st_test.log_file, pattern=r'data\[0\]="ABCDEFGH"', expected=1))
+    # A round trip cannot see byte swapping -- the library swaps on the way out and unswaps on
+    # the way back, so the string returns intact either way.  Assert the actual bytes instead:
+    # "ABCDEFGH" with a 2-byte count becomes 08 00 42 41 44 43 46 45 48 47, i.e. BADCFEHG.
+    #
+    # This pins current behaviour, it does not vouch for it.  slc_tag_byte_order (used by
+    # SLC500, Micrologix and LGX_PCCC) and plc5_tag_byte_order both set str_is_byte_swapped=1,
+    # and it is not settled that anything other than PLC/5 should.  If hardware testing says
+    # Micrologix does not swap, this check fails and points straight at the decision.
+    sec.test("check the Micrologix ST string byte order (pins current behaviour, needs hardware)",
+              None, T, depends_on=st_test.id, ports_needed=0,
+              check=CheckSpec(log_file=st_test.log_file,
+                               pattern=r"plc_tag_set_string:\d+ 00000 08 00 42 41 44 43 46 45 48 47", expected=1))
+
+    # ab_common.c only reaches its elem_size and overall-size checks on the PCCC PLC types --
+    # Logix-class tags get their size from the PLC and skip that branch entirely -- so the size
+    # overflow check has to be tested here rather than in the ControlLogix section.  N7 elements
+    # are two bytes, so anything past AB_MAX_TAG_DATA_SIZE/2 == 4194304 elements is rejected
+    # before the multiply that would otherwise overflow a signed int.
+    #
+    # There is no companion test for "element size must be at least one byte" because that one
+    # is not reachable from the attribute string: get_tag_data_type() sets elem_size from the
+    # data file type long before the check runs, and every PCCC file type has a non-zero size.
+    # It is a guard against a future file type, not against user input.
+    # PCCC PLCs talk over unconnected messaging, so these reach the *unconnected* CPF checks --
+    # the connected ones above never see this path.  The two PCCC-layer checks live here too.
+    mlgx_corrupt_tag = f"protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0"
+    mlgx_corrupt_args = ["--plc=Micrologix"]
+
+    corrupt_test(sec, "Micrologix unconnected CPF item count", "cpf_count", mgw, mlgx_corrupt_tag,
+                 r"Unconnected response has 3 CPF items, expected 2!", elem_type="sint16",
+                 plc_args=mlgx_corrupt_args, tag_def="N7[10]")
+    corrupt_test(sec, "Micrologix unconnected CPF item type", "cpf_type", mgw, mlgx_corrupt_tag,
+                 r"Unconnected response CPF item types are", elem_type="sint16", plc_args=mlgx_corrupt_args,
+                 tag_def="N7[10]")
+    corrupt_test(sec, "Micrologix unexpected PCCC reply code", "pccc_reply", mgw, mlgx_corrupt_tag,
+                 r"Unexpected PCCC reply code [0-9a-f]+, expected [0-9a-f]+!", elem_type="sint16",
+                 plc_args=mlgx_corrupt_args, tag_def="N7[10]")
+    corrupt_test(sec, "Micrologix PCCC transaction number mismatch", "pccc_tns", mgw, mlgx_corrupt_tag,
+                 r"Response has TNS [0-9a-f]+ but we sent [0-9a-f]+!", elem_type="sint16",
+                 plc_args=mlgx_corrupt_args, tag_def="N7[10]")
+
+    bad_attr(sec, "Micrologix tag size overflow",
+             f"protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=5000000&name=N7:0",
+             r"larger than the maximum tag size of \d+ bytes!", elem_type="sint16")
+
+    # --- PCCC-mapped ControlLogix section --------------------------------------
+    # A ControlLogix reached through its PCCC mapping: CIP framing with a routing path to the
+    # CPU, but PCCC data files and the PCCC typed read/write pair (0x68/0x67) on top.  Unlike
+    # the other PCCC PLCs the request is wrapped in an Unconnected_Send, so it lands in
+    # ab_server's inner CIP dispatcher rather than the unconnected one.
+    #
+    # The library forces unconnected messaging for this PLC type (ab_common.c sets
+    # use_connected_msg = 0 and eip_lgx_pccc.c only ever builds AB_EIP_UNCONNECTED_SEND), so
+    # these are unconnected tests.  ab_server itself will serve PCCC over a connected CPF item
+    # if a client ever asks for it.
+    lgx_pccc_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=LgxPccc", "--port={PORT}", "--path=1,0",
+                        "--tag=B3[10]", "--tag=N7[10]", "--tag=L19[10]", "--tag=F8[4]", "--tag=ST18[4]"],
+        startup_wait_s=1,
+    )
+    lgw = "127.0.0.1:{PORT}"
+    lgx_pccc_tag = f"protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=1"
+
+    sec = m.section("lgx_pccc", server=lgx_pccc_server)
+    sec.test("B data file PCCC-mapped Logix tag read/write",
+              [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--debug=4"], F)
+    sec.test("B bit data file PCCC-mapped Logix tag read/write",
+              [exe("tag_rw2"), "--type=bit", f"--tag={lgx_pccc_tag}&name=B3:0/6", "--write=1", "--debug=4"], F)
+    sec.test("N data file PCCC-mapped Logix tag read/write",
+              [exe("tag_rw2"), "--type=sint16", f"--tag={lgx_pccc_tag}&name=N7:0", "--write=42", "--debug=4"], F)
+    sec.test("L data file PCCC-mapped Logix tag read/write",
+              [exe("tag_rw2"), "--type=sint32", f"--tag={lgx_pccc_tag}&name=L19:0", "--write=7", "--debug=4"], F)
+    sec.test("F data file PCCC-mapped Logix tag read/write",
+              [exe("tag_rw2"), "--type=real32", f"--tag={lgx_pccc_tag}&name=F8:0", "--write=3.5", "--debug=4"], F)
+
+    # A multi-element read exercises the array type prefix in the typed-read reply; a single
+    # element would still get one, but this is where a wrong total-size byte would show up.
+    multi = sec.test("N data file PCCC-mapped Logix array read/write",
+              [exe("tag_rw2"), "--type=sint16",
+               f"--tag=protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=10&name=N7:0",
+               "--write=1,2,3,4,5,6,7,8,9,10", "--debug=4"], F)
+    sec.test("check the PCCC-mapped Logix array round-trips all ten elements",
+              None, F, depends_on=multi.id, ports_needed=0,
+              check=CheckSpec(log_file=multi.log_file, pattern=r"data\[9\]=10 ", expected=1))
+
+    st = sec.test("ST string data file PCCC-mapped Logix tag read/write",
+              [exe("tag_rw2"), "--type=string", f"--tag={lgx_pccc_tag}&name=ST18:1", "--write=ABCDEFGH", "--debug=4"], F)
+    sec.test("check the PCCC-mapped Logix ST string round-trips",
+              None, F, depends_on=st.id, ports_needed=0,
+              check=CheckSpec(log_file=st.log_file, pattern=r'data\[0\]="ABCDEFGH"', expected=1))
+
+    # Same four checks as the Micrologix set: the CPF ones because this path is unconnected too,
+    # and the PCCC-layer ones because they sit at dispatch_pccc_request's exit regardless of
+    # which PCCC command got there.
+    lgx_pccc_corrupt_tag = f"{lgx_pccc_tag}&name=N7:0"
+    lgx_pccc_corrupt_args = ["--plc=LgxPccc", "--path=1,0"]
+
+    corrupt_test(sec, "PCCC-mapped Logix unconnected CPF item count", "cpf_count", lgw, lgx_pccc_corrupt_tag,
+                 r"Unconnected response has 3 CPF items, expected 2!", elem_type="sint16",
+                 plc_args=lgx_pccc_corrupt_args, tag_def="N7[10]")
+    corrupt_test(sec, "PCCC-mapped Logix unconnected CPF item type", "cpf_type", lgw, lgx_pccc_corrupt_tag,
+                 r"Unconnected response CPF item types are", elem_type="sint16",
+                 plc_args=lgx_pccc_corrupt_args, tag_def="N7[10]")
+    corrupt_test(sec, "PCCC-mapped Logix unexpected PCCC reply code", "pccc_reply", lgw, lgx_pccc_corrupt_tag,
+                 r"Unexpected PCCC reply code [0-9a-f]+, expected [0-9a-f]+!", elem_type="sint16",
+                 plc_args=lgx_pccc_corrupt_args, tag_def="N7[10]")
+    corrupt_test(sec, "PCCC-mapped Logix PCCC transaction number mismatch", "pccc_tns", lgw, lgx_pccc_corrupt_tag,
+                 r"Response has TNS [0-9a-f]+ but we sent [0-9a-f]+!", elem_type="sint16",
+                 plc_args=lgx_pccc_corrupt_args, tag_def="N7[10]")
+
     # --- PLC5 section ------------------------------------------------------
     plc5_server = ServerSpec(
         exe_path=exe("ab_server"),
-        args_template=["--debug", "--plc=PLC/5", "--port={PORT}", "--tag=B3[10]", "--tag=N7[10]"],
+        args_template=["--debug", "--plc=PLC/5", "--port={PORT}", "--tag=B3[10]", "--tag=N7[10]",
+                        "--tag=ST18[4]", "--tag=F8[4]"],
         startup_wait_s=1,
     )
     pgw = "127.0.0.1:{PORT}"
@@ -810,6 +1072,24 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0"], F)
     sec.test("N bit data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1"], F)
+    # These two are the reason the PLC/5 word-count fix matters: both files are wider than the
+    # two bytes that B3 and N7 use, so both used to be rejected outright by the simulator.
+    plc5_st_test = sec.test("ST string data file PLC5 tag read/write",
+              [exe("tag_rw2"), "--type=string",
+               f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=ST18:1",
+               "--write=ABCDEFGH", "--debug=4"], F)
+    # PLC/5 shares the swapped string layout, so the same byte pattern as the Micrologix check.
+    sec.test("check the PLC5 ST string byte order (pins current behaviour, needs hardware)",
+              None, T, depends_on=plc5_st_test.id, ports_needed=0,
+              check=CheckSpec(log_file=plc5_st_test.log_file,
+                               pattern=r"plc_tag_set_string:\d+ 00000 08 00 42 41 44 43 46 45 48 47", expected=1))
+    # PLC/5 is the only byte order that swaps the two halves of a 32-bit float
+    # (plc5_tag_byte_order.float32_order = {2,3,0,1}, confirmed correct against hardware), so a
+    # float has to survive the round trip.
+    sec.test("F float data file PLC5 tag read/write (word-swapped float32)",
+              [exe("tag_rw2"), "--type=real32",
+               f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=F8:1",
+               "--write=1.5", "--debug=4"], F)
 
     # --- Modbus section ------------------------------------------------------
     modbus_server = ServerSpec(

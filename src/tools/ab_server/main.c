@@ -50,6 +50,7 @@
 
 #include "args.h"
 #include "eip.h"
+#include "fault.h"
 #include "mutex.h"
 #include "plc.h"
 #include "slice.h"
@@ -74,6 +75,9 @@ static slice_s request_handler(slice_s input, slice_s output, void *plc);
 static atomic_int32_t g_reject_fo_count;
 static atomic_int32_t g_empty_frag_count;
 static atomic_int32_t g_reject_size_count;
+
+/* one per fault_kind_t, shared the same way -- see plc_s.fault_counts. */
+static atomic_int32_t g_fault_counts[FAULT_MAX];
 
 
 #ifdef IS_WINDOWS
@@ -165,6 +169,7 @@ int main(int argc, const char **argv) {
     plc.reject_fo_count = &g_reject_fo_count;
     plc.empty_frag_count = &g_empty_frag_count;
     plc.reject_size_count = &g_reject_size_count;
+    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
     /* set the random seed. */
     srand((unsigned int)time(NULL));
@@ -194,9 +199,10 @@ void usage(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] [--port=<port>] --tag=<tag>\n"
                     "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
-                    "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\" or \"Micrologix\".\n"
+                    "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\", \"Micrologix\" or\n"
+                    "                \"LgxPccc\" (a ControlLogix addressed through its PCCC mapping).\n"
                     "\n"
-                    "   <path> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
+                    "   <path> = (required for ControlLogix and LgxPccc) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "\n"
                     "   <port> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "            Defaults to 44818.\n"
@@ -237,9 +243,25 @@ void usage(void) {
                     "                               packed requests leave no room, and it makes no progress,\n"
                     "                               so a client must not retry it forever.\n"
                     "        --delay=<ms>           delay every response by <ms> milliseconds.\n"
+                    "        --corrupt=<kind>[:<n>] send the next <n> responses (default 1) deliberately\n"
+                    "                               malformed, to exercise the client's response checks.\n"
+                    "                               May be repeated.  <kind> is one of:\n"
+                    "                                 cpf_count  - CPF item count other than two.\n"
+                    "                                 cpf_type   - unrecognized CPF address item type.\n"
+                    "                                 conn_id    - wrong connection ID on a connected send.\n"
+                    "                                 item_len   - CPF data item length that disagrees with\n"
+                    "                                              the packet.\n"
+                    "                                 short_cpf  - no CIP payload at all.\n"
+                    "                                 short_cip  - CIP payload too short for a CIP header.\n"
+                    "                                 eip_cmd    - wrong EIP command in the reply.\n"
+                    "                                 session    - wrong EIP session handle.\n"
+                    "                                 context    - wrong sender context echoed back.\n"
+                    "                                 pccc_reply - unexpected PCCC reply code.\n"
+                    "                                 pccc_tns   - PCCC transaction number we never sent.\n"
                     "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
-                    "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n");
+                    "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n"
+                    "         ab_server --plc=LgxPccc --path=1,0 --tag=N7[10]\n");
 
     exit(1);
 }
@@ -252,9 +274,10 @@ void usage(void) {
  */
 static const args_flag_def_t arg_flags[] = {
     {"plc", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_ONCE, "plc",
-     "PLC type to simulate: ControlLogix, Micro800, Omron, PLC/5, SLC500 or Micrologix", {.has_default = false}},
+     "PLC type to simulate: ControlLogix, Micro800, Omron, PLC/5, SLC500, Micrologix or LgxPccc",
+     {.has_default = false}},
     {"path", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "path",
-     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix", {.has_default = false}},
+     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix and LgxPccc", {.has_default = false}},
     {"port", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "port", "TCP port to listen on.  Defaults to 44818",
      {.has_default = false}},
     {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated",
@@ -272,6 +295,9 @@ static const args_flag_def_t arg_flags[] = {
      "Connection size to offer with a 0x0109 rejection", {.has_default = true, .value.int_val = 508}},
     {"delay", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "delay", "Delay every response by <ms> milliseconds",
      {.has_default = true, .value.int_val = 0}},
+    {"corrupt", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_MULTIPLE, "corrupt",
+     "Corrupt the next <count> responses in the named way, as <kind>[:<count>].  May be repeated",
+     {.has_default = false}},
 };
 
 #define NUM_ARG_FLAGS (sizeof(arg_flags) / sizeof(arg_flags[0]))
@@ -283,11 +309,13 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     const char *path_str = NULL;
     const char *plc_type_str = NULL;
     size_t num_tags = 0;
+    size_t num_corruptions = 0;
 
     /* make sure that the fault injection counts are zero. */
     atomic_store_int32(plc->reject_fo_count, 0);
     atomic_store_int32(plc->empty_frag_count, 0);
     atomic_store_int32(plc->reject_size_count, 0);
+    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
 
     if(args_parse(argc, argv, arg_flags, NUM_ARG_FLAGS, &args) != UTIL_OK) {
         int bad_flag = args_get_error_flag_index(&args);
@@ -348,7 +376,8 @@ void process_args(int argc, const char **argv, plc_s *plc) {
 
         if(!tag_val.present || !tag_val.value.string_val) { continue; }
 
-        if(plc->plc_type == PLC_PLC5 || plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) {
+        if(plc->plc_type == PLC_PLC5 || plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX
+           || plc->plc_type == PLC_LGX_PCCC) {
             parse_pccc_tag(tag_val.value.string_val, plc);
         } else {
             parse_cip_tag(tag_val.value.string_val, plc);
@@ -387,6 +416,21 @@ void process_args(int argc, const char **argv, plc_s *plc) {
         plc->response_delay = (int)args_get_int(&args, "delay");
     }
 
+    num_corruptions = args_get_count(&args, "corrupt");
+    for(size_t i = 0; i < num_corruptions; i++) {
+        args_value_t corrupt_val = args_get_at(&args, "corrupt", i);
+
+        if(!corrupt_val.present || !corrupt_val.value.string_val) { continue; }
+
+        if(!fault_parse(corrupt_val.value.string_val, plc)) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Unrecognized --corrupt value \"%s\".\n", corrupt_val.value.string_val);
+            args_free(&args);
+            usage();
+            return;
+        }
+    }
+
     /*
      * The string values above point into argv, which outlives this call, so freeing the result
      * bookkeeping here does not invalidate anything kept in plc.
@@ -409,6 +453,20 @@ bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path) {
         plc->path_len = 6;
         plc->client_to_server_max_packet = 504;
         plc->server_to_client_max_packet = 504;
+        *needs_path = true;
+    } else if(str_cmp_i(plc_type_str, "LgxPccc") == 0) {
+        log_info_always("Selecting PCCC-mapped ControlLogix simulator.");
+        plc->plc_type = PLC_LGX_PCCC;
+        plc->path[0] = (uint8_t)0x00; /* filled in later. */
+        plc->path[1] = (uint8_t)0x00; /* filled in later. */
+        plc->path[2] = (uint8_t)0x20;
+        plc->path[3] = (uint8_t)0x02;
+        plc->path[4] = (uint8_t)0x24;
+        plc->path[5] = (uint8_t)0x01;
+        plc->path_len = 6;
+        /* MAX_CIP_LGX_PCCC_MSG_SIZE in the library's session.c. */
+        plc->client_to_server_max_packet = 244;
+        plc->server_to_client_max_packet = 244;
         *needs_path = true;
     } else if(str_cmp_i(plc_type_str, "Micro800") == 0) {
         log_info_always("Selecting Micro8xx simulator.");
@@ -567,7 +625,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         } else if(str_cmp_i(data_file_name, "ST18") == 0) {
             log_info("Found ST18 data file.");
             tag->tag_type = TAG_PCCC_TYPE_STRING;
-            tag->elem_size = 84;
+            tag->elem_size = TAG_PCCC_SIZE_STRING;
             tag->data_file_num = 18;
         } else if(str_cmp_i(data_file_name, "L19") == 0) {
             log_info("Found L19 data file.");

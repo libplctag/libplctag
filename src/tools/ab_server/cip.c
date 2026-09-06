@@ -215,6 +215,14 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     switch(cip_service) {
         case CIP_SRV_MULTI: return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc); break;
 
+        /*
+         * PCCC Execute arrives here, rather than in the unconnected dispatcher above, whenever it
+         * is wrapped: inside an Unconnected_Send, which is how the PCCC-mapped Logix talks, or
+         * inside a connected CPF item.  dispatch_pccc_request() wants the whole CIP request
+         * because it skips its own 13-byte header.
+         */
+        case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
+
         case CIP_SRV_READ_NAMED_TAG:
         case CIP_SRV_READ_NAMED_TAG_FRAG:
             return handle_read_request(cip_service, cip_service_path, cip_service_payload, output, plc);
