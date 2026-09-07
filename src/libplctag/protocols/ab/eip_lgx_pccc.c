@@ -38,6 +38,8 @@ extern "C"
 */
 
 
+#include <stddef.h>
+
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/defs.h>
@@ -368,7 +370,7 @@ static int check_read_status(ab_tag_p tag) {
         type_end = data;
 
         /* copy data into the tag. */
-        if((intptr_t)data > (intptr_t)data_end || (data_end - data) > tag->size) {
+        if((intptr_t)data > (intptr_t)data_end || (data_end - data) > (ptrdiff_t)tag->size) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
