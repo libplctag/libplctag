@@ -951,10 +951,14 @@ def build_manifest() -> Manifest:
     # SLC500, Micrologix and LGX_PCCC) and plc5_tag_byte_order both set str_is_byte_swapped=1,
     # and it is not settled that anything other than PLC/5 should.  If hardware testing says
     # Micrologix does not swap, this check fails and points straight at the decision.
+    #
+    # Matched in the outgoing wire dump rather than in plc_tag_set_string()'s buffer dump: the
+    # latter is DEBUG_DETAIL, which the release builds CI uses compile out entirely
+    # (PLCTAG_COMPILE_DEBUG_LEVEL=3).  at_least because the number of dumps varies with build.
     sec.test("check the Micrologix ST string byte order (pins current behaviour, needs hardware)",
               None, T, depends_on=st_test.id, ports_needed=0,
               check=CheckSpec(log_file=st_test.log_file,
-                               pattern=r"plc_tag_set_string:\d+ 00000 08 00 42 41 44 43 46 45 48 47", expected=1))
+                               pattern=r"42 41 44 43 46 45 48 47", expected=1, at_least=True))
 
     # ab_common.c only reaches its elem_size and overall-size checks on the PCCC PLC types --
     # Logix-class tags get their size from the PLC and skip that branch entirely -- so the size
@@ -1082,7 +1086,7 @@ def build_manifest() -> Manifest:
     sec.test("check the PLC5 ST string byte order (pins current behaviour, needs hardware)",
               None, T, depends_on=plc5_st_test.id, ports_needed=0,
               check=CheckSpec(log_file=plc5_st_test.log_file,
-                               pattern=r"plc_tag_set_string:\d+ 00000 08 00 42 41 44 43 46 45 48 47", expected=1))
+                               pattern=r"42 41 44 43 46 45 48 47", expected=1, at_least=True))
     # PLC/5 is the only byte order that swaps the two halves of a 32-bit float
     # (plc5_tag_byte_order.float32_order = {2,3,0,1}, confirmed correct against hardware), so a
     # float has to survive the round trip.
