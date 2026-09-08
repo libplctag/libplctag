@@ -2882,8 +2882,9 @@ int receive_forward_open_response(omron_conn_p conn) {
             } else {
                 rc = PLCTAG_ERR_REMOTE_ERR;
 
+                /* comparing pointers directly is UB, so compare the integer values instead. */
                 if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2
-                   && (&fo_resp->status_size + 5) <= (conn->data + conn->data_size)) {
+                   && (intptr_t)(&fo_resp->status_size + 5) <= (intptr_t)(conn->data + conn->data_size)) {
                     /* we might have an error that tells us the actual size to use. */
                     uint8_t *data = &fo_resp->status_size;
                     int extended_status = data[1] | (data[2] << 8);
