@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include <ctype.h>
+#include <errno.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/defs.h>
@@ -781,6 +782,7 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
     p = &name[*name_index];
     q = p;
 
+    errno = 0;
     val = strtol((char *)p, (char **)&q, 10);
 
     /* sanity checks. */
@@ -801,8 +803,12 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
      * strtol() returns a long, which is wider than the 32 bits the largest segment encoding
      * holds on many platforms.  Reject anything that would be silently truncated rather than
      * quietly addressing a different array element than the caller asked for.
+     *
+     * Where long is only 32 bits the range check alone is not enough: strtol() saturates at
+     * LONG_MAX == INT32_MAX and sets ERANGE, so an overflowing value slips through as the
+     * largest legal segment.
      */
-    if(val > (long)INT32_MAX) {
+    if(errno == ERANGE || val > (long)INT32_MAX) {
         pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, tag->tag_id, "Numeric segment must be less than or equal to %ld!",
                (long)INT32_MAX);
         return PLCTAG_ERR_BAD_PARAM;
