@@ -1315,6 +1315,9 @@ static int check_read_status_connected(omron_tag_p tag) {
          */
         payload_size = (data_end - data);
         if(payload_size > 0) {
+            /* we got data, so the transfer is moving again. */
+            tag->fragment_retry_count = 0;
+
             /* skip the copy if we already have type data */
             if(tag->encoded_type_info_size == 0) {
                 int type_length = 0;
@@ -1401,6 +1404,9 @@ static int check_read_status_connected(omron_tag_p tag) {
             tag->offset += (int)(payload_size);
         } else {
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+
+            /* no payload means no forward progress on a fragmented transfer. */
+            tag->fragment_retry_count++;
         }
 
         /* set the return code */
@@ -1416,13 +1422,21 @@ static int check_read_status_connected(omron_tag_p tag) {
         tag->read_in_progress = 0;
 
         /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data) {
+        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
             /* FIXNE - the abort function above resets the offset. */
             rc = tag_read_start(tag);
         } else {
             tag->offset = 0;
+
+            /* the transfer is over one way or the other, so start the next one clean. */
+            tag->fragment_retry_count = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
             if(tag->pre_write_read) {
@@ -1522,6 +1536,9 @@ static int check_read_status_unconnected(omron_tag_p tag) {
          */
         payload_size = (data_end - data);
         if(payload_size > 0) {
+            /* we got data, so the transfer is moving again. */
+            tag->fragment_retry_count = 0;
+
             /* skip the copy if we already have type data */
             if(tag->encoded_type_info_size == 0) {
                 int type_length = 0;
@@ -1608,6 +1625,9 @@ static int check_read_status_unconnected(omron_tag_p tag) {
             tag->offset += (int)payload_size;
         } else {
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+
+            /* no payload means no forward progress on a fragmented transfer. */
+            tag->fragment_retry_count++;
         }
 
         /* set the return code */
@@ -1624,13 +1644,21 @@ static int check_read_status_unconnected(omron_tag_p tag) {
         tag->read_in_progress = 0;
 
         /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data) {
+        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
             /* FIXME - the abort function above resets the offset! */
             rc = tag_read_start(tag);
         } else {
             tag->offset = 0;
+
+            /* the transfer is over one way or the other, so start the next one clean. */
+            tag->fragment_retry_count = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
             if(tag->pre_write_read) {

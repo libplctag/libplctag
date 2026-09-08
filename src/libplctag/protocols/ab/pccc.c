@@ -41,6 +41,7 @@
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
 #include <platform.h>
+#include <stddef.h>
 #include <string.h>
 #include <utils/debug.h>
 
@@ -547,17 +548,13 @@ const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size) {
      * can send 0xF0 in a response too short to hold the extended status that follows it.
      * Check before each read rather than trusting the status byte to imply the length.
      */
-    if(error_size < 1) {
-        return "PCCC response too short to contain a status byte!";
-    }
+    if(error_size < 1) { return "PCCC response too short to contain a status byte!"; }
 
     error = *error_ptr;
 
     /* extended error? */
     if(error == 0xF0) {
-        if(error_size < 4) {
-            return "PCCC response too short to contain an extended status code!";
-        }
+        if(error_size < 4) { return "PCCC response too short to contain an extended status code!"; }
 
         error = *(error_ptr + 3);
     }
@@ -647,16 +644,22 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
     d_type = (((uint32_t)(*data) & (uint32_t)0xF0) >> (uint32_t)4);
     d_size = (*data) & 0x0F;
 
-    /* check the type.  If it is too large to hold in
+    /*
+     * check the type.  If it is too large to hold in
      * the bottom three bits of the nybble, then the
      * top bit will be set and the bottom three will
      * hold the number of bytes that follows for the
      * type value.  We stop after 4 bytes.  Hopefully
      * that works.
+     *
+     * The extension bytes are little-endian, the same order
+     * pccc_encode_dt_byte() writes them and the same order encode_data()
+     * uses for the equivalent escape in a logical address.
      */
 
     if(d_type & 0x08) {
         int size_bytes = d_type & 0x07;
+        int shift = 0;
 
         /* the extension bytes must actually be present in the data we were given. */
         if(size_bytes > 4 || (int)(data - data_start) + size_bytes >= data_size) { return NULL; }
@@ -665,14 +668,15 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
 
         while(size_bytes--) {
             data++; /* we leave the pointer at the last read byte */
-            d_type <<= 8;
-            d_type |= *data;
+            d_type |= ((uint32_t)(*data)) << shift;
+            shift += 8;
         }
     }
 
     /* same drill for the size */
     if(d_size & 0x08) {
         int size_bytes = d_size & 0x07;
+        int shift = 0;
 
         /* the extension bytes must actually be present in the data we were given. */
         if(size_bytes > 4 || (int)(data - data_start) + size_bytes >= data_size) { return NULL; }
@@ -681,8 +685,8 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
 
         while(size_bytes--) {
             data++; /* we leave the pointer at the last read byte */
-            d_size <<= 8;
-            d_size |= *data;
+            d_size |= ((uint32_t)(*data)) << shift;
+            shift += 8;
         }
     }
 
@@ -1459,9 +1463,9 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
          */
         if(cip_pccc->request_id_size != 7 || le2h16(cip_pccc->vendor_id) != AB_EIP_VENDOR_ID
            || le2h32(cip_pccc->vendor_serial_number) != AB_EIP_VENDOR_SN) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "PCCC response requester ID (%u, %04x, %08x) is not ours!", (unsigned int)cip_pccc->request_id_size,
-                   (unsigned int)le2h16(cip_pccc->vendor_id), (unsigned int)le2h32(cip_pccc->vendor_serial_number));
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC response requester ID (%u, %04x, %08x) is not ours!",
+                   (unsigned int)cip_pccc->request_id_size, (unsigned int)le2h16(cip_pccc->vendor_id),
+                   (unsigned int)le2h32(cip_pccc->vendor_serial_number));
             return PLCTAG_ERR_BAD_DATA;
         }
 
@@ -1820,8 +1824,8 @@ int pccc_check_read_status(ab_tag_p tag) {
         }
 
         /* did we get the right amount of data? */
-        if((data_end - data) != tag->size) {
-            if((int)(data_end - data) > tag->size) {
+        if((data_end - data) != (ptrdiff_t)tag->size) {
+            if((data_end - data) > (ptrdiff_t)tag->size) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
                        "Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;
@@ -2834,8 +2838,8 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
         }
 
         /* did we get the right amount of data? */
-        if((data_end - data) != tag->size) {
-            if((int)(data_end - data) > tag->size) {
+        if((data_end - data) != (ptrdiff_t)tag->size) {
+            if((data_end - data) > (ptrdiff_t)tag->size) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
                        "Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;

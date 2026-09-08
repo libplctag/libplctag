@@ -312,19 +312,11 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
     int new_conn = 0;
     int shared_conn = attr_get_int(attribs, "share_conn", 1); /* share the conn by default. */
     int rc = PLCTAG_STATUS_OK;
-    int auto_disconnect_enabled = 0;
-    int auto_disconnect_timeout_ms = INT_MAX;
     int connection_inactivity_timeout_ms = CONN_DISCONNECT_TIMEOUT;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Starting");
-
-    auto_disconnect_timeout_ms = attr_get_int(attribs, "auto_disconnect_ms", INT_MAX);
-    if(auto_disconnect_timeout_ms != INT_MAX) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Setting auto-disconnect after %dms.", auto_disconnect_timeout_ms);
-        auto_disconnect_enabled = 1;
-    }
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_DISCONNECT_TIMEOUT);
     if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_DISCONNECT_TIMEOUT) {
@@ -360,8 +352,6 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "unable to create or find a conn!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
-                conn->auto_disconnect_enabled = auto_disconnect_enabled;
-                conn->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
                 atomic_init_int32(&conn->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
 
                 /* see if we have an attribute set for forcing the use of the older ForwardOpen */
@@ -374,16 +364,6 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
                 new_conn = 1;
             }
         } else {
-            /* turn on auto disconnect if we need to. */
-            if(!conn->auto_disconnect_enabled && auto_disconnect_enabled) {
-                conn->auto_disconnect_enabled = auto_disconnect_enabled;
-            }
-
-            /* disconnect period always goes down. */
-            if(conn->auto_disconnect_enabled && conn->auto_disconnect_timeout_ms > auto_disconnect_timeout_ms) {
-                conn->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
-            }
-
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Reusing existing conn.");
         }
     }
@@ -564,6 +544,29 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     uint16_t dhp_dest = 0;
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting");
+
+    /*
+     * The host string is copied into this allocation verbatim, so its length is part of the
+     * conn's size.  It comes straight from the "gateway" attribute with nothing between the
+     * application and here, so bound it: without this a caller can size the conn object
+     * arbitrarily.
+     */
+    if(!host || str_length(host) >= MAX_CONN_HOST_LEN) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Gateway string is missing or longer than the maximum of %d bytes!",
+               MAX_CONN_HOST_LEN - 1);
+        return OMRON_CONN_NULL;
+    }
+
+    /*
+     * The path string is copied in verbatim too, and it is not self-limiting: spaces are
+     * skipped everywhere in the path encoder, so an arbitrarily long string can still encode
+     * to a valid short path.  Bound it against the encoded path buffer -- a real route is a
+     * handful of hops, so this rejects nothing that describes real hardware.
+     */
+    if(path && str_length(path) >= MAX_CONN_PATH) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Path string is longer than the maximum of %d bytes!", MAX_CONN_PATH - 1);
+        return OMRON_CONN_NULL;
+    }
 
     if(*use_connected_msg) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Connection should use connected messaging.");
@@ -1861,6 +1864,8 @@ int process_requests(omron_conn_p conn) {
                         (size_t)((uint8_t *)multi_resp - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
                     size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
 
+                    /* FIXME - conn->data_size is uint32_t, so this test is always false.  Check carefully
+                     * before removing it: the guard that follows depends on data_size being sane. */
                     if(conn->data_size < 0 || offsets_start > (size_t)conn->data_size
                        || offsets_size > (size_t)conn->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
@@ -2013,6 +2018,8 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
         size_t offsets_start = (size_t)((uint8_t *)multi - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
         size_t offsets_size = (size_t)total_responses * sizeof(uint16_le);
 
+        /* FIXME - conn->data_size is uint32_t, so that test is always false.  Check carefully
+         * before removing it: the bounds below depend on data_size being sane. */
         if(sub_packet < 0 || sub_packet >= (int)total_responses || conn->data_size < 0
            || offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
@@ -2149,6 +2156,7 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
     uint8_t *pkt_start = NULL;
     int pkt_len = 0;
     size_t pkt_offset = 0;
+    size_t src_offset = 0;
     uint8_t *first_pkt_data = NULL;
     uint8_t *next_pkt_data = NULL;
 
@@ -2250,10 +2258,30 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet %d is of length %d.", i, pkt_len);
 
         /* as above: bound in offsets, and reject a negative length. */
+        if(pkt_len < 0) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
+                   "Bundled request %d has a negative payload length of %d!", i, pkt_len);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        /*
+         * pkt_len has to fit the SOURCE as well.  It comes from a length field in the request
+         * buffer, so bounding it only against the destination leaves mem_copy() free to read
+         * past the end of requests[i]->data.
+         */
+        src_offset = (size_t)(pkt_start - requests[i]->data);
+
+        if(requests[i]->request_size < 0 || src_offset > (size_t)requests[i]->request_size
+           || (size_t)pkt_len > (size_t)requests[i]->request_size - src_offset) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
+                   "Bundled request %d claims %d payload bytes but its buffer only holds %d!", i, pkt_len,
+                   requests[i]->request_size);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
         pkt_offset = (size_t)(next_pkt_data - conn->data);
 
-        if(pkt_len < 0 || pkt_offset > (size_t)conn->data_capacity
-           || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset) {
+        if(pkt_offset > (size_t)conn->data_capacity || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
                    "Bundled requests do not fit in the conn buffer of %u bytes!", conn->data_capacity);
             return PLCTAG_ERR_TOO_LARGE;

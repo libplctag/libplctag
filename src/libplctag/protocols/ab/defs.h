@@ -57,6 +57,17 @@
  * buffer.  Refuse to grow past this so a misbehaving or hostile PLC cannot
  * drive us out of memory.
  */
+/*
+ * How many consecutive zero-payload fragment responses to accept before giving up.
+ *
+ * A partial-transfer status with no data is legitimate -- packing several requests into one
+ * packet can leave the later ones with only a bare CIP header -- but it makes no progress, and
+ * a PLC that sends nothing else keeps us asking for the same fragment forever.  This is high
+ * enough that ordinary packing starvation resolves itself and low enough that a stuck transfer
+ * fails quickly.
+ */
+#define MAX_FRAGMENT_RETRIES (100)
+
 #define AB_MAX_TAG_DATA_SIZE (8 * 1024 * 1024)
 
 

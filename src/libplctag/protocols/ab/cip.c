@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include <ctype.h>
+#include <errno.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
@@ -624,6 +625,17 @@ int cip_encode_tag_name(ab_tag_p tag, const char *name) {
         }
     }
 
+    /*
+     * The loop above stops as soon as the encoded name fills the buffer, which leaves the rest of
+     * the name unparsed and looks exactly like a malformed name to the check below.  Say what
+     * actually happened instead, and with the error code that fits it.
+     */
+    if(name_index < name_len && encoded_index >= MAX_TAG_NAME) {
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Encoded tag name is too long at position %d in the tag name!",
+               name_index);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     if(name_index != name_len) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id,
                "Bad tag name format.  Tag must end with a bit identifier if one is present.");
@@ -728,6 +740,18 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
 
     /* get the rest of the name. */
     while((isalnum(name[name_i]) || name[name_i] == ':' || name[name_i] == '_') && (encoded_i < (MAX_TAG_NAME - 1))) {
+        /*
+         * The segment length is a single byte, so a symbolic segment cannot hold more than 255
+         * characters.  Without this the counter below wraps back to zero and the PLC gets a
+         * zero-length segment followed by the rest of the name as stray path bytes.
+         */
+        if(tag->encoded_name[seg_len_index] == 0xFF) {
+            pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id,
+                   "Symbolic segment starting at position %d in the tag name is longer than the maximum of 255 characters!",
+                   name_start);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
         tag->encoded_name[encoded_i] = (uint8_t)name[name_i];
         encoded_i++;
         tag->encoded_name[seg_len_index]++;
@@ -762,6 +786,7 @@ int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, in
     p = &name[*name_index];
     q = p;
 
+    errno = 0;
     val = strtol((char *)p, (char **)&q, 10);
 
     /* sanity checks. */
@@ -782,8 +807,12 @@ int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, in
      * strtol() returns a long, which is wider than the 32 bits the largest segment encoding
      * holds on many platforms.  Reject anything that would be silently truncated rather than
      * quietly addressing a different array element than the caller asked for.
+     *
+     * Where long is only 32 bits the range check alone is not enough: strtol() saturates at
+     * LONG_MAX == INT32_MAX and sets ERANGE, so an overflowing value slips through as the
+     * largest legal segment.
      */
-    if(val > (long)INT32_MAX) {
+    if(errno == ERANGE || val > (long)INT32_MAX) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, tag->tag_id, "Numeric segment must be less than or equal to %ld!",
                (long)INT32_MAX);
         return PLCTAG_ERR_BAD_PARAM;

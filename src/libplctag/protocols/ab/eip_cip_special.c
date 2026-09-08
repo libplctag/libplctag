@@ -1666,6 +1666,9 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
          * response, there might not be.
          */
         if(payload_size > 0) {
+            /* we got data, so the transfer is moving again. */
+            tag->fragment_retry_count = 0;
+
             uint8_t *current_entry_data = data;
             int new_size = (int)payload_size + tag->offset;
 
@@ -1717,6 +1720,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
             while((data_end - current_entry_data) >= (ptrdiff_t)sizeof(tag_list_entry)) {
                 tag_list_entry *current_entry = (tag_list_entry *)current_entry_data;
                 ptrdiff_t entry_size = (ptrdiff_t)sizeof(*current_entry) + (ptrdiff_t)le2h16(current_entry->string_len);
+                uint32_t next_instance_id = 0;
 
                 if(entry_size > (data_end - current_entry_data)) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -1725,8 +1729,26 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
                     break;
                 }
 
-                /* first element is the symbol instance ID */
-                tag->next_id = (uint16_t)(le2h32(current_entry->instance_id) + 1);
+                /*
+                 * First element is the symbol instance ID.
+                 *
+                 * The listing protocol reports a 32-bit instance ID but the request that asks
+                 * for the next chunk can only carry 16 bits of it, so increment in 32 bits and
+                 * check before narrowing.  Truncating instead would wrap the ID back to a low
+                 * value and restart the listing from the beginning, forever -- and a controller
+                 * with enough tags to reach that point is doing nothing wrong.
+                 */
+                next_instance_id = le2h32(current_entry->instance_id) + 1;
+
+                if(next_instance_id > UINT16_MAX) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                           "Symbol instance ID %" PRIu32 " is too large to request the next chunk of the tag listing!",
+                           next_instance_id);
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                    break;
+                }
+
+                tag->next_id = next_instance_id;
 
                 pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Next ID: %d", tag->next_id);
 
@@ -1737,6 +1759,9 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
             }
         } else {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+
+            /* no payload means no forward progress on a fragmented transfer. */
+            tag->fragment_retry_count++;
         }
     } while(0);
 
@@ -1745,14 +1770,21 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
-        /* keep going if we are not done yet. */
-        if(partial_data) {
+        /* keep going if we are not done yet, unless we are getting nowhere. */
+        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                   "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
                    "calling listing_tag_build_read_request_connected() to get the next chunk.");
             rc = listing_tag_build_read_request_connected(tag);
         } else {
-            /* done! */
+            /* done!  Start the next transfer with a clean progress counter. */
+            tag->fragment_retry_count = 0;
+
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done reading tag list data!");
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "total symbols: %d", tag->elem_count);
@@ -2135,6 +2167,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
            will trigger a full retry.
        */
         if(payload_size > 0 && !partial_data) {
+            /* we got the metadata, so the transfer made progress. */
             uint8_t *new_buffer = NULL;
             int new_size = 14; /* MAGIC, size of the header below */
             uint32_le tmp_u32;
@@ -2198,6 +2231,9 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
             pdebug_dump_bytes(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, tag->data, tag->size);
         } else if(partial_data) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Partial response, no data to process yet.");
+
+            /* tag->offset is not advanced here, so a partial result retries the whole read. */
+            tag->fragment_retry_count++;
         } else {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "UDT metadata response contained no data!");
             rc = PLCTAG_ERR_TOO_SMALL;
@@ -2213,14 +2249,21 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
-        /* keep going if we are not done yet. */
-        if(partial_data) {
+        /* keep going if we are not done yet, unless we are getting nowhere. */
+        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                   "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(partial_data) {
             /* call read start again to try again.  The data returned might be zero bytes if this is a packed result */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
                    "calling udt_tag_build_read_metadata_request_connected() to try again.");
             rc = udt_tag_build_read_metadata_request_connected(tag);
         } else {
-            /* done! */
+            /* done!  Start the next transfer with a clean progress counter. */
+            tag->fragment_retry_count = 0;
+
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done reading udt metadata!");
 
             tag->elem_count = 1;
@@ -2454,6 +2497,9 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
          * response, there might not be.
          */
         if(payload_size > 0) {
+            /* we got data, so the transfer is moving again. */
+            tag->fragment_retry_count = 0;
+
             uint8_t *new_buffer = NULL;
             int new_size = (int)(tag->size) + (int)payload_size;
 
@@ -2489,6 +2535,9 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
                    "payload of %d (%x) bytes resulting in current offset %d", (int)payload_size, (int)payload_size, tag->offset);
         } else {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+
+            /* no payload means no forward progress on a fragmented transfer. */
+            tag->fragment_retry_count++;
         }
     } while(0);
 
@@ -2497,8 +2546,13 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
-        /* keep going if we are not done yet. */
-        if(partial_data) {
+        /* keep going if we are not done yet, unless we are getting nowhere. */
+        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
+                   "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(partial_data) {
             /* call read start again to try again.  The data returned might be zero bytes if this is a packed result */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
                    "calling udt_tag_build_read_metadata_request_connected() to try again.");
@@ -2507,7 +2561,9 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
             /* if we get OK, we need to return PENDING for the new request. */
             if(rc == PLCTAG_STATUS_OK) { rc = PLCTAG_STATUS_PENDING; }
         } else {
-            /* done! */
+            /* done!  Start the next transfer with a clean progress counter. */
+            tag->fragment_retry_count = 0;
+
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
                    "Done reading UDT field data.  Tag buffer contains:");
             pdebug_dump_bytes(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, tag->data, tag->size);

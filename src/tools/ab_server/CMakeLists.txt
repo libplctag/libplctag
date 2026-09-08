@@ -14,6 +14,8 @@ endif()
 
 # Define the source files for ab_server
 set(AB_SERVER_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/args.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/args.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/cip.h
     ${CMAKE_CURRENT_SOURCE_DIR}/compat.h
@@ -25,6 +27,8 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/err.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fairness.c
     ${CMAKE_CURRENT_SOURCE_DIR}/fairness.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/fault.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/fault.h
     ${CMAKE_CURRENT_SOURCE_DIR}/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/memory.c
     ${CMAKE_CURRENT_SOURCE_DIR}/memory.h

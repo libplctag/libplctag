@@ -137,8 +137,22 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     /* set the byte order. */
     tag->byte_order = &system_tag_byte_order;
 
-    /* get the name and copy it */
-    str_copy(tag->name, MAX_SYSTEM_TAG_NAME - 1, name);
+    /*
+     * Get the name and copy it.
+     *
+     * str_copy() refuses rather than truncating, so a name too long for the buffer is an
+     * error here.  No system tag has a name anywhere near this long, and a truncated one
+     * would not match any of them anyway.
+     */
+    rc = str_copy(tag->name, MAX_SYSTEM_TAG_NAME - 1, name);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, tag->tag_id, "System tag name is too long, maximum is %d characters!",
+               MAX_SYSTEM_TAG_NAME - 2);
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return (plc_tag_p)NULL;
+    }
+
     tag->name[MAX_SYSTEM_TAG_NAME - 1] = '\0';
 
     /* point data at the backing store. */

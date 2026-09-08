@@ -459,10 +459,20 @@ extern int str_copy(char *dst, int dst_size, const char *src) {
     }
 
 
-    /* FIXME - if there is not enough room, truncate the string. */
+    /*
+     * Refuse rather than truncate.  A caller that ignored a truncation would act on a partial
+     * string, so there is no safe partial result to produce here.  Keeping this identical to
+     * the POSIX version also keeps the contract the same on both platforms.
+     */
+    if(str_length(src) >= dst_size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source string of %d bytes does not fit a destination of %d bytes!",
+               str_length(src), dst_size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     strncpy_s(dst, (rsize_t)(unsigned int)dst_size, src, _TRUNCATE);
 
-    return 0;
+    return PLCTAG_STATUS_OK;
 }
 
 
