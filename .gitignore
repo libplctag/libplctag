@@ -63,3 +63,4 @@ src/tests/log.txt
 .vscode
 external_docs/
 build_perf/*
+build_*/*
