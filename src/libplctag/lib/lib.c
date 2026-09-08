@@ -2042,7 +2042,8 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from read command returned error %s!",
                        plc_tag_decode_error(rc));
 
-                rc = plc_tag_abort_impl(tag);
+                /* the abort's own result must not mask the error that caused it. */
+                plc_tag_abort_impl(tag);
             }
 
             tag->read_in_flight = 0;
@@ -2101,6 +2102,14 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
 
         if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag read to complete!");
+
+            /*
+             * The protocol layer is still working on the request.  Every other exit from this
+             * loop aborts it; without that here the operation stays in flight after the tag
+             * looks idle, and the next read fails with PLCTAG_ERR_BUSY out of nowhere.
+             */
+            plc_tag_abort_impl(tag);
+
             rc = PLCTAG_ERR_TIMEOUT;
         }
 
@@ -2303,6 +2312,10 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
 
         if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag write to complete!");
+
+            /* see the matching comment in plc_tag_read(). */
+            plc_tag_abort_impl(tag);
+
             rc = PLCTAG_ERR_TIMEOUT;
         }
 
