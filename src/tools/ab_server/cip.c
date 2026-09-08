@@ -1188,6 +1188,16 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     while(offset < slice_len(tag_path)) {
         uint8_t segment_type = slice_get_uint8(tag_path, offset);
 
+        /*
+         * The caller's indexes[] array holds exactly max_indexes entries, so this must be checked
+         * before the writes below and not after the increment: a remote client controls how many
+         * numeric segments the path carries.
+         */
+        if(*num_indexes >= max_indexes) {
+            log_info("More numeric segments than the expected maximum, %u!", max_indexes);
+            return false;
+        }
+
         switch(segment_type) {
             case 0x28:        // Single byte value
                 offset += 1;  // skip segment type
@@ -1217,11 +1227,6 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
         }
 
         (*num_indexes)++;
-
-        if(*num_indexes > max_indexes) {
-            log_info("More numeric segments, %zu, than expected, %zu!", *num_indexes, max_indexes);
-            return false;
-        }
     }
 
     /* the only valid number of indexes is zero or the number of dimensions in the tag. */
