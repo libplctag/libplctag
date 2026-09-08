@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,9 +70,13 @@ bool fault_parse(const char *spec, plc_s *plc) {
     if(colon) {
         char *end = NULL;
 
+        /* where long is 32 bits strtol() saturates at LONG_MAX == INT32_MAX, so the range
+         * check below cannot see an overflow on its own. */
+        errno = 0;
+
         count = strtol(colon + 1, &end, 10);
 
-        if(end == colon + 1 || *end != '\0' || count < 1 || count > INT32_MAX) {
+        if(errno == ERANGE || end == colon + 1 || *end != '\0' || count < 1 || count > INT32_MAX) {
             log_error("Fault count in \"%s\" must be a positive number.", spec);
             return false;
         }
