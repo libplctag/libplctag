@@ -604,7 +604,8 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { data_file_name[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(data_file_name) - 1; i++) { data_file_name[i] = tag_str[start + i]; }
 
         /* check data file for a match. */
         if(str_cmp_i(data_file_name, "B3") == 0) {
@@ -659,7 +660,8 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { size_str[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(size_str) - 1; i++) { size_str[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -772,7 +774,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { tag_name[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(tag_name) - 1; i++) { tag_name[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -793,7 +796,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { type_str[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(type_str) - 1; i++) { type_str[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -815,7 +819,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { dim_str[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(dim_str) - 1; i++) { dim_str[i] = tag_str[start + i]; }
 
         start += len;
     }
