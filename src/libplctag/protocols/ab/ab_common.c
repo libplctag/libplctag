@@ -154,8 +154,7 @@ void ab_teardown(void) {
         ab_protocol_terminating = 1;
 
         /* wait for the thread to die */
-        thread_join(io_handler_thread);
-        thread_destroy((thread_p *)&io_handler_thread);
+        thread_join((thread_p *)&io_handler_thread);
     } else {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
     }

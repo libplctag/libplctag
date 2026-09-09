@@ -40,6 +40,7 @@
  */
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -105,7 +106,7 @@ typedef struct {
 } thread_stats_t;
 
 /* Forward declarations */
-static void *worker_thread(void *arg);
+static THREAD_FUNC(worker_thread);
 
 
 static void parse_args(int argc, char **argv) {
@@ -150,7 +151,7 @@ static uint32_t ms_from_env(const char *var_name, uint32_t default_ms) {
 
 
 int main(int argc, char **argv) {
-    compat_thread_t threads[NUM_THREADS] = {0};
+    thread_p threads[NUM_THREADS] = {0};
     thread_stats_t thread_stats[NUM_THREADS] = {0};
     int rc = PLCTAG_STATUS_OK;
     int all_succeeded = 1;
@@ -185,7 +186,7 @@ int main(int argc, char **argv) {
 
     for(int i = 0; i < NUM_THREADS; i++) {
         thread_stats[i].thread_id = i;
-        rc = compat_thread_create(&threads[i], worker_thread, &thread_stats[i]);
+        rc = thread_create(&threads[i], worker_thread, 0, &thread_stats[i]);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Could not create thread %d! Error: %s\n", i, plc_tag_decode_error(rc));
             terminate_threads = 1;
@@ -224,7 +225,7 @@ int main(int argc, char **argv) {
      */
     fprintf(stderr, "\n=== Step 6: Waiting for threads to finish ===\n");
     for(int i = 0; i < NUM_THREADS; i++) {
-        rc = compat_thread_join(threads[i], NULL);
+        rc = thread_join(&threads[i]);
         if(rc != PLCTAG_STATUS_OK) { fprintf(stderr, "WARNING: Error joining thread %d: %s\n", i, plc_tag_decode_error(rc)); }
         fprintf(stderr, "Thread %d joined.\n", i);
     }
@@ -273,7 +274,7 @@ int main(int argc, char **argv) {
 }
 
 
-static void *worker_thread(void *arg) {
+static THREAD_FUNC(worker_thread) {
     thread_stats_t *stats = (thread_stats_t *)arg;
     char tag_string[512];
     int32_t tag_id = 0;
@@ -298,7 +299,7 @@ static void *worker_thread(void *arg) {
         fprintf(stderr, "Thread %d: ERROR creating initial tag: %s\n", stats->thread_id, plc_tag_decode_error(tag_id));
         stats->initial_tag_created = 0;
         stats->last_error = tag_id;
-        return NULL;
+        THREAD_RETURN(0);
     }
 
     stats->initial_tag_created = 1;
@@ -387,5 +388,5 @@ static void *worker_thread(void *arg) {
     fprintf(stderr, "Thread %d: Exiting. Reads=%d, Writes=%d, Errors=%d\n", stats->thread_id, stats->read_count,
             stats->write_count, stats->error_count);
 
-    return NULL;
+    THREAD_RETURN(0);
 }

@@ -33,6 +33,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -83,8 +84,8 @@ static int open_tag(const char *tag_str) {
 }
 
 
-void *test_tag(void *data) {
-    int tid = (int)(intptr_t)data;
+THREAD_FUNC(test_tag) {
+    int tid = (int)(intptr_t)arg;
     int iteration = 1;
 
     while(!done) {
@@ -134,14 +135,14 @@ void *test_tag(void *data) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Test %d terminating.\n", tid);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    compat_thread_t threads[MAX_THREADS];
+    thread_p threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int64_t seconds = 30; /* default 30 seconds */
@@ -173,7 +174,7 @@ int main(int argc, char **argv) {
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
-        compat_thread_create(&threads[tid], test_tag, (void *)(intptr_t)tid);
+        thread_create(&threads[tid], test_tag, 0, (void *)(intptr_t)tid);
     }
 
     start_time = compat_time_ms();
@@ -191,7 +192,7 @@ int main(int argc, char **argv) {
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&threads[tid]); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "All test threads terminated.\n");

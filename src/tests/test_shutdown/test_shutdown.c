@@ -33,6 +33,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -61,8 +62,8 @@ static compat_atomic_int32_t write_start_count = {0};
 static compat_atomic_int32_t write_complete_count = {0};
 
 
-static void *reader_function(void *tag_arg);
-static void *writer_function(void *tag_arg);
+static THREAD_FUNC(reader_function);
+static THREAD_FUNC(writer_function);
 static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 
 
@@ -86,8 +87,8 @@ int main(int argc, char **argv) {
     const char *tag_attribs = parse_args(argc, argv);
     int rc = PLCTAG_STATUS_OK;
     char tag_attr_str[512] = {0};
-    compat_thread_t read_threads[NUM_TAGS];
-    compat_thread_t write_threads[NUM_TAGS];
+    thread_p read_threads[NUM_TAGS];
+    thread_p write_threads[NUM_TAGS];
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -125,8 +126,8 @@ int main(int argc, char **argv) {
 
         /* create read and write thread for this tag. */
         /* FIXME - check error returns! */
-        compat_thread_create(&read_threads[i], reader_function, (void *)(intptr_t)tag_id);
-        compat_thread_create(&write_threads[i], writer_function, (void *)(intptr_t)tag_id);
+        thread_create(&read_threads[i], reader_function, 0, (void *)(intptr_t)tag_id);
+        thread_create(&write_threads[i], writer_function, 0, (void *)(intptr_t)tag_id);
 
         fprintf(stderr, ".");
     }
@@ -157,7 +158,7 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Joining reader thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
         fflush(stderr);
-        compat_thread_join(read_threads[i], NULL);
+        thread_join(&read_threads[i]);
         threads_remaining--;
         // NOLINTNEXTLINE
         fprintf(stderr, "Reader thread %d joined. Threads remaining: %d\n", i, threads_remaining);
@@ -166,7 +167,7 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Joining writer thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
         fflush(stderr);
-        compat_thread_join(write_threads[i], NULL);
+        thread_join(&write_threads[i]);
         threads_remaining--;
         // NOLINTNEXTLINE
         fprintf(stderr, "Writer thread %d joined. Threads remaining: %d\n", i, threads_remaining);
@@ -191,8 +192,8 @@ int main(int argc, char **argv) {
 }
 
 
-void *reader_function(void *tag_arg) {
-    int32_t tag_id = (int32_t)(intptr_t)tag_arg;
+THREAD_FUNC(reader_function) {
+    int32_t tag_id = (int32_t)(intptr_t)arg;
     int64_t start_time = compat_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
@@ -217,12 +218,12 @@ void *reader_function(void *tag_arg) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Reader thread for tag ID %" PRId32 " exiting.\n", tag_id);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
-void *writer_function(void *tag_arg) {
-    int32_t tag_id = (int32_t)(intptr_t)tag_arg;
+THREAD_FUNC(writer_function) {
+    int32_t tag_id = (int32_t)(intptr_t)arg;
     int64_t start_time = compat_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
@@ -253,7 +254,7 @@ void *writer_function(void *tag_arg) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Writer thread for tag ID %" PRId32 " exiting.\n", tag_id);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 

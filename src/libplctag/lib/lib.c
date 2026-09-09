@@ -1516,8 +1516,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     if(inst->tag_tickler_thread) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Waiting for tag tickler thread to exit.");
         cond_signal(inst->tag_tickler_wait);
-        thread_join(inst->tag_tickler_thread);
-        thread_destroy(&inst->tag_tickler_thread);
+        thread_join(&inst->tag_tickler_thread);
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag tickler thread exited.");
     }
 

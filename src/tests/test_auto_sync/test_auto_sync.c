@@ -33,6 +33,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdint.h>
@@ -79,8 +80,8 @@ static void set_val(int32_t tag, int32_t val) {
 }
 
 
-void *reader_function(void *tag_arg) {
-    int32_t tag = (int32_t)(intptr_t)tag_arg;
+THREAD_FUNC(reader_function) {
+    int32_t tag = (int32_t)(intptr_t)arg;
     int64_t start_time = compat_time_ms();
     int64_t run_until = start_time + g_run_period_ms;
     int iteration = 1;
@@ -95,12 +96,12 @@ void *reader_function(void *tag_arg) {
         compat_sleep_ms(g_read_sleep_ms, NULL);
     }
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
-void *writer_function(void *tag_arg) {
-    int32_t tag = (int32_t)(intptr_t)tag_arg;
+THREAD_FUNC(writer_function) {
+    int32_t tag = (int32_t)(intptr_t)arg;
     int64_t start_time = compat_time_ms();
     int64_t run_until = start_time + g_run_period_ms;
     int iteration = 1;
@@ -119,7 +120,7 @@ void *writer_function(void *tag_arg) {
         compat_sleep_ms(g_write_sleep_ms, NULL);
     }
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
@@ -197,7 +198,7 @@ int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
     int32_t read_tag = 0;
     int32_t write_tag = 0;
-    compat_thread_t read_thread, write_thread;
+    thread_p read_thread, write_thread;
     const char *tag_attribs = DEFAULT_TAG_ATTRIBS;
     /* If set, read_tag/write_tag are two independent tags (needed for Modbus,
      * where auto_sync_read_ms and auto_sync_write_ms can't share one tag);
@@ -252,14 +253,14 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Ready to start threads.\n");
 
     /* create the threads. */
-    compat_thread_create(&read_thread, reader_function, (void *)(intptr_t)read_tag);
-    compat_thread_create(&write_thread, writer_function, (void *)(intptr_t)write_tag);
+    thread_create(&read_thread, reader_function, 0, (void *)(intptr_t)read_tag);
+    thread_create(&write_thread, writer_function, 0, (void *)(intptr_t)write_tag);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for threads to quit.\n");
 
-    compat_thread_join(read_thread, NULL);
-    compat_thread_join(write_thread, NULL);
+    thread_join(&read_thread);
+    thread_join(&write_thread);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Done.\n");

@@ -1189,13 +1189,7 @@ void session_destroy(void *session_arg) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session thread.");
     if(session->handler_thread) {
         /* this cannot be guarded by the mutex since the session thread also locks it. */
-        thread_join(session->handler_thread);
-
-        /* FIXME - is this critical block needed? */
-        critical_block(session->session_mutex) {
-            thread_destroy(&(session->handler_thread));
-            session->handler_thread = NULL;
-        }
+        thread_join(&(session->handler_thread));
     }
 
 

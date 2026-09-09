@@ -33,6 +33,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <libplctag/lib/libplctag.h>
 #include <signal.h>
 #include <stdint.h>
@@ -134,8 +135,8 @@ static int32_t open_tag(FILE *log, int tid, int num_elems) {
 }
 
 
-static void *test_cip(void *data) {
-    thread_args *args = (thread_args *)data;
+static THREAD_FUNC(test_cip) {
+    thread_args *args = (thread_args *)arg;
     int tid = args->tid;
     int num_elems = args->num_elems;
     int32_t value = 0;
@@ -232,7 +233,7 @@ static void *test_cip(void *data) {
 
     close_log(log);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
@@ -242,7 +243,7 @@ static void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    compat_thread_t threads[MAX_THREADS];
+    thread_p threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int num_threads = 0;
@@ -294,7 +295,7 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating serial test thread %d with %d elements.\n", args[tid].tid, args[tid].num_elems);
 
-        compat_thread_create(&threads[tid], test_cip, &args[tid]);
+        thread_create(&threads[tid], test_cip, 0, &args[tid]);
     }
 
     start_time = compat_time_ms();
@@ -306,7 +307,7 @@ int main(int argc, char **argv) {
 
     compat_atomic_store_int32(&done, 1);
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&threads[tid]); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "--- All test threads terminated.\n");

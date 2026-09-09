@@ -41,6 +41,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -67,7 +68,7 @@ static compat_atomic_int32_t terminate = {0};
 void handle_interrupt(void) { compat_atomic_store_int32(&terminate, 1); }
 
 static void run_test(size_t num_threads);
-static void *test_func(void *arg);
+static THREAD_FUNC(test_func);
 
 int main(void) {
     /* check the library version. */
@@ -104,10 +105,16 @@ int main(void) {
 
 static compat_atomic_int32_t end_test_run = {0};
 
+/*
+ * Each thread stores its own iteration count in its own slot, so run_test()
+ * can total them after joining.  thread_join() does not carry a return value.
+ */
+static size_t thread_iterations[MAX_THREADS] = {0};
+
 
 void run_test(size_t thread_count) {
     size_t total_iterations = 0;
-    compat_thread_t threads[MAX_THREADS] = {0};
+    thread_p threads[MAX_THREADS] = {0};
     int64_t start_time_ms = compat_time_ms();
     int64_t end_time_ms = start_time_ms + TEST_TIME_MS;
     int64_t total_test_run_time = 0;
@@ -119,7 +126,8 @@ void run_test(size_t thread_count) {
 
     for(size_t thread_id = 0; thread_id < thread_count; thread_id++) {
         /* create the threads that run the test. */
-        compat_thread_create(&threads[thread_id], test_func, (void *)(uintptr_t)thread_id);
+        thread_iterations[thread_id] = 0;
+        thread_create(&threads[thread_id], test_func, 0, (void *)(uintptr_t)thread_id);
     }
 
     /* wait for the test to end. */
@@ -129,12 +137,9 @@ void run_test(size_t thread_count) {
 
     /* join with the threads and add up the iterations. */
     for(size_t thread_index = 0; thread_index < thread_count; thread_index++) {
-        void *result_ptr;
-        int result = 0;
+        thread_join(&threads[thread_index]);
 
-        compat_thread_join(threads[thread_index], &result_ptr);
-
-        total_iterations += (size_t)(uintptr_t)result;
+        total_iterations += thread_iterations[thread_index];
     }
 
     total_test_run_time = compat_time_ms() - start_time_ms;
@@ -145,7 +150,7 @@ void run_test(size_t thread_count) {
 }
 
 
-void *test_func(void *arg) {
+THREAD_FUNC(test_func) {
     int thread_id = (int)(intptr_t)arg;
     int iteration_count = 0;
     int64_t longest_read = 0;
@@ -204,5 +209,7 @@ void *test_func(void *arg) {
     fprintf(stderr, "Thread %d: longest read was %" PRId64 "ms\n", thread_id, longest_read);
     fflush(stderr);
 
-    return (void *)(intptr_t)iteration_count;
+    thread_iterations[thread_id] = (size_t)iteration_count;
+
+    THREAD_RETURN(0);
 }

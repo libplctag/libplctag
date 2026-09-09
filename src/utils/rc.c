@@ -386,9 +386,7 @@ int refcount_teardown(void) {
 
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Waiting for cleanup thread to exit.");
 
-        thread_join(cleanup_thread);
-        thread_destroy(&cleanup_thread);
-        cleanup_thread = NULL;
+        thread_join(&cleanup_thread);
     } else {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Cleanup thread not running!");
     }

@@ -903,8 +903,7 @@ void modbus_plc_destructor(void *plc_arg) {
         }
 
         /* wait for the thread to terminate and destroy it. */
-        thread_join(plc->handler_thread);
-        thread_destroy(&plc->handler_thread);
+        thread_join(&plc->handler_thread);
 
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Modbus handler thread %p destroyed.", plc->handler_thread);
 

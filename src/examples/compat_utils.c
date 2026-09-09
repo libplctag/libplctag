@@ -50,27 +50,6 @@
 #    include <time.h>
 #    include <unistd.h>
 
-/* threads */
-int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *), void *arg) {
-    return pthread_create(thread, NULL, start_routine, arg);
-}
-
-int compat_thread_detach(compat_thread_t thread) { return pthread_detach(thread); }
-
-void compat_thread_exit(void *retval) { pthread_exit(retval); }
-
-int compat_thread_join(compat_thread_t thread, void **retval) { return pthread_join(thread, retval); }
-
-compat_thread_t compat_thread_self(void) { return pthread_self(); }
-
-int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void)) {
-    return pthread_once(once_control, init_routine);
-}
-
-
-void compat_thread_yield(void) { sched_yield(); }
-
-
 /* mutexes */
 int compat_mutex_init(compat_mutex_t *mutex) { return pthread_mutex_init(mutex, NULL); }
 
@@ -219,61 +198,6 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 
 #    include <process.h>
 #    include <processthreadsapi.h>
-
-
-/* threads */
-int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *), void *arg) {
-    *thread = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))start_routine, arg, 0, NULL);
-    return *thread ? 0 : -1;
-}
-
-
-int compat_thread_detach(compat_thread_t thread) {
-    CloseHandle(thread);
-
-    return 0;
-}
-
-
-void compat_thread_exit(void *retval) {
-    unsigned int temp_return_val = 0;
-
-    if(retval) { temp_return_val = *((unsigned int *)retval); }
-
-    _endthreadex(temp_return_val);
-}
-
-
-int compat_thread_join(compat_thread_t thread, void **retval) {
-    if(!thread) { return -1; }
-
-    if(WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) { return -1; }
-
-    if(retval) {
-        DWORD temp_ret_val = 0;
-        GetExitCodeThread(thread, (LPDWORD)&temp_ret_val);
-        *retval = (void *)(intptr_t)temp_ret_val;
-    }
-
-    CloseHandle(thread);
-
-    return 0;
-}
-
-
-compat_thread_t compat_thread_self(void) { return (compat_thread_t)GetCurrentThread(); }
-
-
-int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void)) {
-    if(!once_control) { return -1; }
-
-    if(InterlockedCompareExchange((volatile long *)once_control, 1, 0) == 0) { init_routine(); }
-
-    return 0;
-}
-
-
-void compat_thread_yield(void) { SwitchToThread(); }
 
 
 /* Mutex functions */

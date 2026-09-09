@@ -67,6 +67,14 @@ extern "C"
 #include <stdint.h>
 #include <malloc.h>
 
+/*
+ * NOTE: platform.h is being refactored.  The threading API has moved to
+ * utils/thread.h and is included here so that existing consumers keep
+ * compiling unchanged.  Mutexes, condition variables and sockets will move
+ * out in the same way.  New code should include utils/thread.h directly.
+ */
+#include <utils/thread.h>
+
 
 /* WinSock does not define this or support signals */
 #define MSG_NOSIGNAL 0
@@ -191,36 +199,6 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
         LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))               \
         for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock);              \
             LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0)
-
-/* thread functions/defs */
-typedef struct thread_t *thread_p;
-// typedef PTHREAD_START_ROUTINE thread_func_t;
-// typedef DWORD /*WINAPI*/ (*thread_func_t)(void *lpParam );
-extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg);
-extern void thread_stop(void);
-extern void thread_kill(thread_p t);
-extern int thread_join(thread_p t);
-extern int thread_detach();
-extern int thread_destroy(thread_p *t);
-
-#define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
-#define THREAD_RETURN(val) return (DWORD)val;
-
-
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && (defined(__MINGW32__) || defined(__MINGW64__))
-#    define THREAD_LOCAL _Thread_local
-#else /* use Windows __declspec attribute */
-#    define WIN32_LEAN_AND_MEAN
-#    include <windows.h>
-#    include <processthreadsapi.h>
-#    define THREAD_LOCAL __declspec(thread)
-#    define thread_func_t LPTHREAD_START_ROUTINE
-#    define NO_RETURN __declspec(noreturn)
-#    define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
-#    define THREAD_RETURN(val) return (DWORD)val;
-
-#endif
-
 
 /* atomic operations */
 #define spin_block(lock)                                                            \

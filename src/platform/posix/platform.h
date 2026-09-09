@@ -39,6 +39,14 @@
 #include <math.h>
 #include <stdarg.h>
 
+/*
+ * NOTE: platform.h is being refactored.  The threading API has moved to
+ * utils/thread.h and is included here so that existing consumers keep
+ * compiling unchanged.  Mutexes, condition variables and sockets will move
+ * out in the same way.  New code should include utils/thread.h directly.
+ */
+#include <utils/thread.h>
+
 /* common definitions */
 #define START_PACK
 #define END_PACK __attribute__((__packed__))
@@ -136,21 +144,6 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
         __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))                \
         for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock);               \
             __sync_rc_nargle_##__LINE__ == PLCTAG_STATUS_OK && __sync_flag_nargle_##__LINE__; __sync_flag_nargle_##__LINE__ = 0)
-
-/* thread functions/defs */
-typedef struct thread_t *thread_p;
-typedef void *(*thread_func_t)(void *arg);
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
-extern void thread_stop(void) __attribute__((noreturn));
-extern void thread_kill(thread_p t);
-extern int thread_join(thread_p t);
-extern int thread_detach(void);
-extern int thread_destroy(thread_p *t);
-
-#define THREAD_FUNC(func) void *func(void *arg)
-#define THREAD_RETURN(val) return (void *)val;
-
-#define THREAD_LOCAL __thread
 
 /* atomic operations */
 #define spin_block(lock)                                                                \

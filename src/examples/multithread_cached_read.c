@@ -33,6 +33,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdint.h>
@@ -69,8 +70,8 @@ void handle_done(void) { compat_atomic_store_int32(&done, 1); }
  * Thread function.  Just read until killed.
  */
 
-void *thread_func(void *data) {
-    int tid = (int)(intptr_t)data;
+THREAD_FUNC(thread_func) {
+    int tid = (int)(intptr_t)arg;
     int rc;
     int value;
 
@@ -112,13 +113,13 @@ void *thread_func(void *data) {
         compat_sleep_ms(10, NULL);
     }
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
 int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
-    compat_thread_t thread[MAX_THREADS];
+    thread_p thread[MAX_THREADS];
     int num_threads;
     int thread_id = 0;
 
@@ -169,13 +170,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {
-        compat_thread_create(&thread[thread_id], thread_func, (void *)(intptr_t)thread_id);
+        thread_create(&thread[thread_id], thread_func, 0, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
     while(!compat_atomic_load_int32(&done)) { compat_sleep_ms(100, NULL); }
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { thread_join(&thread[thread_id]); }
 
     plc_tag_destroy(tag);
 

@@ -46,6 +46,7 @@
  */
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
@@ -157,7 +158,7 @@ static void start_server(const char *ab_server_path, int test_pid, int server_po
 }
 
 
-static void *destroy_thread_func(void *arg) {
+static THREAD_FUNC(destroy_thread_func) {
     destroy_state_t *state = (destroy_state_t *)arg;
 
     plc_tag_destroy(state->tag);
@@ -167,7 +168,7 @@ static void *destroy_thread_func(void *arg) {
     compat_cond_signal(&state->cond);
     compat_mutex_unlock(&state->mutex);
 
-    return NULL;
+    THREAD_RETURN(0);
 }
 
 
@@ -242,8 +243,8 @@ int main(int argc, char **argv) {
     compat_mutex_init(&state.mutex);
     compat_cond_init(&state.cond);
 
-    compat_thread_t thread;
-    compat_thread_create(&thread, destroy_thread_func, &state);
+    thread_p thread;
+    thread_create(&thread, destroy_thread_func, 0, &state);
 
     log("Calling plc_tag_destroy (timeout %d ms)...\n", DESTROY_TIMEOUT_MS);
 
@@ -262,7 +263,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    compat_thread_join(thread, NULL);
+    thread_join(&thread);
     compat_mutex_destroy(&state.mutex);
     compat_cond_destroy(&state.cond);
 

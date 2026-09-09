@@ -961,13 +961,7 @@ void conn_destroy(void *conn_arg) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn thread.");
     if(conn->handler_thread) {
         /* this cannot be guarded by the mutex since the conn thread also locks it. */
-        thread_join(conn->handler_thread);
-
-        /* FIXME - is this critical block needed? */
-        critical_block(conn->mutex) {
-            thread_destroy(&(conn->handler_thread));
-            conn->handler_thread = NULL;
-        }
+        thread_join(&(conn->handler_thread));
     }
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */

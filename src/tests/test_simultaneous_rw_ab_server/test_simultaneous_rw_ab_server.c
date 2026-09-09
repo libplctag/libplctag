@@ -1,4 +1,5 @@
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,7 +40,7 @@ static volatile int running = 1;
 static volatile int read_passed = 0;
 static volatile int write_passed = 0;
 
-void *reader_thread(void *arg) {
+THREAD_FUNC(reader_thread) {
     (void)arg;
 
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
@@ -47,7 +48,7 @@ void *reader_thread(void *arg) {
         // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Could not create tag for reading: %s\n", plc_tag_decode_error(tag));
         read_passed = 0;
-        return NULL;
+        THREAD_RETURN(0);
     }
 
     while(running) {
@@ -73,10 +74,10 @@ void *reader_thread(void *arg) {
     }
 
     plc_tag_destroy(tag);
-    return NULL;
+    THREAD_RETURN(0);
 }
 
-void *writer_thread(void *arg) {
+THREAD_FUNC(writer_thread) {
     (void)arg;
 
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
@@ -84,7 +85,7 @@ void *writer_thread(void *arg) {
         // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Could not create tag for writing: %s\n", plc_tag_decode_error(tag));
         write_passed = 0;
-        return NULL;
+        THREAD_RETURN(0);
     }
 
     plc_tag_set_int32(tag, 0, EXPECTED_VALUE);
@@ -101,7 +102,7 @@ void *writer_thread(void *arg) {
 
     plc_tag_destroy(tag);
 
-    return NULL;
+    THREAD_RETURN(0);
 }
 
 void start_server(int test_pid) {
@@ -152,15 +153,15 @@ int main(void) {
         return 1;
     }
 
-    compat_thread_t reader, writer;
-    compat_thread_create(&writer, writer_thread, (void *)(intptr_t)tag);
-    compat_thread_create(&reader, reader_thread, (void *)(intptr_t)tag);
+    thread_p reader, writer;
+    thread_create(&writer, writer_thread, 0, (void *)(intptr_t)tag);
+    thread_create(&reader, reader_thread, 0, (void *)(intptr_t)tag);
 
     compat_sleep_ms(RUN_TIME_MS, NULL);
     running = 0;
 
-    compat_thread_join(reader, NULL);
-    compat_thread_join(writer, NULL);
+    thread_join(&reader);
+    thread_join(&writer);
 
     plc_tag_destroy(tag);
     stop_server(test_pid);

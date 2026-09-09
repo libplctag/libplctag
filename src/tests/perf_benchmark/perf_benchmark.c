@@ -62,6 +62,7 @@
  */
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include "stats.h"
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -141,7 +142,7 @@ typedef struct {
 
 /*--- Thread function ---*/
 
-static void *thread_func(void *arg) {
+static THREAD_FUNC(thread_func) {
     thread_data_t *td = (thread_data_t *)arg;
     /* Each thread starts at the first tag in its own exclusive slice. */
     int tag_idx = 0;
@@ -150,7 +151,7 @@ static void *thread_func(void *arg) {
     td->error_count = 0;
 
     /* Spin until signalled to start. */
-    while(!compat_atomic_load_int32(&go) && !compat_atomic_load_int32(&done)) { compat_thread_yield(); }
+    while(!compat_atomic_load_int32(&go) && !compat_atomic_load_int32(&done)) { thread_yield(); }
 
     if(td->is_async) {
         /* Async: fire reads on all tags, then poll all for completion.
@@ -158,7 +159,7 @@ static void *thread_func(void *arg) {
          * requests in-flight simultaneously rather than serializing them.
          * No locking needed -- this thread exclusively owns its tags. */
         int *read_rc = (int *)calloc((size_t)td->num_tags, sizeof(int));
-        if(!read_rc) { return NULL; }
+        if(!read_rc) { THREAD_RETURN(0); }
 
         while(!compat_atomic_load_int32(&done)) {
             /* Phase 1: Start reads on all tags. */
@@ -176,7 +177,7 @@ static void *thread_func(void *arg) {
                         if(plc_tag_status(td->tags[i]) == PLCTAG_STATUS_PENDING) { pending = 1; }
                     }
                 }
-                if(pending) { compat_thread_yield(); }
+                if(pending) { thread_yield(); }
             } while(pending && !compat_atomic_load_int32(&done));
 
             /* Phase 3: Tally completed reads. */
@@ -213,7 +214,7 @@ static void *thread_func(void *arg) {
         }
     }
 
-    return NULL;
+    THREAD_RETURN(0);
 }
 
 
@@ -251,7 +252,7 @@ int main(int argc, char **argv) {
     const char *base_tag_path = NULL;
 
     int32_t tag_handles[MAX_TAGS];
-    compat_thread_t threads[MAX_THREADS];
+    thread_p threads[MAX_THREADS];
     thread_data_t tdata[MAX_THREADS];
 
     /*--- Parse arguments ---*/
@@ -352,10 +353,10 @@ int main(int argc, char **argv) {
     /*--- Create threads (they spin-wait on go flag) ---*/
     fprintf(stderr, "Creating %d threads...\n", num_threads);
     for(int i = 0; i < num_threads; i++) {
-        if(compat_thread_create(&threads[i], thread_func, &tdata[i]) != 0) {
+        if(thread_create(&threads[i], thread_func, 0, &tdata[i]) != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Failed to create thread %d\n", i);
             compat_atomic_store_int32(&done, 1);
-            for(int j = 0; j < i; j++) { compat_thread_join(threads[j], NULL); }
+            for(int j = 0; j < i; j++) { thread_join(&threads[j]); }
             for(int j = 0; j < num_tags; j++) { plc_tag_destroy(tag_handles[j]); }
             return 1;
         }
@@ -376,7 +377,7 @@ int main(int argc, char **argv) {
     compat_atomic_store_int32(&done, 1); /* signal threads to stop */
 
     /* Join all threads. */
-    for(int i = 0; i < num_threads; i++) { compat_thread_join(threads[i], NULL); }
+    for(int i = 0; i < num_threads; i++) { thread_join(&threads[i]); }
 
     int64_t wall_end = compat_time_ms();
     double cpu_end = get_cpu_time_ms();

@@ -40,6 +40,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -93,8 +94,8 @@ typedef struct {
 } thread_args;
 
 
-void *test_runner(void *data) {
-    thread_args *args = (thread_args *)data;
+THREAD_FUNC(test_runner) {
+    thread_args *args = (thread_args *)arg;
     int tid = args->tid;
     int32_t tag = args->tag;
     int *status = &(args->status);
@@ -145,14 +146,14 @@ void *test_runner(void *data) {
 
     fflush(stderr);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    compat_thread_t thread[MAX_THREADS];
+    thread_p thread[MAX_THREADS];
     int num_threads = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
@@ -258,7 +259,7 @@ int main(int argc, char **argv) {
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
-        compat_thread_create(&thread[tid], test_runner, (void *)&args[tid]);
+        thread_create(&thread[tid], test_runner, 0, (void *)&args[tid]);
     }
 
     /* wait for threads to create and start. */
@@ -280,7 +281,7 @@ int main(int argc, char **argv) {
     /* wait for the threads to stop. */
     compat_sleep_ms(100, NULL);
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(thread[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&thread[tid]); }
 
     /* close the tags but get the group first. */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {

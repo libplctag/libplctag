@@ -46,6 +46,7 @@
 // #include "clog.h"
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -118,8 +119,8 @@ typedef struct {
 } thread_args;
 
 
-void *test_runner(void *data) {
-    thread_args *args = (thread_args *)data;
+THREAD_FUNC(test_runner) {
+    thread_args *args = (thread_args *)arg;
     int tid = args->tid;
     int32_t tag = 0;
     char full_tag_string[1024];
@@ -157,7 +158,7 @@ void *test_runner(void *data) {
         fprintf(stderr, "!!! Failed to create tag for thread %d with error %s!\n", tid, plc_tag_decode_error(tag));
         *status = tag;
         compat_atomic_inc_int32(&ready_count);
-        return 0;
+        THREAD_RETURN(0);
     }
 
     compat_atomic_inc_int32(&ready_count);
@@ -197,7 +198,7 @@ void *test_runner(void *data) {
 
     fflush(stderr);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 
@@ -281,7 +282,7 @@ static int compute_max_threads_for_platform(void) {
 }
 
 int main(int argc, char **argv) {
-    compat_thread_t thread[MAX_THREADS];
+    thread_p thread[MAX_THREADS];
     int num_threads = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
@@ -387,7 +388,7 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating test thread %d.\n", tid);
 
-        compat_thread_create(&thread[tid], test_runner, (void *)&args[tid]);
+        thread_create(&thread[tid], test_runner, 0, (void *)&args[tid]);
     }
 
     /* Wait until every thread has either created its tag or given up -- see
@@ -412,7 +413,7 @@ int main(int argc, char **argv) {
     /* FIXME - wait for the threads to stop. */
     compat_sleep_ms(100, NULL);
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(thread[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&thread[tid]); }
 
     /* close the tags. args[tid].tag holds a negative error code, not a valid
      * handle, for any thread whose plc_tag_create() failed. */

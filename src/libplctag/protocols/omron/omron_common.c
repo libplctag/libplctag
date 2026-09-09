@@ -151,8 +151,7 @@ void omron_teardown(void) {
         omron_protocol_terminating = 1;
 
         /* wait for the thread to die */
-        thread_join(omron_conn_handler_thread);
-        thread_destroy((thread_p *)&omron_conn_handler_thread);
+        thread_join((thread_p *)&omron_conn_handler_thread);
     } else {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
     }

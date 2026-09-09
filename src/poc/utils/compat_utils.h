@@ -56,8 +56,6 @@ extern "C" {
 #    define compat_snprintf snprintf
 #    define compat_sscanf sscanf
 
-typedef pthread_t compat_thread_t;
-typedef pthread_once_t compat_once_t;
 typedef pthread_mutex_t compat_mutex_t;
 typedef pthread_cond_t compat_cond_t;
 
@@ -103,8 +101,6 @@ static inline int compat_sscanf(const char *str, const char *format, ...) {
     return rc;
 }
 
-typedef HANDLE compat_thread_t;
-typedef volatile long compat_once_t;
 typedef CRITICAL_SECTION compat_mutex_t;
 typedef CONDITION_VARIABLE compat_cond_t;
 
@@ -112,18 +108,6 @@ typedef CONDITION_VARIABLE compat_cond_t;
 #else
 #    error "Unsupported platform!"
 #endif
-
-
-/* threads */
-extern int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *), void *arg);
-extern int compat_thread_detach(compat_thread_t thread);
-extern void compat_thread_exit(void *retval); /* no return */
-extern int compat_thread_join(compat_thread_t thread, void **retval);
-extern compat_thread_t compat_thread_self(void);
-
-extern int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void));
-
-extern void compat_thread_yield(void);
 
 
 /* mutexes*/
@@ -172,7 +156,6 @@ extern int64_t compat_time_ms(void);
 extern int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms);
 
 /* cross platform yield CPU */
-extern void compat_thread_yield(void);
 
 
 /* catch terminate/interrupt signals/events */

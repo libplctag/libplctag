@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -88,9 +89,9 @@ void tag_callback(int32_t tag_id, int event, int status, void *arg) {
  * Thread function.  Just read until killed.
  */
 
-void *thread_func(void *data) {
+THREAD_FUNC(thread_func) {
     int rc = PLCTAG_STATUS_OK;
-    int tid = (int)(intptr_t)data;
+    int tid = (int)(intptr_t)arg;
     int value;
     char buf[250] = {
         0,
@@ -112,12 +113,12 @@ void *thread_func(void *data) {
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return 0;
+        THREAD_RETURN(0);
     }
 
     while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
         if(compat_atomic_load_int32(&done)) { break; }
-        compat_thread_yield();
+        thread_yield();
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -126,7 +127,7 @@ void *thread_func(void *data) {
         plc_tag_destroy(tag);
         compat_mutex_destroy(&states[tid].mutex);
         compat_cond_destroy(&states[tid].read_event);
-        return 0;
+        THREAD_RETURN(0);
     }
 
     /* use extended callback to pass the thread index/id */
@@ -154,7 +155,7 @@ void *thread_func(void *data) {
                     plc_tag_destroy(tag);
                     compat_mutex_destroy(&states[tid].mutex);
                     compat_cond_destroy(&states[tid].read_event);
-                    return 0;
+                    THREAD_RETURN(0);
                 }
             }
             value = plc_tag_get_int32(tag, 0);
@@ -166,7 +167,7 @@ void *thread_func(void *data) {
         fprintf(stderr, "Thread %d got result %d with return code %s in %" PRId64 "ms\n", tid, value, plc_tag_decode_error(rc),
                 (end - start));
 
-        compat_thread_yield();
+        thread_yield();
     }
 
     plc_tag_destroy(tag);
@@ -174,12 +175,12 @@ void *thread_func(void *data) {
     compat_mutex_destroy(&states[tid].mutex);
     compat_cond_destroy(&states[tid].read_event);
 
-    return 0;
+    THREAD_RETURN(0);
 }
 
 int main(int argc, char **argv) {
 
-    compat_thread_t thread[MAX_THREADS];
+    thread_p thread[MAX_THREADS];
 
     int thread_id = 0;
 
@@ -218,13 +219,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {
-        compat_thread_create(&thread[thread_id], thread_func, (void *)(intptr_t)thread_id);
+        thread_create(&thread[thread_id], thread_func, 0, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
     while(!compat_atomic_load_int32(&done)) { compat_sleep_ms(100, NULL); }
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { thread_join(&thread[thread_id]); }
 
     return 0;
 }

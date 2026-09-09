@@ -33,6 +33,7 @@
 
 
 #include "compat_utils.h"
+#include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <signal.h>
@@ -51,14 +52,14 @@
 static compat_atomic_int32_t terminate = {0};
 
 static void interrupt_handler(void);
-static void *thread_func(void *arg);
+static THREAD_FUNC(thread_func);
 
 
 #define NUM_THREADS 10
 
 
 int main(void) {
-    compat_thread_t threads[NUM_THREADS] = {0};
+    thread_p threads[NUM_THREADS] = {0};
     int64_t end_time = compat_time_ms() + (10 * 1000);
 
     /* Set up the signal handler */
@@ -75,7 +76,7 @@ int main(void) {
 
     /* create 10 threads to run thread_func() */
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) {
-        int rc = compat_thread_create(&threads[task_id], thread_func, (void *)(intptr_t)task_id);
+        int rc = thread_create(&threads[task_id], thread_func, 0, (void *)(intptr_t)task_id);
         if(rc != 0) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Error creating thread %d\n", task_id);
@@ -92,7 +93,7 @@ int main(void) {
 
     compat_atomic_store_int32(&terminate, 1);
 
-    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { compat_thread_join(threads[task_id], NULL); }
+    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { thread_join(&threads[task_id]); }
 
     return 0;
 }
@@ -107,7 +108,7 @@ void interrupt_handler(void) { compat_atomic_store_int32(&terminate, 1); }
     If any error occurs, it closes the tag handle and opens a new one.
 */
 
-void *thread_func(void *arg) {
+THREAD_FUNC(thread_func) {
     int task_id = (int)(intptr_t)arg;
     int rc;
     int32_t tag = 0;
@@ -147,5 +148,5 @@ void *thread_func(void *arg) {
         plc_tag_destroy(tag);
     }
 
-    return 0;
+    THREAD_RETURN(0);
 }
