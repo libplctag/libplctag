@@ -1146,7 +1146,12 @@ int omron_check_request_status(omron_tag_p tag) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
-    tag->status = (int8_t)rc;
+    /*
+     * Do not copy rc into tag->status here.  This function returns PLCTAG_STATUS_OK when there is
+     * simply no request in flight, and that would overwrite the result of the operation that just
+     * finished.  A read that gave up with PLCTAG_ERR_PARTIAL would be reported as a success on the
+     * next tickler pass.  The AB version of this function dropped the same line for the same reason.
+     */
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_SPEW, tag->tag_id, "Done.");
 
