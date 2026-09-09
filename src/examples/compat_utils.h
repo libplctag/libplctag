@@ -179,10 +179,6 @@ extern void compat_thread_yield(void);
 extern int compat_set_interrupt_handler(void (*handler)(void));
 
 
-#define RANDOM_U64_ERROR (UINT64_MAX)
-extern uint64_t compat_random_u64(uint64_t upper_bound);
-
-
 extern int compat_fprintf(FILE *stream, const char *format, ...);
 
 #ifdef __cplusplus
