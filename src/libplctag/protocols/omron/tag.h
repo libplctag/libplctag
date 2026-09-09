@@ -102,6 +102,17 @@ struct omron_tag_t {
     uint8_t udt_get_fields;
     uint16_t udt_id;
 
+    /*
+     * Consecutive fragment responses that carried no payload.
+     *
+     * A partial-transfer status with zero bytes is legitimate: when several requests are
+     * packed into one packet the earlier ones can consume all the room, leaving the later
+     * ones only a bare CIP header.  It is also what a PLC would send forever to keep us
+     * asking for the same fragment, so count them and give up rather than loop.  Reset
+     * whenever a response actually delivers data.
+     */
+    int fragment_retry_count;
+
     /* requests */
     int pre_write_read;
     int first_read;

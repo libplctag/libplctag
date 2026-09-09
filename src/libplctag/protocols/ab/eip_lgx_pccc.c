@@ -38,6 +38,8 @@ extern "C"
 */
 
 
+#include <stddef.h>
+
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/defs.h>
@@ -166,6 +168,9 @@ int tag_read_start(ab_tag_p tag) {
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
@@ -298,6 +303,9 @@ static int check_read_status(ab_tag_p tag) {
         int pccc_res_type;
         int pccc_res_length;
 
+        rc = pccc_check_response_header(tag, false);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
         pccc = (pccc_resp *)(tag->req->data);
 
         /* point to the start of the data */
@@ -330,7 +338,7 @@ static int check_read_status(ab_tag_p tag) {
 
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status));
+                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -362,7 +370,7 @@ static int check_read_status(ab_tag_p tag) {
         type_end = data;
 
         /* copy data into the tag. */
-        if(data > data_end || (data_end - data) > tag->size) {
+        if((intptr_t)data > (intptr_t)data_end || (data_end - data) > (ptrdiff_t)tag->size) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -375,7 +383,7 @@ static int check_read_status(ab_tag_p tag) {
         if(!tag->pre_write_read) { mem_copy(tag->data, data, (int)(data_end - data)); }
 
         /* copy type data into tag. */
-        if(type_start > type_end) {
+        if((intptr_t)type_start > (intptr_t)type_end) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
@@ -418,6 +426,9 @@ int tag_write_start(ab_tag_p tag) {
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
@@ -548,7 +559,14 @@ static int check_write_status(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
 
     do {
-        pccc_resp *pccc = (pccc_resp *)(tag->req->data);
+        pccc_resp *pccc = NULL;
+
+        rc = pccc_check_response_header(tag, false);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
+        pccc = (pccc_resp *)(tag->req->data);
+
+        uint8_t *data_end = tag->req->data + tag->req->request_size;
 
         if(pccc->general_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d",
@@ -559,7 +577,7 @@ static int check_write_status(ab_tag_p tag) {
 
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status));
+                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }

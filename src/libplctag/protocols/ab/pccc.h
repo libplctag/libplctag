@@ -38,6 +38,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <platform.h>
+#include <stdbool.h>
 
 typedef enum {
     PCCC_FILE_UNKNOWN = 0x00, /* UNKNOWN! */
@@ -78,11 +79,12 @@ extern int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_
 // extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
 extern uint8_t pccc_calculate_bcc(uint8_t *data, int size);
 extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
-extern const char *pccc_decode_error(uint8_t *error_ptr);
+extern const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length);
 extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
 
 /* generic direct ethernet tag functions */
+extern int pccc_check_response_header(ab_tag_p tag, bool is_dhp);
 extern int pccc_tag_status(ab_tag_p tag);
 extern int pccc_tag_tickler(ab_tag_p tag);
 extern int pccc_tag_read_start(ab_tag_p tag);

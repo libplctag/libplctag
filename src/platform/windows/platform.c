@@ -46,6 +46,7 @@
 
 #include <errno.h>
 #include <io.h>
+#include <limits.h>
 #include <math.h>
 #include <process.h>
 #include <stdio.h>
@@ -458,10 +459,20 @@ extern int str_copy(char *dst, int dst_size, const char *src) {
     }
 
 
-    /* FIXME - if there is not enough room, truncate the string. */
+    /*
+     * Refuse rather than truncate.  A caller that ignored a truncation would act on a partial
+     * string, so there is no safe partial result to produce here.  Keeping this identical to
+     * the POSIX version also keeps the contract the same on both platforms.
+     */
+    if(str_length(src) >= dst_size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source string of %d bytes does not fit a destination of %d bytes!",
+               str_length(src), dst_size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     strncpy_s(dst, (rsize_t)(unsigned int)dst_size, src, _TRUNCATE);
 
-    return 0;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -518,7 +529,16 @@ extern int str_to_int(const char *str, int *val) {
 
     if(endptr == str) { return -1; }
 
-    /* FIXME - this will truncate long values. */
+    /*
+     * long is wider than int on some platforms, so strtol() can return values that do not
+     * survive the cast.  Reject those rather than handing the caller a truncated value it
+     * cannot distinguish from a real one.
+     */
+    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+        return -1;
+    }
+
     *val = (int)tmp_val;
 
     return 0;

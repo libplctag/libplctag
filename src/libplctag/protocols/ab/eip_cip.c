@@ -1361,6 +1361,9 @@ static int check_read_status_connected(ab_tag_p tag) {
          */
         payload_size = (data_end - data);
         if(payload_size > 0) {
+            /* we got data, so the transfer is moving again. */
+            tag->fragment_retry_count = 0;
+
             /* skip the copy if we already have type data */
             if(tag->encoded_type_info_size == 0) {
                 int type_length = 0;
@@ -1408,11 +1411,27 @@ static int check_read_status_connected(ab_tag_p tag) {
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
 
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
             /* copy the data into the tag and realloc if we need more space. */
             if(payload_size + tag->offset > tag->size) {
+                /* a PLC can keep returning fragments forever.  Do not grow without bound. */
+                if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
+                           (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
 
@@ -1440,6 +1459,9 @@ static int check_read_status_connected(ab_tag_p tag) {
             tag->offset += (int)(payload_size);
         } else {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+
+            /* no payload means no forward progress on a fragmented transfer. */
+            tag->fragment_retry_count++;
         }
 
         /* set the return code */
@@ -1452,12 +1474,20 @@ static int check_read_status_connected(ab_tag_p tag) {
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data) {
+        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start((plc_tag_p)tag);
         } else {
             tag->offset = 0;
+
+            /* the transfer is over one way or the other, so start the next one clean. */
+            tag->fragment_retry_count = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
             if(tag->pre_write_read) {
@@ -1541,6 +1571,9 @@ static int check_read_status_unconnected(ab_tag_p tag) {
          */
         payload_size = (data_end - data);
         if(payload_size > 0) {
+            /* we got data, so the transfer is moving again. */
+            tag->fragment_retry_count = 0;
+
             /* skip the copy if we already have type data */
             if(tag->encoded_type_info_size == 0) {
                 int type_length = 0;
@@ -1588,11 +1621,27 @@ static int check_read_status_unconnected(ab_tag_p tag) {
             /* skip past the type data */
             data += (tag->encoded_type_info_size);
 
+            if((intptr_t)data > (intptr_t)data_end) {
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
+
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
             /* copy the data into the tag and realloc if we need more space. */
             if(payload_size + tag->offset > tag->size) {
+                /* a PLC can keep returning fragments forever.  Do not grow without bound. */
+                if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
+                           (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
 
@@ -1620,6 +1669,9 @@ static int check_read_status_unconnected(ab_tag_p tag) {
             tag->offset += (int)payload_size;
         } else {
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
+
+            /* no payload means no forward progress on a fragmented transfer. */
+            tag->fragment_retry_count++;
         }
 
         /* set the return code */
@@ -1634,12 +1686,20 @@ static int check_read_status_unconnected(ab_tag_p tag) {
         tag->read_in_progress = 0;
 
         /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data) {
+        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
+                   tag->fragment_retry_count);
+            rc = PLCTAG_ERR_PARTIAL;
+        } else if(!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start((plc_tag_p)tag);
         } else {
             tag->offset = 0;
+
+            /* the transfer is over one way or the other, so start the next one clean. */
+            tag->fragment_retry_count = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
             if(tag->pre_write_read) {
@@ -1837,6 +1897,16 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
 
     int elements_per_packet = 0;
     int element_size = 0;
+
+    /*
+     * elem_size is derived from the PLC's response as tag->size / tag->elem_count, so a PLC
+     * that returns fewer bytes than the tag has elements drives it to zero.  It is the
+     * divisor below, so check it here.
+     */
+    if(tag->elem_size <= 0) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Tag element size of %d bytes is not usable!", tag->elem_size);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
     /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
     8 bytes as the unit */

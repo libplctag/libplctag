@@ -319,6 +319,31 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
     /* get the element count, default to 1 if missing. */
     tag->elem_count = attr_get_int(attribs, "elem_count", 1);
 
+    /*
+     * An array can legitimately have up to INT32_MAX elements, but it cannot have zero or a
+     * negative number of them.  Several places divide the tag size by this to recover the
+     * element size, so a zero here is a division by zero later.
+     */
+    if(tag->elem_count < 1) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be at least one, was %d!", tag->elem_count);
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        return (plc_tag_p)tag;
+    }
+
+    /*
+     * The CIP read and write services carry the element count in a two-byte field, and every
+     * place that builds one casts to uint16_t explicitly, so nothing downstream objects to a
+     * larger value -- the count simply wraps and the PLC is asked for a different number of
+     * elements than the caller asked for.  There is no size check here of the kind ab_common.c
+     * has because an Omron tag learns its size from the PLC rather than from the attributes.
+     */
+    if(tag->elem_count > UINT16_MAX) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be no more than %d, was %d!", UINT16_MAX,
+               tag->elem_count);
+        tag->status = PLCTAG_ERR_TOO_LARGE;
+        return (plc_tag_p)tag;
+    }
+
     tag->size = 0;
     tag->data = NULL;
 
@@ -902,6 +927,100 @@ int check_tag_name(omron_tag_p tag, const char *name) {
  * @return status of the request.
  */
 
+/*
+ * Validate the Common Packet Format header of a connected response.
+ *
+ * The caller has already checked that the response is long enough to hold this header.  Every
+ * field below is chosen by the PLC and the handlers downstream use them to find the CIP data,
+ * so a response that is merely long enough is not yet a response we can parse.
+ *
+ * The connection ID is the important one.  It is the only thing that says this data belongs to
+ * our connection rather than to some other conversation on the same socket, and the tag layer
+ * copies the payload straight into the tag buffer on the strength of it.
+ */
+static int check_cpf_connected(omron_tag_p tag, omron_request_p req) {
+    eip_cip_co_resp *resp = (eip_cip_co_resp *)(req->data);
+    size_t data_item_start = 0;
+    size_t data_item_length = 0;
+
+    if(le2h16(resp->cpf_item_count) != 2) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Connected response has %u CPF items, expected 2!",
+               le2h16(resp->cpf_item_count));
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    if(le2h16(resp->cpf_cai_item_type) != OMRON_EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != OMRON_EIP_ITEM_CDI) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
+               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), OMRON_EIP_ITEM_CAI, OMRON_EIP_ITEM_CDI);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    /*
+     * Only meaningful once ForwardOpen has actually negotiated a connection.  Until then
+     * orig_connection_id is just the local placeholder, we send connection ID zero on the
+     * wire, and the target echoes zero back -- there is no connection identity to check.
+     */
+    if(tag->conn && tag->conn->targ_connection_id != 0
+       && le2h32(resp->cpf_orig_conn_id) != tag->conn->orig_connection_id) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Connected response is for connection %" PRIx32 " but ours is %" PRIx32 "!", le2h32(resp->cpf_orig_conn_id),
+               tag->conn->orig_connection_id);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    /*
+     * The connected data item covers the connection sequence number and everything after it.
+     * Require it to match what we actually received rather than merely fit, otherwise the PLC
+     * can shorten the item and leave the handlers reading bytes it never sent.
+     */
+    data_item_start = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - req->data);
+    data_item_length = (size_t)le2h16(resp->cpf_cdi_item_length);
+
+    if(data_item_start + data_item_length != (size_t)req->request_size) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Connected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
+               data_item_length, req->request_size, data_item_start);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* As above, but for the unconnected CPF header.  There is no connection ID to check here. */
+static int check_cpf_unconnected(omron_tag_p tag, omron_request_p req) {
+    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(req->data);
+    size_t data_item_start = 0;
+    size_t data_item_length = 0;
+
+    if(le2h16(resp->cpf_item_count) != 2) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unconnected response has %u CPF items, expected 2!",
+               le2h16(resp->cpf_item_count));
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    if(le2h16(resp->cpf_nai_item_type) != OMRON_EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != OMRON_EIP_ITEM_UDI) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
+               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), OMRON_EIP_ITEM_NAI, OMRON_EIP_ITEM_UDI);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    data_item_start = (size_t)((uint8_t *)(&resp->reply_service) - req->data);
+    data_item_length = (size_t)le2h16(resp->cpf_udi_item_length);
+
+    if(data_item_start + data_item_length != (size_t)req->request_size) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Unconnected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
+               data_item_length, req->request_size, data_item_start);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int omron_check_request_status(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     omron_request_p req = NULL;
@@ -977,9 +1096,38 @@ int omron_check_request_status(omron_tag_p tag) {
         switch(le2h16(eip_header->encap_command)) {
             case OMRON_EIP_CONNECTED_SEND:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received a connected send EIP packet.");
+
+                /*
+                 * The response must hold the EIP header, the connected CPF header and at
+                 * least a minimal CIP response.  The handlers below cast the buffer to
+                 * this type and read its fields, so check the length here, once, before
+                 * any of them touch it.
+                 */
+                if((size_t)req->request_size < sizeof(eip_cip_co_resp)) {
+                    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+                           "Connected response of %d bytes is too short to hold a CIP response of %d bytes!", req->request_size,
+                           (int)sizeof(eip_cip_co_resp));
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                    break;
+                }
+
+                rc = check_cpf_connected(tag, req);
+
                 break;
             case OMRON_EIP_UNCONNECTED_SEND:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received an unconnected send EIP packet.");
+
+                /* as above, but for the unconnected CPF header. */
+                if((size_t)req->request_size < sizeof(eip_cip_uc_resp)) {
+                    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+                           "Unconnected response of %d bytes is too short to hold a CIP response of %d bytes!", req->request_size,
+                           (int)sizeof(eip_cip_uc_resp));
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                    break;
+                }
+
+                rc = check_cpf_unconnected(tag, req);
+
                 break;
             default:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received an unknown EIP packet type %04" PRIx16 ".",
@@ -998,7 +1146,12 @@ int omron_check_request_status(omron_tag_p tag) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
-    tag->status = (int8_t)rc;
+    /*
+     * Do not copy rc into tag->status here.  This function returns PLCTAG_STATUS_OK when there is
+     * simply no request in flight, and that would overwrite the result of the operation that just
+     * finished.  A read that gave up with PLCTAG_ERR_PARTIAL would be reported as a success on the
+     * next tickler pass.  The AB version of this function dropped the same line for the same reason.
+     */
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_SPEW, tag->tag_id, "Done.");
 

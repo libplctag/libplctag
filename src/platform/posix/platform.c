@@ -392,6 +392,18 @@ extern int str_copy(char *dst, int dst_size, const char *src) {
         return PLCTAG_ERR_TOO_SMALL;
     }
 
+    /*
+     * Refuse rather than truncate.  strncpy() writes no terminator when the source fills the
+     * destination exactly, so a caller that ignored a truncation would be left holding an
+     * unterminated buffer -- every later str_length() or print of it runs off the end.  There
+     * is no safe partial result here, so do not produce one.
+     */
+    if(str_length(src) >= dst_size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source string of %d bytes does not fit a destination of %d bytes!",
+               str_length(src), dst_size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     // NOLINTNEXTLINE
     strncpy(dst, src, (size_t)(unsigned int)dst_size);
 
@@ -452,7 +464,16 @@ extern int str_to_int(const char *str, int *val) {
 
     if(endptr == str) { return -1; }
 
-    /* FIXME - this will truncate long values. */
+    /*
+     * long is wider than int on most 64-bit platforms, so strtol() happily returns values
+     * that do not survive the cast.  Without this check "4294967296" converts to zero on
+     * LP64 and the caller has no way to tell that from a real zero.  Reject instead.
+     */
+    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+        return -1;
+    }
+
     *val = (int)tmp_val;
 
     return 0;

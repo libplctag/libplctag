@@ -235,7 +235,7 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
         uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
         uint8_t *data_end = tag->req->data + (tag->req->request_size);
 
-        if(data_end < data_start) {
+        if((intptr_t)data_end < (intptr_t)data_start) {
             pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
             omron_tag_abort(tag);
             return PLCTAG_ERR_TOO_SMALL;
@@ -294,7 +294,7 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
         uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
         uint8_t *data_end = tag->req->data + tag->req->request_size;
 
-        if(data_end < data_start) {
+        if((intptr_t)data_end < (intptr_t)data_start) {
             pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
             omron_tag_abort(tag);
             return PLCTAG_ERR_TOO_SMALL;

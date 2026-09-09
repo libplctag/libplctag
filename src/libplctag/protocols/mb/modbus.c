@@ -59,6 +59,8 @@
  * byte-count/exception-code byte. check_read_response()/check_write_response() read up to
  * this offset unconditionally. */
 #define MODBUS_MIN_RESPONSE_SIZE (MODBUS_MBAP_SIZE + 3)
+/* Modbus registers are addressed with 16 bits, so this is the most that can exist. */
+#define MAX_MODBUS_ELEM_COUNT (65536)
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 #define MAX_MODBUS_PDU_PAYLOAD (253) /* everything after the server address */
@@ -250,6 +252,13 @@ struct modbus_tag_t {
 
     /* transaction ID of current pending request (0 = none) */
     uint16_t pending_transaction_id;
+
+    /*
+     * Function code of the request in flight.  A server answering a holding-register read with
+     * a coil response hands back bit-packed data that we would copy into the tag as words, so
+     * the reply has to name the same function we asked for.
+     */
+    uint8_t req_fn_code;
 
     /* timestamp when the operation last changed */
     int64_t op_changed_time;
@@ -481,6 +490,17 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
     if(elem_count < 0) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Element count should not be a negative value!");
         return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * elem_count comes from the attribute string, so cap it.  Modbus registers are
+     * addressed with 16 bits, so more than 65536 of them is meaningless, and without
+     * this the elem_count * reg_size below can overflow or ask for a huge allocation.
+     */
+    if(elem_count > MAX_MODBUS_ELEM_COUNT) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Element count %d is larger than the maximum of %d!", elem_count,
+               MAX_MODBUS_ELEM_COUNT);
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
@@ -2329,6 +2349,26 @@ int receive_response(modbus_plc_p plc) {
             return PLCTAG_ERR_TOO_SMALL;
         }
 
+        /*
+         * The MBAP header is fixed by the spec, so check it here where the whole packet is in
+         * hand rather than leaving it to the per-tag handlers.  A non-zero protocol identifier
+         * is not Modbus/TCP at all, and a reply carrying somebody else's unit ID is a reply to
+         * somebody else -- neither is data we should hand to a tag.
+         */
+        if(plc->read_data[2] != 0 || plc->read_data[3] != 0) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Response protocol identifier is %u, expected zero!",
+                   (unsigned int)((plc->read_data[2] << 8) + plc->read_data[3]));
+            plc->read_data_len = 0;
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        if(plc->read_data[6] != plc->server_id) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Response is for unit %u but we are talking to unit %u!",
+                   (unsigned int)plc->read_data[6], (unsigned int)plc->server_id);
+            plc->read_data_len = 0;
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Updated last_packet_time_ms=%" PRId64 " (received full packet).",
@@ -2548,6 +2588,7 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     plc->write_data_len++;
 
     tag->seq_id = seq_id;
+    tag->req_fn_code = plc->write_data[7];
     atomic_set_bool(&plc->flags.request_ready, true);
     plc->request_tag_id = tag->tag_id;
 
@@ -2588,6 +2629,30 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
         /* the operation is complete regardless of the outcome. */
         // tag->flags.operation_complete = 1;
 
+        /*
+         * The transaction ID only says the server is answering this request.  It does not say
+         * it is answering the question we asked: the function code has to match too, or we
+         * decode a coil bitmap as register words.  An exception reply sets the high bit and is
+         * otherwise the same code.
+         */
+        if((plc->read_data[7] & (uint8_t)0x7F) != tag->req_fn_code) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Got function code %u in response to function code %u!",
+                   (unsigned int)(plc->read_data[7] & (uint8_t)0x7F), (unsigned int)tag->req_fn_code);
+
+            plc->read_data_len = 0;
+            atomic_set_bool(&plc->flags.response_ready, false);
+
+            tag->seq_id = 0;
+            tag->read_complete = 1;
+            tag->read_in_flight = 0;
+            tag->request_num = 0;
+            tag->status = (int8_t)PLCTAG_ERR_BAD_DATA;
+
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);
 
@@ -2614,20 +2679,30 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "byte_offset = %d", byte_offset);
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "copy_size = %d", copy_size);
 
-            mem_copy(tag->data + byte_offset, &plc->read_data[9], copy_size);
-
-            /* are we done? */
-            if(tag->size > (byte_offset + copy_size)) {
-                /* Not yet. */
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Not done reading entire tag.");
-                partial_read = 1;
+            /*
+             * byte_offset comes from our own request numbering, but forming tag->data + byte_offset
+             * past the end of the buffer is UB even when copy_size has been clamped to zero.
+             */
+            if(byte_offset < 0 || byte_offset > tag->size) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Byte offset %d is outside a tag of %d bytes!", byte_offset,
+                       tag->size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
             } else {
-                /* read is done. */
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Read is complete.");
-                partial_read = 0;
-            }
+                mem_copy(tag->data + byte_offset, &plc->read_data[9], copy_size);
 
-            rc = PLCTAG_STATUS_OK;
+                /* are we done? */
+                if(tag->size > (byte_offset + copy_size)) {
+                    /* Not yet. */
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Not done reading entire tag.");
+                    partial_read = 1;
+                } else {
+                    /* read is done. */
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Read is complete.");
+                    partial_read = 0;
+                }
+
+                rc = PLCTAG_STATUS_OK;
+            }
         }
 
         /* either way, clean up the PLC buffer. */
@@ -2785,6 +2860,7 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     plc->write_data_len += request_payload_size;
 
     tag->seq_id = (uint16_t)(unsigned int)seq_id;
+    tag->req_fn_code = plc->write_data[7];
     atomic_set_bool(&plc->flags.request_ready, true);
     plc->request_tag_id = tag->tag_id;
 
@@ -2825,6 +2901,25 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* this is our response, so the operation is complete regardless of the status. */
         // tag->flags.operation_complete = 1;
+
+        /* as in the read case, the reply has to name the function we actually asked for. */
+        if((plc->read_data[7] & (uint8_t)0x7F) != tag->req_fn_code) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Got function code %u in response to function code %u!",
+                   (unsigned int)(plc->read_data[7] & (uint8_t)0x7F), (unsigned int)tag->req_fn_code);
+
+            plc->read_data_len = 0;
+            atomic_set_bool(&plc->flags.response_ready, false);
+
+            tag->seq_id = 0;
+            tag->request_num = 0;
+            tag->write_complete = 1;
+            tag->write_in_flight = 0;
+            tag->status = (int8_t)PLCTAG_ERR_BAD_DATA;
+
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+            return PLCTAG_ERR_BAD_DATA;
+        }
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);

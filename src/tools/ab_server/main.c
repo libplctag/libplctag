@@ -48,7 +48,9 @@
 #    include <strings.h>
 #endif
 
+#include "args.h"
 #include "eip.h"
+#include "fault.h"
 #include "mutex.h"
 #include "plc.h"
 #include "slice.h"
@@ -59,6 +61,7 @@
 
 static void usage(void);
 static void process_args(int argc, const char **argv, plc_s *plc);
+static bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path);
 static void parse_path(const char *path, plc_s *plc);
 static void parse_pccc_tag(const char *tag, plc_s *plc);
 static void parse_cip_tag(const char *tag, plc_s *plc);
@@ -70,6 +73,11 @@ static slice_s request_handler(slice_s input, slice_s output, void *plc);
  * reconnecting with a new TCP session on every retry. Every copy's
  * reject_fo_count pointer points back at this one instance. */
 static atomic_int32_t g_reject_fo_count;
+static atomic_int32_t g_empty_frag_count;
+static atomic_int32_t g_reject_size_count;
+
+/* one per fault_kind_t, shared the same way -- see plc_s.fault_counts. */
+static atomic_int32_t g_fault_counts[FAULT_MAX];
 
 
 #ifdef IS_WINDOWS
@@ -159,6 +167,9 @@ int main(int argc, const char **argv) {
 
     /* shared across every connection's copy of plc -- see plc_s.reject_fo_count. */
     plc.reject_fo_count = &g_reject_fo_count;
+    plc.empty_frag_count = &g_empty_frag_count;
+    plc.reject_size_count = &g_reject_size_count;
+    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
     /* set the random seed. */
     srand((unsigned int)time(NULL));
@@ -188,9 +199,10 @@ void usage(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] [--port=<port>] --tag=<tag>\n"
                     "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
-                    "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\" or \"Micrologix\".\n"
+                    "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\", \"Micrologix\" or\n"
+                    "                \"LgxPccc\" (a ControlLogix addressed through its PCCC mapping).\n"
                     "\n"
-                    "   <path> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
+                    "   <path> = (required for ControlLogix and LgxPccc) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "\n"
                     "   <port> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "            Defaults to 44818.\n"
@@ -219,177 +231,315 @@ void usage(void) {
                     "\n"
                     "        <sizes> field is one or more (up to 3) numbers separated by commas.\n"
                     "\n"
+                    "    Fault injection, for testing client error handling:\n"
+                    "        --reject_fo=<n>        fail the next <n> ForwardOpen requests with a duplicate\n"
+                    "                               connection error.\n"
+                    "        --reject_size=<n>      fail the next <n> ForwardOpen requests with extended status\n"
+                    "                               0x0109, \"connection size not supported\", offering a smaller\n"
+                    "                               size for the client to retry with.\n"
+                    "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
+                    "        --empty_frag=<n>       answer the next <n> read requests with a partial transfer\n"
+                    "                               status and no data.  This is what a real PLC sends when\n"
+                    "                               packed requests leave no room, and it makes no progress,\n"
+                    "                               so a client must not retry it forever.\n"
+                    "        --delay=<ms>           delay every response by <ms> milliseconds.\n"
+                    "        --corrupt=<kind>[:<n>] send the next <n> responses (default 1) deliberately\n"
+                    "                               malformed, to exercise the client's response checks.\n"
+                    "                               May be repeated.  <kind> is one of:\n"
+                    "                                 cpf_count  - CPF item count other than two.\n"
+                    "                                 cpf_type   - unrecognized CPF address item type.\n"
+                    "                                 conn_id    - wrong connection ID on a connected send.\n"
+                    "                                 item_len   - CPF data item length that disagrees with\n"
+                    "                                              the packet.\n"
+                    "                                 short_cpf  - no CIP payload at all.\n"
+                    "                                 short_cip  - CIP payload too short for a CIP header.\n"
+                    "                                 eip_cmd    - wrong EIP command in the reply.\n"
+                    "                                 session    - wrong EIP session handle.\n"
+                    "                                 context    - wrong sender context echoed back.\n"
+                    "                                 pccc_reply - unexpected PCCC reply code.\n"
+                    "                                 pccc_tns   - PCCC transaction number we never sent.\n"
+                    "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
-                    "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n");
+                    "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n"
+                    "         ab_server --plc=LgxPccc --path=1,0 --tag=N7[10]\n");
 
     exit(1);
 }
 
 
+/*
+ * Flag table.  Replaces the old hand-rolled strncmp() chain; args_parse() handles the
+ * name/value splitting, type conversion, duplicate detection and unknown-flag rejection that
+ * the chain did not.  Note that "tag" is ARGS_MULTIPLE -- everything else is once-only.
+ */
+static const args_flag_def_t arg_flags[] = {
+    {"plc", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_ONCE, "plc",
+     "PLC type to simulate: ControlLogix, Micro800, Omron, PLC/5, SLC500, Micrologix or LgxPccc",
+     {.has_default = false}},
+    {"path", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "path",
+     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix and LgxPccc", {.has_default = false}},
+    {"port", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "port", "TCP port to listen on.  Defaults to 44818",
+     {.has_default = false}},
+    {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated",
+     {.has_default = false}},
+    {"debug", ARGS_TYPE_BOOL, ARGS_OPTIONAL, ARGS_ONCE, "debug", "Turn on debug logging", {.has_default = false}},
+    {"reject_fo", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "reject_fo",
+     "Reject the first <count> ForwardOpen requests", {.has_default = true, .value.int_val = 0}},
+    {"empty_frag", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "empty_frag",
+     "Answer the first <count> read requests with a partial-transfer status and no data",
+     {.has_default = true, .value.int_val = 0}},
+    {"reject_size", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "reject_size",
+     "Reject the first <count> ForwardOpen requests with extended status 0x0109",
+     {.has_default = true, .value.int_val = 0}},
+    {"supported_size", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "supported_size",
+     "Connection size to offer with a 0x0109 rejection", {.has_default = true, .value.int_val = 508}},
+    {"delay", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "delay", "Delay every response by <ms> milliseconds",
+     {.has_default = true, .value.int_val = 0}},
+    {"corrupt", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_MULTIPLE, "corrupt",
+     "Corrupt the next <count> responses in the named way, as <kind>[:<count>].  May be repeated",
+     {.has_default = false}},
+};
+
+#define NUM_ARG_FLAGS (sizeof(arg_flags) / sizeof(arg_flags[0]))
+
+
 void process_args(int argc, const char **argv, plc_s *plc) {
-    bool has_path = false;
+    args_result_t args;
     bool needs_path = false;
-    bool has_plc = false;
-    bool has_tag = false;
+    const char *path_str = NULL;
+    const char *plc_type_str = NULL;
+    size_t num_tags = 0;
+    size_t num_corruptions = 0;
 
-    /* make sure that the reject FO count is zero. */
+    /* make sure that the fault injection counts are zero. */
     atomic_store_int32(plc->reject_fo_count, 0);
+    atomic_store_int32(plc->empty_frag_count, 0);
+    atomic_store_int32(plc->reject_size_count, 0);
+    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
 
-    for(int i = 0; i < argc; i++) {
-        if(strncmp(argv[i], "--plc=", 6) == 0) {
-            if(has_plc) {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "PLC type can only be specified once!\n");
-                usage();
-                return;
-            }
+    if(args_parse(argc, argv, arg_flags, NUM_ARG_FLAGS, &args) != UTIL_OK) {
+        int bad_flag = args_get_error_flag_index(&args);
 
-            if(str_cmp_i(&(argv[i][6]), "ControlLogix") == 0) {
-                log_info_always("Selecting ControlLogix simulator.");
-                plc->plc_type = PLC_CONTROL_LOGIX;
-                plc->path[0] = (uint8_t)0x00; /* filled in later. */
-                plc->path[1] = (uint8_t)0x00; /* filled in later. */
-                plc->path[2] = (uint8_t)0x20;
-                plc->path[3] = (uint8_t)0x02;
-                plc->path[4] = (uint8_t)0x24;
-                plc->path[5] = (uint8_t)0x01;
-                plc->path_len = 6;
-                plc->client_to_server_max_packet = 504;
-                plc->server_to_client_max_packet = 504;
-                needs_path = true;
-                has_plc = true;
-            } else if(str_cmp_i(&(argv[i][6]), "Micro800") == 0) {
-                log_info_always("Selecting Micro8xx simulator.");
-                plc->plc_type = PLC_MICRO800;
-                plc->path[0] = (uint8_t)0x20;
-                plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24;
-                plc->path[3] = (uint8_t)0x01;
-                plc->path_len = 4;
-                plc->client_to_server_max_packet = 504;
-                plc->server_to_client_max_packet = 504;
-                needs_path = false;
-                has_plc = true;
-            } else if(str_cmp_i(&(argv[i][6]), "Omron") == 0) {
-                log_info_always("Selecting Omron NJ/NX simulator.");
-                plc->plc_type = PLC_OMRON;
-                plc->path[0] = (uint8_t)0x12;  /* Extended segment, port A */
-                plc->path[1] = (uint8_t)0x09;  /* 9 bytes length. */
-                plc->path[2] = (uint8_t)0x31;  /* '1' */
-                plc->path[3] = (uint8_t)0x32;  /* '2' */
-                plc->path[4] = (uint8_t)0x37;  /* '7' */
-                plc->path[5] = (uint8_t)0x2e;  /* '.' */
-                plc->path[6] = (uint8_t)0x30;  /* '0' */
-                plc->path[7] = (uint8_t)0x2e;  /* '.' */
-                plc->path[8] = (uint8_t)0x30;  /* '0' */
-                plc->path[9] = (uint8_t)0x2e;  /* '.' */
-                plc->path[10] = (uint8_t)0x31; /* '1' */
-                plc->path[11] = (uint8_t)0x00; /* padding */
-                plc->path[12] = (uint8_t)0x20;
-                plc->path[13] = (uint8_t)0x02;
-                plc->path[14] = (uint8_t)0x24;
-                plc->path[15] = (uint8_t)0x01;
-                plc->path_len = 16;
-                plc->client_to_server_max_packet = 504;
-                plc->server_to_client_max_packet = 504;
-                needs_path = false;
-                has_plc = true;
-            } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
-                log_info_always("Selecting PLC/5 simulator.");
-                plc->plc_type = PLC_PLC5;
-                plc->path[0] = (uint8_t)0x20;
-                plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24;
-                plc->path[3] = (uint8_t)0x01;
-                plc->path_len = 4;
-                plc->client_to_server_max_packet = 244;
-                plc->server_to_client_max_packet = 244;
-                needs_path = false;
-                has_plc = true;
-            } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
-                log_info_always("Selecting SLC 500 simulator.");
-                plc->plc_type = PLC_SLC;
-                plc->path[0] = (uint8_t)0x20;
-                plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24;
-                plc->path[3] = (uint8_t)0x01;
-                plc->path_len = 4;
-                plc->client_to_server_max_packet = 244;
-                plc->server_to_client_max_packet = 244;
-                needs_path = false;
-                has_plc = true;
-            } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
-                log_info_always("Selecting Micrologix simulator.");
-                plc->plc_type = PLC_MICROLOGIX;
-                plc->path[0] = (uint8_t)0x20;
-                plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24;
-                plc->path[3] = (uint8_t)0x01;
-                plc->path_len = 4;
-                plc->client_to_server_max_packet = 244;
-                plc->server_to_client_max_packet = 244;
-                needs_path = false;
-                has_plc = true;
-            } else {
-                // NOLINTNEXTLINE
-                fprintf(stderr, "Unsupported PLC type %s!\n", &(argv[i][6]));
-                usage();
-            }
-        }
-
-        if(strncmp(argv[i], "--path=", 7) == 0) {
-            parse_path(&(argv[i][7]), plc);
-            has_path = true;
-        }
-
-        if(strncmp(argv[i], "--port=", 7) == 0) { plc->port_str = &(argv[i][7]); }
-
-        if(strncmp(argv[i], "--tag=", 6) == 0) {
-            if(plc && (plc->plc_type == PLC_PLC5 || plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX)) {
-                parse_pccc_tag(&(argv[i][6]), plc);
-            } else {
-                parse_cip_tag(&(argv[i][6]), plc);
-            }
-            has_tag = true;
-        }
-
-        if(strcmp(argv[i], "--debug") == 0) {
-            debug_on();
-            log_set_level(LOG_LEVEL_DETAIL);
-        }
-
-        if(strncmp(argv[i], "--reject_fo=", 12) == 0) {
-            if(plc) {
-                log_info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
-                atomic_store_int32(plc->reject_fo_count, atoi(&argv[i][12]));
-            }
-        }
-
-        if(strncmp(argv[i], "--delay=", 8) == 0) {
-            if(plc) {
-                log_info("Setting response delay to %dms.", atoi(&argv[i][8]));
-                plc->response_delay = atoi(&argv[i][8]);
-            }
-        }
+        /*
+         * Name the flag the way the user typed it.  For a known flag the table has the name; for
+         * an unrecognized one there is no table entry, so args_parse() hands back the offending
+         * argv entry instead.
+         */
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error processing arguments: %s (%s)\n", args_get_error_detail(&args),
+                (bad_flag >= 0 && (size_t)bad_flag < NUM_ARG_FLAGS)
+                    ? arg_flags[bad_flag].name
+                    : (args_get_error_debug_name(&args) ? args_get_error_debug_name(&args) : "?"));
+        args_free(&args);
+        usage();
+        return;
     }
 
-    if(needs_path && !has_path) {
+    /*
+     * Everything is parsed before anything is acted on, so the PLC type can be applied first
+     * regardless of where --plc appeared on the command line.  The tag definitions depend on
+     * it: "STRING" means a different CIP type on Logix, Micro800 and Omron, so the tags cannot
+     * be parsed until the PLC type is known.
+     */
+    plc_type_str = args_get_string(&args, "plc");
+    if(!plc_type_str || !set_plc_type(plc_type_str, plc, &needs_path)) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Unsupported PLC type %s!\n", plc_type_str ? plc_type_str : "(none)");
+        args_free(&args);
+        usage();
+        return;
+    }
+
+    /* debug output needs to be on before anything interesting is logged. */
+    if(args_get_bool(&args, "debug")) {
+        debug_on();
+        log_set_level(LOG_LEVEL_DETAIL);
+    }
+
+    path_str = args_get_string(&args, "path");
+    if(path_str) {
+        parse_path(path_str, plc);
+    } else if(needs_path) {
         // NOLINTNEXTLINE
         fprintf(stderr, "This PLC type requires a path argument.\n");
+        args_free(&args);
         usage();
+        return;
     }
 
-    if(!has_plc) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "You must pass a --plc= argument!\n");
-        usage();
+    if(args_get_string(&args, "port")) { plc->port_str = args_get_string(&args, "port"); }
+
+    /* now that the PLC type is known, the tags can be interpreted. */
+    num_tags = args_get_count(&args, "tag");
+    for(size_t i = 0; i < num_tags; i++) {
+        args_value_t tag_val = args_get_at(&args, "tag", i);
+
+        if(!tag_val.present || !tag_val.value.string_val) { continue; }
+
+        if(plc->plc_type == PLC_PLC5 || plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX
+           || plc->plc_type == PLC_LGX_PCCC) {
+            parse_pccc_tag(tag_val.value.string_val, plc);
+        } else {
+            parse_cip_tag(tag_val.value.string_val, plc);
+        }
     }
 
-    if(!has_tag) {
+    if(num_tags == 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "You must define at least one tag.\n");
+        args_free(&args);
         usage();
+        return;
     }
+
+    /* fault injection. */
+    if(args_get_int(&args, "reject_fo") != 0) {
+        log_info("Setting reject ForwardOpen count to %d.", (int)args_get_int(&args, "reject_fo"));
+        atomic_store_int32(plc->reject_fo_count, (int32_t)args_get_int(&args, "reject_fo"));
+    }
+
+    if(args_get_int(&args, "empty_frag") != 0) {
+        log_info("Setting empty fragment response count to %d.", (int)args_get_int(&args, "empty_frag"));
+        atomic_store_int32(plc->empty_frag_count, (int32_t)args_get_int(&args, "empty_frag"));
+    }
+
+    if(args_get_int(&args, "reject_size") != 0) {
+        log_info("Setting reject connection size count to %d.", (int)args_get_int(&args, "reject_size"));
+        atomic_store_int32(plc->reject_size_count, (int32_t)args_get_int(&args, "reject_size"));
+    }
+
+    log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));
+    plc->reject_size_supported = (uint16_t)args_get_int(&args, "supported_size");
+
+    if(args_get_int(&args, "delay") != 0) {
+        log_info("Setting response delay to %dms.", (int)args_get_int(&args, "delay"));
+        plc->response_delay = (int)args_get_int(&args, "delay");
+    }
+
+    num_corruptions = args_get_count(&args, "corrupt");
+    for(size_t i = 0; i < num_corruptions; i++) {
+        args_value_t corrupt_val = args_get_at(&args, "corrupt", i);
+
+        if(!corrupt_val.present || !corrupt_val.value.string_val) { continue; }
+
+        if(!fault_parse(corrupt_val.value.string_val, plc)) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Unrecognized --corrupt value \"%s\".\n", corrupt_val.value.string_val);
+            args_free(&args);
+            usage();
+            return;
+        }
+    }
+
+    /*
+     * The string values above point into argv, which outlives this call, so freeing the result
+     * bookkeeping here does not invalidate anything kept in plc.
+     */
+    args_free(&args);
+}
+
+
+/* returns false if the PLC type is not recognized. */
+bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path) {
+    if(str_cmp_i(plc_type_str, "ControlLogix") == 0) {
+        log_info_always("Selecting ControlLogix simulator.");
+        plc->plc_type = PLC_CONTROL_LOGIX;
+        plc->path[0] = (uint8_t)0x00; /* filled in later. */
+        plc->path[1] = (uint8_t)0x00; /* filled in later. */
+        plc->path[2] = (uint8_t)0x20;
+        plc->path[3] = (uint8_t)0x02;
+        plc->path[4] = (uint8_t)0x24;
+        plc->path[5] = (uint8_t)0x01;
+        plc->path_len = 6;
+        plc->client_to_server_max_packet = 504;
+        plc->server_to_client_max_packet = 504;
+        *needs_path = true;
+    } else if(str_cmp_i(plc_type_str, "LgxPccc") == 0) {
+        log_info_always("Selecting PCCC-mapped ControlLogix simulator.");
+        plc->plc_type = PLC_LGX_PCCC;
+        plc->path[0] = (uint8_t)0x00; /* filled in later. */
+        plc->path[1] = (uint8_t)0x00; /* filled in later. */
+        plc->path[2] = (uint8_t)0x20;
+        plc->path[3] = (uint8_t)0x02;
+        plc->path[4] = (uint8_t)0x24;
+        plc->path[5] = (uint8_t)0x01;
+        plc->path_len = 6;
+        /* MAX_CIP_LGX_PCCC_MSG_SIZE in the library's session.c. */
+        plc->client_to_server_max_packet = 244;
+        plc->server_to_client_max_packet = 244;
+        *needs_path = true;
+    } else if(str_cmp_i(plc_type_str, "Micro800") == 0) {
+        log_info_always("Selecting Micro8xx simulator.");
+        plc->plc_type = PLC_MICRO800;
+        plc->path[0] = (uint8_t)0x20;
+        plc->path[1] = (uint8_t)0x02;
+        plc->path[2] = (uint8_t)0x24;
+        plc->path[3] = (uint8_t)0x01;
+        plc->path_len = 4;
+        plc->client_to_server_max_packet = 504;
+        plc->server_to_client_max_packet = 504;
+        *needs_path = false;
+    } else if(str_cmp_i(plc_type_str, "Omron") == 0) {
+        log_info_always("Selecting Omron NJ/NX simulator.");
+        plc->plc_type = PLC_OMRON;
+        plc->path[0] = (uint8_t)0x12;  /* Extended segment, port A */
+        plc->path[1] = (uint8_t)0x09;  /* 9 bytes length. */
+        plc->path[2] = (uint8_t)0x31;  /* '1' */
+        plc->path[3] = (uint8_t)0x32;  /* '2' */
+        plc->path[4] = (uint8_t)0x37;  /* '7' */
+        plc->path[5] = (uint8_t)0x2e;  /* '.' */
+        plc->path[6] = (uint8_t)0x30;  /* '0' */
+        plc->path[7] = (uint8_t)0x2e;  /* '.' */
+        plc->path[8] = (uint8_t)0x30;  /* '0' */
+        plc->path[9] = (uint8_t)0x2e;  /* '.' */
+        plc->path[10] = (uint8_t)0x31; /* '1' */
+        plc->path[11] = (uint8_t)0x00; /* padding */
+        plc->path[12] = (uint8_t)0x20;
+        plc->path[13] = (uint8_t)0x02;
+        plc->path[14] = (uint8_t)0x24;
+        plc->path[15] = (uint8_t)0x01;
+        plc->path_len = 16;
+        plc->client_to_server_max_packet = 504;
+        plc->server_to_client_max_packet = 504;
+        *needs_path = false;
+    } else if(str_cmp_i(plc_type_str, "PLC/5") == 0) {
+        log_info_always("Selecting PLC/5 simulator.");
+        plc->plc_type = PLC_PLC5;
+        plc->path[0] = (uint8_t)0x20;
+        plc->path[1] = (uint8_t)0x02;
+        plc->path[2] = (uint8_t)0x24;
+        plc->path[3] = (uint8_t)0x01;
+        plc->path_len = 4;
+        plc->client_to_server_max_packet = 244;
+        plc->server_to_client_max_packet = 244;
+        *needs_path = false;
+    } else if(str_cmp_i(plc_type_str, "SLC500") == 0) {
+        log_info_always("Selecting SLC 500 simulator.");
+        plc->plc_type = PLC_SLC;
+        plc->path[0] = (uint8_t)0x20;
+        plc->path[1] = (uint8_t)0x02;
+        plc->path[2] = (uint8_t)0x24;
+        plc->path[3] = (uint8_t)0x01;
+        plc->path_len = 4;
+        plc->client_to_server_max_packet = 244;
+        plc->server_to_client_max_packet = 244;
+        *needs_path = false;
+    } else if(str_cmp_i(plc_type_str, "Micrologix") == 0) {
+        log_info_always("Selecting Micrologix simulator.");
+        plc->plc_type = PLC_MICROLOGIX;
+        plc->path[0] = (uint8_t)0x20;
+        plc->path[1] = (uint8_t)0x02;
+        plc->path[2] = (uint8_t)0x24;
+        plc->path[3] = (uint8_t)0x01;
+        plc->path_len = 4;
+        plc->client_to_server_max_packet = 244;
+        plc->server_to_client_max_packet = 244;
+        *needs_path = false;
+    } else {
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -454,7 +604,8 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { data_file_name[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(data_file_name) - 1; i++) { data_file_name[i] = tag_str[start + i]; }
 
         /* check data file for a match. */
         if(str_cmp_i(data_file_name, "B3") == 0) {
@@ -475,7 +626,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         } else if(str_cmp_i(data_file_name, "ST18") == 0) {
             log_info("Found ST18 data file.");
             tag->tag_type = TAG_PCCC_TYPE_STRING;
-            tag->elem_size = 84;
+            tag->elem_size = TAG_PCCC_SIZE_STRING;
             tag->data_file_num = 18;
         } else if(str_cmp_i(data_file_name, "L19") == 0) {
             log_info("Found L19 data file.");
@@ -509,7 +660,8 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { size_str[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(size_str) - 1; i++) { size_str[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -622,7 +774,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { tag_name[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(tag_name) - 1; i++) { tag_name[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -643,7 +796,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { type_str[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(type_str) - 1; i++) { type_str[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -665,7 +819,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         usage();
     } else {
         /* copy the string. */
-        for(size_t i = 0; i < len && i < (size_t)200; i++) { dim_str[i] = tag_str[start + i]; }
+        /* leave room for the terminating nul, str_cmp_i() below needs the string terminated. */
+        for(size_t i = 0; i < len && i < sizeof(dim_str) - 1; i++) { dim_str[i] = tag_str[start + i]; }
 
         start += len;
     }
@@ -697,8 +852,28 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         tag->tag_type = TAG_CIP_TYPE_LREAL;
         tag->elem_size = 8;
     } else if(str_cmp_i(type_str, "STRING") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_STRING;
-        tag->elem_size = 88;
+        /*
+         * "STRING" means a different thing on each PLC family, so this needs the PLC type to
+         * already be set -- process_args() applies --plc before parsing any tag for that reason.
+         */
+        switch(plc->plc_type) {
+            case PLC_CONTROL_LOGIX:
+                /* Logix's STRING is a UDT, sent as an abbreviated struct rather than a type code. */
+                tag->tag_type = TAG_CIP_STRUCT_HANDLE_STRING;
+                tag->elem_size = TAG_CIP_SIZE_LOGIX_STRING;
+                break;
+
+            case PLC_MICRO800:
+                tag->tag_type = TAG_CIP_TYPE_SHORT_STRING;
+                tag->elem_size = TAG_CIP_SIZE_SHORT_STRING;
+                break;
+
+            default:
+                /* Omron and anything else: the original CIP STRING. */
+                tag->tag_type = TAG_CIP_TYPE_STRING;
+                tag->elem_size = TAG_CIP_SIZE_STRING;
+                break;
+        }
     } else if(str_cmp_i(type_str, "BOOL") == 0) {
         tag->tag_type = TAG_CIP_TYPE_BOOL;
         tag->elem_size = 1;
@@ -706,6 +881,19 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
         usage();
+    }
+
+    /* build the encoded type as it will appear on the wire. */
+    if(tag->tag_type == TAG_CIP_STRUCT_HANDLE_STRING) {
+        tag->type_info[0] = TAG_CIP_TYPE_ABBREV_STRUCT;
+        tag->type_info[1] = 2; /* two bytes of struct handle follow. */
+        tag->type_info[2] = (uint8_t)(TAG_CIP_STRUCT_HANDLE_STRING & 0xFF);
+        tag->type_info[3] = (uint8_t)((TAG_CIP_STRUCT_HANDLE_STRING >> 8) & 0xFF);
+        tag->type_info_size = 4;
+    } else {
+        tag->type_info[0] = (uint8_t)(tag->tag_type & 0xFF);
+        tag->type_info[1] = 0; /* pad */
+        tag->type_info_size = 2;
     }
 
     /* match the dimensions. */

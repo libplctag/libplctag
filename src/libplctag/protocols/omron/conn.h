@@ -54,6 +54,17 @@
 
 #    define MAX_CONN_PATH (260) /* 256 plus padding. */
 #    define MAX_IP_ADDR_SEG_LEN (16)
+
+/*
+ * Longest gateway string we will copy into a conn, NUL included.
+ *
+ * The attribute is "host[:port]" and is stored whole -- conn_open_socket() splits it at
+ * connect time rather than at create time.  A DNS name is at most 253 characters in dotted
+ * form (the familiar 255 is the wire encoding, which adds a length byte per label and a
+ * terminating zero), so 253 + ":65535" + NUL is 260.  Rounded up to keep the following
+ * fields aligned.
+ */
+#    define MAX_CONN_HOST_LEN (264)
 #    define OMRON_CONN_EVENT_RING_SIZE (64)
 #    define OMRON_CONN_EVENT_RING_MASK (OMRON_CONN_EVENT_RING_SIZE - 1)
 
@@ -102,6 +113,15 @@ struct omron_conn_t {
 
     uint64_t resp_seq_id;
 
+    /*
+     * What we last put on the wire.  The response has to be an answer to the request we
+     * actually sent, so these are snapshotted from the outgoing packet in send_eip_request()
+     * and checked against the incoming one in recv_eip_response().
+     */
+    uint16_t req_encap_command;
+    uint64_t req_seq_id;
+    bool req_sent;
+
     /* data for receiving messages */
     uint32_t data_offset;
     uint32_t data_capacity;
@@ -116,10 +136,6 @@ struct omron_conn_t {
     atomic_int32_t terminating;
     mutex_p mutex;
     cond_p wait_cond;
-
-    /* disconnect handling */
-    int auto_disconnect_enabled;
-    int auto_disconnect_timeout_ms;
 
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status; /* plc_tag_conn_status_t values */

@@ -33,20 +33,22 @@
 
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#include <stdbool.h>
 
-extern const char *decode_cip_error_short(uint8_t *data, size_t data_size);
-extern const char *decode_cip_error_long(uint8_t *data, size_t data_size);
-extern int decode_cip_error_code(uint8_t *data, size_t data_size);
+#include "plc.h"
 
 /*
- * Bytes remaining in a received buffer starting at data, given the buffer's end pointer.
- * data and buf_end must point into (or one past) the same buffer.  Returns 0 if data is at
- * or past buf_end -- e.g. a truncated response that did not even reach this field -- rather
- * than letting a negative pointer difference wrap around to a huge size_t.
+ * Arm a fault from a "<kind>[:<count>]" specification, as passed to --corrupt.  The count
+ * defaults to one.  Returns false if the kind is not recognized or the count is not a positive
+ * number.
  */
-static inline size_t cip_error_data_size(uint8_t *data, uint8_t *buf_end) {
-    /* comparing pointers directly is UB, so compare the integer values instead. */
-    return ((intptr_t)data < (intptr_t)buf_end) ? (size_t)((intptr_t)buf_end - (intptr_t)data) : 0;
-}
+extern bool fault_parse(const char *spec, plc_s *plc);
+
+/*
+ * True if this kind of fault should be injected into the response being built right now, in
+ * which case one use is consumed.  Safe to call when nothing is armed.
+ */
+extern bool fault_fires(plc_s *plc, fault_kind_t kind);
+
+/* the name as it is spelled on the command line, for logging and the usage message. */
+extern const char *fault_kind_name(fault_kind_t kind);

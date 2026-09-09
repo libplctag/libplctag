@@ -54,7 +54,7 @@ jobs:
         run: echo "Building branch ${{ env.BRANCH }} for ${{ matrix.arch }}/${{ matrix.libc }}"
 
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-${{ matrix.artifact_suffix }}
           path: |
@@ -155,7 +155,7 @@ jobs:
           mv *.zip release_zips/
 
       - name: Upload ZIP artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
@@ -197,7 +197,7 @@ jobs:
 
       - name: Upload package artifacts
         if: (matrix.arch == 'x86_64' || matrix.arch == 'arm64') && matrix.libc == 'glibc'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_packages
           path: ${{ env.BUILD }}/packages/*
@@ -230,7 +230,7 @@ jobs:
         run: echo "Building branch ${{ env.BRANCH }} on macOS ${{ matrix.name }}"
 
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -261,7 +261,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-${{ matrix.artifact_suffix }}
           path: |
@@ -286,7 +286,7 @@ jobs:
           mv *.zip release_zips/
 
       - name: Upload ZIP artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
@@ -319,7 +319,7 @@ jobs:
 
     steps:
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -355,7 +355,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-ubuntu_mem_sanitizer_${{ matrix.arch }}
           path: |
@@ -386,7 +386,7 @@ jobs:
 
     steps:
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -422,7 +422,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-ubuntu_thread_sanitizer_${{ matrix.arch }}
           path: |
@@ -452,7 +452,7 @@ jobs:
 
     steps:
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -481,7 +481,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-macos_mem_sanitizer_${{ matrix.arch }}
           path: |
@@ -512,7 +512,7 @@ jobs:
 
     steps:
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -541,7 +541,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-macos_thread_sanitizer_${{ matrix.arch }}
           path: |
@@ -590,7 +590,7 @@ jobs:
 
     steps:
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -696,7 +696,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-ubuntu_valgrind_${{ matrix.arch }}
           path: |
@@ -757,7 +757,7 @@ jobs:
         run: echo "Building branch ${{ env.BRANCH }} for Windows ${{ matrix.name }}"
 
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -904,7 +904,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-${{ matrix.artifact_suffix }}
           path: |
@@ -932,7 +932,7 @@ jobs:
 
       - name: Upload ZIP artifacts (MSVC only)
         if: matrix.toolchain == 'msvc'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}\release_zips\*.zip
@@ -966,7 +966,7 @@ jobs:
         run: echo "Building branch ${{ env.BRANCH }} for ${{ matrix.arch }}"
 
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -1086,7 +1086,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-ubuntu_${{ matrix.artifact_suffix }}
           path: |
@@ -1094,7 +1094,7 @@ jobs:
           retention-days: 7
 
       - name: Upload ZIP artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
@@ -1111,7 +1111,7 @@ jobs:
 
     steps:
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -1154,7 +1154,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-ubuntu_s390x_qemu
           path: |
@@ -1185,7 +1185,7 @@ jobs:
         run: |
           echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux for ${{ matrix.arch }} (host runner: ${{ matrix.runner }})"
       - name: "Checkout library source."
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'pull_request' && github.sha || env.BRANCH }}
 
@@ -1483,7 +1483,7 @@ jobs:
           ls -la "${{ env.BUILD }}/release_zips"
 
       - name: Upload ZIP artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_zips
           path: ${{ env.BUILD }}/release_zips/*.zip
@@ -1523,7 +1523,7 @@ jobs:
 
       - name: Upload Alpine test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-alpine_native_${{ matrix.arch }}
           path: logs/*.log
@@ -1531,7 +1531,7 @@ jobs:
           retention-days: 7
 
       - name: Upload Alpine package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT }}_packages
           path: ${{ env.BUILD }}/release_packages/
@@ -1542,7 +1542,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -1655,7 +1655,7 @@ jobs:
           df -h
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -1709,7 +1709,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: ./release_artifacts
 

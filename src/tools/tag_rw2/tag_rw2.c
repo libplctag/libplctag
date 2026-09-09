@@ -392,6 +392,7 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
     int val_start = -1;
     int elem_index = 0;
     char *tmp_vals = NULL;
+    char **fields = NULL;
 
     /* check the value string */
     if(!write_vals || strlen(write_vals) == 0) {
@@ -429,6 +430,30 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
 
     args->write_val_count = num_vals;
 
+    /*
+     * Point at each value in turn.  The commas above were overwritten with terminators, so the
+     * values are now consecutive strings in tmp_vals and an empty one is just a leading
+     * terminator.  Walking them by index this way is what makes "1,,3" put a value in slot 2
+     * rather than slot 1 -- the old scan skipped empty values entirely, which both shifted
+     * every later value down and left the tail of the array as the NULLs calloc() supplied.
+     */
+    fields = calloc((size_t)(unsigned int)num_vals, sizeof(char *));
+    if(!fields) {
+        printf("ERROR: Unable to allocate the write value index!\n");
+        free(tmp_vals);
+        cleanup(args);
+        exit(1);
+    }
+
+    {
+        int field_start = 0;
+
+        for(int i = 0; i < num_vals; i++) {
+            fields[i] = &tmp_vals[field_start];
+            field_start += (int)(unsigned int)strlen(fields[i]) + 1;
+        }
+    }
+
     /* now that we know the number of arguments, we can process them. */
     switch(args->element_type) {
         case TYPE_BIT:
@@ -441,34 +466,26 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    if(args->element_type != TYPE_RAW) {
-                        // NOLINTNEXTLINE
-                        if(compat_sscanf(&(tmp_vals[val_start]), "%" SCNu8 "", &(args->write_vals.u8[elem_index])) != 1) {
-                            printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
-                            cleanup(args);
-                            usage();
-                        }
-                    } else {
-                        // NOLINTNEXTLINE
-                        if(compat_sscanf(&(tmp_vals[val_start]), "%" SCNx8 "", &(args->write_vals.u8[elem_index])) != 1) {
-                            printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
-                            cleanup(args);
-                            usage();
-                        }
-                        // FIXME
-                        printf("Got hex %x\n", args->write_vals.u8[elem_index]);
+                if(args->element_type != TYPE_RAW) {
+                    // NOLINTNEXTLINE
+                    if(compat_sscanf(fields[elem_index], "%" SCNu8 "", &(args->write_vals.u8[elem_index])) != 1) {
+                        printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
+                        cleanup(args);
+                        usage();
                     }
-
-                    elem_index++;
+                } else {
+                    // NOLINTNEXTLINE
+                    if(compat_sscanf(fields[elem_index], "%" SCNx8 "", &(args->write_vals.u8[elem_index])) != 1) {
+                        printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
+                        cleanup(args);
+                        usage();
+                    }
+                    // FIXME
+                    printf("Got hex %x\n", args->write_vals.u8[elem_index]);
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -481,23 +498,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&tmp_vals[val_start], "%" SCNd8 "", &(args->write_vals.i8[elem_index])) != 1) {
-                        printf("ERROR: bad format for signed 8-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNd8 "", &(args->write_vals.i8[elem_index])) != 1) {
+                    printf("ERROR: bad format for signed 8-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -510,23 +519,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&(tmp_vals[val_start]), "%" SCNu16 "", &(args->write_vals.u16[elem_index])) != 1) {
-                        printf("ERROR: bad format for unsigned 16-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNu16 "", &(args->write_vals.u16[elem_index])) != 1) {
+                    printf("ERROR: bad format for unsigned 16-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -539,23 +540,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&tmp_vals[val_start], "%" SCNd16 "", &(args->write_vals.i16[elem_index])) != 1) {
-                        printf("ERROR: bad format for signed 16-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNd16 "", &(args->write_vals.i16[elem_index])) != 1) {
+                    printf("ERROR: bad format for signed 16-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -568,23 +561,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&(tmp_vals[val_start]), "%" SCNu32 "", &(args->write_vals.u32[elem_index])) != 1) {
-                        printf("ERROR: bad format for unsigned 32-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNu32 "", &(args->write_vals.u32[elem_index])) != 1) {
+                    printf("ERROR: bad format for unsigned 32-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -597,23 +582,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&tmp_vals[val_start], "%" SCNd32 "", &(args->write_vals.i32[elem_index])) != 1) {
-                        printf("ERROR: bad format for signed 32-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNd32 "", &(args->write_vals.i32[elem_index])) != 1) {
+                    printf("ERROR: bad format for signed 32-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -626,23 +603,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&(tmp_vals[val_start]), "%" SCNu64 "", &(args->write_vals.u64[elem_index])) != 1) {
-                        printf("ERROR: bad format for unsigned 64-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNu64 "", &(args->write_vals.u64[elem_index])) != 1) {
+                    printf("ERROR: bad format for unsigned 64-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -655,23 +624,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&tmp_vals[val_start], "%" SCNd64 "", &(args->write_vals.i64[elem_index])) != 1) {
-                        printf("ERROR: bad format for signed 64-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%" SCNd64 "", &(args->write_vals.i64[elem_index])) != 1) {
+                    printf("ERROR: bad format for signed 64-bit integer for write value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -684,23 +645,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&(tmp_vals[val_start]), "%f", &(args->write_vals.f32[elem_index])) != 1) {
-                        printf("ERROR: bad format for 32-bit floating point value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%f", &(args->write_vals.f32[elem_index])) != 1) {
+                    printf("ERROR: bad format for 32-bit floating point value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -713,23 +666,15 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 exit(1);
             }
 
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    // NOLINTNEXTLINE
-                    if(compat_sscanf(&tmp_vals[val_start], "%lf", &(args->write_vals.f64[elem_index])) != 1) {
-                        printf("ERROR: bad format for 64-bit floating point value.\n");
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                // NOLINTNEXTLINE
+                if(compat_sscanf(fields[elem_index], "%lf", &(args->write_vals.f64[elem_index])) != 1) {
+                    printf("ERROR: bad format for 64-bit floating point value.\n");
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -743,22 +688,14 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
             }
 
             /* go through the strings. */
-            val_start = -1;
-            elem_index = 0;
-            for(int i = 0; i < len; i++) {
-                if(val_start == -1 && tmp_vals[i] != 0) {
-                    val_start = i;
+            for(elem_index = 0; elem_index < num_vals; elem_index++) {
 
-                    if((args->write_vals.string[elem_index] = compat_strdup(&tmp_vals[val_start])) == NULL) {
-                        printf("ERROR: Unable to allocate string copy for write argument %d!\n", elem_index);
-                        cleanup(args);
-                        usage();
-                    }
-
-                    elem_index++;
+                if((args->write_vals.string[elem_index] = compat_strdup(fields[elem_index])) == NULL) {
+                    printf("ERROR: Unable to allocate string copy for write argument %d!\n", elem_index);
+                    cleanup(args);
+                    usage();
                 }
 
-                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -776,6 +713,8 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
             usage();
             break;
     }
+
+    if(fields) { free(fields); }
 
     if(tmp_vals) { free(tmp_vals); }
 }

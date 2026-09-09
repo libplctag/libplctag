@@ -41,6 +41,7 @@
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
 #include <platform.h>
+#include <stddef.h>
 #include <string.h>
 #include <utils/debug.h>
 
@@ -538,11 +539,25 @@ uint16_t pccc_calculate_crc16(uint8_t *data, int size) {
 }
 
 
-const char *pccc_decode_error(uint8_t *error_ptr) {
-    uint8_t error = *error_ptr;
+const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size) {
+    uint8_t error = 0;
+
+    /*
+     * error_size is how many bytes the response actually has starting at error_ptr.  The
+     * PLC picks the status byte and the response length independently, so a hostile PLC
+     * can send 0xF0 in a response too short to hold the extended status that follows it.
+     * Check before each read rather than trusting the status byte to imply the length.
+     */
+    if(error_size < 1) { return "PCCC response too short to contain a status byte!"; }
+
+    error = *error_ptr;
 
     /* extended error? */
-    if(error == 0xF0) { error = *(error_ptr + 3); }
+    if(error == 0xF0) {
+        if(error_size < 4) { return "PCCC response too short to contain an extended status code!"; }
+
+        error = *(error_ptr + 3);
+    }
 
     switch(error) {
         case 1: return "Error converting block address."; break;
@@ -629,16 +644,22 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
     d_type = (((uint32_t)(*data) & (uint32_t)0xF0) >> (uint32_t)4);
     d_size = (*data) & 0x0F;
 
-    /* check the type.  If it is too large to hold in
+    /*
+     * check the type.  If it is too large to hold in
      * the bottom three bits of the nybble, then the
      * top bit will be set and the bottom three will
      * hold the number of bytes that follows for the
      * type value.  We stop after 4 bytes.  Hopefully
      * that works.
+     *
+     * The extension bytes are little-endian, the same order
+     * pccc_encode_dt_byte() writes them and the same order encode_data()
+     * uses for the equivalent escape in a logical address.
      */
 
     if(d_type & 0x08) {
         int size_bytes = d_type & 0x07;
+        int shift = 0;
 
         /* the extension bytes must actually be present in the data we were given. */
         if(size_bytes > 4 || (int)(data - data_start) + size_bytes >= data_size) { return NULL; }
@@ -647,14 +668,15 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
 
         while(size_bytes--) {
             data++; /* we leave the pointer at the last read byte */
-            d_type <<= 8;
-            d_type |= *data;
+            d_type |= ((uint32_t)(*data)) << shift;
+            shift += 8;
         }
     }
 
     /* same drill for the size */
     if(d_size & 0x08) {
         int size_bytes = d_size & 0x07;
+        int shift = 0;
 
         /* the extension bytes must actually be present in the data we were given. */
         if(size_bytes > 4 || (int)(data - data_start) + size_bytes >= data_size) { return NULL; }
@@ -663,8 +685,8 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
 
         while(size_bytes--) {
             data++; /* we leave the pointer at the last read byte */
-            d_size <<= 8;
-            d_size |= *data;
+            d_size |= ((uint32_t)(*data)) << shift;
+            shift += 8;
         }
     }
 
@@ -1364,6 +1386,103 @@ void encode_data(uint8_t *data, int *index, int val) {
 
 
 /*
+ * pccc_check_response_header
+ *
+ * Every PCCC response handler casts the request buffer to a chain of headers and
+ * then reads fields out of it.  The generic check in check_request_status() only
+ * knows about the CIP response headers, so validate the PCCC-specific chain here,
+ * in one place, before any handler dereferences it.
+ *
+ * Two things are checked: that the buffer is long enough for the headers the handler
+ * is about to walk, and that the response is an answer to the request we sent.  The
+ * PCCC layer identifies a request by its TNS, and DH+ additionally by the node the
+ * reply came from -- a DH+ gateway multiplexes several PLCs over one CIP connection,
+ * so without the node check any of them can answer for any other.
+ *
+ * DH+ responses arrive behind a connected CPF header, everything else behind an
+ * unconnected one.
+ */
+int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
+    int min_size = 0;
+    pccc_cmd_resp *pccc_cmd = NULL;
+
+    if(!tag || !tag->req) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, (tag ? tag->tag_id : 0), "Called without a request in flight!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(is_dhp) {
+        min_size = (int)(sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_cmd_resp));
+    } else {
+        min_size = (int)(sizeof(eip_cpf_uc_header) + sizeof(cip_pccc_resp) + sizeof(pccc_cmd_resp));
+    }
+
+    if(tag->req->request_size < min_size) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
+               "Response of %d bytes is too short to hold a %s response header of %d bytes!", tag->req->request_size,
+               (is_dhp ? "DH+ PCCC" : "PCCC"), min_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(is_dhp) {
+        pccc_dhp_cmd_resp *dhp_resp = (pccc_dhp_cmd_resp *)((eip_cpf_co_header *)(tag->req->data) + 1);
+
+        /* we sent this to dhp_dest from node zero, so the answer has to come back the other way. */
+        if(!tag->session) {
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Called without a session!");
+            return PLCTAG_ERR_NULL_PTR;
+        }
+
+        if(le2h16(dhp_resp->src_node) != tag->session->dhp_dest || le2h16(dhp_resp->dest_node) != 0) {
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
+                   "DH+ response is from node %u to node %u but we sent to node %u from node 0!",
+                   (unsigned int)le2h16(dhp_resp->src_node), (unsigned int)le2h16(dhp_resp->dest_node),
+                   (unsigned int)tag->session->dhp_dest);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /* the DH+ command response has no CIP PCCC header, so the TNS is all that is left. */
+        pccc_cmd = (pccc_cmd_resp *)(&dhp_resp->pccc_command);
+    } else {
+        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)((eip_cpf_uc_header *)(tag->req->data) + 1);
+
+        /*
+         * The reply code is the PCCC-layer echo of the service we asked for.  Everything after
+         * it shifts if the target answered a different service, so check it before the fields
+         * that follow are read.
+         */
+        if(cip_pccc->reply_code != (AB_EIP_CMD_PCCC_EXECUTE | AB_EIP_CMD_CIP_OK)) {
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected PCCC reply code %02x, expected %02x!",
+                   (unsigned int)cip_pccc->reply_code, (unsigned int)(AB_EIP_CMD_PCCC_EXECUTE | AB_EIP_CMD_CIP_OK));
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /*
+         * The requester ID is echoed verbatim from our request.  It is how a PCCC target tells
+         * one requester from another, so a reply carrying somebody else's is not ours.
+         */
+        if(cip_pccc->request_id_size != 7 || le2h16(cip_pccc->vendor_id) != AB_EIP_VENDOR_ID
+           || le2h32(cip_pccc->vendor_serial_number) != AB_EIP_VENDOR_SN) {
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC response requester ID (%u, %04x, %08x) is not ours!",
+                   (unsigned int)cip_pccc->request_id_size, (unsigned int)le2h16(cip_pccc->vendor_id),
+                   (unsigned int)le2h32(cip_pccc->vendor_serial_number));
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        pccc_cmd = (pccc_cmd_resp *)(cip_pccc + 1);
+    }
+
+    if(le2h16(pccc_cmd->pccc_seq_num) != tag->req_pccc_seq_num) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Response has TNS %04x but we sent %04x!",
+               (unsigned int)le2h16(pccc_cmd->pccc_seq_num), (unsigned int)tag->req_pccc_seq_num);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
  * tag_status
  *
  * get the tag status.
@@ -1458,6 +1577,9 @@ int pccc_tag_read_start(ab_tag_p tag) {
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int cip_payload_space = session_get_available_cip_payload_space(tag->session);
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
@@ -1666,6 +1788,14 @@ int pccc_check_read_status(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
 
+    rc = pccc_check_response_header(tag, false);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->read_in_progress = 0;
+        tag->read_complete = 1;
+        return rc;
+    }
+
     /* get the header pointers */
     eip_cpf_uc_header *eip_cpf = (eip_cpf_uc_header *)(tag->req->data);
     cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(eip_cpf + 1);
@@ -1687,14 +1817,15 @@ int pccc_check_read_status(ab_tag_p tag) {
 
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status, pccc_decode_error(&pccc_cmd->pccc_status));
+                   pccc_cmd->pccc_status,
+                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         /* did we get the right amount of data? */
-        if((data_end - data) != tag->size) {
-            if((int)(data_end - data) > tag->size) {
+        if((data_end - data) != (ptrdiff_t)tag->size) {
+            if((data_end - data) > (ptrdiff_t)tag->size) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
                        "Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;
@@ -1732,6 +1863,9 @@ int pccc_tag_write_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
 
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
+
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
     if(tag->is_bit) {
@@ -1768,20 +1902,26 @@ int pccc_tag_write_start(ab_tag_p tag) {
             break;
         }
 
-        data_per_packet = (size_t)session_payload_space - overhead;
-
-        if(data_per_packet <= 0) {
+        /*
+         * The payload space comes from the connection size the PLC negotiated in the
+         * ForwardOpen response, so it can be smaller than our overhead.  Compare before
+         * subtracting: data_per_packet is unsigned, so an underflow here would wrap to a
+         * huge value that passes every check below.
+         */
+        if((size_t)session_payload_space <= overhead) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!", overhead,
+                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
                    session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
+        data_per_packet = (size_t)session_payload_space - overhead;
+
         if(data_per_packet < (size_t)tag->size) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag size is %d, write overhead is %d, and write data per packet is %zu.", tag->size, overhead,
+                   "Tag size is %d, write overhead is %zu, and write data per packet is %zu.", tag->size, overhead,
                    data_per_packet);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
@@ -1923,6 +2063,9 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
 
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
+
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
     do {
@@ -1949,20 +2092,26 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
             break;
         }
 
-        data_per_packet = (size_t)session_payload_space - overhead;
-
-        if(data_per_packet <= 0) {
+        /*
+         * The payload space comes from the connection size the PLC negotiated in the
+         * ForwardOpen response, so it can be smaller than our overhead.  Compare before
+         * subtracting: data_per_packet is unsigned, so an underflow here would wrap to a
+         * huge value that passes every check below.
+         */
+        if((size_t)session_payload_space <= overhead) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!", overhead,
+                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
                    session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
+        data_per_packet = (size_t)session_payload_space - overhead;
+
         if(data_per_packet < (size_t)tag->size) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag size is %d, write overhead is %d, and write data per packet is %zu.", tag->size, overhead,
+                   "Tag size is %d, write overhead is %zu, and write data per packet is %zu.", tag->size, overhead,
                    data_per_packet);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
@@ -2116,6 +2265,9 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
 
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
+
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
     do {
@@ -2150,20 +2302,26 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
             break;
         }
 
-        data_per_packet = (size_t)session_payload_space - overhead;
-
-        if(data_per_packet <= 0) {
+        /*
+         * The payload space comes from the connection size the PLC negotiated in the
+         * ForwardOpen response, so it can be smaller than our overhead.  Compare before
+         * subtracting: data_per_packet is unsigned, so an underflow here would wrap to a
+         * huge value that passes every check below.
+         */
+        if((size_t)session_payload_space <= overhead) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!", overhead,
+                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
                    session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
+        data_per_packet = (size_t)session_payload_space - overhead;
+
         if(data_per_packet < (size_t)tag->size) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag size is %d, write overhead is %d, and write data per packet is %zu.", tag->size, overhead,
+                   "Tag size is %d, write overhead is %zu, and write data per packet is %zu.", tag->size, overhead,
                    data_per_packet);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
@@ -2313,9 +2471,18 @@ int pccc_check_write_status(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
+    rc = pccc_check_response_header(tag, false);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->write_in_progress = 0;
+        return rc;
+    }
+
     /* the request reference is valid. */
 
     pccc = (pccc_resp *)(tag->req->data);
+
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
 
     /* fake exception */
     do {
@@ -2327,7 +2494,7 @@ int pccc_check_write_status(ab_tag_p tag) {
 
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status));
+                   pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -2430,6 +2597,9 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     int cip_payload_space = session_get_available_cip_payload_space(tag->session);
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting");
 
@@ -2642,6 +2812,14 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
 
+    rc = pccc_check_response_header(tag, true);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->read_in_progress = 0;
+        tag->read_complete = 1;
+        return rc;
+    }
+
     /* get the header pointers */
     eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
     pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(eip_cpf + 1);
@@ -2653,14 +2831,15 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
     do {
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status, pccc_decode_error(&pccc_cmd->pccc_status));
+                   pccc_cmd->pccc_status,
+                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         /* did we get the right amount of data? */
-        if((data_end - data) != tag->size) {
-            if((int)(data_end - data) > tag->size) {
+        if((data_end - data) != (ptrdiff_t)tag->size) {
+            if((data_end - data) > (ptrdiff_t)tag->size) {
                 pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
                        "Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;
@@ -2696,6 +2875,9 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -2733,20 +2915,26 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
             break;
         }
 
-        data_per_packet = (size_t)session_payload_space - overhead;
-
-        if(data_per_packet <= 0) {
+        /*
+         * The payload space comes from the connection size the PLC negotiated in the
+         * ForwardOpen response, so it can be smaller than our overhead.  Compare before
+         * subtracting: data_per_packet is unsigned, so an underflow here would wrap to a
+         * huge value that passes every check below.
+         */
+        if((size_t)session_payload_space <= overhead) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!", overhead,
+                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
                    session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
+        data_per_packet = (size_t)session_payload_space - overhead;
+
         if(data_per_packet < (size_t)tag->size) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag size is %d, write overhead is %d, and write data per packet is %zu.", tag->size, overhead,
+                   "Tag size is %d, write overhead is %zu, and write data per packet is %zu.", tag->size, overhead,
                    data_per_packet);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
@@ -2890,6 +3078,9 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     size_t overhead = 0;
     int data_per_packet = 0;
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -3080,6 +3271,9 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
     uint8_t *embed_start = NULL;
     size_t overhead = 0;
     int data_per_packet = 0;
+
+    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
+    tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -3274,17 +3468,27 @@ int pccc_dhp_check_write_status(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
+    rc = pccc_check_response_header(tag, true);
+    if(rc != PLCTAG_STATUS_OK) {
+        ab_tag_abort_request(tag);
+        tag->write_in_progress = 0;
+        return rc;
+    }
+
     /* the request reference is valid. */
 
     /* get the header pointers */
     eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
     pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(eip_cpf + 1);
 
+    uint8_t *data_end = tag->req->data + tag->req->request_size;
+
     /* fake exceptions */
     do {
         if(pccc_cmd->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
-                   pccc_cmd->pccc_status, pccc_decode_error(&pccc_cmd->pccc_status));
+                   pccc_cmd->pccc_status,
+                   pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }

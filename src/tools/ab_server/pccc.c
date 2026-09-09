@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include "pccc.h"
+#include "fault.h"
 #include "cip.h"
 #include "eip.h"
 #include "plc.h"
@@ -50,7 +51,31 @@ const uint8_t SLC_READ[] = {0xa2};
 const uint8_t SLC_WRITE[] = {0xaa};
 const uint8_t SLC_RMW[] = {0xab};
 
+/*
+ * The PCCC mapping inside a ControlLogix has its own typed read/write pair.  They carry a
+ * PLC/5-style logical address but count in elements rather than words, and the data is wrapped
+ * in PCCC type prefixes.  See eip_lgx_pccc.c in the library.
+ */
+const uint8_t LGX_READ[] = {0x68};
+const uint8_t LGX_WRITE[] = {0x67};
+
+/* PCCC typed-data type codes, as used in the DT byte below. */
+#define PCCC_DATA_BIT_STRING ((uint8_t)0x02)
+#define PCCC_DATA_BYTE_STRING ((uint8_t)0x03)
+#define PCCC_DATA_INT ((uint8_t)0x04)
+#define PCCC_DATA_REAL ((uint8_t)0x08)
+#define PCCC_DATA_ARRAY ((uint8_t)0x09)
+
 const uint8_t PCCC_RESP_PREFIX[] = {0xcb, 0x00, 0x00, 0x00, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21};
+
+/*
+ * A PLC/5 range read/write counts its transfer size and offset in 16-bit words -- see
+ * plc5_pccc_read_cmd_req in the library's pccc.c, which sends tag->size / 2.  The SLC command
+ * right below counts bytes instead, which is why the two handlers differ.  Multiplying the
+ * word count by tag->elem_size instead of by two happened to work for the 2-byte B3 and N7
+ * files and asked for absurd amounts of data for anything wider.
+ */
+#define PLC5_WORD_SIZE ((size_t)2)
 
 const uint8_t PCCC_ERR_ADDR_NOT_USABLE = (int8_t)0x06;
 const uint8_t PCCC_ERR_FILE_IS_WRONG_SIZE = (int8_t)0x07;
@@ -66,6 +91,11 @@ static slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc
 static slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc);
 static slice_s handle_slc_write_request(slice_s input, slice_s output, plc_s *plc);
 static slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc);
+static slice_s handle_lgx_read_request(slice_s input, slice_s output, plc_s *plc);
+static slice_s handle_lgx_write_request(slice_s input, slice_s output, plc_s *plc);
+static size_t encode_dt_byte(slice_s output, size_t offset, uint8_t data_type, size_t data_size);
+static size_t decode_dt_byte(slice_s input, size_t offset, uint8_t *data_type, size_t *data_size);
+static uint8_t lgx_pccc_data_type(tag_def_s *tag);
 static slice_s make_pccc_log_error(slice_s output, uint8_t err_code, plc_s *plc);
 
 
@@ -115,6 +145,10 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc) {
         } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX)
                   && slice_match_data_prefix(pccc_command, SLC_RMW, sizeof(SLC_RMW))) {
             pccc_output = handle_slc_rmw_request(pccc_command, pccc_output, plc);
+        } else if(plc->plc_type == PLC_LGX_PCCC && slice_match_data_prefix(pccc_command, LGX_READ, sizeof(LGX_READ))) {
+            pccc_output = handle_lgx_read_request(pccc_command, pccc_output, plc);
+        } else if(plc->plc_type == PLC_LGX_PCCC && slice_match_data_prefix(pccc_command, LGX_WRITE, sizeof(LGX_WRITE))) {
+            pccc_output = handle_lgx_write_request(pccc_command, pccc_output, plc);
         } else {
             log_info("Unsupported PCCC command!");
             pccc_output = make_pccc_log_error(pccc_output, PCCC_ERR_UNSUPPORTED_COMMAND, plc);
@@ -127,6 +161,25 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc) {
         log_info("Got:");
         log_info_slice(pccc_input);
         pccc_output = make_pccc_log_error(pccc_output, PCCC_ERR_UNSUPPORTED_COMMAND, plc);
+    }
+
+    /*
+     * Fault injection.  Every handler above writes the reply code at offset 0 and the
+     * transaction number at offset 2 of its response, so both corruptions belong here rather
+     * than repeated in each of the six handlers.
+     */
+    if(!slice_has_err(pccc_output) && slice_len(pccc_output) >= 4) {
+        /*
+         * The reply code the client checks is the CIP-layer one at the front of
+         * PCCC_RESP_PREFIX, 0xcb, not the PCCC command echo at the start of the PCCC payload.
+         * It is the PCCC-layer echo of the service that was asked for, and everything after it
+         * shifts if the target answers a different service.
+         */
+        if(fault_fires(plc, FAULT_PCCC_REPLY)) { slice_set_uint8(output, 0, (uint8_t)0xce); }
+
+        if(fault_fires(plc, FAULT_PCCC_TNS)) {
+            slice_set_uint16_le(pccc_output, 2, (uint16_t)(plc->pccc_seq_id ^ (uint16_t)0xFFFF));
+        }
     }
 
     return slice_from_slice(output, 0, 11 + slice_len(pccc_output));
@@ -175,8 +228,8 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc) {
 
     /* now we can check the start and end offsets. */
     tag_size = tag->elem_count * tag->elem_size;
-    start_byte_offset = offset + (data_file_element * tag->elem_size);
-    end_byte_offset = start_byte_offset + (transfer_size * tag->elem_size);
+    start_byte_offset = (offset * PLC5_WORD_SIZE) + (data_file_element * tag->elem_size);
+    end_byte_offset = start_byte_offset + (transfer_size * PLC5_WORD_SIZE);
 
     if(start_byte_offset >= tag_size) {
         log_info("Starting offset, %u, is greater than tag size, %d!", (unsigned int)start_byte_offset, (unsigned int)tag_size);
@@ -195,22 +248,22 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc) {
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
-    log_info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
-             transfer_size * tag->elem_size);
+    log_info("Transfer size %u (in words), tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
+             transfer_size * PLC5_WORD_SIZE);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
     slice_set_uint8(output, 1, 0); /* no error */
     slice_set_uint16_le(output, 2, plc->pccc_seq_id);
 
-    for(size_t i = 0; i < (transfer_size * tag->elem_size); i++) {
+    for(size_t i = 0; i < (transfer_size * PLC5_WORD_SIZE); i++) {
         log_info("setting byte %d to value %d.", 4 + i, tag->data[start_byte_offset + i]);
         slice_set_uint8(output, 4 + i, tag->data[start_byte_offset + i]);
     }
 
-    log_info("Output slice length %d.", slice_len(slice_from_slice(output, 0, 4 + (transfer_size * tag->elem_size))));
+    log_info("Output slice length %d.", slice_len(slice_from_slice(output, 0, 4 + (transfer_size * PLC5_WORD_SIZE))));
 
-    return slice_from_slice(output, 0, 4 + (transfer_size * tag->elem_size));
+    return slice_from_slice(output, 0, 4 + (transfer_size * PLC5_WORD_SIZE));
 }
 
 
@@ -262,8 +315,8 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc) {
      */
 
     tag_size = tag->elem_count * tag->elem_size;
-    start_byte_offset = offset + (data_file_element * tag->elem_size);
-    end_byte_offset = start_byte_offset + (transfer_size * tag->elem_size);
+    start_byte_offset = (offset * PLC5_WORD_SIZE) + (data_file_element * tag->elem_size);
+    end_byte_offset = start_byte_offset + (transfer_size * PLC5_WORD_SIZE);
 
     if(start_byte_offset >= tag_size) {
         log_info("Starting offset, %u, is greater than tag size, %d!", (unsigned int)start_byte_offset, (unsigned int)tag_size);
@@ -278,20 +331,20 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc) {
     data_start_byte_offset = 8;
     data_len = slice_len(input) - 8;
 
-    if(data_len != (transfer_size * tag->elem_size)) {
+    if(data_len != (transfer_size * PLC5_WORD_SIZE)) {
         log_info("Data in packet is not the same length, %u, as the requested transfer, %d!", data_len,
-                 (transfer_size * tag->elem_size));
+                 (transfer_size * PLC5_WORD_SIZE));
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
     /* copy the data into the tag. */
-    for(size_t i = 0; i < (transfer_size * tag->elem_size); i++) {
+    for(size_t i = 0; i < (transfer_size * PLC5_WORD_SIZE); i++) {
         log_info("setting byte %d to value %d.", start_byte_offset + i, slice_get_uint8(input, data_start_byte_offset + i));
         tag->data[start_byte_offset + i] = slice_get_uint8(input, data_start_byte_offset + i);
     }
 
-    log_info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
-             transfer_size * tag->elem_size);
+    log_info("Transfer size %u (in words), tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
+             transfer_size * PLC5_WORD_SIZE);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
@@ -681,6 +734,280 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     }
 
     log_info("RMW operation complete.");
+
+    /* build the response. */
+    slice_set_uint8(output, 0, 0x4f);
+    slice_set_uint8(output, 1, 0); /* no error */
+    slice_set_uint16_le(output, 2, plc->pccc_seq_id);
+
+    return slice_from_slice(output, 0, 4);
+}
+
+
+/*
+ * PCCC typed data is prefixed with a "DT byte": the high nybble is the type and the low nybble
+ * the size.  A nybble with bit 3 set means its low three bits are instead a count of following
+ * bytes holding the real value.
+ *
+ * ponytail: only single extension bytes are generated and accepted.  A PCCC packet cannot
+ * exceed 244 bytes, so nothing wider is reachable, and the library's own encoder and decoder
+ * disagree on the byte order of wider values anyway (pccc.c:719 vs pccc.c:666).
+ */
+size_t encode_dt_byte(slice_s output, size_t offset, uint8_t data_type, size_t data_size) {
+    size_t index = offset + 1;
+    uint8_t type_nybble = 0;
+    uint8_t size_nybble = 0;
+
+    if(data_type <= 0x07) {
+        type_nybble = data_type;
+    } else {
+        type_nybble = (uint8_t)0x09;
+        slice_set_uint8(output, index++, data_type);
+    }
+
+    if(data_size <= 0x07) {
+        size_nybble = (uint8_t)data_size;
+    } else {
+        size_nybble = (uint8_t)0x09;
+        slice_set_uint8(output, index++, (uint8_t)data_size);
+    }
+
+    slice_set_uint8(output, offset, (uint8_t)((type_nybble << 4) | size_nybble));
+
+    return index - offset;
+}
+
+
+/* returns the number of bytes consumed, or zero if the prefix is malformed or truncated. */
+size_t decode_dt_byte(slice_s input, size_t offset, uint8_t *data_type, size_t *data_size) {
+    size_t index = offset + 1;
+    uint8_t dt_byte = 0;
+    uint8_t type_nybble = 0;
+    uint8_t size_nybble = 0;
+
+    if(offset >= slice_len(input)) { return 0; }
+
+    dt_byte = slice_get_uint8(input, offset);
+    type_nybble = (uint8_t)((dt_byte & (uint8_t)0xF0) >> 4);
+    size_nybble = (uint8_t)(dt_byte & (uint8_t)0x0F);
+
+    *data_type = type_nybble;
+    *data_size = size_nybble;
+
+    if(type_nybble & (uint8_t)0x08) {
+        if((type_nybble & (uint8_t)0x07) != 1 || index >= slice_len(input)) { return 0; }
+        *data_type = slice_get_uint8(input, index++);
+    }
+
+    if(size_nybble & (uint8_t)0x08) {
+        if((size_nybble & (uint8_t)0x07) != 1 || index >= slice_len(input)) { return 0; }
+        *data_size = slice_get_uint8(input, index++);
+    }
+
+    return index - offset;
+}
+
+
+uint8_t lgx_pccc_data_type(tag_def_s *tag) {
+    switch(tag->tag_type) {
+        case TAG_PCCC_TYPE_BIT: return PCCC_DATA_BIT_STRING; break;
+        case TAG_PCCC_TYPE_REAL: return PCCC_DATA_REAL; break;
+        case TAG_PCCC_TYPE_STRING: return PCCC_DATA_BYTE_STRING; break;
+        /* N and L files are both signed integers; the DT byte size tells them apart. */
+        default: return PCCC_DATA_INT; break;
+    }
+}
+
+
+slice_s handle_lgx_read_request(slice_s input, slice_s output, plc_s *plc) {
+    uint16_t offset = 0;
+    uint16_t transfer_size = 0;
+    size_t start_byte_offset = 0;
+    size_t end_byte_offset = 0;
+    size_t transfer_bytes = 0;
+    size_t tag_size = 0;
+    size_t data_file_num = 0;
+    size_t data_file_element = 0;
+    size_t dt_len = 0;
+    uint8_t data_file_prefix = 0;
+    tag_def_s *tag = plc->tags;
+
+    log_info("Got packet:");
+    log_info_slice(input);
+
+    /*
+     * 68 - PCCC-mapped Logix typed read.
+     * <offset> - 16-bit element offset into the data file.
+     * <transfer size> - 16-bit count of elements to transfer.
+     * 06 <file num> <file element> - PLC/5-style logical address.
+     * <transfer size> - the element count again.
+     */
+
+    offset = slice_get_uint16_le(input, 1);
+    transfer_size = slice_get_uint16_le(input, 3);
+
+    data_file_prefix = slice_get_uint8(input, 5);
+
+    if(data_file_prefix != 0x06) {
+        log_info("Unexpected data file prefix byte %d!", data_file_prefix);
+        return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
+    }
+
+    data_file_num = slice_get_uint8(input, 6);
+    data_file_element = slice_get_uint8(input, 7);
+
+    /* find the tag. */
+    while(tag && tag->data_file_num != data_file_num) { tag = tag->next_tag; }
+
+    if(!tag) {
+        log_info("Unable to find tag with data file %u!", (unsigned int)data_file_num);
+        return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
+    }
+
+    tag_size = tag->elem_count * tag->elem_size;
+    start_byte_offset = ((size_t)offset + data_file_element) * tag->elem_size;
+    transfer_bytes = (size_t)transfer_size * tag->elem_size;
+    end_byte_offset = start_byte_offset + transfer_bytes;
+
+    if(start_byte_offset >= tag_size) {
+        log_info("Starting offset, %u, is greater than tag size, %u!", (unsigned int)start_byte_offset, (unsigned int)tag_size);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    if(end_byte_offset > tag_size) {
+        log_info("Ending offset, %u, is greater than tag size, %u!", (unsigned int)end_byte_offset, (unsigned int)tag_size);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    /* the type prefixes below add a few bytes, so leave more headroom than the raw-data cases. */
+    if(transfer_bytes > 230) {
+        log_info("Request asks for too much data, %u bytes, for response packet!", (unsigned int)transfer_bytes);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    /* build the response. */
+    slice_set_uint8(output, 0, 0x4f);
+    slice_set_uint8(output, 1, 0); /* no error */
+    slice_set_uint16_le(output, 2, plc->pccc_seq_id);
+
+    /* a typed read answers with an array prefix covering the whole transfer, then the element type. */
+    dt_len = encode_dt_byte(output, 4, PCCC_DATA_ARRAY, transfer_bytes);
+    dt_len += encode_dt_byte(output, 4 + dt_len, lgx_pccc_data_type(tag), tag->elem_size);
+
+    for(size_t i = 0; i < transfer_bytes; i++) {
+        slice_set_uint8(output, 4 + dt_len + i, tag->data[start_byte_offset + i]);
+    }
+
+    log_info("Transfer size %u (in elements), tag elem size %u, %u type prefix bytes.", transfer_size,
+             (unsigned int)tag->elem_size, (unsigned int)dt_len);
+
+    return slice_from_slice(output, 0, 4 + dt_len + transfer_bytes);
+}
+
+
+slice_s handle_lgx_write_request(slice_s input, slice_s output, plc_s *plc) {
+    uint16_t offset = 0;
+    uint16_t transfer_size = 0;
+    size_t start_byte_offset = 0;
+    size_t end_byte_offset = 0;
+    size_t transfer_bytes = 0;
+    size_t tag_size = 0;
+    size_t data_file_num = 0;
+    size_t data_file_element = 0;
+    size_t data_start_byte_offset = 0;
+    size_t data_len = 0;
+    size_t dt_len = 0;
+    size_t dt_data_size = 0;
+    uint8_t dt_data_type = 0;
+    uint8_t data_file_prefix = 0;
+    tag_def_s *tag = plc->tags;
+
+    log_info("Got packet:");
+    log_info_slice(input);
+
+    /*
+     * 67 - PCCC-mapped Logix typed write.  Same header as the read above, but the element count
+     * at the end is replaced by the type prefixes the client got back from its first read,
+     * followed by the data itself.
+     */
+
+    offset = slice_get_uint16_le(input, 1);
+    transfer_size = slice_get_uint16_le(input, 3);
+
+    data_file_prefix = slice_get_uint8(input, 5);
+
+    if(data_file_prefix != 0x06) {
+        log_info("Unexpected data file prefix byte %d!", data_file_prefix);
+        return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
+    }
+
+    data_file_num = slice_get_uint8(input, 6);
+    data_file_element = slice_get_uint8(input, 7);
+
+    /* find the tag. */
+    while(tag && tag->data_file_num != data_file_num) { tag = tag->next_tag; }
+
+    if(!tag) {
+        log_info("Unable to find tag with data file %u!", (unsigned int)data_file_num);
+        return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
+    }
+
+    tag_size = tag->elem_count * tag->elem_size;
+    start_byte_offset = ((size_t)offset + data_file_element) * tag->elem_size;
+    transfer_bytes = (size_t)transfer_size * tag->elem_size;
+    end_byte_offset = start_byte_offset + transfer_bytes;
+
+    if(start_byte_offset >= tag_size) {
+        log_info("Starting offset, %u, is greater than tag size, %u!", (unsigned int)start_byte_offset, (unsigned int)tag_size);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    if(end_byte_offset > tag_size) {
+        log_info("Ending offset, %u, is greater than tag size, %u!", (unsigned int)end_byte_offset, (unsigned int)tag_size);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    /* step over the type prefixes: an array header, if present, then the element header. */
+    dt_len = decode_dt_byte(input, 8, &dt_data_type, &dt_data_size);
+
+    if(dt_len == 0) {
+        log_info("Unable to decode the data type prefix!");
+        return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
+    }
+
+    if(dt_data_type == PCCC_DATA_ARRAY) {
+        size_t elem_dt_len = decode_dt_byte(input, 8 + dt_len, &dt_data_type, &dt_data_size);
+
+        if(elem_dt_len == 0) {
+            log_info("Unable to decode the array element data type prefix!");
+            return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
+        }
+
+        dt_len += elem_dt_len;
+    }
+
+    data_start_byte_offset = 8 + dt_len;
+
+    if(slice_len(input) < data_start_byte_offset) {
+        log_info("Packet too short to contain any data!");
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    data_len = slice_len(input) - data_start_byte_offset;
+
+    /*
+     * The client pads the embedded PCCC request out to an even length, so one trailing byte
+     * beyond the transfer is expected and is not part of the data.
+     */
+    if(data_len != transfer_bytes && data_len != transfer_bytes + 1) {
+        log_info("Data in packet is not the same length, %u, as the requested transfer, %u!", (unsigned int)data_len,
+                 (unsigned int)transfer_bytes);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
+    for(size_t i = 0; i < transfer_bytes; i++) {
+        tag->data[start_byte_offset + i] = slice_get_uint8(input, data_start_byte_offset + i);
+    }
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
