@@ -134,7 +134,9 @@ between them. Making `tag->req` atomic converts a mutex into a use-after-free.
 
 ---
 
-## 2. Delete `src/utils/handle_system.{c,h}`
+## 2. Delete `src/utils/handle_system.{c,h}` — DONE (2026-09-09)
+
+Both files removed; full build clean. The rationale is kept below as the record of why.
 
 Dead code, and a second competing lifetime model. It is in no `CMakeLists.txt`, has zero
 callers outside itself, and calls `mutex_create()` / `cond_create()` with no arguments
@@ -286,13 +288,13 @@ rewrite rather than doing separately.
 | # | Change                                   | Diff        | Gets you                                            |
 |---|------------------------------------------|-------------|-----------------------------------------------------|
 | 1 | Lock-rank asserts (§1)                   | ~40 lines   | Finds real `api ↔ session` cycles today, on CI      |
-| 2 | Delete `handle_system.*` (§2)            | −545 lines  | Removes a broken parallel lifetime model            |
+| 2 | ~~Delete `handle_system.*` (§2)~~ **done** | −545 lines  | Removed a broken parallel lifetime model            |
 | 3 | `-Wthread-safety` annotations (§3)       | ~5 structs  | Compiler rejects unlocked field access              |
 | 4 | `-Wconsumed` on rc pointers (§4)         | 1 header    | Compiler flags use-after-`rc_dec`                   |
 | 5 | `refcount_drain()` condvar (§6)          | ~30 lines   | Removes a poll-and-give-up shutdown race            |
 | 6 | X-macro'd `lib.c` accessors (§7a)        | −900 lines  | One bounds check instead of 46                      |
 
-Items 1, 2, and 5 are self-contained and independent of the slice rewrite. Items 3 and 4
+Items 1 and 5 are self-contained and independent of the slice rewrite (item 2 is done). Items 3 and 4
 are Clang-only warning jobs and cannot break the GCC/MSVC builds. Item 6 should probably
 wait until the slice rewrite settles the shape of `tag->data`.
 
