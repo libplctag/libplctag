@@ -1287,9 +1287,17 @@ def run_test_in_worker(test: Test) -> Result:
                 # server still returns almost immediately once it's actually listening.
                 ready_timeout = max(test.server.startup_wait_s * 10, 15.0)
                 if not _wait_for_server_ready(ready_port, server_proc, ready_timeout):
-                    end = time.monotonic()
                     detail = "server exited during startup" if server_proc.poll() is not None else "server did not start listening in time"
-                    return Result(test=test, ok=False, detail=detail, start=start, end=end)
+                    stop_process(server_proc)
+                    server_proc = None
+                    if attempt == 1:
+                        end = time.monotonic()
+                        return Result(test=test, ok=False, detail=detail + " (retried once)", start=start, end=end)
+                    # An exclusive_default_port server binds a literal port inside Linux's
+                    # ephemeral range, so an unrelated client's source port can be sitting on
+                    # it (see ALLOC_PORT_BASE). That clears in seconds -- wait and retry.
+                    time.sleep(2.0)
+                    continue
 
             cmd = _client_wrapper + _fill(test.cmd_template, ports)
             base_timeout = STRESS_TEST_TIMEOUT_S if test.group == Group.STRESS else DEFAULT_TEST_TIMEOUT_S
