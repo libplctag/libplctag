@@ -55,18 +55,22 @@ void atomic_init_bool(atomic_bool *a, bool new_val) { *a = new_val; }
 bool atomic_get_bool(atomic_bool *a) { return *a; }
 
 bool atomic_set_bool(atomic_bool *a, bool new_val) {
-    bool old = *a;
-    *a = new_val;
-    return old;
+#    ifdef _WIN32
+    /* Windows has no single byte atomic; atomic_bool is a volatile short here. */
+    return InterlockedExchange16(a, (SHORT)new_val) != 0;
+#    else
+    return __atomic_exchange_n(a, new_val, __ATOMIC_SEQ_CST);
+#    endif
 }
 
 bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val) {
 #    ifdef _WIN32
-    /* Windows does not have a native single byte atomic */
-    return InterlockedCompareExchange16(a, new_val, old_val) == old_val;
+    /* Windows does not have a native single byte atomic; atomic_bool is a volatile short here. */
+    return InterlockedCompareExchange16(a, (SHORT)new_val, (SHORT)old_val) != 0;
 #    else
     bool expected = old_val;
-    return __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return expected;
 #    endif
 }
 
@@ -75,9 +79,11 @@ void atomic_init_int32(atomic_int32_t *a, int32_t new_val) { *a = new_val; }
 int32_t atomic_get_int32(atomic_int32_t *a) { return *a; }
 
 int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val) {
-    int32_t old = *a;
-    *a = new_val;
-    return old;
+#    ifdef _WIN32
+    return (int32_t)InterlockedExchange((LONG *)a, (LONG)new_val);
+#    else
+    return __atomic_exchange_n(a, new_val, __ATOMIC_SEQ_CST);
+#    endif
 }
 
 int32_t atomic_add_int32(atomic_int32_t *a, int32_t other) {
@@ -103,9 +109,11 @@ void atomic_init_int64(atomic_int64_t *a, int64_t new_val) { *a = new_val; }
 int64_t atomic_get_int64(atomic_int64_t *a) { return *a; }
 
 int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val) {
-    int64_t old = *a;
-    *a = new_val;
-    return old;
+#    ifdef _WIN32
+    return (int64_t)InterlockedExchange64((LONGLONG *)a, (LONGLONG)new_val);
+#    else
+    return __atomic_exchange_n(a, new_val, __ATOMIC_SEQ_CST);
+#    endif
 }
 
 int64_t atomic_add_int64(atomic_int64_t *a, int64_t other) {

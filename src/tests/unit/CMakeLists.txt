@@ -70,6 +70,46 @@ target_include_directories(test_tag_name_bounds PRIVATE
 
 target_link_libraries(test_tag_name_bounds PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_atomic_utils: checks the utils/atomic_utils contract (set and compare-and-set
+# return the ORIGINAL value) and that set is a real atomic exchange rather than a read
+# followed by a write, by building a spin lock on it and hammering it with threads.
+#
+# atomic_utils.c holds two separate implementations -- a C11 one and a fallback for
+# compilers without <stdatomic.h> -- and a build only ever compiles one of them. So the
+# test is built twice. The first links the library and exercises whatever this compiler
+# selected; the second compiles atomic_utils.c directly with __STDC_NO_ATOMICS__ to force
+# the fallback, which is otherwise dead code on every platform that has C11 atomics.
+#
+# The forced target still links plctag_static for thread_create()/thread_join(), but its
+# own atomic_utils.o resolves the atomic_* symbols first, so the archive member is never
+# pulled in and there is no duplicate definition.
+add_executable(test_atomic_utils test_atomic_utils.c)
+
+target_include_directories(test_atomic_utils PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_atomic_utils PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+add_executable(test_atomic_utils_no_c11
+    test_atomic_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/atomic_utils.c
+)
+
+target_include_directories(test_atomic_utils_no_c11 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_compile_definitions(test_atomic_utils_no_c11 PRIVATE __STDC_NO_ATOMICS__)
+
+target_link_libraries(test_atomic_utils_no_c11 PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_eip_response_validation: checks that a response whose EIP header does not answer the
 # request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
 # because the library's own socket shim is internal, so it is skipped on Windows.
@@ -96,10 +136,13 @@ endif()
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
+add_test(NAME unit_test_atomic_utils COMMAND test_atomic_utils)
+add_test(NAME unit_test_atomic_utils_no_c11 COMMAND test_atomic_utils_no_c11)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_atomic_utils test_atomic_utils_no_c11
+            ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"
