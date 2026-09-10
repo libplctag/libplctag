@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,43 +33,56 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLATFORM_H__
-#define __PLATFORM_H__
+/*
+ * String helpers.
+ *
+ * This replaces the string section that used to live in the platform shims
+ * (src/platform/posix/platform.[ch] and src/platform/windows/platform.[ch]).
+ * The API is unchanged; only the home of the declarations moved.
+ *
+ * Every entry point tolerates a NULL pointer, treating it as an empty string.
+ * The comparisons order NULL and "" ahead of any non-empty string and report
+ * them equal to each other, so callers do not have to pre-check.
+ *
+ * str_dup(), str_split() and str_concat() return memory the caller must free
+ * with mem_free().
+ */
 
-#include <stddef.h>
 #include <stdint.h>
-#include <math.h>
-#include <stdarg.h>
+
+#include <libplctag/lib/libplctag.h>
+#include <utils/macros.h>
+
+
+/* comparisons: -1, 0 or 1, ordering NULL and "" below any non-empty string. */
+extern int str_cmp(const char *first, const char *second);
+extern int str_cmp_i(const char *first, const char *second);
+extern int str_cmp_i_n(const char *first, const char *second, int count);
+
+/* case-insensitive strstr(); NULL when either side is empty or there is no match. */
+extern char *str_str_cmp_i(const char *haystack, const char *needle);
 
 /*
- * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes, the old
- * "condition variables" (now interruptible sleeps), sockets, memory and strings
- * have moved to utils/thread.h, utils/spinlock.h, utils/mutex.h, utils/nap.h,
- * utils/socket.h, utils/mem.h and utils/str.h.  They are included here so that
- * existing consumers keep compiling unchanged.  Time and a couple of macros are
- * what is left.  New code should include the utils/ headers directly.
+ * Copies only when the whole source fits.  Returns PLCTAG_ERR_TOO_LARGE and
+ * writes nothing rather than truncating, so the destination is never left
+ * holding a partial string.
  */
-#include <utils/mem.h>
-#include <utils/mutex.h>
-#include <utils/nap.h>
-#include <utils/socket.h>
-#include <utils/spinlock.h>
-#include <utils/str.h>
-#include <utils/thread.h>
+extern int str_copy(char *dst, int dst_size, const char *src);
 
-/* common definitions */
-#define START_PACK
-#define END_PACK __attribute__((__packed__))
+extern int str_length(const char *str);
+extern char *str_dup(const char *str);
 
-#define ZLA_SIZE 0
+/* return 0 on success, -1 if the text does not convert or does not fit. */
+extern int str_to_int(const char *str, int *val);
+extern int str_to_float(const char *str, float *val);
 
-#define USE_GNU_VARARG_MACROS 1
+/*
+ * Splits into a single allocation: an array of pointers terminated by a NULL
+ * entry, followed by a private copy of the string with the separators zeroed.
+ * One mem_free() of the returned pointer releases all of it.
+ */
+extern char **str_split(const char *str, const char *sep);
 
-
-/* misc functions */
-extern int sleep_ms(int ms);
-extern int64_t time_ms(void);
-
-#define snprintf_platform snprintf
-
-#endif /* _PLATFORM_H_ */
+/* concatenates its arguments into one new string. */
+#define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__) + 1, s1, __VA_ARGS__)
+extern char *str_concat_impl(int num_args, ...);
