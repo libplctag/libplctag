@@ -45,6 +45,7 @@
  * compiling unchanged.  Mutexes, condition variables and sockets will move
  * out in the same way.  New code should include utils/thread.h directly.
  */
+#include <utils/spinlock.h>
 #include <utils/thread.h>
 
 /* common definitions */
@@ -144,22 +145,6 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
         __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))                \
         for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock);               \
             __sync_rc_nargle_##__LINE__ == PLCTAG_STATUS_OK && __sync_flag_nargle_##__LINE__; __sync_flag_nargle_##__LINE__ = 0)
-
-/* atomic operations */
-#define spin_block(lock)                                                                \
-    for(int __sync_flag_nargle_lock_##__LINE__ = 1; __sync_flag_nargle_lock_##__LINE__; \
-        __sync_flag_nargle_lock_##__LINE__ = 0, lock_release(lock))                     \
-        for(int __sync_rc_nargle_lock_##__LINE__ = lock_acquire(lock);                  \
-            __sync_rc_nargle_lock_##__LINE__ && __sync_flag_nargle_lock_##__LINE__; __sync_flag_nargle_lock_##__LINE__ = 0)
-
-typedef int lock_t;
-
-#define LOCK_INIT (0)
-
-/* returns non-zero when lock acquired, zero when lock operation failed */
-extern int lock_acquire_try(lock_t *lock);
-extern int lock_acquire(lock_t *lock);
-extern void lock_release(lock_t *lock);
 
 
 /* condition variables */

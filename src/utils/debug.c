@@ -44,6 +44,7 @@
 #include <time.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
+#include <utils/spinlock.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #    include <windows.h>
@@ -67,8 +68,8 @@ static volatile uint32_t thread_num = 1;
  * mutex here means those calls re-enter pdebug_impl() while still inside this same
  * critical section, recursing without ever completing the original lock attempt.
  * lock_acquire()/lock_release() are deliberately pdebug-free for exactly this
- * reason. lock_t is also valid from static initialization alone (LOCK_INIT is just
- * 0), unlike a mutex_p, which needs a runtime mutex_create() -- and pdebug_impl()/
+ * reason. lock_t is also valid from static initialization alone (LOCK_INIT is a
+ * plain zero initializer), unlike a mutex_p, which needs a runtime mutex_create() -- and pdebug_impl()/
  * debug_register_logger()/debug_unregister_logger() can all run before
  * initialize_modules() ever does, e.g. a caller may register a logger as their very
  * first API call.

@@ -39,6 +39,7 @@
 #    include <libplctag/protocols/ab/ab_common.h>
 #    include <libplctag/protocols/ab/defs.h>
 #    include <utils/atomic_utils.h>
+#    include <utils/spinlock.h>
 #    include <utils/rc.h>
 #    include <utils/vector.h>
 

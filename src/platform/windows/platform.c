@@ -802,65 +802,6 @@ int mutex_destroy(mutex_p *m) {
 
 
 /***************************************************************************
- ******************************* Atomic Ops ********************************
- **************************************************************************/
-
-/*
- * lock_acquire
- *
- * Tries to write a non-zero value into the lock atomically.
- *
- * Returns non-zero on success.
- *
- * Warning: do not pass null pointers!
- */
-
-#define ATOMIC_UNLOCK_VAL ((LONG)(0))
-#define ATOMIC_LOCK_VAL ((LONG)(1))
-
-extern int lock_acquire_try(lock_t *lock) {
-    LONG rc = InterlockedExchange(lock, ATOMIC_LOCK_VAL);
-
-    if(rc != ATOMIC_LOCK_VAL) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
-
-
-/*
- * Spin briefly, then start yielding.
- *
- * A bare spin only pays off when the holder is running on another core and will
- * release within a few cycles. If it is descheduled, or blocked in a syscall, or
- * the process is being serialized onto one core, then spinning burns the waiter's
- * whole timeslice and actively delays the holder it is waiting on. Yielding hands
- * the CPU to the holder instead, so the worst case degrades to "slow" rather than
- * to a livelock that scales with the thread count.
- */
-extern int lock_acquire(lock_t *lock) {
-    int spins = 0;
-
-    while(!lock_acquire_try(lock)) {
-        if(++spins >= 100) { /* MAGIC */
-            /* SwitchToThread() yields only to another thread on this core, so fall
-             * back to a zero-length sleep, which will also consider other cores. */
-            if(!SwitchToThread()) { Sleep(0); }
-            spins = 0;
-        }
-    }
-
-    return 1;
-}
-
-extern void lock_release(lock_t *lock) {
-    InterlockedExchange(lock, ATOMIC_UNLOCK_VAL);
-    /*pdebug("released lock");*/
-}
-
-
-/***************************************************************************
  ************************* Condition Variables *****************************
  ***************************************************************************/
 

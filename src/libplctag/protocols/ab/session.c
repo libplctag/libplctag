@@ -3412,7 +3412,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
         res->data = buffer;
         res->tag_id = tag_id;
         res->request_capacity = (int)request_capacity;
-        res->lock = LOCK_INIT;
+        atomic_init_bool(&res->lock, false);
 
         *req = res;
     }

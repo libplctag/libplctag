@@ -737,63 +737,6 @@ int mutex_destroy(mutex_p *m) {
 
 
 /***************************************************************************
- ******************************* Atomic Ops ********************************
- **************************************************************************/
-
-/*
- * lock_acquire
- *
- * Tries to write a non-zero value into the lock atomically.
- *
- * Returns non-zero on success.
- *
- * Warning: do not pass null pointers!
- */
-
-#define ATOMIC_LOCK_VAL (1)
-
-extern int lock_acquire_try(lock_t *lock) {
-    int rc = __sync_lock_test_and_set((int *)lock, ATOMIC_LOCK_VAL);
-
-    if(rc != ATOMIC_LOCK_VAL) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
-
-/*
- * Spin briefly, then start yielding.
- *
- * A bare spin only pays off when the holder is running on another core and will
- * release within a few cycles. If it is descheduled, or blocked in a syscall, or
- * the process is being serialized onto one core -- an oversubscribed machine, or
- * running under Valgrind, which lets exactly one thread run at a time -- then
- * spinning burns the waiter's whole timeslice and actively delays the holder it is
- * waiting on. Yielding hands the CPU to the holder instead, so the worst case
- * degrades to "slow" rather than to a livelock that scales with the thread count.
- */
-int lock_acquire(lock_t *lock) {
-    int spins = 0;
-
-    while(!lock_acquire_try(lock)) {
-        if(++spins >= 100) { /* MAGIC */
-            sched_yield();
-            spins = 0;
-        }
-    }
-
-    return 1;
-}
-
-
-extern void lock_release(lock_t *lock) {
-    __sync_lock_release((int *)lock);
-    /*pdebug("released lock");*/
-}
-
-
-/***************************************************************************
  ************************* Condition Variables *****************************
  ***************************************************************************/
 

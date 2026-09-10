@@ -55,6 +55,7 @@
 #include <utils/random_utils.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
+#include <utils/spinlock.h>
 
 
 #define INITIAL_TAG_TABLE_SIZE (201)

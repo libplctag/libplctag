@@ -39,6 +39,7 @@
 #    include <libplctag/protocols/omron/defs.h>
 #    include <libplctag/protocols/omron/omron_common.h>
 #    include <utils/atomic_utils.h>
+#    include <utils/spinlock.h>
 #    include <utils/rc.h>
 #    include <utils/vector.h>
 
