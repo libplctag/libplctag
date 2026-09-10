@@ -32,12 +32,11 @@
  ***************************************************************************/
 
 /*
- * Portable condition variables.  See utils/condvar.h for what this primitive
- * is and is not.
+ * Interruptible sleep.  See utils/nap.h for what this primitive is and is not.
  *
  * All platform-specific code is confined to the static functions at the
  * bottom of this file.  The public functions hold the argument checking,
- * allocation, timeout arithmetic, flag handling and logging that both
+ * allocation, timeout arithmetic, interrupt handling and logging that both
  * platforms share.
  */
 
@@ -56,11 +55,11 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
-#include <utils/condvar.h>
+#include <utils/nap.h>
 #include <utils/debug.h>
 
 
-struct cond_t {
+struct nap_t {
 #ifdef _WIN32
     CRITICAL_SECTION cs;
     CONDITION_VARIABLE cond;
@@ -68,56 +67,56 @@ struct cond_t {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
 #endif
-    bool flag;
+    bool interrupted;
 };
 
 
-static int32_t condvar_init(struct cond_t *c);
-static int32_t condvar_lock(struct cond_t *c);
-static int32_t condvar_unlock(struct cond_t *c);
-static int32_t condvar_sleep(struct cond_t *c, int64_t time_left_ms);
-static int32_t condvar_wake(struct cond_t *c);
-static void condvar_close(struct cond_t *c);
+static int32_t nap_init(struct nap_t *n);
+static int32_t nap_lock(struct nap_t *n);
+static int32_t nap_unlock(struct nap_t *n);
+static int32_t nap_sleep(struct nap_t *n, int64_t time_left_ms);
+static int32_t nap_signal(struct nap_t *n);
+static void nap_close(struct nap_t *n);
 
 
 /*
- * Create a new condition variable.
+ * Create a new nap.
  */
 
-extern int32_t cond_create(cond_p *c) {
+extern int32_t nap_create(nap_p *n) {
     int32_t rc = PLCTAG_STATUS_OK;
-    cond_p tmp_cond = NULL;
+    nap_p tmp_nap = NULL;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Starting.");
 
-    if(!c) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Null pointer to condition var pointer!");
+    if(!n) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Null pointer to nap pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(*c) { pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Condition var pointer is not null, was it not deleted first?"); }
+    if(*n) { pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Nap pointer is not null, was it not deleted first?"); }
 
     /* clear the output first. */
-    *c = NULL;
+    *n = NULL;
 
-    tmp_cond = (struct cond_t *)mem_alloc((int)(unsigned int)sizeof(*tmp_cond));
+    tmp_nap = (struct nap_t *)mem_alloc((int)(unsigned int)sizeof(*tmp_nap));
 
-    if(!tmp_cond) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to allocate new condition var!");
+    if(!tmp_nap) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to allocate new nap!");
         return PLCTAG_ERR_NO_MEM;
     }
 
-    rc = condvar_init(tmp_cond);
+    rc = nap_init(tmp_nap);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to initialize condition var!");
-        mem_free(tmp_cond);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to initialize nap!");
+        mem_free(tmp_nap);
         return rc;
     }
 
-    tmp_cond->flag = false;
+    tmp_nap->interrupted = false;
 
-    *c = tmp_cond;
+    *n = tmp_nap;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Done.");
 
@@ -126,20 +125,20 @@ extern int32_t cond_create(cond_p *c) {
 
 
 /*
- * Wait for the condition var to be signaled or for the timeout to expire.
+ * Sleep until interrupted or until the timeout expires.
  *
- * The flag is consumed on the way out, so each signal releases exactly one
- * waiter.
+ * A pending interrupt is taken on the way out, so each interrupt releases
+ * exactly one waiter.  Timing out is the normal path.
  */
 
-extern int32_t cond_wait_impl(const char *func, int32_t line_num, cond_p c, int32_t timeout_ms) {
+extern int32_t nap_wait_impl(const char *func, int32_t line_num, nap_p n, int32_t timeout_ms) {
     int32_t rc = PLCTAG_STATUS_OK;
     int64_t start_time = time_ms();
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting. Called from %s:%d.", func, (int)line_num);
 
-    if(!c) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Condition var pointer is null in call from %s:%d!", func, (int)line_num);
+    if(!n) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Nap pointer is null in call from %s:%d!", func, (int)line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -150,14 +149,14 @@ extern int32_t cond_wait_impl(const char *func, int32_t line_num, cond_p c, int3
         return PLCTAG_ERR_TIMEOUT;
     }
 
-    rc = condvar_lock(c);
+    rc = nap_lock(n);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to lock mutex!");
         return rc;
     }
 
-    while(!c->flag) {
+    while(!n->interrupted) {
         int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
 
         pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Waiting for %" PRId64 "ms.", time_left);
@@ -168,33 +167,33 @@ extern int32_t cond_wait_impl(const char *func, int32_t line_num, cond_p c, int3
             break;
         }
 
-        rc = condvar_sleep(c, time_left);
+        rc = nap_sleep(n, time_left);
 
         if(rc == PLCTAG_ERR_TIMEOUT) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Timeout response from condition var wait.");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Nap ran to its timeout.");
             break;
         }
 
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Error waiting on condition variable!");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Error while napping!");
             break;
         }
 
         /* we might need to wait again.  could be a spurious wake up. */
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Condition var wait returned.");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Nap wait returned.");
     }
 
-    if(c->flag) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Condition var signaled for call at %s:%d.", func, (int)line_num);
+    if(n->interrupted) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Nap interrupted for call at %s:%d.", func, (int)line_num);
 
-        /* clear the flag now that we've responded. */
-        c->flag = false;
+        /* take the interrupt now that we've responded to it. */
+        n->interrupted = false;
     } else {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Condition wait terminated due to error or timeout for call at %s:%d.", func,
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Nap terminated due to error or timeout for call at %s:%d.", func,
                (int)line_num);
     }
 
-    if(condvar_unlock(c) != PLCTAG_STATUS_OK) {
+    if(nap_unlock(n) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
@@ -206,40 +205,40 @@ extern int32_t cond_wait_impl(const char *func, int32_t line_num, cond_p c, int3
 
 
 /*
- * Raise the flag and wake one waiter.
+ * Post an interrupt and wake one waiter.
  */
 
-extern int32_t cond_signal_impl(const char *func, int32_t line_num, cond_p c) {
+extern int32_t nap_interrupt_impl(const char *func, int32_t line_num, nap_p n) {
     int32_t rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting.  Called from %s:%d.", func, (int)line_num);
 
-    if(!c) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Condition var pointer is null in call at %s:%d!", func, (int)line_num);
+    if(!n) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Nap pointer is null in call at %s:%d!", func, (int)line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = condvar_lock(c);
+    rc = nap_lock(n);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to lock mutex!");
         return rc;
     }
 
-    c->flag = true;
+    n->interrupted = true;
 
     /*
      * The wake happens with the lock held.  Both platforms allow it and it
-     * keeps the flag and the wake from being separated by a waiter that gets
-     * in between them.
+     * keeps the pending interrupt and the wake from being separated by a
+     * waiter that gets in between them.
      */
-    rc = condvar_wake(c);
+    rc = nap_signal(n);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Signal of condition var failed in call at %s:%d!", func, (int)line_num);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Interrupt of nap failed in call at %s:%d!", func, (int)line_num);
     }
 
-    if(condvar_unlock(c) != PLCTAG_STATUS_OK) {
+    if(nap_unlock(n) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
@@ -251,29 +250,29 @@ extern int32_t cond_signal_impl(const char *func, int32_t line_num, cond_p c) {
 
 
 /*
- * Drop the flag without waiting.
+ * Discard a pending interrupt without waiting.
  */
 
-extern int32_t cond_clear_impl(const char *func, int32_t line_num, cond_p c) {
+extern int32_t nap_clear_impl(const char *func, int32_t line_num, nap_p n) {
     int32_t rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Starting.  Called from %s:%d.", func, (int)line_num);
 
-    if(!c) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Condition var pointer is null in call at %s:%d!", func, (int)line_num);
+    if(!n) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Nap pointer is null in call at %s:%d!", func, (int)line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = condvar_lock(c);
+    rc = nap_lock(n);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to lock mutex!");
         return rc;
     }
 
-    c->flag = false;
+    n->interrupted = false;
 
-    if(condvar_unlock(c) != PLCTAG_STATUS_OK) {
+    if(nap_unlock(n) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
@@ -285,22 +284,22 @@ extern int32_t cond_clear_impl(const char *func, int32_t line_num, cond_p c) {
 
 
 /*
- * Destroy the condition var and free the handle.
+ * Destroy the nap and free the handle.
  */
 
-extern int32_t cond_destroy(cond_p *c) {
+extern int32_t nap_destroy(nap_p *n) {
     pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Starting.");
 
-    if(!c || !*c) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Condition var pointer is null!");
+    if(!n || !*n) {
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Nap pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    condvar_close(*c);
+    nap_close(*n);
 
-    mem_free(*c);
+    mem_free(*n);
 
-    *c = NULL;
+    *n = NULL;
 
     pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Done.");
 
@@ -314,30 +313,30 @@ extern int32_t cond_destroy(cond_p *c) {
 
 #ifdef _WIN32
 
-static int32_t condvar_init(struct cond_t *c) {
-    InitializeCriticalSection(&(c->cs));
-    InitializeConditionVariable(&(c->cond));
+static int32_t nap_init(struct nap_t *n) {
+    InitializeCriticalSection(&(n->cs));
+    InitializeConditionVariable(&(n->cond));
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static int32_t condvar_lock(struct cond_t *c) {
-    EnterCriticalSection(&(c->cs));
+static int32_t nap_lock(struct nap_t *n) {
+    EnterCriticalSection(&(n->cs));
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static int32_t condvar_unlock(struct cond_t *c) {
-    LeaveCriticalSection(&(c->cs));
+static int32_t nap_unlock(struct nap_t *n) {
+    LeaveCriticalSection(&(n->cs));
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static int32_t condvar_sleep(struct cond_t *c, int64_t time_left_ms) {
-    if(SleepConditionVariableCS(&(c->cond), &(c->cs), (DWORD)time_left_ms)) { return PLCTAG_STATUS_OK; }
+static int32_t nap_sleep(struct nap_t *n, int64_t time_left_ms) {
+    if(SleepConditionVariableCS(&(n->cond), &(n->cs), (DWORD)time_left_ms)) { return PLCTAG_STATUS_OK; }
 
     /* error or timeout. */
     if(GetLastError() == ERROR_TIMEOUT) { return PLCTAG_ERR_TIMEOUT; }
@@ -346,28 +345,28 @@ static int32_t condvar_sleep(struct cond_t *c, int64_t time_left_ms) {
 }
 
 
-static int32_t condvar_wake(struct cond_t *c) {
-    WakeConditionVariable(&(c->cond));
+static int32_t nap_signal(struct nap_t *n) {
+    WakeConditionVariable(&(n->cond));
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static void condvar_close(struct cond_t *c) {
+static void nap_close(struct nap_t *n) {
     /*
      * NOTE: the old platform code freed the handle without ever deleting the
      * critical section, leaking its wait resources.
      */
-    DeleteCriticalSection(&(c->cs));
+    DeleteCriticalSection(&(n->cs));
 }
 
 #else
 
-static int32_t condvar_init(struct cond_t *c) {
-    if(pthread_mutex_init(&(c->mutex), NULL)) { return PLCTAG_ERR_CREATE; }
+static int32_t nap_init(struct nap_t *n) {
+    if(pthread_mutex_init(&(n->mutex), NULL)) { return PLCTAG_ERR_CREATE; }
 
-    if(pthread_cond_init(&(c->cond), NULL)) {
-        pthread_mutex_destroy(&(c->mutex));
+    if(pthread_cond_init(&(n->cond), NULL)) {
+        pthread_mutex_destroy(&(n->mutex));
         return PLCTAG_ERR_CREATE;
     }
 
@@ -375,21 +374,21 @@ static int32_t condvar_init(struct cond_t *c) {
 }
 
 
-static int32_t condvar_lock(struct cond_t *c) {
-    if(pthread_mutex_lock(&(c->mutex))) { return PLCTAG_ERR_MUTEX_LOCK; }
+static int32_t nap_lock(struct nap_t *n) {
+    if(pthread_mutex_lock(&(n->mutex))) { return PLCTAG_ERR_MUTEX_LOCK; }
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static int32_t condvar_unlock(struct cond_t *c) {
-    if(pthread_mutex_unlock(&(c->mutex))) { return PLCTAG_ERR_MUTEX_UNLOCK; }
+static int32_t nap_unlock(struct nap_t *n) {
+    if(pthread_mutex_unlock(&(n->mutex))) { return PLCTAG_ERR_MUTEX_UNLOCK; }
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static int32_t condvar_sleep(struct cond_t *c, int64_t time_left_ms) {
+static int32_t nap_sleep(struct nap_t *n, int64_t time_left_ms) {
     struct timespec timeout;
     int wait_rc = 0;
 
@@ -403,7 +402,7 @@ static int32_t condvar_sleep(struct cond_t *c, int64_t time_left_ms) {
     timeout.tv_sec = (time_t)(end_time / 1000);
     timeout.tv_nsec = (long)1000000 * (long)(end_time % 1000);
 
-    wait_rc = pthread_cond_timedwait(&(c->cond), &(c->mutex), &timeout);
+    wait_rc = pthread_cond_timedwait(&(n->cond), &(n->mutex), &timeout);
 
     if(wait_rc == 0) { return PLCTAG_STATUS_OK; }
 
@@ -413,22 +412,22 @@ static int32_t condvar_sleep(struct cond_t *c, int64_t time_left_ms) {
      * pthread_cond_timedwait() returns the error directly and never touches
      * errno, so wait_rc is the only meaningful value to report here.
      */
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Error %d waiting on condition variable!", wait_rc);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Error %d waiting on nap condition variable!", wait_rc);
 
     return PLCTAG_ERR_BAD_STATUS;
 }
 
 
-static int32_t condvar_wake(struct cond_t *c) {
+static int32_t nap_signal(struct nap_t *n) {
     /*
      * pthread_cond_signal() returns the error directly and never touches
      * errno, so capture the return value rather than reporting an unrelated
      * stale errno.
      */
-    int signal_rc = pthread_cond_signal(&(c->cond));
+    int signal_rc = pthread_cond_signal(&(n->cond));
 
     if(signal_rc) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Signal of condition var returned error %d!", signal_rc);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Signal of nap condition variable returned error %d!", signal_rc);
         return PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -436,9 +435,9 @@ static int32_t condvar_wake(struct cond_t *c) {
 }
 
 
-static void condvar_close(struct cond_t *c) {
-    pthread_cond_destroy(&(c->cond));
-    pthread_mutex_destroy(&(c->mutex));
+static void nap_close(struct nap_t *n) {
+    pthread_cond_destroy(&(n->cond));
+    pthread_mutex_destroy(&(n->mutex));
 }
 
 #endif

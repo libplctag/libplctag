@@ -214,9 +214,9 @@ static void omron_device_tag_destructor(void *ptr) {
         tag->api_mutex = NULL;
     }
 
-    if(tag->tag_cond_wait) {
-        cond_destroy(&(tag->tag_cond_wait));
-        tag->tag_cond_wait = NULL;
+    if(tag->tag_nap) {
+        nap_destroy(&(tag->tag_nap));
+        tag->tag_nap = NULL;
     }
 
     if(tag->byte_order && tag->byte_order->is_allocated) {

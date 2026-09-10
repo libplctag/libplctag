@@ -156,7 +156,7 @@ void conn_teardown(void) {
                 omron_conn_p conn = vector_get(conns, i);
                 if(conn) {
                     atomic_set_int32(&conn->terminating, 1);
-                    if(conn->wait_cond) { cond_signal(conn->wait_cond); }
+                    if(conn->nap) { nap_interrupt(conn->nap); }
                 }
             }
         }
@@ -733,8 +733,8 @@ int conn_init(omron_conn_p conn) {
         return rc;
     }
 
-    /* create the conn condition variable. */
-    if((rc = cond_create(&(conn->wait_cond))) != PLCTAG_STATUS_OK) {
+    /* create the conn nap. */
+    if((rc = nap_create(&(conn->nap))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn condition var!");
         conn->failed = 1;
         return rc;
@@ -954,8 +954,8 @@ void conn_destroy(void *conn_arg) {
     /* terminate the conn thread first. */
     atomic_set_int32(&conn->terminating, 1);
 
-    /* signal the condition variable in case it is waiting */
-    if(conn->wait_cond) { cond_signal(conn->wait_cond); }
+    /* interrupt the nap in case the handler is sleeping */
+    if(conn->nap) { nap_interrupt(conn->nap); }
 
     /* get rid of the handler thread. */
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn thread.");
@@ -997,11 +997,11 @@ void conn_destroy(void *conn_arg) {
         }
     }
 
-    /* we are done with the condition variable, finally destroy it. */
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn condition variable.");
-    if(conn->wait_cond) {
-        cond_destroy(&(conn->wait_cond));
-        conn->wait_cond = NULL;
+    /* we are done with the nap, finally destroy it. */
+    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Destroying conn nap.");
+    if(conn->nap) {
+        nap_destroy(&(conn->nap));
+        conn->nap = NULL;
     }
 
     /* we are done with the mutex, finally destroy it. */
@@ -1084,7 +1084,7 @@ int conn_add_request(omron_conn_p conn, omron_request_p req) {
 
     critical_block(conn->mutex) { rc = conn_add_request_unsafe(conn, req); }
 
-    cond_signal(conn->wait_cond);
+    nap_interrupt(conn->nap);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, req->tag_id, "Done.");
 
@@ -1222,7 +1222,7 @@ THREAD_FUNC(conn_handler) {
                 }
 
                 /* in all cases, don't wait. */
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
 
                 break;
 
@@ -1251,7 +1251,7 @@ THREAD_FUNC(conn_handler) {
                 }
 
                 /* in all cases, don't wait. */
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
 
                 break;
 
@@ -1269,7 +1269,7 @@ THREAD_FUNC(conn_handler) {
                         state = CONN_IDLE;
                     }
                 }
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_SEND_FORWARD_OPEN:
@@ -1284,7 +1284,7 @@ THREAD_FUNC(conn_handler) {
                            "Send Forward Open succeeded, going to CONN_RECEIVE_FORWARD_OPEN state.");
                     state = CONN_RECEIVE_FORWARD_OPEN;
                 }
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_RECEIVE_FORWARD_OPEN:
@@ -1315,7 +1315,7 @@ THREAD_FUNC(conn_handler) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to CONN_IDLE state.");
                     state = CONN_IDLE;
                 }
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_IDLE:
@@ -1350,7 +1350,7 @@ THREAD_FUNC(conn_handler) {
                     } else {
                         state = CONN_UNREGISTER;
                     }
-                    cond_signal(conn->wait_cond);
+                    nap_interrupt(conn->nap);
                 }
 
                 /* check if we should disconnect */
@@ -1364,7 +1364,7 @@ THREAD_FUNC(conn_handler) {
                     } else {
                         state = CONN_UNREGISTER;
                     }
-                    cond_signal(conn->wait_cond);
+                    nap_interrupt(conn->nap);
                 }
 
                 /* if there is work to do, make sure we signal the condition var. */
@@ -1373,7 +1373,7 @@ THREAD_FUNC(conn_handler) {
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
                                "There are %d requests still pending after abort purge and sending.", num_reqs);
-                        cond_signal(conn->wait_cond);
+                        nap_interrupt(conn->nap);
                     }
                 }
 
@@ -1388,7 +1388,7 @@ THREAD_FUNC(conn_handler) {
                 }
 
                 state = CONN_UNREGISTER;
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_UNREGISTER:
@@ -1400,7 +1400,7 @@ THREAD_FUNC(conn_handler) {
                 }
 
                 state = CONN_CLOSE_SOCKET;
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_CLOSE_SOCKET:
@@ -1416,7 +1416,7 @@ THREAD_FUNC(conn_handler) {
                 } else {
                     state = CONN_START_RETRY;
                 }
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_START_RETRY:
@@ -1429,7 +1429,7 @@ THREAD_FUNC(conn_handler) {
                 /* start waiting. */
                 state = CONN_WAIT_ERR_RETRY;
 
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
 
             case CONN_WAIT_ERR_RETRY:
@@ -1439,7 +1439,7 @@ THREAD_FUNC(conn_handler) {
                 if(timeout_time < time_ms()) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Transitioning to CONN_OPEN_SOCKET_START.");
                     state = CONN_OPEN_SOCKET_START;
-                    cond_signal(conn->wait_cond);
+                    nap_interrupt(conn->nap);
                 }
 
                 break;
@@ -1459,7 +1459,7 @@ THREAD_FUNC(conn_handler) {
                                "There are requests waiting, reopening connection to PLC.");
 
                         state = CONN_OPEN_SOCKET_START;
-                        cond_signal(conn->wait_cond);
+                        nap_interrupt(conn->nap);
                     }
                 }
 
@@ -1477,7 +1477,7 @@ THREAD_FUNC(conn_handler) {
                     state = CONN_UNREGISTER;
                 }
 
-                cond_signal(conn->wait_cond);
+                nap_interrupt(conn->nap);
                 break;
         }
 
@@ -1488,7 +1488,7 @@ THREAD_FUNC(conn_handler) {
         if(wait_until_time > 0) {
             int64_t time_left = wait_until_time - time_ms();
 
-            if(time_left > 0) { cond_wait(conn->wait_cond, (int)time_left); }
+            if(time_left > 0) { nap_wait(conn->nap, (int)time_left); }
         }
     }
 

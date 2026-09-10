@@ -73,14 +73,14 @@
 static volatile int32_t next_tag_id = 10; /* MAGIC */
 
 /* The library-scoped instance: the tag hashtable, its lookup mutex, and the tag
- * tickler thread/condvar. Allocated with rc_alloc() so its lifetime can be shared
+ * tickler thread/nap. Allocated with rc_alloc() so its lifetime can be shared
  * safely between "the library is running" (current_instance holds the genesis
  * reference) and "a tag that outlives shutdown still needs it"
  * (tag->instance holds one per tag). See docs/library_lifecycle_design.md. */
 struct lib_instance_t {
     hashtable_p tags;
     mutex_p tag_lookup_mutex;
-    cond_p tag_tickler_wait;
+    nap_p tag_tickler_nap;
     thread_p tag_tickler_thread;
 };
 
@@ -197,9 +197,9 @@ static void lib_instance_destructor(void *arg) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
 
-    if(inst->tag_tickler_wait) {
+    if(inst->tag_tickler_nap) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag tickler condition var.");
-        cond_destroy(&inst->tag_tickler_wait);
+        nap_destroy(&inst->tag_tickler_nap);
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag tickler condition var destroyed.");
     }
 
@@ -314,8 +314,8 @@ int lib_init(void) {
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag condition variable.");
-    rc = cond_create(&(inst->tag_tickler_wait));
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag nap.");
+    rc = nap_create(&(inst->tag_tickler_nap));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag condition var!");
         rc_dec(inst);
@@ -360,15 +360,15 @@ int plc_tag_tickler_wake_impl(const char *func, int line_num) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!inst->tag_tickler_wait) {
+    if(!inst->tag_tickler_nap) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Called from %s:%d when tag tickler condition var is NULL!", func, line_num);
         rc_dec(inst);
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = cond_signal(inst->tag_tickler_wait);
+    rc = nap_interrupt(inst->tag_tickler_nap);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Error %s trying to signal condition variable in call from %s:%d",
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Error %s trying to interrupt nap in call from %s:%d",
                plc_tag_decode_error(rc), func, line_num);
     }
 
@@ -390,14 +390,14 @@ int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!tag->tag_cond_wait) {
+    if(!tag->tag_nap) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Called from %s:%d when tag condition var is NULL!", func, line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = cond_signal(tag->tag_cond_wait);
+    rc = nap_interrupt(tag->tag_nap);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s trying to signal condition variable in call from %s:%d",
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s trying to interrupt nap in call from %s:%d",
                plc_tag_decode_error(rc), func, line_num);
         return rc;
     }
@@ -652,9 +652,9 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
         return PLCTAG_ERR_CREATE;
     }
 
-    rc = cond_create(&(tag->tag_cond_wait));
+    rc = nap_create(&(tag->tag_nap));
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag condition variable!");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag nap!");
         return PLCTAG_ERR_CREATE;
     }
 
@@ -732,7 +732,7 @@ THREAD_FUNC(tag_tickler_func) {
 
                     /* wake immediately */
                     // plc_tag_tickler_wake();
-                    cond_signal(tag->tag_cond_wait);
+                    nap_interrupt(tag->tag_nap);
                 }
 
                 if(tag->write_complete) {
@@ -747,7 +747,7 @@ THREAD_FUNC(tag_tickler_func) {
 
                     /* wake immediately */
                     //  plc_tag_tickler_wake();
-                    cond_signal(tag->tag_cond_wait);
+                    nap_interrupt(tag->tag_nap);
                 }
 
                 /* wake up earlier if the time until the next write wake up is sooner. */
@@ -775,7 +775,7 @@ THREAD_FUNC(tag_tickler_func) {
         /* clear the active tags vector */
         vector_reset(active_tags);
 
-        if(inst->tag_tickler_wait) {
+        if(inst->tag_tickler_nap) {
             int64_t time_to_wait = tag_tickler_wait_timeout_end - time_ms();
             int wait_rc = PLCTAG_STATUS_OK;
 
@@ -783,7 +783,7 @@ THREAD_FUNC(tag_tickler_func) {
 
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Waiting for %" PRId64 "ms until next tickler wake up.", time_to_wait);
 
-            wait_rc = cond_wait(inst->tag_tickler_wait, (int)time_to_wait);
+            wait_rc = nap_wait(inst->tag_tickler_nap, (int)time_to_wait);
             if(wait_rc == PLCTAG_ERR_TIMEOUT) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Tag tickler thread timed out waiting for something to do.");
             }
@@ -873,7 +873,7 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
             tag_raise_event(tag, PLCTAG_EVENT_ABORTED, (int8_t)rc);
 
             /* Signal any waiting threads */
-            cond_signal(tag->tag_cond_wait);
+            nap_interrupt(tag->tag_nap);
         } else {
             /*
              * The abort was already handled by the tickler or PLC thread.
@@ -909,7 +909,7 @@ static int plc_tag_status_impl(plc_tag_p tag) {
             tag->read_in_flight = 0;
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
             tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
-            cond_signal(tag->tag_cond_wait);
+            nap_interrupt(tag->tag_nap);
         }
 
         if(tag->write_complete) {
@@ -917,7 +917,7 @@ static int plc_tag_status_impl(plc_tag_p tag) {
             tag->write_in_flight = 0;
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
             tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
-            cond_signal(tag->tag_cond_wait);
+            nap_interrupt(tag->tag_nap);
         }
 
         if(tag->vtable && tag->vtable->status) {
@@ -1371,7 +1371,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             }
 
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            rc = nap_wait(tag->tag_nap, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
@@ -1516,7 +1516,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
      * (called from destroy_modules() below) start freeing protocol-level globals. */
     if(inst->tag_tickler_thread) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Waiting for tag tickler thread to exit.");
-        cond_signal(inst->tag_tickler_wait);
+        nap_interrupt(inst->tag_tickler_nap);
         thread_join(&inst->tag_tickler_thread);
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag tickler thread exited.");
     }
@@ -2024,7 +2024,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         tag->status = PLCTAG_STATUS_PENDING;
 
         /* clear the condition var */
-        cond_clear(tag->tag_cond_wait);
+        nap_clear(tag->tag_nap);
 
         /* the protocol implementation does not do the timeout. */
         if(tag->vtable && tag->vtable->read) {
@@ -2068,7 +2068,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             int64_t timeout_left = end_time - time_ms();
 
             /*
-             * The deadline has passed. cond_wait() rejects a zero or negative
+             * The deadline has passed. nap_wait() rejects a zero or negative
              * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
              * a bad-parameter error instead of the timeout that actually
              * happened, so stop here and report the timeout itself.
@@ -2081,7 +2081,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
 
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            rc = nap_wait(tag->tag_nap, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag read to complete!",
                        plc_tag_decode_error(rc));
@@ -2227,7 +2227,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
          * variable will be set by the abort.   So we have to clear it here and then see
          * if it gets raised afterward.
          */
-        cond_clear(tag->tag_cond_wait);
+        nap_clear(tag->tag_nap);
 
         /*
          * This must be raised _before_ we start the write to enable
@@ -2278,7 +2278,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
             int64_t timeout_left = end_time - time_ms();
 
             /*
-             * The deadline has passed. cond_wait() rejects a zero or negative
+             * The deadline has passed. nap_wait() rejects a zero or negative
              * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
              * a bad-parameter error instead of the timeout that actually
              * happened, so stop here and report the timeout itself.
@@ -2291,7 +2291,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
             if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
 
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            rc = nap_wait(tag->tag_nap, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag write to complete!",
                        plc_tag_decode_error(rc));

@@ -321,7 +321,7 @@ modbus_plc_p plcs = NULL;
 
 /* PLC lifecycle management */
 static atomic_int32_t plc_count;
-static cond_p plc_cleanup_cond = NULL;
+static nap_p plc_cleanup_nap = NULL;
 
 /* Track active handler threads for proper shutdown synchronization */
 static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
@@ -627,9 +627,9 @@ void modbus_tag_destructor(void *tag_arg) {
         tag->ext_mutex = NULL;
     }
 
-    if(tag->tag_cond_wait) {
-        cond_destroy(&(tag->tag_cond_wait));
-        tag->tag_cond_wait = NULL;
+    if(tag->tag_nap) {
+        nap_destroy(&(tag->tag_nap));
+        tag->tag_nap = NULL;
     }
 
     if(tag->byte_order && tag->byte_order->is_allocated) {
@@ -936,17 +936,17 @@ void modbus_plc_destructor(void *plc_arg) {
     }
 
     /* Decrement PLC count and signal cleanup when last one is destroyed. This must
-     * share mb_mutex with mb_teardown()'s destruction of plc_cleanup_cond below:
-     * holding the mutex here guarantees mb_teardown can never free the condvar out
+     * share mb_mutex with mb_teardown()'s destruction of plc_cleanup_nap below:
+     * holding the mutex here guarantees mb_teardown can never free the nap out
      * from under a signal call that is still in flight. */
     int32_t remaining = 0;
     critical_block(mb_mutex) {
         atomic_add_int32(&plc_count, -1);
         remaining = atomic_get_int32(&plc_count);
 
-        if(remaining == 0 && plc_cleanup_cond) {
+        if(remaining == 0 && plc_cleanup_nap) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Last PLC destroyed, signaling cleanup condition.");
-            cond_signal(plc_cleanup_cond);
+            nap_interrupt(plc_cleanup_nap);
         }
     }
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "PLC destroyed, count now %d.", remaining);
@@ -1404,7 +1404,7 @@ THREAD_FUNC(modbus_plc_handler) {
         }
 
         /* wait if needed, could be signalled already. */
-        // cond_wait(plc->wait_cond, MODBUS_IDLE_WAIT_TIMEOUT);
+        // nap_wait(plc->nap, MODBUS_IDLE_WAIT_TIMEOUT);
     }
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Handler thread exiting.");
@@ -3902,9 +3902,9 @@ static void mb_connection_tag_destructor(void *ptr) {
         mutex_destroy(&dt->api_mutex);
         dt->api_mutex = NULL;
     }
-    if(dt->tag_cond_wait) {
-        cond_destroy(&dt->tag_cond_wait);
-        dt->tag_cond_wait = NULL;
+    if(dt->tag_nap) {
+        nap_destroy(&dt->tag_nap);
+        dt->tag_nap = NULL;
     }
     if(dt->byte_order && dt->byte_order->is_allocated) {
         mem_free(dt->byte_order);
@@ -4022,12 +4022,12 @@ void mb_teardown(void) {
 
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waiting for all Modbus PLCs to be destroyed.");
 
-        /* Wait for all PLCs to be destroyed using condition variable */
+        /* Wait for all PLCs to be destroyed, napping between checks */
         while(atomic_get_int32(&plc_count) > 0) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waiting for %d PLC(s) to be destroyed.", atomic_get_int32(&plc_count));
 
             /* Wait for signal with timeout */
-            int wait_rc = cond_wait(plc_cleanup_cond, 5000); /* 5 second timeout */
+            int wait_rc = nap_wait(plc_cleanup_nap, 5000); /* 5 second timeout */
             if(wait_rc == PLCTAG_ERR_TIMEOUT) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Timeout waiting for PLCs to be destroyed!");
                 break;
@@ -4059,19 +4059,19 @@ void mb_teardown(void) {
 
     if(active_count == 0) { pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "All handler threads completed."); }
 
-    /* Destroy the condvar under mb_mutex: modbus_plc_destructor() holds mb_mutex for
+    /* Destroy the nap under mb_mutex: modbus_plc_destructor() holds mb_mutex for
      * its decrement-and-signal, so acquiring it here guarantees any signal call that
-     * was in flight has fully completed before we free the condvar out from under it.
+     * was in flight has fully completed before we free the nap out from under it.
      * mb_mutex itself must therefore outlive this block; it is destroyed afterward. */
     if(mb_mutex) {
         critical_block(mb_mutex) {
-            if(plc_cleanup_cond) {
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Destroying cleanup condition variable.");
-                cond_destroy(&plc_cleanup_cond);
-                plc_cleanup_cond = NULL;
+            if(plc_cleanup_nap) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Destroying cleanup nap.");
+                nap_destroy(&plc_cleanup_nap);
+                plc_cleanup_nap = NULL;
             }
         }
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Cleanup condition variable destroyed.");
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Cleanup nap destroyed.");
 
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Destroying Modbus mutex.");
         mutex_destroy(&mb_mutex);
@@ -4097,9 +4097,9 @@ int mb_init(void) {
         }
     }
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting up cleanup condition variable.");
-    if(!plc_cleanup_cond) {
-        rc = cond_create(&plc_cleanup_cond);
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting up cleanup nap.");
+    if(!plc_cleanup_nap) {
+        rc = nap_create(&plc_cleanup_nap);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s creating cleanup condition!", plc_tag_decode_error(rc));
             return rc;

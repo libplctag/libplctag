@@ -34,31 +34,43 @@
  ***************************************************************************/
 
 /*
- * Portable condition variables.
+ * Interruptible sleep.
  *
- * This replaces the condition variable section that used to live in the
+ * A nap is a thread's own sleep timer that somebody else can cut short.  The
+ * waiter sleeps until its deadline; anyone who gives it work interrupts the
+ * nap so it wakes now instead.
+ *
+ * This replaces the "condition variable" section that used to live in the
  * platform shims (src/platform/posix/platform.h and
- * src/platform/windows/platform.h).  The API is unchanged; only the home of
- * the declarations moved.
+ * src/platform/windows/platform.h).  Only the names and the home of the
+ * declarations changed; the primitive behaves exactly as it always did.
  *
- * NOTE: this is not a POSIX condition variable.  It is an auto-reset event
- * that owns its own mutex:
+ * NOTE: this is not a condition variable, despite what it used to be called.
+ * It carries no data and takes no caller-supplied mutex.  It is an auto-reset
+ * event owning its own mutex:
  *
- *   - cond_signal() raises the flag and wakes one waiter.  The flag stays
- *     raised until a waiter consumes it, so a signal sent before anyone waits
- *     is not lost.
- *   - cond_wait() returns as soon as the flag is up and clears it on the way
- *     out.  Spurious wake ups are handled internally.
- *   - cond_clear() drops the flag without waiting.
+ *   - nap_interrupt() posts a pending interrupt and wakes one waiter.  The
+ *     interrupt stays pending until a waiter takes it, so work handed over
+ *     just before the waiter goes to sleep is not lost.
+ *   - nap_wait() returns as soon as an interrupt is pending and takes it on
+ *     the way out.  Spurious wake ups are handled internally.  Timing out is
+ *     the normal path, not an error: callers sleep to a deadline and treat
+ *     PLCTAG_ERR_TIMEOUT as "nothing happened, go around again".
+ *   - nap_clear() discards a pending interrupt without waiting.  Use it
+ *     before a fresh wait so a stale interrupt does not end it immediately.
  *
- * There is no broadcast and no caller-supplied mutex.  Code that needs a real
- * condition variable paired with a caller-held mutex uses compat_cond_* in the
- * test utilities.
+ * One interrupt at a time and one waiter released per interrupt.  Many
+ * interrupts arriving during a single nap collapse into one wake up, which
+ * suits the state machines that use this: they re-read all of their state
+ * when they wake regardless of how many things changed.
  *
- * cond_wait() requires a positive timeout; zero or negative returns
- * PLCTAG_ERR_TIMEOUT without waiting.
+ * There is no broadcast.  Code that needs a real condition variable paired
+ * with a caller-held mutex uses compat_cond_* in the test utilities.
  *
- * The wait, signal and clear entry points are macros so that the calling
+ * nap_wait() requires a positive timeout; zero or negative returns
+ * PLCTAG_ERR_TIMEOUT without sleeping.
+ *
+ * The wait, interrupt and clear entry points are macros so that the calling
  * function and line number reach the log without every caller passing them.
  */
 
@@ -67,14 +79,14 @@
 #include <libplctag/lib/libplctag.h>
 
 
-typedef struct cond_t *cond_p;
+typedef struct nap_t *nap_p;
 
-extern int32_t cond_create(cond_p *c);
-extern int32_t cond_destroy(cond_p *c);
+extern int32_t nap_create(nap_p *n);
+extern int32_t nap_destroy(nap_p *n);
 
-extern int32_t cond_wait_impl(const char *func, int32_t line_num, cond_p c, int32_t timeout_ms);
-extern int32_t cond_signal_impl(const char *func, int32_t line_num, cond_p c);
-extern int32_t cond_clear_impl(const char *func, int32_t line_num, cond_p c);
+extern int32_t nap_wait_impl(const char *func, int32_t line_num, nap_p n, int32_t timeout_ms);
+extern int32_t nap_interrupt_impl(const char *func, int32_t line_num, nap_p n);
+extern int32_t nap_clear_impl(const char *func, int32_t line_num, nap_p n);
 
 /*
  * NOTE: utils/mutex.h supplies the __func__ shim needed by MSVC.  Both headers
@@ -82,6 +94,6 @@ extern int32_t cond_clear_impl(const char *func, int32_t line_num, cond_p c);
  */
 #include <utils/mutex.h>
 
-#define cond_wait(c, t) cond_wait_impl(__func__, __LINE__, c, t)
-#define cond_signal(c) cond_signal_impl(__func__, __LINE__, c)
-#define cond_clear(c) cond_clear_impl(__func__, __LINE__, c)
+#define nap_wait(n, t) nap_wait_impl(__func__, __LINE__, n, t)
+#define nap_interrupt(n) nap_interrupt_impl(__func__, __LINE__, n)
+#define nap_clear(n) nap_clear_impl(__func__, __LINE__, n)

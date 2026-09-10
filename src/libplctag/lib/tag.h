@@ -45,7 +45,7 @@
 typedef struct plc_tag_t *plc_tag_p;
 
 /* Opaque handle to the library-scoped instance (tag hashtable, its lookup mutex,
- * and the tag tickler thread/condvar). Full definition lives in lib.c. A tag holds
+ * and the tag tickler thread/nap). Full definition lives in lib.c. A tag holds
  * a reference for its whole lifetime (see plc_tag_create_impl()/each protocol
  * destructor), so any code reachable from a valid plc_tag_p may use
  * tag->instance->tags / tag->instance->tag_lookup_mutex directly: those objects
@@ -169,7 +169,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int64_t read_cache_ms;                   \
     uint8_t *data;                           \
     tag_byte_order_t *byte_order;            \
-    cond_p tag_cond_wait;                    \
+    nap_p tag_nap;                           \
     mutex_p api_mutex;                       \
     mutex_p ext_mutex;                       \
     tag_extended_callback_func callback;     \

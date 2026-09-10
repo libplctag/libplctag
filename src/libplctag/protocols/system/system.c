@@ -181,7 +181,7 @@ static void system_tag_destroy(plc_tag_p ptag) {
 
     if(ptag->api_mutex) { mutex_destroy(&ptag->api_mutex); }
 
-    if(ptag->tag_cond_wait) { cond_destroy(&ptag->tag_cond_wait); }
+    if(ptag->tag_nap) { nap_destroy(&ptag->tag_nap); }
 
     if(tag->byte_order && tag->byte_order->is_allocated) {
         mem_free(tag->byte_order);

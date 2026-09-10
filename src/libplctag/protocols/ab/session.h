@@ -145,7 +145,7 @@ struct ab_session_t {
     thread_p handler_thread;
     atomic_int32_t terminating;
     mutex_p session_mutex;
-    cond_p session_wait_cond;
+    nap_p session_nap;
 
     /* connection status - readable by tags via atomics */
     atomic_int32_t connection_status;        /* plc_tag_conn_status_t values */

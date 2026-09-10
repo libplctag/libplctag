@@ -68,13 +68,14 @@ extern "C"
 #include <malloc.h>
 
 /*
- * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes and
- * condition variables have moved to utils/thread.h, utils/spinlock.h,
- * utils/mutex.h and utils/condvar.h and are included here so that existing
- * consumers keep compiling unchanged.  Sockets will move out in the same way.
- * New code should include the utils/ headers directly.
+ * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes and the
+ * old "condition variables" (now interruptible sleeps) have moved to
+ * utils/thread.h, utils/spinlock.h, utils/mutex.h and utils/nap.h and are
+ * included here so that existing consumers keep compiling unchanged.  Sockets
+ * will move out in the same way.  New code should include the utils/ headers
+ * directly.
  */
-#include <utils/condvar.h>
+#include <utils/nap.h>
 #include <utils/mutex.h>
 #include <utils/spinlock.h>
 #include <utils/thread.h>

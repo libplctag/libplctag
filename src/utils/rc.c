@@ -68,7 +68,7 @@ typedef struct refcount_t *refcount_p;
 
 /* Global cleanup thread state */
 static mutex_p cleanup_mutex = NULL;
-static cond_p cleanup_cond = NULL;
+static nap_p cleanup_nap = NULL;
 static vector_p cleanup_queue = NULL;
 static thread_p cleanup_thread = NULL;
 static atomic_int32_t cleanup_thread_running = ATOMIC_INT_STATIC_INIT;
@@ -203,7 +203,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
                 vec_len = vector_length(cleanup_queue);
                 if(vector_insert(cleanup_queue, vec_len, rc) == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Cleanup queued, signaling cleanup thread.");
-                    cond_signal(cleanup_cond);
+                    nap_interrupt(cleanup_nap);
                 } else {
                     pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Unable to queue cleanup, falling back to immediate cleanup!");
                     /* Fallback: clean up immediately if we can't queue */
@@ -244,7 +244,7 @@ void refcount_cleanup(refcount_p rc) {
 /*
  * Cleanup thread function.
  *
- * Waits on the cleanup condition variable and processes cleanup queue entries
+ * Naps until interrupted and processes cleanup queue entries
  * one at a time. This ensures that destructors don't run in arbitrary user threads
  * but in a dedicated cleanup thread, avoiding complex thread synchronization issues.
  *
@@ -257,7 +257,7 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
     while(atomic_get_int32(&cleanup_thread_running)) {
         refcount_p header = NULL;
 
-        cond_wait(cleanup_cond, 100); /* 100 millisecond timeout */
+        nap_wait(cleanup_nap, 100); /* 100 millisecond timeout */
 
         do {
             critical_block(cleanup_mutex) { header = vector_remove(cleanup_queue, 0); }
@@ -293,10 +293,10 @@ int refcount_startup(void) {
         return rc;
     }
 
-    /* Create the cleanup condition variable */
-    rc = cond_create(&cleanup_cond);
+    /* Create the cleanup nap */
+    rc = nap_create(&cleanup_nap);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to create cleanup condition variable!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to create cleanup nap!");
         mutex_destroy(&cleanup_mutex);
         cleanup_mutex = NULL;
         return rc;
@@ -306,8 +306,8 @@ int refcount_startup(void) {
     cleanup_queue = vector_create(16, 512);
     if(!cleanup_queue) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, 0, "Unable to create cleanup queue!");
-        cond_destroy(&cleanup_cond);
-        cleanup_cond = NULL;
+        nap_destroy(&cleanup_nap);
+        cleanup_nap = NULL;
         mutex_destroy(&cleanup_mutex);
         cleanup_mutex = NULL;
         return PLCTAG_ERR_NO_MEM;
@@ -321,8 +321,8 @@ int refcount_startup(void) {
         atomic_set_int32(&cleanup_thread_running, 0);
         vector_destroy(cleanup_queue);
         cleanup_queue = NULL;
-        cond_destroy(&cleanup_cond);
-        cleanup_cond = NULL;
+        nap_destroy(&cleanup_nap);
+        cleanup_nap = NULL;
         mutex_destroy(&cleanup_mutex);
         cleanup_mutex = NULL;
         return rc;
@@ -382,7 +382,7 @@ int refcount_teardown(void) {
         /* Signal the cleanup thread to exit */
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Signaling cleanup thread to exit.");
         atomic_set_int32(&cleanup_thread_running, 0);
-        if(cleanup_cond) { cond_signal(cleanup_cond); }
+        if(cleanup_nap) { nap_interrupt(cleanup_nap); }
 
         pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Waiting for cleanup thread to exit.");
 
@@ -411,9 +411,9 @@ int refcount_teardown(void) {
     }
 
     /* Clean up synchronization primitives */
-    if(cleanup_cond) {
-        cond_destroy(&cleanup_cond);
-        cleanup_cond = NULL;
+    if(cleanup_nap) {
+        nap_destroy(&cleanup_nap);
+        cleanup_nap = NULL;
     }
 
     if(cleanup_mutex) {

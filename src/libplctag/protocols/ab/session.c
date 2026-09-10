@@ -960,8 +960,8 @@ int session_init(ab_session_p session) {
         return rc;
     }
 
-    /* create the session condition variable. */
-    if((rc = cond_create(&(session->session_wait_cond))) != PLCTAG_STATUS_OK) {
+    /* create the session nap. */
+    if((rc = nap_create(&(session->session_nap))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session condition var!");
         session->failed = 1;
         return rc;
@@ -1182,8 +1182,8 @@ void session_destroy(void *session_arg) {
     /* terminate the session thread first. */
     atomic_set_int32(&session->terminating, 1);
 
-    /* signal the condition variable in case it is waiting */
-    if(session->session_wait_cond) { cond_signal(session->session_wait_cond); }
+    /* interrupt the nap in case the handler is sleeping */
+    if(session->session_nap) { nap_interrupt(session->session_nap); }
 
     /* get rid of the handler thread. */
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session thread.");
@@ -1224,11 +1224,11 @@ void session_destroy(void *session_arg) {
         }
     }
 
-    /* we are done with the condition variable, finally destroy it. */
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session condition variable.");
-    if(session->session_wait_cond) {
-        cond_destroy(&(session->session_wait_cond));
-        session->session_wait_cond = NULL;
+    /* we are done with the nap, finally destroy it. */
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session nap.");
+    if(session->session_nap) {
+        nap_destroy(&(session->session_nap));
+        session->session_nap = NULL;
     }
 
     /* we are done with the mutex, finally destroy it. */
@@ -1297,7 +1297,7 @@ int session_add_request(ab_session_p session, ab_request_p req) {
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     /* wake up the session thread because we added something to process. */
-    cond_signal(session->session_wait_cond);
+    nap_interrupt(session->session_nap);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Done.");
 
@@ -1448,7 +1448,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 /* in all cases, don't wait. */
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
 
                 break;
 
@@ -1479,7 +1479,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 /* in all cases, don't wait. */
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
 
                 break;
 
@@ -1500,7 +1500,7 @@ THREAD_FUNC(session_handler) {
                         state = SESSION_IDLE;
                     }
                 }
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_SEND_FORWARD_OPEN:
@@ -1518,7 +1518,7 @@ THREAD_FUNC(session_handler) {
                            "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
                     state = SESSION_RECEIVE_FORWARD_OPEN;
                 }
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_RECEIVE_FORWARD_OPEN:
@@ -1551,7 +1551,7 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                     state = SESSION_IDLE;
                 }
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_IDLE:
@@ -1588,7 +1588,7 @@ THREAD_FUNC(session_handler) {
                         state = SESSION_UNREGISTER;
                     }
 
-                    cond_signal(session->session_wait_cond);
+                    nap_interrupt(session->session_nap);
                 }
 
                 /* check if we should disconnect */
@@ -1603,7 +1603,7 @@ THREAD_FUNC(session_handler) {
                     } else {
                         state = SESSION_UNREGISTER;
                     }
-                    cond_signal(session->session_wait_cond);
+                    nap_interrupt(session->session_nap);
                 }
 
                 /* if there is work to do, make sure we signal the condition var. */
@@ -1612,7 +1612,7 @@ THREAD_FUNC(session_handler) {
                     if(num_reqs > 0) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
                                "There are %d requests still pending after abort purge and sending.", num_reqs);
-                        cond_signal(session->session_wait_cond);
+                        nap_interrupt(session->session_nap);
                     }
                 }
 
@@ -1628,7 +1628,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 state = SESSION_UNREGISTER;
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_UNREGISTER:
@@ -1641,7 +1641,7 @@ THREAD_FUNC(session_handler) {
                 }
 
                 state = SESSION_CLOSE_SOCKET;
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_CLOSE_SOCKET:
@@ -1658,7 +1658,7 @@ THREAD_FUNC(session_handler) {
                 } else {
                     state = SESSION_START_RETRY;
                 }
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_START_RETRY:
@@ -1674,7 +1674,7 @@ THREAD_FUNC(session_handler) {
                 /* start waiting. */
                 state = SESSION_WAIT_ERR_RETRY;
 
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
 
             case SESSION_WAIT_ERR_RETRY:
@@ -1685,7 +1685,7 @@ THREAD_FUNC(session_handler) {
                 if(timeout_time < now) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
                     state = SESSION_OPEN_SOCKET_START;
-                    cond_signal(session->session_wait_cond);
+                    nap_interrupt(session->session_nap);
                 } else {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Wait not complete, still %dms to go.",
                            (int)(timeout_time - now));
@@ -1709,7 +1709,7 @@ THREAD_FUNC(session_handler) {
                                "There are requests waiting, reopening connection to PLC.");
 
                         state = SESSION_OPEN_SOCKET_START;
-                        cond_signal(session->session_wait_cond);
+                        nap_interrupt(session->session_nap);
                     }
                 }
 
@@ -1729,7 +1729,7 @@ THREAD_FUNC(session_handler) {
                     state = SESSION_UNREGISTER;
                 }
 
-                cond_signal(session->session_wait_cond);
+                nap_interrupt(session->session_nap);
                 break;
         }
 
@@ -1743,7 +1743,7 @@ THREAD_FUNC(session_handler) {
             if(time_left > 0) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting up to %" PRId64 "ms for something to happen.",
                        time_left);
-                cond_wait(session->session_wait_cond, (int)time_left);
+                nap_wait(session->session_nap, (int)time_left);
             }
         }
     }
