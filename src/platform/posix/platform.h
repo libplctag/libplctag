@@ -40,12 +40,13 @@
 #include <stdarg.h>
 
 /*
- * NOTE: platform.h is being refactored.  Threads, spin locks and mutexes have
- * moved to utils/thread.h, utils/spinlock.h and utils/mutex.h and are included
- * here so that existing consumers keep compiling unchanged.  Condition
- * variables and sockets will move out in the same way.  New code should
- * include the utils/ headers directly.
+ * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes and
+ * condition variables have moved to utils/thread.h, utils/spinlock.h,
+ * utils/mutex.h and utils/condvar.h and are included here so that existing
+ * consumers keep compiling unchanged.  Sockets will move out in the same way.
+ * New code should include the utils/ headers directly.
  */
+#include <utils/condvar.h>
 #include <utils/mutex.h>
 #include <utils/spinlock.h>
 #include <utils/thread.h>
@@ -107,17 +108,6 @@ extern char *str_concat_impl(int num_args, ...);
 
 
 
-/* condition variables */
-typedef struct cond_t *cond_p;
-extern int cond_create(cond_p *c);
-extern int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms);
-extern int cond_signal_impl(const char *func, int line_num, cond_p c);
-extern int cond_clear_impl(const char *func, int line_num, cond_p c);
-extern int cond_destroy(cond_p *c);
-
-#define cond_wait(c, t) cond_wait_impl(__func__, __LINE__, c, t)
-#define cond_signal(c) cond_signal_impl(__func__, __LINE__, c)
-#define cond_clear(c) cond_clear_impl(__func__, __LINE__, c)
 
 
 /* socket functions */
