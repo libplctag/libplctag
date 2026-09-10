@@ -68,15 +68,16 @@ extern "C"
 #include <malloc.h>
 
 /*
- * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes and the
- * old "condition variables" (now interruptible sleeps) have moved to
- * utils/thread.h, utils/spinlock.h, utils/mutex.h and utils/nap.h and are
- * included here so that existing consumers keep compiling unchanged.  Sockets
- * will move out in the same way.  New code should include the utils/ headers
- * directly.
+ * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes, the old
+ * "condition variables" (now interruptible sleeps) and sockets have moved to
+ * utils/thread.h, utils/spinlock.h, utils/mutex.h, utils/nap.h and
+ * utils/socket.h.  They are included here so that existing consumers keep
+ * compiling unchanged.  Memory, strings, time and the serial stubs are what is
+ * left.  New code should include the utils/ headers directly.
  */
-#include <utils/nap.h>
 #include <utils/mutex.h>
+#include <utils/nap.h>
+#include <utils/socket.h>
 #include <utils/spinlock.h>
 #include <utils/thread.h>
 
@@ -157,32 +158,6 @@ extern char **str_split(const char *str, const char *sep);
 #define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__) + 1, s1, __VA_ARGS__)
 extern char *str_concat_impl(int num_args, ...);
 
-
-
-
-/* socket functions */
-typedef struct sock_t *sock_p;
-typedef enum {
-    SOCK_EVENT_NONE = 0,
-    SOCK_EVENT_TIMEOUT = (1 << 0),
-    SOCK_EVENT_DISCONNECT = (1 << 1),
-    SOCK_EVENT_ERROR = (1 << 2),
-    SOCK_EVENT_CAN_READ = (1 << 3),
-    SOCK_EVENT_CAN_WRITE = (1 << 4),
-    SOCK_EVENT_WAKE_UP = (1 << 5),
-    SOCK_EVENT_CONNECT = (1 << 6),
-
-    SOCK_EVENT_DEFAULT_MASK = (SOCK_EVENT_TIMEOUT | SOCK_EVENT_DISCONNECT | SOCK_EVENT_ERROR | SOCK_EVENT_WAKE_UP)
-} sock_event_t;
-extern int socket_create(sock_p *s);
-extern int socket_connect_tcp_start(sock_p s, const char *host, int port);
-extern int socket_connect_tcp_check(sock_p s, int timeout_ms);
-extern int socket_wait_event(sock_p sock, int events, int timeout_ms);
-extern int socket_wake(sock_p sock);
-extern int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms);
-extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
-extern int socket_close(sock_p s);
-extern int socket_destroy(sock_p *s);
 
 
 /* serial handling */
