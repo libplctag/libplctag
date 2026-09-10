@@ -23,17 +23,19 @@ set(SOURCES
     modbus_server.c
     register_storage.c
     modbus_protocol.c
-    buf.c
-    err.c
-    log.c
-    args.c
-    utils.c
-    coro_net.c
-    socket.c
+    ../utils/buf.c
+    ../utils/err.c
+    ../utils/log.c
+    ../utils/args.c
+    ../utils/utils.c
+    ../utils/coro_net.c
+    ../utils/socket.c
 )
 
 # Include directories
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+# The generic utilities (buf, err, log, args, utils, coro_net, socket) live in ../utils.
+# They used to be byte-identical copies in this directory; the copies are gone.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../utils)
 
 # Create executable
 add_executable(modbus_server ${SOURCES})

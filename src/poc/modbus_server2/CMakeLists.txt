@@ -18,16 +18,17 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Shared source files from the original modbus_server POC
 set(MODBUS_SERVER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../modbus_server)
+set(MODBUS_UTILS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../utils)
 
 set(SOURCES
     modbus_server2.c
     ${MODBUS_SERVER_SRC}/modbus_protocol.c
     ${MODBUS_SERVER_SRC}/register_storage.c
-    ${MODBUS_SERVER_SRC}/buf.c
-    ${MODBUS_SERVER_SRC}/err.c
-    ${MODBUS_SERVER_SRC}/log.c
-    ${MODBUS_SERVER_SRC}/args.c
-    ${MODBUS_SERVER_SRC}/utils.c
+    ${MODBUS_UTILS_SRC}/buf.c
+    ${MODBUS_UTILS_SRC}/err.c
+    ${MODBUS_UTILS_SRC}/log.c
+    ${MODBUS_UTILS_SRC}/args.c
+    ${MODBUS_UTILS_SRC}/utils.c
 )
 
 # Include both directories: modbus_server2/ (for any local headers) and
@@ -35,6 +36,7 @@ set(SOURCES
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${MODBUS_SERVER_SRC}
+    ${MODBUS_UTILS_SRC}
 )
 
 add_executable(modbus_server2 ${SOURCES})

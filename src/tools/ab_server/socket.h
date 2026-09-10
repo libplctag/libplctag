@@ -48,11 +48,6 @@ typedef int SOCKET;
 
 /* ===== SOCKET API ===== */
 
-/* Open a TCP client connection
- * Returns: Valid SOCKET file descriptor (>= 0) on success
- *          Negative error code (from err_t) on failure */
-extern SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port);
-
 /* Open a TCP server socket
  * Returns: Valid SOCKET file descriptor (>= 0) on success
  *          Negative error code (from err_t) on failure */

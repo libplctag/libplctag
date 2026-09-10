@@ -31,6 +31,7 @@ endif()
 
 # ---- Shared source files from the original modbus_server POC ----
 set(MODBUS_SERVER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../modbus_server)
+set(MODBUS_UTILS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../utils)
 
 set(SOURCES
     modbus_server3.c
@@ -40,15 +41,16 @@ set(SOURCES
     bytes.c
     log.c
     ${MODBUS_SERVER_SRC}/register_storage.c
-    ${MODBUS_SERVER_SRC}/err.c
-    ${MODBUS_SERVER_SRC}/args.c
-    ${MODBUS_SERVER_SRC}/utils.c
+    ${MODBUS_UTILS_SRC}/err.c
+    ${MODBUS_UTILS_SRC}/args.c
+    ${MODBUS_UTILS_SRC}/utils.c
 )
 
 # Local directory first so log.h (buf_t-free copy) shadows modbus_server/log.h.
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${MODBUS_SERVER_SRC}
+    ${MODBUS_UTILS_SRC}
 )
 
 add_executable(modbus_server3 ${SOURCES})
@@ -80,11 +82,12 @@ endif()
 # ---- Null-fiber context-switch benchmark ----
 add_executable(bench_fiber_switch
     bench_fiber_switch.c
-    ${MODBUS_SERVER_SRC}/utils.c
+    ${MODBUS_UTILS_SRC}/utils.c
 )
 include_directories(bench_fiber_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${MODBUS_SERVER_SRC}
+    ${MODBUS_UTILS_SRC}
 )
 target_link_libraries(bench_fiber_switch yafl)
 if(UNIX AND NOT APPLE)
