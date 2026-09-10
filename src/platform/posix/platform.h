@@ -66,6 +66,4 @@
 extern int sleep_ms(int ms);
 extern int64_t time_ms(void);
 
-#define snprintf_platform snprintf
-
 #endif /* _PLATFORM_H_ */
