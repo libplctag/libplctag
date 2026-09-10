@@ -1274,23 +1274,27 @@ int session_add_request(ab_session_p session, ab_request_p req) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
 
-    critical_block(session->session_mutex) {
-        if(!session) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, req->tag_id, "Session is null!");
-            return PLCTAG_ERR_NULL_PTR;
-        }
+    /* this must be checked before the critical block below dereferences it. */
+    if(!session) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, req->tag_id, "Session is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
+    critical_block(session->session_mutex) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, req->tag_id, "rc_inc: Acquiring request reference.");
         req = rc_inc(req);
 
         if(!req) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Request is either null or in the process of being deleted.");
-            return PLCTAG_ERR_NULL_PTR;
+            rc = PLCTAG_ERR_NULL_PTR;
+            break;
         }
 
         /* insert into the requests vector */
         vector_set(session->requests, vector_length(session->requests), req);
     }
+
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     /* wake up the session thread because we added something to process. */
     cond_signal(session->session_wait_cond);

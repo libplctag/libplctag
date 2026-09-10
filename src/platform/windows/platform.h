@@ -68,11 +68,13 @@ extern "C"
 #include <malloc.h>
 
 /*
- * NOTE: platform.h is being refactored.  The threading API has moved to
- * utils/thread.h and is included here so that existing consumers keep
- * compiling unchanged.  Mutexes, condition variables and sockets will move
- * out in the same way.  New code should include utils/thread.h directly.
+ * NOTE: platform.h is being refactored.  Threads, spin locks and mutexes have
+ * moved to utils/thread.h, utils/spinlock.h and utils/mutex.h and are included
+ * here so that existing consumers keep compiling unchanged.  Condition
+ * variables and sockets will move out in the same way.  New code should
+ * include the utils/ headers directly.
  */
+#include <utils/mutex.h>
 #include <utils/spinlock.h>
 #include <utils/thread.h>
 
@@ -153,53 +155,6 @@ extern char **str_split(const char *str, const char *sep);
 #define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__) + 1, s1, __VA_ARGS__)
 extern char *str_concat_impl(int num_args, ...);
 
-/* mutex functions/defs */
-typedef struct mutex_t *mutex_p;
-extern int mutex_create(mutex_p *m);
-extern int mutex_destroy(mutex_p *m);
-
-extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
-extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
-extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
-
-#if defined(_WIN32) && defined(_MSC_VER)
-/* MinGW on Windows does not need this. */
-#    define __func__ __FUNCTION__
-#endif
-
-#define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
-#define mutex_try_lock(m) mutex_try_lock_impl(__func__, __LINE__, m)
-#define mutex_unlock(m) mutex_unlock_impl(__func__, __LINE__, m)
-
-/* macros are evil */
-
-/*
- * Use this one like this:
- *
- *     critical_block(my_mutex) {
- *         locked_data++;
- *         foo(locked_data);
- *     }
- *
- * The macro locks and unlocks for you.  Derived from ideas/code on StackOverflow.com.
- *
- * Do not use break, return, goto or continue inside the synchronized block if
- * you intend to have them apply to a loop outside the synchronized block.
- *
- * You can use break, but it will drop out of the inner for loop and correctly
- * unlock the mutex.  It will NOT break out of any surrounding loop outside the
- * synchronized block.
- */
-
-#define PLCTAG_CAT2(a, b) a##b
-#define PLCTAG_CAT(a, b) PLCTAG_CAT2(a, b)
-#define LINE_ID(base) PLCTAG_CAT(base, __LINE__)
-
-#define critical_block(lock)                                                \
-    for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); \
-        LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))               \
-        for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock);              \
-            LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0)
 
 
 /* condition variables */
