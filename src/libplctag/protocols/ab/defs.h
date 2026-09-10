@@ -414,8 +414,6 @@ START_PACK typedef struct {
                                          * 0x24 - instance
                                          * 0x01 - instance #1.
                                          */
-
-    // uint8_t conn_path[ZLA_SIZE];    /* connection path as above */
 } END_PACK eip_forward_open_request_t;
 
 
@@ -474,8 +472,6 @@ START_PACK typedef struct {
                                             * 0x24 - instance
                                             * 0x01 - instance #1.
                                             */
-
-    // uint8_t conn_path[ZLA_SIZE];    /* connection path as above */
 } END_PACK eip_forward_open_request_ex_t;
 
 
@@ -517,7 +513,6 @@ START_PACK typedef struct {
     uint32_le targ_to_orig_api;     /* Actual packet interval, microsecs */
     uint8_t app_data_size;          /* size in 16-bit words of send_data at end */
     uint8_t reserved2;
-    // uint8_t app_data[ZLA_SIZE];
 } END_PACK eip_forward_open_response_t;
 
 
@@ -558,7 +553,6 @@ START_PACK typedef struct {
     uint32_le orig_serial_number; /* our unique serial number */
     uint8_t path_size;            /* size of connection path in 16-bit words*/
     uint8_t reserved;             /* ALWAYS 0 */
-    // uint8_t conn_path[ZLA_SIZE];
 } END_PACK eip_forward_close_req_t;
 
 
@@ -596,7 +590,6 @@ START_PACK typedef struct {
     uint32_le orig_serial_number; /* our unique serial number */
     uint8_t path_size;            /* size of connection path in 16-bit words*/
     uint8_t reserved;             /* ALWAYS 0 */
-    // uint8_t conn_path[ZLA_SIZE];
 } END_PACK eip_forward_close_resp_t;
 
 
@@ -673,7 +666,6 @@ START_PACK typedef struct {
     uint8_t pccc_function;        /* FNC sub-function of command */
     uint16_le pccc_offset;        /* offset of requested in total request */
     uint16_le pccc_transfer_size; /* total number of words requested */
-    // uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
 } END_PACK eip_pccc_req_old;
 
 
@@ -720,7 +712,6 @@ START_PACK typedef struct {
     uint8_t pccc_command;   /* CMD read, write etc. */
     uint8_t pccc_status;    /* STS 0x00 in request */
     uint16_le pccc_seq_num; /* TNSW transaction/connection sequence number */
-    // uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
 } END_PACK eip_pccc_resp_old;
 
 
@@ -765,7 +756,6 @@ START_PACK typedef struct {
 //     uint8_t pccc_function;          /* FNC sub-function of command */
 //     uint16_le pccc_transfer_offset;           /* offset of this request? */
 //     uint16_le pccc_transfer_size;    /* number of elements requested */
-//     //uint8_t pccc_data[ZLA_SIZE];    /* send_data for request */
 // } END_PACK pccc_dhp_co_req;
 //
 
@@ -808,7 +798,6 @@ START_PACK typedef struct {
 //     uint8_t pccc_command;           /* CMD read, write etc. */
 //     uint8_t pccc_status;            /* STS 0x00 in request */
 //     uint16_le pccc_seq_num;         /* TNSW transaction/connection sequence number */
-//     //uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
 // } END_PACK pccc_dhp_co_resp;
 
 
@@ -843,7 +832,6 @@ START_PACK typedef struct {
     /* CIP Service Info */
     // uint8_t service_code;           /* ALWAYS 0x4C, CIP_READ */
     /*uint8_t req_path_size;*/ /* path size in words */
-    // uint8_t req_path[ZLA_SIZE];
 } END_PACK eip_cip_co_req;
 
 
@@ -882,7 +870,6 @@ START_PACK typedef struct {
     uint8_t num_status_words; /* number of 16-bit words in status */
 
     /* CIP Data*/
-    // uint8_t resp_data[ZLA_SIZE];
 } END_PACK eip_cip_co_resp;
 
 
@@ -1001,7 +988,6 @@ START_PACK typedef struct {
 //    uint8_t pccc_function;          /* FNC sub-function of command */
 ////    uint16_le pccc_offset;           /* offset of requested in total request */
 //    uint8_t pccc_transfer_size;    /* total number of bytes requested */
-//    //uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
 //} END_PACK pccc_req;
 //
 
@@ -1044,7 +1030,6 @@ START_PACK typedef struct {
     uint8_t pccc_command;   /* CMD read, write etc. */
     uint8_t pccc_status;    /* STS 0x00 in request */
     uint16_le pccc_seq_num; /* TNSW transaction/connection sequence number */
-    // uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC response. */
 } END_PACK pccc_resp;
 
 
@@ -1097,7 +1082,6 @@ START_PACK typedef struct {
     uint8_t pccc_function;        /* FNC sub-function of command */
     uint16_le pccc_offset;        /* offset of requested in total request */
     uint16_le pccc_transfer_size; /* total number of words requested */
-    // uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
 
     /* IOI path to DHRIO */
 } END_PACK pccc_dhp_req;
@@ -1141,5 +1125,4 @@ START_PACK typedef struct {
     uint8_t pccc_command;   /* CMD read, write etc. */
     uint8_t pccc_status;    /* STS 0x00 in request */
     uint16_le pccc_seq_num; /* TNSW transaction/connection sequence number */
-    // uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC response. */
 } END_PACK pccc_dhp_resp;

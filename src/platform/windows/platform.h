@@ -99,9 +99,6 @@ extern "C"
 #    define __PRETTY_FUNCTION__ __func__
 #endif
 
-/* VS C++ uses foo[] to denote a zero length array. */
-#define ZLA_SIZE
-
 /* export definitions. */
 
 #define USE_STD_VARARG_MACROS 1
