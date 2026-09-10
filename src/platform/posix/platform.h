@@ -41,11 +41,12 @@
 
 /*
  * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes, the old
- * "condition variables" (now interruptible sleeps), sockets, memory and strings
- * have moved to utils/thread.h, utils/spinlock.h, utils/mutex.h, utils/nap.h,
- * utils/socket.h, utils/mem.h and utils/str.h.  They are included here so that
- * existing consumers keep compiling unchanged.  Time and a couple of macros are
- * what is left.  New code should include the utils/ headers directly.
+ * "condition variables" (now interruptible sleeps), sockets, memory, strings and
+ * time have all moved into utils/.  Both platform.c files are gone; this header
+ * is what remains, and it exists only so that code including <platform.h> keeps
+ * compiling.  What is genuinely still here is the struct packing macros and, on
+ * Windows, the winsock include block and the ssize_t typedef.  New code should
+ * include the utils/ headers directly.
  */
 #include <utils/mem.h>
 #include <utils/mutex.h>
@@ -54,6 +55,7 @@
 #include <utils/spinlock.h>
 #include <utils/str.h>
 #include <utils/thread.h>
+#include <utils/time.h>
 
 /* common definitions */
 #define START_PACK
@@ -61,9 +63,5 @@
 
 #define USE_GNU_VARARG_MACROS 1
 
-
-/* misc functions */
-extern int sleep_ms(int ms);
-extern int64_t time_ms(void);
 
 #endif /* _PLATFORM_H_ */

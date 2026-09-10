@@ -90,9 +90,10 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/socket.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/thread.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/thread.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/time.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/time.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h"
-                     "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
 list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")

@@ -44,6 +44,7 @@
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 #include <utils/rc.h>
+#include <utils/time.h>
 #include <utils/vector.h>
 
 /* data definitions */
@@ -70,28 +71,6 @@
 #define SOCKET_CONNECT_TIMEOUT (20)    /* connect timeout step in milliseconds */
 #define MODBUS_IDLE_WAIT_TIMEOUT (100) /* idle wait timeout in milliseconds */
 #define MAX_MODBUS_REQUESTS (16)       /* per the Modbus specification */
-
-/* Microsecond timing for performance analysis */
-#ifdef _WIN32
-/* windows.h already included by platform.h */
-static inline int64_t time_us(void) {
-    FILETIME ft;
-    int64_t res;
-    GetSystemTimeAsFileTime(&ft);
-    /* FILETIME is in 100ns increments since Jan 1, 1601 */
-    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
-    /* Convert to microseconds. Magic offset is for Jan 1, 1970 Unix epoch. */
-    res = (res - 116444736000000000) / 10;
-    return res;
-}
-#else
-#    include <sys/time.h>
-static inline int64_t time_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return ((int64_t)tv.tv_sec * 1000000) + (int64_t)tv.tv_usec;
-}
-#endif
 
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;

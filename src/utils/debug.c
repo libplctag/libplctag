@@ -45,6 +45,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 #include <utils/spinlock.h>
+#include <utils/time.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #    include <windows.h>
@@ -189,33 +190,22 @@ static const char *format_module_name(debug_module_t module) {
 static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO", "DETAIL", "SPEW"};
 
 
+#ifdef _WIN32
 /*
- * Get current epoch time in microseconds.
- * Works on Linux, BSD, macOS, and Windows.
+ * Windows spells it localtime_s and takes its arguments the other way round.
+ *
+ * This used to be an exported localtime_r() in the Windows platform shim, which
+ * meant the library published a symbol under a POSIX name.  It has exactly one
+ * caller -- the log line built below -- so it lives here instead.
  */
-static int64_t time_us(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    /* Windows implementation using GetSystemTimePreciseAsFileTime (Windows 8+) */
-    FILETIME ft;
-    ULARGE_INTEGER uli;
+static struct tm *localtime_r(const time_t *timep, struct tm *result) {
+    time_t t = *timep;
 
-    GetSystemTimePreciseAsFileTime(&ft);
-    uli.LowPart = ft.dwLowDateTime;
-    uli.HighPart = ft.dwHighDateTime;
+    localtime_s(result, &t);
 
-    /* FILETIME is in 100-nanosecond intervals since Jan 1, 1601 */
-    /* Convert to microseconds and adjust to Unix epoch (Jan 1, 1970) */
-    /* Difference is 11644473600 seconds = 11644473600000000 microseconds */
-    return (int64_t)((uli.QuadPart / 10) - 11644473600000000LL);
-#else
-    /* POSIX implementation using gettimeofday (Linux, BSD, macOS) */
-    struct timeval tv;
-
-    gettimeofday(&tv, NULL);
-
-    return (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
-#endif
+    return result;
 }
+#endif
 
 
 static void ensure_stderr_buffering(void) {
