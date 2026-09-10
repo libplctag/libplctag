@@ -69,12 +69,13 @@ extern "C"
 
 /*
  * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes, the old
- * "condition variables" (now interruptible sleeps) and sockets have moved to
- * utils/thread.h, utils/spinlock.h, utils/mutex.h, utils/nap.h and
- * utils/socket.h.  They are included here so that existing consumers keep
- * compiling unchanged.  Memory, strings, time and the serial stubs are what is
- * left.  New code should include the utils/ headers directly.
+ * "condition variables" (now interruptible sleeps), sockets and memory have
+ * moved to utils/thread.h, utils/spinlock.h, utils/mutex.h, utils/nap.h,
+ * utils/socket.h and utils/mem.h.  They are included here so that existing
+ * consumers keep compiling unchanged.  Strings, time and the serial stubs are
+ * what is left.  New code should include the utils/ headers directly.
  */
+#include <utils/mem.h>
 #include <utils/mutex.h>
 #include <utils/nap.h>
 #include <utils/socket.h>
@@ -135,15 +136,6 @@ typedef SSIZE_T ssize_t;
 #endif
 
 
-/* memory functions/defs */
-extern void *mem_alloc(int size);
-extern void *mem_realloc(void *orig, int size);
-extern void mem_free(const void *mem);
-extern void mem_set(void *d1, int c, int size);
-extern void mem_copy(void *dest, void *src, int size);
-extern void mem_move(void *dest, void *src, int size);
-extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
-
 /* string functions/defs */
 extern int str_cmp(const char *first, const char *second);
 extern int str_cmp_i(const char *first, const char *second);
@@ -158,15 +150,6 @@ extern char **str_split(const char *str, const char *sep);
 #define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__) + 1, s1, __VA_ARGS__)
 extern char *str_concat_impl(int num_args, ...);
 
-
-
-/* serial handling */
-typedef struct serial_port_t *serial_port_p;
-#define PLC_SERIAL_PORT_NULL ((plc_serial_port)NULL)
-extern serial_port_p plc_lib_open_serial_port(const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type);
-extern int plc_lib_close_serial_port(serial_port_p serial_port);
-extern int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size);
-extern int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size);
 
 
 /* time functions */
