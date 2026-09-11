@@ -33,7 +33,9 @@
 
 #pragma once
 
-#include <platform.h>
+#include <stdint.h>
+
+#include <utils/macros.h>
 
 
 START_PACK typedef struct {

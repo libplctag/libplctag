@@ -56,6 +56,13 @@
 
 #    include <ws2tcpip.h>
 
+/*
+ * WinSock has neither MSG_NOSIGNAL nor signals to suppress.  Every other socket
+ * implementation in the tree defines this the same way locally; this one used to
+ * get it from the Windows platform shim.
+ */
+#    define MSG_NOSIGNAL 0
+
 #else
 
 #    include <arpa/inet.h>

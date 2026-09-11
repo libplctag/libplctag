@@ -68,14 +68,16 @@ extern "C"
 #include <malloc.h>
 
 /*
- * NOTE: platform.h is being refactored.  Threads, spin locks, mutexes, the old
- * "condition variables" (now interruptible sleeps), sockets, memory, strings and
- * time have all moved into utils/.  Both platform.c files are gone; this header
- * is what remains, and it exists only so that code including <platform.h> keeps
- * compiling.  What is genuinely still here is the struct packing macros and, on
- * Windows, the winsock include block and the ssize_t typedef.  New code should
+ * NOTE: platform.h no longer holds any code of its own.  Threads, spin locks,
+ * mutexes, the old "condition variables" (now interruptible sleeps), sockets,
+ * memory, strings, time and the struct packing macros have all moved into
+ * utils/, and both platform.c files are gone.  This header survives only so that
+ * the ~180 files including <platform.h> keep compiling,
+ * and to supply the two things that are genuinely Windows-only: the winsock
+ * include block and the ssize_t typedef that ab/cip.c needs.  New code should
  * include the utils/ headers directly.
  */
+#include <utils/macros.h>
 #include <utils/mem.h>
 #include <utils/mutex.h>
 #include <utils/nap.h>
@@ -84,26 +86,6 @@ extern "C"
 #include <utils/str.h>
 #include <utils/thread.h>
 #include <utils/time.h>
-
-
-/* WinSock does not define this or support signals */
-#define MSG_NOSIGNAL 0
-
-#ifdef _MSC_VER
-/* MS Visual Studio C compiler. */
-#    define START_PACK __pragma(pack(push, 1))
-#    define END_PACK __pragma(pack(pop))
-#    define __PRETTY_FUNCTION__ __FUNCTION__
-#else
-/* MinGW on Windows. */
-#    define START_PACK
-#    define END_PACK __attribute__((packed))
-#    define __PRETTY_FUNCTION__ __func__
-#endif
-
-/* export definitions. */
-
-#define USE_STD_VARARG_MACROS 1
 
 /* Apparently ssize_t is not on Windows. */
 #if defined(_MSC_VER)

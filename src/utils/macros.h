@@ -38,6 +38,27 @@
  * This is a collection of handy macros.
  */
 
+/*
+ * Struct packing.
+ *
+ * Wire-format structs must have no padding between members.  MSVC does that
+ * with a pragma pair around the declaration; everything else with an attribute
+ * after it.  Both spellings are needed, so every packed struct in the tree is
+ * written:
+ *
+ *     START_PACK typedef struct { ... } END_PACK my_wire_struct_t;
+ *
+ * These used to live in the platform shims.  utils/byteorder.h needs them, so
+ * a utils/ header depended on <platform.h> to declare its own types.
+ */
+#ifdef _MSC_VER
+#    define START_PACK __pragma(pack(push, 1))
+#    define END_PACK __pragma(pack(pop))
+#else
+#    define START_PACK
+#    define END_PACK __attribute__((__packed__))
+#endif
+
 /* select one out of a list */
 #define GET_MACRO(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, NAME, ...) NAME
 
