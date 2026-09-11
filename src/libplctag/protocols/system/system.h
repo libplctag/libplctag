@@ -36,7 +36,6 @@
 
 #    include <utils/attr.h>
 #    include <utils/debug.h>
-#    include <platform.h>
 #    include <libplctag/lib/tag.h>
 
 extern plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),

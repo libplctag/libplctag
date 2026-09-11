@@ -34,6 +34,7 @@
 #pragma once
 
 #include <utils/byteorder.h>
+#include <utils/macros.h>
 
 
 #define AB_EIP_PLC5_PARAM ((uint16_t)0x4302)

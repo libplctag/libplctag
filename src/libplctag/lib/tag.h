@@ -36,7 +36,8 @@
 
 
 #include <libplctag/lib/libplctag.h>
-#include <platform.h>
+#include <utils/mutex.h>
+#include <utils/nap.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
 #include <utils/debug.h>

@@ -39,7 +39,14 @@
 #include <libplctag/protocols/omron/omron_common.h>
 #include <libplctag/protocols/omron/tag.h>
 #include <limits.h>
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/mutex.h>
+#include <utils/nap.h>
+#include <utils/socket.h>
+#include <utils/spinlock.h>
+#include <utils/str.h>
+#include <utils/thread.h>
+#include <utils/time.h>
 #include <stdlib.h>
 #include <time.h>
 #include <utils/atomic_utils.h>

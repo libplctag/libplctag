@@ -37,7 +37,10 @@
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/omron_common.h>
 #include <libplctag/protocols/omron/tag.h>
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/mutex.h>
+#include <utils/nap.h>
+#include <utils/str.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>

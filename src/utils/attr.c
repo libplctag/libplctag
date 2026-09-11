@@ -38,7 +38,8 @@
  *      Author: Kyle Hayes
  */
 
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/str.h>
 #include <stdio.h>
 #include <string.h>
 #include <utils/attr.h>

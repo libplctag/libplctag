@@ -37,7 +37,7 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <platform.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 typedef enum {

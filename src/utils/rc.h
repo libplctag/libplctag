@@ -33,7 +33,6 @@
 
 #pragma once
 
-#include <platform.h>
 
 typedef void (*rc_cleanup_func)(void *);
 

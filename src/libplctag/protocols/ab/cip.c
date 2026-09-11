@@ -38,7 +38,8 @@
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <libplctag/protocols/ab/tag.h>
-#include <platform.h>
+#include <utils/str.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,7 +74,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
     *is_dhp = 0;
 
-    path_len = (size_t)(ssize_t)str_length(path);
+    path_len = (size_t)(ptrdiff_t)str_length(path);
 
     while(path && path[path_index] && path_index < path_len && conn_path_index < max_conn_path_size) {
         /* skip spaces before each segment */
@@ -94,7 +95,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
             /* check if it is last. */
             if(path_index < path_len) {
                 pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "DH+ address must be the last segment in a path! %d %d",
-                       (int)(ssize_t)path_index, (int)(ssize_t)path_len);
+                       (int)(ptrdiff_t)path_index, (int)(ptrdiff_t)path_len);
                 return PLCTAG_ERR_BAD_PARAM;
             }
 
@@ -102,14 +103,14 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         } else {
             /* unknown, cannot parse this! */
             pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Unable to parse remaining path string from position %d, \"%s\".",
-                   (int)(ssize_t)path_index, (char *)&path[path_index]);
+                   (int)(ptrdiff_t)path_index, (char *)&path[path_index]);
             return PLCTAG_ERR_BAD_PARAM;
         }
     }
 
     if(conn_path_index >= max_conn_path_size) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Encoded connection path is too long (%d >= %d).",
-               (int)(ssize_t)conn_path_index, max_conn_path_size);
+               (int)(ptrdiff_t)conn_path_index, max_conn_path_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -180,7 +181,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     size_t p_index = *path_index;
     size_t c_index = *conn_path_index;
 
-    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ptrdiff_t)*path_index, path);
 
     while(isdigit(path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
@@ -189,14 +190,14 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* did we match anything? */
     if(p_index == *path_index) {
-        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Did not find numeric path segment at position %d.", (int)(ssize_t)p_index);
+        pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Did not find numeric path segment at position %d.", (int)(ptrdiff_t)p_index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
     /* was the numeric segment valid? */
     if(val < 0 || val > 0x11) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_WARN, 0, "Numeric segment in path at position %d is out of bounds!",
-               (int)(ssize_t)(*path_index));
+               (int)(ptrdiff_t)(*path_index));
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -231,7 +232,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     size_t p_index = *path_index;
     size_t c_index = *conn_path_index;
 
-    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ptrdiff_t)*path_index, path);
 
     /* first part, the extended address marker*/
     val = 0;
@@ -242,7 +243,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     if(val != 18 && val != 19) {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Path segment at %d does not match IP address segment.",
-               (int)(ssize_t)*path_index);
+               (int)(ptrdiff_t)*path_index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -258,7 +259,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     /* is the next character a comma? */
     if(path[p_index] != ',') {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0,
-               "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".", (int)(ssize_t)p_index,
+               "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".", (int)(ptrdiff_t)p_index,
                &path[p_index]);
         return PLCTAG_ERR_NOT_FOUND;
     }
@@ -437,7 +438,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     int val = 0;
     size_t p_index = *path_index;
 
-    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Starting at position %d in string %s.", (int)(ptrdiff_t)*path_index, path);
 
     /* Get the port part. */
     switch(path[p_index]) {
@@ -455,7 +456,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
         default:
             pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0, "Character '%c' at position %d does not match start of DH+ segment.",
-                   path[p_index], (int)(ssize_t)p_index);
+                   path[p_index], (int)(ptrdiff_t)p_index);
             return PLCTAG_ERR_NOT_FOUND;
             break;
     }
@@ -469,7 +470,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     if(path[p_index] != ':') {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0,
                "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index],
-               (int)(ssize_t)p_index);
+               (int)(ptrdiff_t)p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -500,7 +501,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     if(path[p_index] != ':') {
         pdebug(DEBUG_MODULE_AB_CIP, DEBUG_DETAIL, 0,
                "Character '%c' at position %d does not match the second colon expected in DH+ segment.", path[p_index],
-               (int)(ssize_t)p_index);
+               (int)(ptrdiff_t)p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 

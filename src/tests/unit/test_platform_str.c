@@ -50,7 +50,7 @@
 #include "mini_mock.h"
 
 #include <errno.h>
-#include <platform.h>
+#include <utils/str.h>
 
 
 /* A stale ERANGE must not turn a valid integer conversion into a failure. */

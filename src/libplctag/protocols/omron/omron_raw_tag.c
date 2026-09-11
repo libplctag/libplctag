@@ -42,7 +42,7 @@
 #include <libplctag/protocols/omron/omron_raw_tag.h>
 #include <libplctag/protocols/omron/omron_standard_tag.h> /* for the Logix decode types. */
 #include <libplctag/protocols/omron/tag.h>
-#include <platform.h>
+#include <utils/mem.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>

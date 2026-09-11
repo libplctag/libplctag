@@ -35,7 +35,6 @@
 
 #include <utils/attr.h>
 #include <utils/debug.h>
-#include <platform.h>
 #include <libplctag/lib/tag.h>
 
 #define MAX_SYSTEM_TAG_NAME (20)

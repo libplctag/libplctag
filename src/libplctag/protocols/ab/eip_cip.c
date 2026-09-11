@@ -41,7 +41,8 @@
 #include <libplctag/protocols/ab/error_codes.h>
 #include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
-#include <platform.h>
+#include <utils/macros.h>
+#include <utils/mem.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>

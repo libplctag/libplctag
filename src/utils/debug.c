@@ -34,7 +34,7 @@
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/version.h>
-#include <platform.h>
+#include <utils/thread.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>

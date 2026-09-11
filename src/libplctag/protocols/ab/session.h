@@ -39,8 +39,12 @@
 #    include <libplctag/protocols/ab/ab_common.h>
 #    include <libplctag/protocols/ab/defs.h>
 #    include <utils/atomic_utils.h>
-#    include <utils/spinlock.h>
+#    include <utils/mutex.h>
+#    include <utils/nap.h>
 #    include <utils/rc.h>
+#    include <utils/socket.h>
+#    include <utils/spinlock.h>
+#    include <utils/thread.h>
 #    include <utils/vector.h>
 
 /* #define MAX_SESSION_HOST    (128) */

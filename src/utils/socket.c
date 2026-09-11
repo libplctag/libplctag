@@ -93,7 +93,7 @@
 #include <string.h>
 
 #include <libplctag/lib/libplctag.h>
-#include <platform.h>
+#include <utils/mem.h>
 #include <utils/debug.h>
 #include <utils/socket.h>
 

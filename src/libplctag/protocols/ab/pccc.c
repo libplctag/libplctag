@@ -40,7 +40,10 @@
 #include <libplctag/protocols/ab/pccc.h>
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
-#include <platform.h>
+#include <utils/macros.h>
+#include <utils/mem.h>
+#include <utils/mutex.h>
+#include <utils/str.h>
 #include <stddef.h>
 #include <string.h>
 #include <utils/debug.h>

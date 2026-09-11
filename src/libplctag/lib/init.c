@@ -39,7 +39,8 @@
 #include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/system/system.h>
 #include <utils/rc.h>
-#include <platform.h>
+#include <utils/str.h>
+#include <utils/time.h>
 #include <stdlib.h>
 #include <utils/attr.h>
 #include <utils/debug.h>

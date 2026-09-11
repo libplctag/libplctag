@@ -38,7 +38,10 @@
 #include <libplctag/lib/version.h>
 #include <libplctag/protocols/system/system.h>
 #include <libplctag/protocols/system/tag.h>
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/mutex.h>
+#include <utils/nap.h>
+#include <utils/str.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>

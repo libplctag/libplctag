@@ -43,6 +43,7 @@
  * convince myself that it is going to be correct on all platforms.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
 extern uint32_t hash(uint8_t *k, size_t length, uint32_t initval);

@@ -41,7 +41,7 @@
 #include <libplctag/protocols/omron/omron_common.h>
 #include <libplctag/protocols/omron/omron_standard_tag.h>
 #include <libplctag/protocols/omron/tag.h>
-#include <platform.h>
+#include <utils/mem.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>

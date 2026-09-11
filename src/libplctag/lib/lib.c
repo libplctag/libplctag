@@ -45,7 +45,12 @@
 #include <libplctag/protocols/mb/modbus.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/mutex.h>
+#include <utils/nap.h>
+#include <utils/str.h>
+#include <utils/thread.h>
+#include <utils/time.h>
 #include <stdlib.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>

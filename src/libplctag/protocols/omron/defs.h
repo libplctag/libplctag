@@ -34,6 +34,7 @@
 #pragma once
 
 #include <utils/byteorder.h>
+#include <utils/macros.h>
 
 
 /*

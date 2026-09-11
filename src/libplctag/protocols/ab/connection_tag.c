@@ -39,7 +39,10 @@
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/mutex.h>
+#include <utils/nap.h>
+#include <utils/str.h>
 #include <utils/rc.h>
 #include <inttypes.h>
 

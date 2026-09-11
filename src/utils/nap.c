@@ -54,7 +54,8 @@
 #include <stdint.h>
 
 #include <libplctag/lib/libplctag.h>
-#include <platform.h>
+#include <utils/mem.h>
+#include <utils/time.h>
 #include <utils/nap.h>
 #include <utils/debug.h>
 
