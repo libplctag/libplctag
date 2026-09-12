@@ -549,8 +549,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     int conn_path_offset = 0;
     uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
     int tmp_conn_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
-    int is_dhp = 0;
-    uint16_t dhp_dest = 0;
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting");
 
@@ -606,7 +604,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     }
 
     /* encode the path */
-    rc = CIP.encode_path(path, use_connected_msg, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    rc = omron_encode_path(path, use_connected_msg, &tmp_conn_path[0], &tmp_conn_path_size);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
                plc_tag_decode_error(rc));
@@ -686,8 +684,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     conn->failed = 0;
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     conn->conn_seq_id = (random_u64(UINT32_MAX) + 1);
-    conn->is_dhp = is_dhp;
-    conn->dhp_dest = dhp_dest;
     atomic_init_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
     /* conn_event_ring_write_idx always points at the ring slot holding the current
@@ -1783,7 +1779,7 @@ int process_requests(omron_conn_p conn) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
-                        rc = CIP.decode_cip_error_code(&(resp->status),
+                        rc = decode_cip_error_code(&(resp->status),
                                                        cip_error_data_size(&resp->status, conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
@@ -1827,7 +1823,7 @@ int process_requests(omron_conn_p conn) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
-                        rc = CIP.decode_cip_error_code(&(resp->status),
+                        rc = decode_cip_error_code(&(resp->status),
                                                        cip_error_data_size(&resp->status, conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
                                plc_tag_decode_error(rc));
@@ -2876,7 +2872,7 @@ int receive_forward_open_response(omron_conn_p conn) {
             size_t general_status_size = cip_error_data_size(&fo_resp->general_status, conn->data + conn->data_size);
 
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Forward Open command failed, response code: %s (%d)",
-                   CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
+                   decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
             if(fo_resp->general_status == CIP_ERR_UNSUPPORTED_SERVICE) {
                 /* this type of command is not supported! */
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Received CIP command unsupported error from the PLC!");
@@ -2918,13 +2914,13 @@ int receive_forward_open_response(omron_conn_p conn) {
                         rc = PLCTAG_ERR_DUPLICATE;
                     } else {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "CIP extended error %s (%s)!",
-                               CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size),
-                               CIP.decode_cip_error_long(&fo_resp->general_status, general_status_size));
+                               decode_cip_error_short(&fo_resp->general_status, general_status_size),
+                               decode_cip_error_long(&fo_resp->general_status, general_status_size));
                     }
                 } else {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "CIP error code %s (%s)!",
-                           CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size),
-                           CIP.decode_cip_error_long(&fo_resp->general_status, general_status_size));
+                           decode_cip_error_short(&fo_resp->general_status, general_status_size),
+                           decode_cip_error_long(&fo_resp->general_status, general_status_size));
                 }
             }
 

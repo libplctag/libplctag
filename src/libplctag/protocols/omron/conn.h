@@ -57,8 +57,6 @@
 #    define CONN_MIN_REQUESTS (10)
 #    define CONN_INC_REQUESTS (10)
 
-#    define MAX_CONN_PATH (260) /* 256 plus padding. */
-#    define MAX_IP_ADDR_SEG_LEN (16)
 
 /*
  * Longest gateway string we will copy into a conn, NUL included.
@@ -102,8 +100,6 @@ struct omron_conn_t {
 
     uint8_t *conn_path;
     uint8_t conn_path_size;
-    uint16_t dhp_dest;
-    int is_dhp;
 
     int connection_group_id;
 

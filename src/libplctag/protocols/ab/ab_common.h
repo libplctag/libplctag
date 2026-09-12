@@ -98,6 +98,9 @@ extern int ab_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint
 
 
 // int ab_tag_destroy(ab_tag_p p_tag);
+/* fills in the tag's encoded_name, encoded_name_size, is_bit and bit from a tag name. */
+extern int encode_tag_name(ab_tag_p tag, const char *name);
+
 extern plc_type_t get_plc_type(attr attribs);
 extern int check_cpu(ab_tag_p tag, attr attribs);
 extern int check_tag_name(ab_tag_p tag, const char *name);

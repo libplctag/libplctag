@@ -33,6 +33,7 @@
 
 #include <ctype.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/cip/cip.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
@@ -45,6 +46,7 @@
 #include <utils/mem.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
+#include <utils/rc.h>
 #include <utils/vector.h>
 
 
@@ -463,6 +465,8 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -611,6 +615,8 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -764,6 +770,8 @@ int build_write_bit_request_connected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -953,6 +961,8 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1101,6 +1111,8 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1286,6 +1298,8 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }

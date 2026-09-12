@@ -49,6 +49,13 @@
 #include <utils/byteorder.h>
 #include <utils/macros.h>
 
+/* CIP limits.  These were duplicated in ab/{tag,session}.h and omron/{tag,conn}.h. */
+#define MAX_TAG_NAME (260)
+#define MAX_CONN_PATH (260) /* 256 plus padding. */
+#define MAX_IP_ADDR_SEG_LEN (16)
+
+
+
 #define CIP_CONN_PARAM ((uint16_t)0x4200)
 #define CIP_CONN_PARAM_EX ((uint32_t)0x42000000)
 #define CIP_CMD_PCCC_EXECUTE ((uint8_t)0x4B)

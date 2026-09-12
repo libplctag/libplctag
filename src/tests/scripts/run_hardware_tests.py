@@ -204,6 +204,17 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
               "--debug=4", "--write=5"]),
+        # The same bridge path with the port written as a channel letter instead of 18.
+        # The encoder resolves a letter port to its channel number and adds 0x11 when the
+        # node is an IP address, so "A" here must produce the byte 0x12 and this must put
+        # byte-identical traffic on the wire as the test above.  That offset came from
+        # hardware behaviour rather than the CIP specification, and this is the only test
+        # anywhere that checks it -- the unit table pins the bytes, not the PLC's opinion
+        # of them.  If this fails while the numeric spelling passes, the offset is wrong.
+        test("CIP bridging with a channel letter port",
+             [exe("tag_rw2"), "--type=sint32",
+              f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,A,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
+              "--debug=4", "--write=5"]),
         test("raw cip tag", [exe("test_raw_cip")]),
         test("tag listing", [exe("list_tags_logix"), logix_gw, logix_path]),
         test("generic CIP device identity query",

@@ -35,6 +35,7 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/cip/cip.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/conn.h>
@@ -126,6 +127,33 @@ static struct tag_vtable_t default_vtable = {
 /*
  * Public functions.
  */
+
+
+/*
+ * The shared CIP encoder takes only the six fields it needs.  Fill one in, call,
+ * copy the three outputs back.
+ */
+static int encode_tag_name(omron_tag_p tag, const char *name) {
+    cip_tag_name_t ctx;
+    int rc = PLCTAG_STATUS_OK;
+
+    ctx.tag_id = tag->tag_id;
+    ctx.elem_count = tag->elem_count;
+    ctx.encoded_name = tag->encoded_name;
+    ctx.encoded_name_size = 0;
+    ctx.is_bit = 0;
+    ctx.bit = 0;
+
+    rc = cip_encode_tag_name(&ctx, name);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        tag->encoded_name_size = ctx.encoded_name_size;
+        tag->is_bit = (uint8_t)(ctx.is_bit ? 1 : 0);
+        tag->bit = (uint8_t)ctx.bit;
+    }
+
+    return rc;
+}
 
 
 int omron_init(void) {
@@ -910,7 +938,7 @@ int check_tag_name(omron_tag_p tag, const char *name) {
     }
 
     /* attempt to parse the tag name */
-    if((rc = CIP.encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
+    if((rc = encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "parse of CIP-style tag name %s failed!", name);
 
         return rc;

@@ -35,6 +35,7 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/cip/cip.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/ab/ab_common.h>
@@ -129,6 +130,33 @@ struct tag_vtable_t default_vtable = {
 /*
  * Public functions.
  */
+
+
+/*
+ * The shared CIP encoder takes only the six fields it needs.  Fill one in, call,
+ * copy the three outputs back.
+ */
+int encode_tag_name(ab_tag_p tag, const char *name) {
+    cip_tag_name_t ctx;
+    int rc = PLCTAG_STATUS_OK;
+
+    ctx.tag_id = tag->tag_id;
+    ctx.elem_count = tag->elem_count;
+    ctx.encoded_name = tag->encoded_name;
+    ctx.encoded_name_size = 0;
+    ctx.is_bit = 0;
+    ctx.bit = 0;
+
+    rc = cip_encode_tag_name(&ctx, name);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        tag->encoded_name_size = ctx.encoded_name_size;
+        tag->is_bit = (uint8_t)(ctx.is_bit ? 1 : 0);
+        tag->bit = (uint8_t)ctx.bit;
+    }
+
+    return rc;
+}
 
 
 int ab_init(void) {
@@ -1272,7 +1300,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
         case AB_PLC_MICRO800:
         case AB_PLC_LGX:
             // case AB_PLC_OMRON_NJNX:
-            if((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
+            if((rc = encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "parse of CIP-style tag name %s failed!", name);
 
                 return rc;

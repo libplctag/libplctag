@@ -57,8 +57,6 @@
 #    define SESSION_MIN_REQUESTS (10)
 #    define SESSION_INC_REQUESTS (10)
 
-#    define MAX_CONN_PATH (260) /* 256 plus padding. */
-#    define MAX_IP_ADDR_SEG_LEN (16)
 
 /*
  * Longest gateway string we will copy into a session, NUL included.

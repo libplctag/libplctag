@@ -35,7 +35,6 @@
 #    define __PLCTAG_OMRON_TAG_H__ 1
 
 /* do these first */
-#    define MAX_TAG_NAME (260)
 #    define MAX_TAG_TYPE_INFO (64)
 
 /* they are used in some of these includes */

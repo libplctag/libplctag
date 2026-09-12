@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/cip/cip.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
@@ -46,6 +47,7 @@
 #include <utils/macros.h>
 #include <utils/mem.h>
 #include <utils/mutex.h>
+#include <utils/rc.h>
 #include <utils/str.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
@@ -269,6 +271,7 @@ tag_byte_order_t udt_tag_logix_byte_order = {.is_allocated = 0,
 
 
 /* Raw tag functions */
+
 
 
 int setup_raw_tag(ab_tag_p tag) {
@@ -923,6 +926,8 @@ int identity_tag_build_read_request_connected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1122,6 +1127,8 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1478,7 +1485,7 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
                 }
 
                 /* we have a program tag request! */
-                if(cip_encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
+                if(encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                            "Tag %s program listing is not able to be encoded!", name);
                     rc = PLCTAG_ERR_BAD_PARAM;
@@ -1954,6 +1961,8 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -2425,6 +2434,8 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     rc = session_add_request(tag->session, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+        /* session_add_request() takes its own reference; ours is still outstanding. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return rc;
     }

@@ -110,6 +110,36 @@ target_compile_definitions(test_atomic_utils_no_c11 PRIVATE __STDC_NO_ATOMICS__)
 
 target_link_libraries(test_atomic_utils_no_c11 PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_byte_buf: the length-carrying byte buffer in utils/byte_buf.h.  Header-only, so
+# this checks the edges: error propagation through a chain, bounds refusal at each
+# width, and the reserve-then-fill split that lets an outer header be written after
+# the payload whose length it carries.
+add_executable(test_byte_buf test_byte_buf.c)
+
+target_include_directories(test_byte_buf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_byte_buf PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# test_cip_path_encode: byte-exact expectations for cip_encode_path(), pinning the
+# current encoder before it is rewritten as a recursive descent parser over port/node
+# pairs. Path encoding is almost untested elsewhere -- the simulator suite runs "1,0"
+# and little else, and DH+/CIP bridging paths only appear against real hardware.
+add_executable(test_cip_path_encode test_cip_path_encode.c)
+
+target_include_directories(test_cip_path_encode PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_cip_path_encode PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_eip_response_validation: checks that a response whose EIP header does not answer the
 # request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
 # because the library's own socket shim is internal, so it is skipped on Windows.
@@ -136,12 +166,15 @@ endif()
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
+add_test(NAME unit_test_cip_path_encode COMMAND test_cip_path_encode)
+add_test(NAME unit_test_byte_buf COMMAND test_byte_buf)
 add_test(NAME unit_test_atomic_utils COMMAND test_atomic_utils)
 add_test(NAME unit_test_atomic_utils_no_c11 COMMAND test_atomic_utils_no_c11)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds test_atomic_utils test_atomic_utils_no_c11
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_cip_path_encode test_byte_buf test_atomic_utils
+            test_atomic_utils_no_c11
             ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

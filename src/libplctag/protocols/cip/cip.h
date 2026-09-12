@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,19 +33,39 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
-#include <stddef.h>
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/protocols/omron/defs.h>
-#include <libplctag/protocols/omron/omron_common.h>
-
 
 /*
- * Only path encoding is still Omron specific.  Tag-name encoding, the type
- * lookups and CIP error decoding are in <libplctag/protocols/cip/...> now.
+ * CIP path and tag-name encoding, and the CIP data-type table.
  *
- * The cip_generic_t vtable that used to be here had exactly one implementation
- * and every slot but this one has moved, so it went with them.
+ * Split out of ab/cip.c and omron/cip.c, which held the same ten functions and
+ * the same 260-entry type table under different names.  Everything here is
+ * defined by the CIP specification.
+ *
+ * The tag-name encoder needed six fields from a tag and nothing else, so it
+ * takes those instead of a vendor tag pointer.  That is the whole of the seam:
+ * fill one in, call, copy the three outputs back.
  */
-extern int omron_encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size);
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <libplctag/protocols/cip/defs.h>
+
+
+typedef struct {
+    int32_t tag_id;        /* in: for log messages only */
+    int elem_count;        /* in */
+    uint8_t *encoded_name; /* in: buffer of MAX_TAG_NAME bytes, filled on success */
+    int encoded_name_size; /* out */
+    int is_bit;            /* out */
+    int bit;               /* out */
+} cip_tag_name_t;
+
+
+extern int cip_encode_tag_name(cip_tag_name_t *ctx, const char *name);
+
+/* look up the type size in bytes based on the first byte */
+extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
+
+/* look up the element size in bytes based on the first byte */
+extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);

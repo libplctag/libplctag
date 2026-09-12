@@ -43,13 +43,10 @@
 extern int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path,
                            int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
 
-//~ char *cip_decode_status(int status);
-extern int cip_encode_tag_name(ab_tag_p tag, const char *name);
-
-/* look up the type size in bytes based on the first byte */
-extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
-
-/* look up the element size in bytes based on the first byte */
-extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);
+/*
+ * Tag-name encoding and the CIP type lookups live in
+ * <libplctag/protocols/cip/cip.h> now; only path encoding is still AB specific,
+ * because it carries the DH+ routing that no other device needs.
+ */
 
 #endif
