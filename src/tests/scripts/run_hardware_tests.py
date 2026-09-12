@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Hardware test runner -- Python port of run_hardware_tests.sh.
+"""Hardware test runner -- the master hardware suite.
 
-Same test list, same real-PLC gateway IPs/tag strings, same pass/fail
-semantics, ported into the declarative Test/Result model used by
-run_simulator_tests_parallel.py so the two runners look and behave alike.
+Real-PLC gateway IPs and tag strings in the declarative Test/Result model used
+by run_simulator_tests_parallel.py, so the two runners look and behave alike.
+
+This began as a port of run_hardware_tests.sh.  The two lists silently drifted
+apart -- four tests only in the shell script, one only here -- and were
+reconciled before the shell script was deleted.
 
 Unlike the simulator runner, there is nothing to spawn: every test here talks
 to a real, already-running PLC on the lab network, addressed directly by IP
@@ -77,6 +80,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_special", "test_tag_attributes", "test_tag_type_attribute",
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
+    "test_event", "test_callback_ex_async", "test_shutdown",
 ]
 
 
@@ -88,11 +92,11 @@ def check_executables_present() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Manifest: real-hardware gateways, one test per line in run_hardware_tests.sh
+# Manifest: real-hardware gateways.
 # ---------------------------------------------------------------------------
 
 def build_manifest() -> list[Test]:
-    # Real lab devices -- see run_hardware_tests.sh for the same addresses.
+    # Real lab devices.
     logix_gw = "10.206.1.40"
     logix_path = "1,4"
     mlgx_gw = "10.206.1.36"
@@ -169,6 +173,16 @@ def build_manifest() -> list[Test]:
         test("N bit data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1"]),
+        test("ST data file PLC5 tag write",
+             [exe("tag_rw2"), "--type=string",
+              f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=ST18:0", "--write=ABCDEFGH",
+              "--debug=4"]),
+        # The same byte-swap check as the Micrologix pair above, but against
+        # plc5_tag_byte_order, which is a separate table.  Expect
+        # 08 00 42 41 44 43 46 45 48 47 in the raw dump if the swap is correct.
+        test("ST data file PLC5 tag read",
+             [exe("tag_rw2"), "--type=string",
+              f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=ST18:0", "--debug=4"]),
         # PCCC-mapped Logix tag (plc=lgxpccc): talks PCCC file-based addressing
         # (N7:0 etc.) to a ControlLogix CPU instead of native CIP tag names --
         # exercises eip_lgx_pccc.c, which no other test in this suite reaches.
@@ -194,6 +208,14 @@ def build_manifest() -> list[Test]:
         test("tag listing", [exe("list_tags_logix"), logix_gw, logix_path]),
         test("generic CIP device identity query",
              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={logix_gw}&plc=generic&name=@identity&debug=3"]),
+        test("extended callbacks with async tag creation (ControlLogix)",
+             [exe("test_callback_ex_async"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_type=DINT&elem_count=10&name=TestBigArray"]),
+        # The "%d" is filled in per thread, so each of the ten threads gets its
+        # own array element.
+        test("shutdown with reads and writes in flight (ControlLogix)",
+             [exe("test_shutdown"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"]),
         test("connection tag connection state transitions (ControlLogix)",
              [exe("test_connection_tag"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
@@ -201,6 +223,12 @@ def build_manifest() -> list[Test]:
              [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=Micrologix&name=@connection"]),
         test("connection tag connection state transitions (PLC5)",
              [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&name=@connection"]),
+        # The positional arguments are thread count and run duration in
+        # seconds; without the duration test_event runs until ^C.  The "%d" in
+        # the tag name is filled in per thread.
+        test("callback wakes the reading thread (ControlLogix)",
+             [exe("test_event"), "4", "20",
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray[%d]"]),
     ]
     return tests
 
