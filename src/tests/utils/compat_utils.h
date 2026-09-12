@@ -58,7 +58,6 @@ extern "C" {
 #    define compat_sscanf sscanf
 
 typedef pthread_mutex_t compat_mutex_t;
-typedef pthread_cond_t compat_cond_t;
 
 #elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
 #    define WINDOWS_PLATFORM
@@ -103,7 +102,6 @@ static inline int compat_sscanf(const char *str, const char *format, ...) {
 }
 
 typedef CRITICAL_SECTION compat_mutex_t;
-typedef CONDITION_VARIABLE compat_cond_t;
 
 
 #else
@@ -138,16 +136,6 @@ extern int32_t compat_atomic_inc_int32(compat_atomic_int32_t *atomic);
 extern int64_t compat_atomic_load_int64(compat_atomic_int64_t *atomic);
 extern void compat_atomic_store_int64(compat_atomic_int64_t *atomic, int64_t value);
 extern int64_t compat_atomic_add_int64(compat_atomic_int64_t *atomic, int64_t delta);
-
-
-/* condition variables */
-
-extern int compat_cond_init(compat_cond_t *cond);
-extern int compat_cond_signal(compat_cond_t *cond);
-extern int compat_cond_broadcast(compat_cond_t *cond);
-extern int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex);
-extern int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mtx, const uint32_t timeout_duration_ms);
-extern int compat_cond_destroy(compat_cond_t *cond);
 
 
 /* current system epoch time in milliseconds. */

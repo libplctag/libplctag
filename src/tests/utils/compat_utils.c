@@ -126,30 +126,6 @@ int64_t compat_atomic_add_int64(compat_atomic_int64_t *atomic, int64_t delta) {
 }
 
 
-/* condition variables */
-int compat_cond_init(compat_cond_t *cond) { return pthread_cond_init(cond, NULL); }
-
-int compat_cond_signal(compat_cond_t *cond) { return pthread_cond_signal(cond); }
-
-int compat_cond_broadcast(compat_cond_t *cond) { return pthread_cond_broadcast(cond); }
-
-int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) { return pthread_cond_wait(cond, mutex); }
-
-int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
-    ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
-    if(ts.tv_nsec >= 1000000000) {
-        ts.tv_sec += 1;
-        ts.tv_nsec -= 1000000000;
-    }
-    return pthread_cond_timedwait(cond, mutex, &ts);
-}
-
-int compat_cond_destroy(compat_cond_t *cond) { return pthread_cond_destroy(cond); }
-
-
 int64_t compat_time_ms(void) {
     struct timespec ts;
 
@@ -289,44 +265,6 @@ void compat_atomic_store_int64(compat_atomic_int64_t *atomic, int64_t value) {
 
 int64_t compat_atomic_add_int64(compat_atomic_int64_t *atomic, int64_t delta) {
     return (int64_t)InterlockedExchangeAdd64((volatile LONG64 *)&atomic->value, (LONG64)delta);
-}
-
-
-/* condition variable functions */
-
-int compat_cond_init(compat_cond_t *cond) {
-    InitializeConditionVariable(cond);
-    return 0;
-}
-
-int compat_cond_signal(compat_cond_t *cond) {
-    WakeConditionVariable(cond);
-    return 0;
-}
-
-int compat_cond_broadcast(compat_cond_t *cond) {
-    WakeAllConditionVariable(cond);
-    return 0;
-}
-
-int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) {
-    SleepConditionVariableCS(cond, mutex, INFINITE); /* Can this be interrupted? */
-    return 0;
-}
-
-int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
-    if(SleepConditionVariableCS(cond, mutex, (DWORD)timeout_duration_ms)) {
-        return 0;
-    } else {
-        return -1;
-    }
-}
-
-int compat_cond_destroy(compat_cond_t *cond) {
-    (void)cond;
-
-    /* nothing to do on Windows */
-    return 0;
 }
 
 

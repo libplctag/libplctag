@@ -46,6 +46,8 @@
  */
 
 #include "compat_utils.h"
+#include <utils/atomic_utils.h>
+#include <utils/nap.h>
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -110,9 +112,8 @@
 /* State shared between main and the destroy thread. */
 typedef struct {
     int32_t tag;
-    compat_mutex_t mutex;
-    compat_cond_t cond;
-    volatile int done;
+    nap_p nap;
+    atomic_bool done;
 } destroy_state_t;
 
 
@@ -163,10 +164,8 @@ static THREAD_FUNC(destroy_thread_func) {
 
     plc_tag_destroy(state->tag);
 
-    compat_mutex_lock(&state->mutex);
-    state->done = 1;
-    compat_cond_signal(&state->cond);
-    compat_mutex_unlock(&state->mutex);
+    atomic_set_bool(&state->done, true);
+    nap_interrupt(state->nap);
 
     THREAD_RETURN(0);
 }
@@ -240,21 +239,22 @@ int main(int argc, char **argv) {
     /* Run plc_tag_destroy in a thread so we can apply a timeout. */
     destroy_state_t state = {0};
     state.tag = tag;
-    compat_mutex_init(&state.mutex);
-    compat_cond_init(&state.cond);
+    atomic_init_bool(&state.done, false);
+    nap_create(&state.nap);
 
     thread_p thread;
     thread_create(&thread, destroy_thread_func, 0, &state);
 
     log("Calling plc_tag_destroy (timeout %d ms)...\n", DESTROY_TIMEOUT_MS);
 
-    compat_mutex_lock(&state.mutex);
-    int timed_out = 0;
-    if(!state.done) {
-        int wait_rc = compat_cond_timedwait(&state.cond, &state.mutex, DESTROY_TIMEOUT_MS);
-        timed_out = (wait_rc != 0 && !state.done);
-    }
-    compat_mutex_unlock(&state.mutex);
+    /*
+     * One signaller, one waiter, one shot.  The nap holds a pending interrupt
+     * if the destroy thread finished before the wait started, so the only
+     * thing worth testing afterwards is the flag itself.
+     */
+    nap_wait(state.nap, DESTROY_TIMEOUT_MS);
+
+    bool timed_out = !atomic_get_bool(&state.done);
 
     if(timed_out) {
         log("FAIL: plc_tag_destroy hung after %d ms (issue #625 regression).\n", DESTROY_TIMEOUT_MS);
@@ -264,8 +264,7 @@ int main(int argc, char **argv) {
     }
 
     thread_join(&thread);
-    compat_mutex_destroy(&state.mutex);
-    compat_cond_destroy(&state.cond);
+    nap_destroy(&state.nap);
 
     log("PASS: plc_tag_destroy returned cleanly after connection loss.\n");
     return 0;

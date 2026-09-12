@@ -64,8 +64,12 @@
  * suits the state machines that use this: they re-read all of their state
  * when they wake regardless of how many things changed.
  *
- * There is no broadcast.  Code that needs a real condition variable paired
- * with a caller-held mutex uses compat_cond_* in the test utilities.
+ * There is no broadcast, and there is no caller-held mutex.  Nothing in the
+ * tree needs either: the two tests that once used a real condition variable
+ * were converted to naps, and the pending interrupt is what their caller-held
+ * mutex had been buying.  Add a condition variable only when a caller turns up
+ * that genuinely needs one -- more than one waiter, or a predicate the waiter
+ * must re-check under the same lock the signaller writes it under.
  *
  * nap_wait() requires a positive timeout; zero or negative returns
  * PLCTAG_ERR_TIMEOUT without sleeping.
