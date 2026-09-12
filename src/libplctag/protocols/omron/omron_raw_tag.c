@@ -366,16 +366,16 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(OMRON_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
+    cip->encap_command = h2le16(EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(OMRON_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);                /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(OMRON_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
 
@@ -471,21 +471,21 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     data += tag->encoded_name_size;
 
     /* encap fields */
-    cip->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
+    cip->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* ALWAYS 0 */
+    cip->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* ALWAYS 0 */
     cip->cpf_nai_item_length = h2le16(0);                /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
+    cip->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
     cip->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
 
     /* CM Service Request - Connection Manager */
-    cip->cm_service_code = OMRON_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
+    cip->cm_service_code = CIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
     cip->cm_req_path_size = 2;                             /* 2, size in 16-bit words of path, next field */
     cip->cm_req_path[0] = 0x20;                            /* class */
     cip->cm_req_path[1] = 0x06;                            /* Connection Manager */
@@ -493,8 +493,8 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     cip->cm_req_path[3] = 0x01;                            /* instance 1 */
 
     /* Unconnected send needs timeout information */
-    cip->secs_per_tick = OMRON_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = OMRON_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
+    cip->secs_per_tick = CIP_SECS_PER_TICK; /* seconds per tick */
+    cip->timeout_ticks = CIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
 
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));

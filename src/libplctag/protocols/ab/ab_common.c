@@ -1327,10 +1327,10 @@ static int check_cpf_connected(ab_tag_p tag, ab_request_p request) {
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if(le2h16(resp->cpf_cai_item_type) != AB_EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != AB_EIP_ITEM_CDI) {
+    if(le2h16(resp->cpf_cai_item_type) != EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != EIP_ITEM_CDI) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
                "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), AB_EIP_ITEM_CAI, AB_EIP_ITEM_CDI);
+               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), EIP_ITEM_CAI, EIP_ITEM_CDI);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -1378,10 +1378,10 @@ static int check_cpf_unconnected(ab_tag_p tag, ab_request_p request) {
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if(le2h16(resp->cpf_nai_item_type) != AB_EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != AB_EIP_ITEM_UDI) {
+    if(le2h16(resp->cpf_nai_item_type) != EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != EIP_ITEM_UDI) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
                "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), AB_EIP_ITEM_NAI, AB_EIP_ITEM_UDI);
+               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), EIP_ITEM_NAI, EIP_ITEM_UDI);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -1480,7 +1480,7 @@ int check_request_status(ab_tag_p tag) {
 
         eip_header = (eip_encap *)(request->data);
 
-        if(le2h32(eip_header->encap_status) != AB_EIP_OK) {
+        if(le2h32(eip_header->encap_status) != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
                    le2h32(eip_header->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -1488,7 +1488,7 @@ int check_request_status(ab_tag_p tag) {
         }
 
         switch(le2h16(eip_header->encap_command)) {
-            case AB_EIP_CONNECTED_SEND:
+            case EIP_CONNECTED_SEND:
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received a connected send EIP packet.");
 
                 /*
@@ -1508,7 +1508,7 @@ int check_request_status(ab_tag_p tag) {
                 rc = check_cpf_connected(tag, request);
 
                 break;
-            case AB_EIP_UNCONNECTED_SEND:
+            case EIP_UNCONNECTED_SEND:
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received an unconnected send EIP packet.");
 
                 /* as above, but for the unconnected CPF header. */

@@ -72,7 +72,7 @@
 #define RETRY_WAIT_MAX_MS (10000)
 
 /* Idle time to wait before disconnecting.  Set it to one second less than we negotiate with the PLC. */
-#define CONN_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
+#define CONN_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
 
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define CONN_IDLE_WAIT_TIME (100)
@@ -315,7 +315,7 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
     const char *conn_gw = attr_get_str(attribs, "gateway", "");
     const char *conn_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
-    // int conn_gw_port = attr_get_int(attribs, "gateway_port", OMRON_EIP_DEFAULT_PORT);
+    // int conn_gw_port = attr_get_int(attribs, "gateway_port", EIP_DEFAULT_PORT);
     //  plc_type_t plc_type = get_plc_type(attribs);
     omron_conn_p conn = OMRON_CONN_NULL;
     int new_conn = 0;
@@ -816,7 +816,7 @@ int conn_open_socket(omron_conn_p conn) {
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Using special port %d.", port);
     } else {
-        port = OMRON_EIP_DEFAULT_PORT;
+        port = EIP_DEFAULT_PORT;
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
@@ -838,7 +838,7 @@ int conn_open_socket(omron_conn_p conn) {
 
 
 int conn_register(omron_conn_p conn) {
-    eip_conn_reg_req *req;
+    eip_session_reg_req *req;
     eip_encap *resp;
     int rc = PLCTAG_STATUS_OK;
 
@@ -850,19 +850,19 @@ int conn_register(omron_conn_p conn) {
      * We use the receiving buffer because we do not have a request and nothing can
      * be coming in (we hope) on the socket yet.
      */
-    mem_set(conn->data, 0, sizeof(eip_conn_reg_req));
+    mem_set(conn->data, 0, sizeof(eip_session_reg_req));
 
-    req = (eip_conn_reg_req *)(conn->data);
+    req = (eip_session_reg_req *)(conn->data);
 
     /* fill in the fields of the request */
-    req->encap_command = h2le16(OMRON_EIP_REGISTER_CONN);
-    req->encap_length = h2le16(sizeof(eip_conn_reg_req) - sizeof(eip_encap));
-    req->encap_conn_handle = h2le32(/*conn->conn_handle*/ 0);
+    req->encap_command = h2le16(EIP_REGISTER_SESSION);
+    req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap));
+    req->encap_session_handle = h2le32(/*conn->conn_handle*/ 0);
     req->encap_status = h2le32(0);
     req->encap_sender_context = h2le64((uint64_t)0);
     req->encap_options = h2le32(0);
 
-    req->eip_version = h2le16(OMRON_EIP_VERSION);
+    req->eip_version = h2le16(EIP_VERSION);
     req->option_flags = h2le16(0);
 
     /*
@@ -873,7 +873,7 @@ int conn_register(omron_conn_p conn) {
      */
 
     /* send registration to the gateway */
-    conn->data_size = sizeof(eip_conn_reg_req);
+    conn->data_size = sizeof(eip_session_reg_req);
     conn->data_offset = 0;
 
     rc = send_eip_request(conn, CONN_DEFAULT_TIMEOUT);
@@ -894,12 +894,12 @@ int conn_register(omron_conn_p conn) {
     resp = (eip_encap *)(conn->data);
 
     /* check the response status */
-    if(le2h16(resp->encap_command) != OMRON_EIP_REGISTER_CONN) {
+    if(le2h16(resp->encap_command) != EIP_REGISTER_SESSION) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", resp->encap_command);
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if(le2h32(resp->encap_status) != OMRON_EIP_OK) {
+    if(le2h32(resp->encap_status) != EIP_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP command failed, response code: %d", le2h32(resp->encap_status));
         return PLCTAG_ERR_REMOTE_ERR;
     }
@@ -908,7 +908,7 @@ int conn_register(omron_conn_p conn) {
      * after all that, save the conn handle, we will
      * use it in future packets.
      */
-    conn->conn_handle = le2h32(resp->encap_conn_handle);
+    conn->conn_handle = le2h32(resp->encap_session_handle);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
 
@@ -1759,7 +1759,7 @@ int process_requests(omron_conn_p conn) {
             if(num_bundled_requests > 1) {
                 cip_multi_resp_header *multi_resp = NULL;
 
-                if(le2h16(((eip_encap *)(conn->data))->encap_command) == OMRON_EIP_UNCONNECTED_SEND) {
+                if(le2h16(((eip_encap *)(conn->data))->encap_command) == EIP_UNCONNECTED_SEND) {
                     eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(conn->data);
                     uint16_t udi_item_length = 0;
                     size_t response_overhead = 0;
@@ -1782,7 +1782,7 @@ int process_requests(omron_conn_p conn) {
                            resp->encap_sender_context);
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
-                    if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
+                    if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
                         rc = CIP.decode_cip_error_code(&(resp->status),
                                                        cip_error_data_size(&resp->status, conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
@@ -1802,7 +1802,7 @@ int process_requests(omron_conn_p conn) {
                         rc = PLCTAG_ERR_BAD_DATA;
                         break;
                     }
-                } else if(le2h16(((eip_encap *)(conn->data))->encap_command) == OMRON_EIP_CONNECTED_SEND) {
+                } else if(le2h16(((eip_encap *)(conn->data))->encap_command) == EIP_CONNECTED_SEND) {
                     eip_cip_co_resp *resp = (eip_cip_co_resp *)(conn->data);
                     uint16_t cdi_item_length = 0;
                     size_t response_overhead = 0;
@@ -1826,7 +1826,7 @@ int process_requests(omron_conn_p conn) {
                            le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
-                    if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
+                    if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
                         rc = CIP.decode_cip_error_code(&(resp->status),
                                                        cip_error_data_size(&resp->status, conn->data + conn->data_size));
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
@@ -1966,7 +1966,7 @@ int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) 
     mem_set(request->data, 0, request->request_capacity);
 
     /* change what we do depending on the type. */
-    if(packed_resp->reply_service != (OMRON_EIP_CMD_CIP_MULTI | OMRON_EIP_CMD_CIP_OK)) {
+    if(packed_resp->reply_service != (CIP_CMD_MULTI | CIP_CMD_OK)) {
         /* copy the data back into the request buffer. */
         new_eip_len = (int)conn->data_size;
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Got single response packet.  Copying %d bytes unchanged.",
@@ -2132,7 +2132,7 @@ int get_payload_size(omron_request_p request) {
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, request->tag_id, "Starting.");
 
-    if(le2h16(header->encap_command) == OMRON_EIP_CONNECTED_SEND) {
+    if(le2h16(header->encap_command) == EIP_CONNECTED_SEND) {
         co_req = (eip_cip_co_req *)(request->data);
         /* get length of new request */
         request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2 /* for connection sequence ID */
@@ -2230,7 +2230,7 @@ int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests
 
     /* now fill in the header. Use pkt_start as it is pointing to the right location. */
     multi_header = (cip_multi_req_header *)pkt_start;
-    multi_header->service_code = OMRON_EIP_CMD_CIP_MULTI;
+    multi_header->service_code = CIP_CMD_MULTI;
     multi_header->req_path_size = 0x02; /* length of path in words */
     multi_header->req_path[0] = 0x20;   /* Class */
     multi_header->req_path[1] = 0x02;   /* CM */
@@ -2331,12 +2331,12 @@ int prepare_request(omron_conn_p conn) {
     /* fill in the fields of the request. */
 
     encap->encap_length = h2le16((uint16_t)payload_size);
-    encap->encap_conn_handle = h2le32(conn->conn_handle);
+    encap->encap_session_handle = h2le32(conn->conn_handle);
     encap->encap_status = h2le32(0);
     encap->encap_options = h2le32(0);
 
     /* set up the conn sequence ID for this transaction */
-    if(le2h16(encap->encap_command) == OMRON_EIP_UNCONNECTED_SEND) {
+    if(le2h16(encap->encap_command) == EIP_UNCONNECTED_SEND) {
         /* get new ID */
         conn->conn_seq_id++;
 
@@ -2345,7 +2345,7 @@ int prepare_request(omron_conn_p conn) {
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Preparing unconnected packet with conn sequence ID %llx",
                conn->conn_seq_id);
-    } else if(le2h16(encap->encap_command) == OMRON_EIP_CONNECTED_SEND) {
+    } else if(le2h16(encap->encap_command) == EIP_CONNECTED_SEND) {
         eip_cip_co_req *conn_req = (eip_cip_co_req *)(conn->data);
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "cpf_targ_conn_id=%x", conn->targ_connection_id);
@@ -2547,7 +2547,7 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
     {
         eip_encap *resp_header = (eip_encap *)(conn->data);
         uint16_t resp_command = le2h16(resp_header->encap_command);
-        uint32_t resp_handle = le2h32(resp_header->encap_conn_handle);
+        uint32_t resp_handle = le2h32(resp_header->encap_session_handle);
 
         if(conn->req_sent && resp_command != conn->req_encap_command) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
@@ -2576,7 +2576,7 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
          * is nothing meaningful to echo.  Their identity is the connection ID and the connection
          * sequence number in the CPF header, which the tag layer checks instead.
          */
-        if(conn->req_sent && resp_command == OMRON_EIP_UNCONNECTED_SEND && conn->resp_seq_id != conn->req_seq_id) {
+        if(conn->req_sent && resp_command == EIP_UNCONNECTED_SEND && conn->resp_seq_id != conn->req_seq_id) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
                    "Received a response with sender context %" PRIx64 " but we sent %" PRIx64 "!", conn->resp_seq_id,
                    conn->req_seq_id);
@@ -2592,7 +2592,7 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
     pdebug_dump_bytes(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, conn->data, (int)(conn->data_offset));
 
     /* check status. */
-    if(le2h32(((eip_encap *)(conn->data))->encap_status) != OMRON_EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
+    if(le2h32(((eip_encap *)(conn->data))->encap_status) != EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
 
@@ -2694,23 +2694,23 @@ int send_old_forward_open_request(omron_conn_p conn) {
     /* fill in the static parts */
 
     /* encap header parts */
-    fo->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fo->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
-    fo->encap_conn_handle = h2le32(conn->conn_handle);
+    fo->encap_session_handle = h2le32(conn->conn_handle);
     fo->encap_sender_context = h2le64(++conn->conn_seq_id);
     fo->router_timeout = h2le16(1); /* one second is enough ? */
 
     /* CPF parts */
     fo->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* null address item type */
+    fo->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);                /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fo->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
     fo->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fo->cm_service_code = OMRON_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
+    fo->cm_service_code = CIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
     fo->cm_req_path_size = 2;                         /* size of path in 16-bit words */
     fo->cm_req_path[0] = 0x20;                        /* class */
     fo->cm_req_path[1] = 0x06;                        /* CM class */
@@ -2718,28 +2718,28 @@ int send_old_forward_open_request(omron_conn_p conn) {
     fo->cm_req_path[3] = 0x01;                        /* instance 1 */
 
     /* Forward Open Params */
-    fo->secs_per_tick = OMRON_EIP_SECS_PER_TICK;                 /* seconds per tick, no used? */
-    fo->timeout_ticks = OMRON_EIP_TIMEOUT_TICKS;                 /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fo->secs_per_tick = CIP_SECS_PER_TICK;                 /* seconds per tick, no used? */
+    fo->timeout_ticks = CIP_TIMEOUT_TICKS;                 /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);                        /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(conn->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     conn->conn_serial_number = next_conn_serial_number(conn->conn_serial_number);
     fo->conn_serial_number = h2le16(conn->conn_serial_number);  /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);           /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);       /* our serial number. */
-    fo->conn_timeout_multiplier = OMRON_EIP_TIMEOUT_MULTIPLIER; /* timeout = mult * RPI */
+    fo->orig_vendor_id = h2le16(CIP_VENDOR_ID);           /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(CIP_VENDOR_SN);       /* our serial number. */
+    fo->conn_timeout_multiplier = CIP_TIMEOUT_MULTIPLIER; /* timeout = mult * RPI */
 
-    fo->orig_to_targ_rpi = h2le32(OMRON_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
+    fo->orig_to_targ_rpi = h2le32(CIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     fo->orig_to_targ_conn_params = h2le16(
-        OMRON_EIP_CONN_PARAM | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+        CIP_CONN_PARAM | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
 
-    fo->targ_to_orig_rpi = h2le32(OMRON_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
+    fo->targ_to_orig_rpi = h2le32(CIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     fo->targ_to_orig_conn_params = h2le16(
-        OMRON_EIP_CONN_PARAM | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+        CIP_CONN_PARAM | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
 
-    fo->transport_class = OMRON_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
+    fo->transport_class = CIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = conn->conn_path_size / 2;           /* size in 16-bit words */
 
     /* set the size of the request */
@@ -2775,23 +2775,23 @@ int send_extended_forward_open_request(omron_conn_p conn) {
     /* fill in the static parts */
 
     /* encap header parts */
-    fo->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fo->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
-    fo->encap_conn_handle = h2le32(conn->conn_handle);
+    fo->encap_session_handle = h2le32(conn->conn_handle);
     fo->encap_sender_context = h2le64(++conn->conn_seq_id);
     fo->router_timeout = h2le16(1); /* one second is enough ? */
 
     /* CPF parts */
     fo->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* null address item type */
+    fo->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);                /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fo->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
     fo->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fo->cm_service_code = OMRON_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
+    fo->cm_service_code = CIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
     fo->cm_req_path_size = 2;                            /* size of path in 16-bit words */
     fo->cm_req_path[0] = 0x20;                           /* class */
     fo->cm_req_path[1] = 0x06;                           /* CM class */
@@ -2799,23 +2799,23 @@ int send_extended_forward_open_request(omron_conn_p conn) {
     fo->cm_req_path[3] = 0x01;                           /* instance 1 */
 
     /* Forward Open Params */
-    fo->secs_per_tick = OMRON_EIP_SECS_PER_TICK;                 /* seconds per tick, no used? */
-    fo->timeout_ticks = OMRON_EIP_TIMEOUT_TICKS;                 /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fo->secs_per_tick = CIP_SECS_PER_TICK;                 /* seconds per tick, no used? */
+    fo->timeout_ticks = CIP_TIMEOUT_TICKS;                 /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);                        /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(conn->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     conn->conn_serial_number = next_conn_serial_number(conn->conn_serial_number);
     fo->conn_serial_number = h2le16(conn->conn_serial_number);  /* our connection ID/serial number. */
-    fo->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);           /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);       /* our serial number. */
-    fo->conn_timeout_multiplier = OMRON_EIP_TIMEOUT_MULTIPLIER; /* timeout = mult * RPI */
-    fo->orig_to_targ_rpi = h2le32(OMRON_EIP_RPI);               /* us to target RPI - Request Packet Interval in microseconds */
+    fo->orig_vendor_id = h2le16(CIP_VENDOR_ID);           /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(CIP_VENDOR_SN);       /* our serial number. */
+    fo->conn_timeout_multiplier = CIP_TIMEOUT_MULTIPLIER; /* timeout = mult * RPI */
+    fo->orig_to_targ_rpi = h2le32(CIP_RPI);               /* us to target RPI - Request Packet Interval in microseconds */
     fo->orig_to_targ_conn_params_ex = h2le32(
-        OMRON_EIP_CONN_PARAM_EX | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
-    fo->targ_to_orig_rpi = h2le32(OMRON_EIP_RPI);           /* target to us RPI - not really used for explicit messages? */
+        CIP_CONN_PARAM_EX | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_rpi = h2le32(CIP_RPI);           /* target to us RPI - not really used for explicit messages? */
     fo->targ_to_orig_conn_params_ex = h2le32(
-        OMRON_EIP_CONN_PARAM_EX | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
-    fo->transport_class = OMRON_EIP_TRANSPORT_CLASS_T3;     /* 0xA3, server transport, class 3, application trigger */
+        CIP_CONN_PARAM_EX | conn->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+    fo->transport_class = CIP_TRANSPORT_CLASS_T3;     /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = conn->conn_path_size / 2;               /* size in 16-bit words */
 
     /* set the size of the request */
@@ -2860,24 +2860,24 @@ int receive_forward_open_response(omron_conn_p conn) {
             break;
         }
 
-        if(le2h16(fo_resp->encap_command) != OMRON_EIP_UNCONNECTED_SEND) {
+        if(le2h16(fo_resp->encap_command) != EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(le2h32(fo_resp->encap_status) != OMRON_EIP_OK) {
+        if(le2h32(fo_resp->encap_status) != EIP_OK) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        if(fo_resp->general_status != OMRON_EIP_OK) {
+        if(fo_resp->general_status != EIP_OK) {
             size_t general_status_size = cip_error_data_size(&fo_resp->general_status, conn->data + conn->data_size);
 
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Forward Open command failed, response code: %s (%d)",
                    CIP.decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
-            if(fo_resp->general_status == OMRON_CIP_ERR_UNSUPPORTED_SERVICE) {
+            if(fo_resp->general_status == CIP_ERR_UNSUPPORTED_SERVICE) {
                 /* this type of command is not supported! */
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Received CIP command unsupported error from the PLC!");
                 rc = PLCTAG_ERR_UNSUPPORTED;
@@ -2985,7 +2985,7 @@ int send_forward_close_req(omron_conn_p conn) {
     /* fill in the static parts */
 
     /* encap header parts */
-    fc->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fc->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fc->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fc->interface_handle))); /* total length of packet except for encap header */
     fc->encap_sender_context = h2le64(++conn->conn_seq_id);
@@ -2993,14 +2993,14 @@ int send_forward_close_req(omron_conn_p conn) {
 
     /* CPF parts */
     fc->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    fc->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* null address item type */
+    fc->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* null address item type */
     fc->cpf_nai_item_length = h2le16(0);                /* no data, zero length */
-    fc->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fc->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
     fc->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fc->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fc->cm_service_code = OMRON_EIP_CMD_FORWARD_CLOSE; /* 0x4E Forward Close Request */
+    fc->cm_service_code = CIP_CMD_FORWARD_CLOSE; /* 0x4E Forward Close Request */
     fc->cm_req_path_size = 2;                          /* size of path in 16-bit words */
     fc->cm_req_path[0] = 0x20;                         /* class */
     fc->cm_req_path[1] = 0x06;                         /* CM class */
@@ -3008,11 +3008,11 @@ int send_forward_close_req(omron_conn_p conn) {
     fc->cm_req_path[3] = 0x01;                         /* instance 1 */
 
     /* Forward Open Params */
-    fc->secs_per_tick = OMRON_EIP_SECS_PER_TICK;               /* seconds per tick, no used? */
-    fc->timeout_ticks = OMRON_EIP_TIMEOUT_TICKS;               /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fc->secs_per_tick = CIP_SECS_PER_TICK;               /* seconds per tick, no used? */
+    fc->timeout_ticks = CIP_TIMEOUT_TICKS;               /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fc->conn_serial_number = h2le16(conn->conn_serial_number); /* our connection SEQUENCE number. */
-    fc->orig_vendor_id = h2le16(OMRON_EIP_VENDOR_ID);          /* our unique :-) vendor ID */
-    fc->orig_serial_number = h2le32(OMRON_EIP_VENDOR_SN);      /* our serial number. */
+    fc->orig_vendor_id = h2le16(CIP_VENDOR_ID);          /* our unique :-) vendor ID */
+    fc->orig_serial_number = h2le32(CIP_VENDOR_SN);      /* our serial number. */
     fc->path_size = conn->conn_path_size / 2;                  /* size in 16-bit words */
     fc->reserved = (uint8_t)0;                                 /* padding for the path. */
 
@@ -3054,19 +3054,19 @@ int recv_forward_close_resp(omron_conn_p conn) {
             break;
         }
 
-        if(le2h16(fo_resp->encap_command) != OMRON_EIP_UNCONNECTED_SEND) {
+        if(le2h16(fo_resp->encap_command) != EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(le2h32(fo_resp->encap_status) != OMRON_EIP_OK) {
+        if(le2h32(fo_resp->encap_status) != EIP_OK) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        if(fo_resp->general_status != OMRON_EIP_OK) {
+        if(fo_resp->general_status != EIP_OK) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Forward Close command failed, response code: %d",
                    fo_resp->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;

@@ -955,10 +955,10 @@ static int check_cpf_connected(omron_tag_p tag, omron_request_p req) {
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if(le2h16(resp->cpf_cai_item_type) != OMRON_EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != OMRON_EIP_ITEM_CDI) {
+    if(le2h16(resp->cpf_cai_item_type) != EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != EIP_ITEM_CDI) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
                "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), OMRON_EIP_ITEM_CAI, OMRON_EIP_ITEM_CDI);
+               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), EIP_ITEM_CAI, EIP_ITEM_CDI);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -1005,10 +1005,10 @@ static int check_cpf_unconnected(omron_tag_p tag, omron_request_p req) {
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if(le2h16(resp->cpf_nai_item_type) != OMRON_EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != OMRON_EIP_ITEM_UDI) {
+    if(le2h16(resp->cpf_nai_item_type) != EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != EIP_ITEM_UDI) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
                "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), OMRON_EIP_ITEM_NAI, OMRON_EIP_ITEM_UDI);
+               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), EIP_ITEM_NAI, EIP_ITEM_UDI);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -1091,7 +1091,7 @@ int omron_check_request_status(omron_tag_p tag) {
 
         eip_header = (eip_encap *)(req->data);
 
-        if(le2h32(eip_header->encap_status) != OMRON_EIP_OK) {
+        if(le2h32(eip_header->encap_status) != EIP_OK) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
                    le2h32(eip_header->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -1099,7 +1099,7 @@ int omron_check_request_status(omron_tag_p tag) {
         }
 
         switch(le2h16(eip_header->encap_command)) {
-            case OMRON_EIP_CONNECTED_SEND:
+            case EIP_CONNECTED_SEND:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received a connected send EIP packet.");
 
                 /*
@@ -1119,7 +1119,7 @@ int omron_check_request_status(omron_tag_p tag) {
                 rc = check_cpf_connected(tag, req);
 
                 break;
-            case OMRON_EIP_UNCONNECTED_SEND:
+            case EIP_UNCONNECTED_SEND:
                 pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Received an unconnected send EIP packet.");
 
                 /* as above, but for the unconnected CPF header. */

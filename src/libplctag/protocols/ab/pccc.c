@@ -1455,9 +1455,9 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
          * it shifts if the target answered a different service, so check it before the fields
          * that follow are read.
          */
-        if(cip_pccc->reply_code != (AB_EIP_CMD_PCCC_EXECUTE | AB_EIP_CMD_CIP_OK)) {
+        if(cip_pccc->reply_code != (CIP_CMD_PCCC_EXECUTE | CIP_CMD_OK)) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected PCCC reply code %02x, expected %02x!",
-                   (unsigned int)cip_pccc->reply_code, (unsigned int)(AB_EIP_CMD_PCCC_EXECUTE | AB_EIP_CMD_CIP_OK));
+                   (unsigned int)cip_pccc->reply_code, (unsigned int)(CIP_CMD_PCCC_EXECUTE | CIP_CMD_OK));
             return PLCTAG_ERR_BAD_DATA;
         }
 
@@ -1465,8 +1465,8 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
          * The requester ID is echoed verbatim from our request.  It is how a PCCC target tells
          * one requester from another, so a reply carrying somebody else's is not ours.
          */
-        if(cip_pccc->request_id_size != 7 || le2h16(cip_pccc->vendor_id) != AB_EIP_VENDOR_ID
-           || le2h32(cip_pccc->vendor_serial_number) != AB_EIP_VENDOR_SN) {
+        if(cip_pccc->request_id_size != 7 || le2h16(cip_pccc->vendor_id) != CIP_VENDOR_ID
+           || le2h32(cip_pccc->vendor_serial_number) != CIP_VENDOR_SN) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC response requester ID (%u, %04x, %08x) is not ours!",
                    (unsigned int)cip_pccc->request_id_size, (unsigned int)le2h16(cip_pccc->vendor_id),
                    (unsigned int)le2h32(cip_pccc->vendor_serial_number));
@@ -1667,7 +1667,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
+        cip_pccc->service_code = CIP_CMD_PCCC_EXECUTE;
         cip_pccc->req_path_size = 2;
         cip_pccc->req_path[0] = 0x20;
         cip_pccc->req_path[1] = 0x67;
@@ -1675,8 +1675,8 @@ int pccc_tag_read_start(ab_tag_p tag) {
         cip_pccc->req_path[3] = 0x01;
 
         cip_pccc->request_id_size = 7;
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        cip_pccc->vendor_id = h2le16(CIP_VENDOR_ID);
+        cip_pccc->vendor_serial_number = h2le32(CIP_VENDOR_SN);
 
         if(tag->plc_type == AB_PLC_PLC5) {
             plc5_pccc_read_cmd_req *pccc_cmd = (plc5_pccc_read_cmd_req *)(cip_pccc + 1);
@@ -1726,16 +1726,16 @@ int pccc_tag_read_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
+        cip_req->cpf_nai_item_type = h2le16(EIP_ITEM_NAI);
         cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
+        cip_req->cpf_udi_item_type = h2le16(EIP_ITEM_UDI);
         cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request CPF UDI item length: %u bytes.",
                le2h16(cip_req->cpf_udi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_UNCONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -1810,7 +1810,7 @@ int pccc_check_read_status(ab_tag_p tag) {
 
     /* fake exceptions */
     do {
-        if(cip_pccc->general_status != AB_EIP_OK) {
+        if(cip_pccc->general_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
                    cip_pccc->general_status,
                    decode_cip_error_long((uint8_t *)&(cip_pccc->general_status),
@@ -1819,7 +1819,7 @@ int pccc_check_read_status(ab_tag_p tag) {
             break;
         }
 
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
+        if(pccc_cmd->pccc_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
@@ -1946,7 +1946,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
+        cip_pccc->service_code = CIP_CMD_PCCC_EXECUTE;
         cip_pccc->req_path_size = 2;
         cip_pccc->req_path[0] = 0x20;
         cip_pccc->req_path[1] = 0x67;
@@ -1955,8 +1955,8 @@ int pccc_tag_write_start(ab_tag_p tag) {
 
         cip_pccc->request_id_size =
             (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        cip_pccc->vendor_id = h2le16(CIP_VENDOR_ID);
+        cip_pccc->vendor_serial_number = h2le32(CIP_VENDOR_SN);
 
         /* fill in PCCC command fields */
         if(tag->plc_type == AB_PLC_PLC5) {
@@ -2008,16 +2008,16 @@ int pccc_tag_write_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
+        cip_req->cpf_nai_item_type = h2le16(EIP_ITEM_NAI);
         cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
+        cip_req->cpf_udi_item_type = h2le16(EIP_ITEM_UDI);
         cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CPF UDI item length: %u bytes.",
                le2h16(cip_req->cpf_udi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_UNCONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -2137,7 +2137,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
+        cip_pccc->service_code = CIP_CMD_PCCC_EXECUTE;
         cip_pccc->req_path_size = 2;
         cip_pccc->req_path[0] = 0x20;
         cip_pccc->req_path[1] = 0x67;
@@ -2146,8 +2146,8 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
 
         cip_pccc->request_id_size =
             (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        cip_pccc->vendor_id = h2le16(CIP_VENDOR_ID);
+        cip_pccc->vendor_serial_number = h2le32(CIP_VENDOR_SN);
 
         /* fill in PCCC command fields */
         pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -2209,16 +2209,16 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
+        cip_req->cpf_nai_item_type = h2le16(EIP_ITEM_NAI);
         cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
+        cip_req->cpf_udi_item_type = h2le16(EIP_ITEM_UDI);
         cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CPF UDI item length: %u bytes.",
                le2h16(cip_req->cpf_udi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_UNCONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -2347,7 +2347,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
-        cip_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
+        cip_pccc->service_code = CIP_CMD_PCCC_EXECUTE;
         cip_pccc->req_path_size = 2;
         cip_pccc->req_path[0] = 0x20;
         cip_pccc->req_path[1] = 0x67;
@@ -2356,8 +2356,8 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
 
         cip_pccc->request_id_size =
             (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        cip_pccc->vendor_id = h2le16(CIP_VENDOR_ID);
+        cip_pccc->vendor_serial_number = h2le32(CIP_VENDOR_SN);
 
         /* fill in PCCC command fields */
         pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -2412,16 +2412,16 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
+        cip_req->cpf_nai_item_type = h2le16(EIP_ITEM_NAI);
         cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
+        cip_req->cpf_udi_item_type = h2le16(EIP_ITEM_UDI);
         cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CPF UDI item length: %u bytes.",
                le2h16(cip_req->cpf_udi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_UNCONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -2490,13 +2490,13 @@ int pccc_check_write_status(ab_tag_p tag) {
 
     /* fake exception */
     do {
-        if(pccc->general_status != AB_EIP_OK) {
+        if(pccc->general_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d", pccc->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        if(pccc->pccc_status != AB_EIP_OK) {
+        if(pccc->pccc_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -2748,10 +2748,10 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
+        cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
         cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
+        cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
@@ -2759,7 +2759,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
                le2h16(cip_req->cpf_cdi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_CONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -2833,7 +2833,7 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
 
     /* fake exceptions */
     do {
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
+        if(pccc_cmd->pccc_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
@@ -3017,10 +3017,10 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
+        cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
         cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
+        cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
@@ -3028,7 +3028,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
                le2h16(cip_req->cpf_cdi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_CONNECTED_SEND);
 
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request CPF UDI item length: %u bytes.",
                le2h16(cip_req->cpf_cdi_item_length));
@@ -3212,10 +3212,10 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
+        cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
         cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
+        cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
@@ -3223,7 +3223,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
                le2h16(cip_req->cpf_cdi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_CONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -3407,10 +3407,10 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
+        cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
         cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
+        cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
@@ -3418,7 +3418,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
                le2h16(cip_req->cpf_cdi_item_length));
 
         cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
+        cip_req->encap_command = h2le16(EIP_CONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -3489,7 +3489,7 @@ int pccc_dhp_check_write_status(ab_tag_p tag) {
 
     /* fake exceptions */
     do {
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
+        if(pccc_cmd->pccc_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));

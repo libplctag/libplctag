@@ -87,7 +87,7 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 #define RETRY_WAIT_MAX_MS (10000)
 
 /* Idle timeout.  One second less than that negotiated with the PLC. */
-#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
+#define SESSION_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define SESSION_IDLE_WAIT_TIME (100)
 
@@ -370,7 +370,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
-    // int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
+    // int session_gw_port = attr_get_int(attribs, "gateway_port", EIP_DEFAULT_PORT);
     plc_type_t plc_type = get_plc_type(attribs);
     ab_session_p session = AB_SESSION_NULL;
     int new_session = 0;
@@ -1042,7 +1042,7 @@ int session_open_socket(ab_session_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Using special port %d.", port);
     } else {
-        port = AB_EIP_DEFAULT_PORT;
+        port = EIP_DEFAULT_PORT;
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
@@ -1081,14 +1081,14 @@ int session_register(ab_session_p session) {
     req = (eip_session_reg_req *)(session->data);
 
     /* fill in the fields of the request */
-    req->encap_command = h2le16(AB_EIP_REGISTER_SESSION);
+    req->encap_command = h2le16(EIP_REGISTER_SESSION);
     req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap));
     req->encap_session_handle = h2le32(/*session->session_handle*/ 0);
     req->encap_status = h2le32(0);
     req->encap_sender_context = h2le64((uint64_t)0);
     req->encap_options = h2le32(0);
 
-    req->eip_version = h2le16(AB_EIP_VERSION);
+    req->eip_version = h2le16(EIP_VERSION);
     req->option_flags = h2le16(0);
 
     /*
@@ -1121,12 +1121,12 @@ int session_register(ab_session_p session) {
     resp = (eip_encap *)(session->data);
 
     /* check the response status */
-    if(le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
+    if(le2h16(resp->encap_command) != EIP_REGISTER_SESSION) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", resp->encap_command);
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if(le2h32(resp->encap_status) != AB_EIP_OK) {
+    if(le2h32(resp->encap_status) != EIP_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP command failed, response code: %d", le2h32(resp->encap_status));
         return PLCTAG_ERR_REMOTE_ERR;
     }
@@ -1963,7 +1963,7 @@ int process_requests(ab_session_p session) {
             if(num_bundled_requests > 1) {
                 cip_multi_resp_header *multi_resp = NULL;
 
-                if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+                if(le2h16(((eip_encap *)(session->data))->encap_command) == EIP_UNCONNECTED_SEND) {
                     eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
                     uint16_t udi_item_length = 0;
                     size_t response_overhead = 0;
@@ -1986,7 +1986,7 @@ int process_requests(ab_session_p session) {
                            resp->encap_sender_context);
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
-                    if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
+                    if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
                         rc = decode_cip_error_code(&(resp->status),
                                                    cip_error_data_size(&resp->status, session->data + session->data_size));
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
@@ -2006,7 +2006,7 @@ int process_requests(ab_session_p session) {
                         rc = PLCTAG_ERR_BAD_DATA;
                         break;
                     }
-                } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
+                } else if(le2h16(((eip_encap *)(session->data))->encap_command) == EIP_CONNECTED_SEND) {
                     eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
                     uint16_t cdi_item_length = 0;
                     size_t response_overhead = 0;
@@ -2030,7 +2030,7 @@ int process_requests(ab_session_p session) {
                            le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
-                    if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
+                    if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
                         size_t status_size = cip_error_data_size(&resp->status, session->data + session->data_size);
 
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Response status=%u", resp->status);
@@ -2179,7 +2179,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
     mem_set(request->data, 0, request->request_capacity);
 
     /* change what we do depending on the type. */
-    if(packed_resp->reply_service != (AB_EIP_CMD_CIP_MULTI | AB_EIP_CMD_CIP_OK)) {
+    if(packed_resp->reply_service != (CIP_CMD_MULTI | CIP_CMD_OK)) {
         /* copy the data back into the request buffer. */
         new_eip_len = (int)session->data_size;
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, request->tag_id, "Got single response packet.  Copying %d bytes unchanged.",
@@ -2351,13 +2351,13 @@ int get_payload_size(ab_request_p request) {
 
     header = (eip_encap *)(request->data);
 
-    if(le2h16(header->encap_command) == AB_EIP_CONNECTED_SEND) {
+    if(le2h16(header->encap_command) == EIP_CONNECTED_SEND) {
         eip_cpf_co_header *co_req = (eip_cpf_co_header *)(request->data);
         /* get length of new request */
         request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2; /* for connection sequence ID */
 
         /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
-    } else if(le2h16(header->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+    } else if(le2h16(header->encap_command) == EIP_UNCONNECTED_SEND) {
         eip_cpf_uc_header *uc_req = (eip_cpf_uc_header *)(request->data);
 
         /* get length of embedded command */
@@ -2474,7 +2474,7 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 
     /* now fill in the header. Use pkt_start as it is pointing to the right location. */
     multi_header = (cip_multi_req_header *)pkt_start;
-    multi_header->service_code = AB_EIP_CMD_CIP_MULTI;
+    multi_header->service_code = CIP_CMD_MULTI;
     multi_header->req_path_size = 0x02; /* length of path in words */
     multi_header->req_path[0] = 0x20;   /* Class */
     multi_header->req_path[1] = 0x02;   /* CM */
@@ -2585,7 +2585,7 @@ int prepare_request(ab_session_p session) {
     /* FIXME - support other kinds of requests? */
 
     /* set up the session sequence ID for this transaction */
-    if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+    if(le2h16(encap->encap_command) == EIP_UNCONNECTED_SEND) {
         /* get new ID */
         session->session_seq_id++;
 
@@ -2594,7 +2594,7 @@ int prepare_request(ab_session_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Preparing unconnected packet with session sequence ID %llx",
                session->session_seq_id);
-    } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
+    } else if(le2h16(encap->encap_command) == EIP_CONNECTED_SEND) {
         eip_cip_co_req *conn_req = (eip_cip_co_req *)(session->data);
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "cpf_targ_conn_id=%x", session->targ_connection_id);
@@ -2854,7 +2854,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
          * is nothing meaningful to echo.  Their identity is the connection ID and the connection
          * sequence number in the CPF header, which the tag layer checks instead.
          */
-        if(session->req_sent && resp_command == AB_EIP_UNCONNECTED_SEND && session->resp_seq_id != session->req_seq_id) {
+        if(session->req_sent && resp_command == EIP_UNCONNECTED_SEND && session->resp_seq_id != session->req_seq_id) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                    "Received a response with sender context %" PRIx64 " but we sent %" PRIx64 "!", session->resp_seq_id,
                    session->req_seq_id);
@@ -2872,7 +2872,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
     pdebug_dump_bytes(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, session->data, (int)(session->data_offset));
 
     /* check status. */
-    if(le2h32(((eip_encap *)(session->data))->encap_status) != AB_EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
+    if(le2h32(((eip_encap *)(session->data))->encap_status) != EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
 
     session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc, rc);
 
@@ -2979,7 +2979,7 @@ int send_old_forward_open_request(ab_session_p session) {
     /* fill in the static parts */
 
     /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fo->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_session_handle = h2le32(session->session_handle);
@@ -2988,14 +2988,14 @@ int send_old_forward_open_request(ab_session_p session) {
 
     /* CPF parts */
     fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
+    fo->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fo->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
     fo->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
+    fo->cm_service_code = CIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
     fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
     fo->cm_req_path[0] = 0x20;                     /* class */
     fo->cm_req_path[1] = 0x06;                     /* CM class */
@@ -3003,18 +3003,18 @@ int send_old_forward_open_request(ab_session_p session) {
     fo->cm_req_path[3] = 0x01;                     /* instance 1 */
 
     /* Forward Open Params */
-    fo->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick, no used? */
-    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fo->secs_per_tick = CIP_SECS_PER_TICK; /* seconds per tick, no used? */
+    fo->timeout_ticks = CIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
     fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);            /* our serial number. */
-    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;      /* timeout = mult * RPI */
+    fo->orig_vendor_id = h2le16(CIP_VENDOR_ID);                /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(CIP_VENDOR_SN);            /* our serial number. */
+    fo->conn_timeout_multiplier = CIP_TIMEOUT_MULTIPLIER;      /* timeout = mult * RPI */
 
-    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
+    fo->orig_to_targ_rpi = h2le32(CIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
     if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX)
@@ -3022,10 +3022,10 @@ int send_old_forward_open_request(ab_session_p session) {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(
-            AB_EIP_CONN_PARAM | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+            CIP_CONN_PARAM | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
     }
 
-    fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
+    fo->targ_to_orig_rpi = h2le32(CIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
     if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX)
@@ -3033,10 +3033,10 @@ int send_old_forward_open_request(ab_session_p session) {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(
-            AB_EIP_CONN_PARAM | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+            CIP_CONN_PARAM | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
     }
 
-    fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
+    fo->transport_class = CIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = session->conn_path_size / 2;     /* size in 16-bit words */
 
     /* set the size of the request */
@@ -3072,7 +3072,7 @@ int send_extended_forward_open_request(ab_session_p session) {
     /* fill in the static parts */
 
     /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fo->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_session_handle = h2le32(session->session_handle);
@@ -3081,14 +3081,14 @@ int send_extended_forward_open_request(ab_session_p session) {
 
     /* CPF parts */
     fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
+    fo->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fo->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
     fo->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
+    fo->cm_service_code = CIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
     fo->cm_req_path_size = 2;                         /* size of path in 16-bit words */
     fo->cm_req_path[0] = 0x20;                        /* class */
     fo->cm_req_path[1] = 0x06;                        /* CM class */
@@ -3096,23 +3096,23 @@ int send_extended_forward_open_request(ab_session_p session) {
     fo->cm_req_path[3] = 0x01;                        /* instance 1 */
 
     /* Forward Open Params */
-    fo->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick, no used? */
-    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fo->secs_per_tick = CIP_SECS_PER_TICK; /* seconds per tick, no used? */
+    fo->timeout_ticks = CIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
     session->conn_serial_number = next_conn_serial_number(session->conn_serial_number);
     fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection ID/serial number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);            /* our serial number. */
-    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;      /* timeout = mult * RPI */
-    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI);                    /* us to target RPI - Request Packet Interval in microseconds */
+    fo->orig_vendor_id = h2le16(CIP_VENDOR_ID);                /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(CIP_VENDOR_SN);            /* our serial number. */
+    fo->conn_timeout_multiplier = CIP_TIMEOUT_MULTIPLIER;      /* timeout = mult * RPI */
+    fo->orig_to_targ_rpi = h2le32(CIP_RPI);                    /* us to target RPI - Request Packet Interval in microseconds */
     fo->orig_to_targ_conn_params_ex = h2le32(
-        AB_EIP_CONN_PARAM_EX | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
-    fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI);              /* target to us RPI - not really used for explicit messages? */
+        CIP_CONN_PARAM_EX | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_rpi = h2le32(CIP_RPI);              /* target to us RPI - not really used for explicit messages? */
     fo->targ_to_orig_conn_params_ex = h2le32(
-        AB_EIP_CONN_PARAM_EX | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
-    fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3;        /* 0xA3, server transport, class 3, application trigger */
+        CIP_CONN_PARAM_EX | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
+    fo->transport_class = CIP_TRANSPORT_CLASS_T3;        /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = session->conn_path_size / 2;            /* size in 16-bit words */
 
     /* set the size of the request */
@@ -3157,24 +3157,24 @@ int receive_forward_open_response(ab_session_p session) {
             break;
         }
 
-        if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
+        if(le2h16(fo_resp->encap_command) != EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
+        if(le2h32(fo_resp->encap_status) != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        if(fo_resp->general_status != AB_EIP_OK) {
+        if(fo_resp->general_status != EIP_OK) {
             size_t general_status_size = cip_error_data_size(&fo_resp->general_status, session->data + session->data_size);
 
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Open command failed, response code: %s (%d)",
                    decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
-            if(fo_resp->general_status == AB_CIP_ERR_UNSUPPORTED_SERVICE) {
+            if(fo_resp->general_status == CIP_ERR_UNSUPPORTED_SERVICE) {
                 /* this type of command is not supported! */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Received CIP command unsupported error from the PLC!");
                 rc = PLCTAG_ERR_UNSUPPORTED;
@@ -3292,7 +3292,7 @@ int send_forward_close_req(ab_session_p session) {
     /* fill in the static parts */
 
     /* encap header parts */
-    fc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fc->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fc->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fc->interface_handle))); /* total length of packet except for encap header */
     fc->encap_sender_context = h2le64(++session->session_seq_id);
@@ -3300,14 +3300,14 @@ int send_forward_close_req(ab_session_p session) {
 
     /* CPF parts */
     fc->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fc->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
+    fc->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* null address item type */
     fc->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fc->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fc->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
     fc->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fc->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fc->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE; /* 0x4E Forward Close Request */
+    fc->cm_service_code = CIP_CMD_FORWARD_CLOSE; /* 0x4E Forward Close Request */
     fc->cm_req_path_size = 2;                       /* size of path in 16-bit words */
     fc->cm_req_path[0] = 0x20;                      /* class */
     fc->cm_req_path[1] = 0x06;                      /* CM class */
@@ -3315,11 +3315,11 @@ int send_forward_close_req(ab_session_p session) {
     fc->cm_req_path[3] = 0x01;                      /* instance 1 */
 
     /* Forward Open Params */
-    fc->secs_per_tick = AB_EIP_SECS_PER_TICK;                     /* seconds per tick, no used? */
-    fc->timeout_ticks = AB_EIP_TIMEOUT_TICKS;                     /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fc->secs_per_tick = CIP_SECS_PER_TICK;                     /* seconds per tick, no used? */
+    fc->timeout_ticks = CIP_TIMEOUT_TICKS;                     /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fc->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
-    fc->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);                /* our unique :-) vendor ID */
-    fc->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);            /* our serial number. */
+    fc->orig_vendor_id = h2le16(CIP_VENDOR_ID);                /* our unique :-) vendor ID */
+    fc->orig_serial_number = h2le32(CIP_VENDOR_SN);            /* our serial number. */
     fc->path_size = session->conn_path_size / 2;                  /* size in 16-bit words */
     fc->reserved = (uint8_t)0;                                    /* padding for the path. */
 
@@ -3361,19 +3361,19 @@ int recv_forward_close_resp(ab_session_p session) {
             break;
         }
 
-        if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
+        if(le2h16(fo_resp->encap_command) != EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
+        if(le2h32(fo_resp->encap_status) != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        if(fo_resp->general_status != AB_EIP_OK) {
+        if(fo_resp->general_status != EIP_OK) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Forward Close command failed, response code: %d",
                    fo_resp->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;

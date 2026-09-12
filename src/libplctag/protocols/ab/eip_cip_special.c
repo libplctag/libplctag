@@ -107,7 +107,7 @@ CIP Tag Info command
 
 //
 // START_PACK typedef struct {
-//    uint8_t request_service;    /* AB_EIP_CMD_CIP_LIST_TAGS=0x55 */
+//    uint8_t request_service;    /* CIP_CMD_LIST_TAGS=0x55 */
 //    uint8_t request_path_size;  /* 3 word = 6 bytes */
 //    uint8_t request_path[4];    /* MAGIC
 //                                    0x20    get class
@@ -533,16 +533,16 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
+    cip->encap_command = h2le16(EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
 
@@ -655,21 +655,21 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     data += tag->encoded_name_size;
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
+    cip->encap_command = h2le16(EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
+    cip->cpf_nai_item_type = h2le16(EIP_ITEM_NAI); /* ALWAYS 0 */
     cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
+    cip->cpf_udi_item_type = h2le16(EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
     cip->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
 
     /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
+    cip->cm_service_code = CIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
     cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
     cip->cm_req_path[0] = 0x20;                         /* class */
     cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
@@ -677,8 +677,8 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     cip->cm_req_path[3] = 0x01;                         /* instance 1 */
 
     /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
+    cip->secs_per_tick = CIP_SECS_PER_TICK; /* seconds per tick */
+    cip->timeout_ticks = CIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
 
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
@@ -898,16 +898,16 @@ int identity_tag_build_read_request_connected(ab_tag_p tag) {
     /* now fill in the static part of the request */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
+    cip->encap_command = h2le16(EIP_CONNECTED_SEND);
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout */
 
     /* Common Packet Format fields for connected send */
     cip->cpf_item_count = h2le16(2);
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
+    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
     cip->cpf_cai_item_length = h2le16(4);
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
+    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
     /* set the size of the request */
@@ -960,7 +960,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     data = (req->data) + sizeof(eip_encap);
 
     /* Set the EIP command */
-    hdr->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
+    hdr->encap_command = h2le16(EIP_UNCONNECTED_SEND);
 
     /* Get the CPF items area - right after the header */
     cpf_items = data;
@@ -980,7 +980,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     data += 2;
 
     /* Null Address Item */
-    uint16_le nai_type = h2le16(AB_EIP_ITEM_NAI);
+    uint16_le nai_type = h2le16(EIP_ITEM_NAI);
     mem_copy(data, &nai_type, 2);
     data += 2;
     uint16_le nai_length = h2le16(0);
@@ -989,7 +989,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
 
     /* Unconnected Data Item */
     data_item = data;
-    uint16_le udi_type = h2le16(AB_EIP_ITEM_UDI);
+    uint16_le udi_type = h2le16(EIP_ITEM_UDI);
     mem_copy(data, &udi_type, 2);
     data += 2;
     uint8_t *length_ptr = data;
@@ -1000,7 +1000,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     /* If routing is needed, wrap in Unconnected Send */
     if(need_unconnected_send) {
         /* Unconnected Send service */
-        uint8_t uc_service = AB_EIP_CMD_UNCONNECTED_SEND;
+        uint8_t uc_service = CIP_CMD_UNCONNECTED_SEND;
         mem_copy(data, &uc_service, 1);
         data++;
 
@@ -1148,7 +1148,7 @@ int identity_tag_check_read_status_connected(ab_tag_p tag) {
     cip_resp = (eip_cip_co_resp *)(tag->req->data);
 
     /* check the CIP response service code */
-    if(cip_resp->reply_service != (0x01 | AB_EIP_CMD_CIP_OK)) {
+    if(cip_resp->reply_service != (0x01 | CIP_CMD_OK)) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response service unexpected: 0x%02x",
                cip_resp->reply_service);
         rc = PLCTAG_ERR_BAD_DATA;
@@ -1157,7 +1157,7 @@ int identity_tag_check_read_status_connected(ab_tag_p tag) {
     }
 
     /* check the status */
-    if(cip_resp->status != AB_CIP_STATUS_OK) {
+    if(cip_resp->status != CIP_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_resp->status);
         rc = PLCTAG_ERR_REMOTE_ERR;
         ab_tag_abort_request(tag);
@@ -1263,7 +1263,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     item_length = le2h16(item_length_le);
     data += 2;
 
-    if(item_type != AB_EIP_ITEM_NAI || item_length != 0) {
+    if(item_type != EIP_ITEM_NAI || item_length != 0) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Invalid Null Address Item: type=0x%04x, length=%d",
                item_type, item_length);
         rc = PLCTAG_ERR_BAD_DATA;
@@ -1281,7 +1281,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     item_length = le2h16(udi_length_le);
     data += 2;
 
-    if(item_type != AB_EIP_ITEM_UDI) {
+    if(item_type != EIP_ITEM_UDI) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Invalid UDI item type: 0x%04x", item_type);
         rc = PLCTAG_ERR_BAD_DATA;
         ab_tag_abort_request(tag);
@@ -1303,7 +1303,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     cip_response++;
 
     /* Check if this is an Unconnected Send response (0x52 | 0x80 = 0xD2) */
-    if(reply_service == (AB_EIP_CMD_UNCONNECTED_SEND | AB_EIP_CMD_CIP_OK)) {
+    if(reply_service == (CIP_CMD_UNCONNECTED_SEND | CIP_CMD_OK)) {
         /* Skip reserved byte */
         cip_response++;
 
@@ -1319,7 +1319,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         cip_status = *cip_response;
         cip_response++;
 
-        if(cip_status != AB_CIP_STATUS_OK) {
+        if(cip_status != CIP_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unconnected Send CIP status is not OK: 0x%02x",
                    cip_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -1344,9 +1344,9 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     }
 
     /* Check for Get_Attributes_All response (0x01 service with success bit 0x80) */
-    if(reply_service != (0x01 | AB_EIP_CMD_CIP_OK)) {
+    if(reply_service != (0x01 | CIP_CMD_OK)) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "CIP response service unexpected: 0x%02x (expected 0x%02x)", reply_service, (0x01 | AB_EIP_CMD_CIP_OK));
+               "CIP response service unexpected: 0x%02x (expected 0x%02x)", reply_service, (0x01 | CIP_CMD_OK));
         rc = PLCTAG_ERR_BAD_DATA;
         ab_tag_abort_request(tag);
         return rc;
@@ -1366,7 +1366,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     cip_status = *cip_response;
     cip_response++;
 
-    if(cip_status != AB_CIP_STATUS_OK) {
+    if(cip_status != CIP_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_status);
         rc = PLCTAG_ERR_REMOTE_ERR;
         ab_tag_abort_request(tag);
@@ -1643,14 +1643,14 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (CIP_CMD_LIST_TAGS | CIP_CMD_OK)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -1662,7 +1662,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -1847,7 +1847,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     /*
      * set up the embedded CIP tag list request packet
-        uint8_t request_service;    AB_EIP_CMD_CIP_LIST_TAGS=0x55
+        uint8_t request_service;    CIP_CMD_LIST_TAGS=0x55
         uint8_t request_path_size;  3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6B    tag info/symbol class
@@ -1863,7 +1863,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
                                                 0x01    attribute #1 - symbol name
     */
 
-    *data = AB_EIP_CMD_CIP_LIST_TAGS;
+    *data = CIP_CMD_LIST_TAGS;
     data++;
 
     /* request path size, in 16-bit words */
@@ -1920,16 +1920,16 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
+    cip->encap_command = h2le16(EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
     /* Check if the payload size exceeds available space before setting request_size */
@@ -2140,14 +2140,14 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_GET_ATTR_LIST | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (CIP_CMD_GET_ATTR_LIST | CIP_CMD_OK)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -2159,7 +2159,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -2326,7 +2326,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
 
     /*
      * set up the embedded CIP UDT metadata request packet
-        uint8_t request_service;    AB_EIP_CMD_CIP_GET_ATTR_LIST=0x03
+        uint8_t request_service;    CIP_CMD_GET_ATTR_LIST=0x03
         uint8_t request_path_size;  3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6C    UDT class
@@ -2342,7 +2342,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
                                                 0x01    attribute #1 - Handle/type of structure.
     */
 
-    *data = AB_EIP_CMD_CIP_GET_ATTR_LIST;
+    *data = CIP_CMD_GET_ATTR_LIST;
     data++;
 
     /* request path size, in 16-bit words */
@@ -2393,16 +2393,16 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
+    cip->encap_command = h2le16(EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
     /* Check if the payload size exceeds available space before setting request_size */
@@ -2474,14 +2474,14 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (CIP_CMD_READ | CIP_CMD_OK)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -2493,7 +2493,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -2636,7 +2636,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
 
     /*
      * set up the embedded CIP UDT metadata request packet
-        uint8_t request_service;        AB_EIP_CMD_CIP_READ=0x4C
+        uint8_t request_service;        CIP_CMD_READ=0x4C
         uint8_t request_path_size;      3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6C    UDT class
@@ -2648,7 +2648,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
         uint16_t total_size;            Total size of request in bytes.
     */
 
-    *data = AB_EIP_CMD_CIP_READ;
+    *data = CIP_CMD_READ;
     data++;
 
     /* request path size, in 16-bit words */
@@ -2685,16 +2685,16 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
+    cip->encap_command = h2le16(EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
     cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
     /* Check if the payload size exceeds available space before setting request_size */
