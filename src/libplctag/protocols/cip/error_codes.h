@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,14 +33,23 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+/*
+ * CIP general and extended status decoding.
+ *
+ * The table and the three decode entry points were carried in two byte-identical
+ * copies -- src/libplctag/protocols/ab/error_codes.c and lines 1165-1455 of
+ * src/libplctag/protocols/omron/cip.c -- neither of which had anything vendor
+ * specific in it.  CIP status codes are defined by the CIP specification, not by
+ * the device that returns them, so this lives with CIP.
+ */
 
 #include <stddef.h>
 #include <stdint.h>
 
+
 extern const char *decode_cip_error_short(uint8_t *data, size_t data_size);
 extern const char *decode_cip_error_long(uint8_t *data, size_t data_size);
-extern int decode_cip_error_code(uint8_t *data, size_t data_size);
+extern int32_t decode_cip_error_code(uint8_t *data, size_t data_size);
 
 /*
  * Bytes remaining in a received buffer starting at data, given the buffer's end pointer.

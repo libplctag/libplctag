@@ -69,20 +69,10 @@ typedef struct {
 
     const char *(*decode_cip_error_short)(uint8_t *data, size_t data_size);
     const char *(*decode_cip_error_long)(uint8_t *data, size_t data_size);
-    int (*decode_cip_error_code)(uint8_t *data, size_t data_size);
+    int32_t (*decode_cip_error_code)(uint8_t *data, size_t data_size);
 
     // int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const
     // char **short_desc, const char **long_desc);
 } cip_generic_t;
 
 extern cip_generic_t CIP;
-
-/*
- * Bytes remaining in a received buffer starting at data, given the buffer's end pointer.
- * data and buf_end must point into (or one past) the same buffer.  Returns 0 if data is at
- * or past buf_end -- e.g. a truncated response that did not even reach this field -- rather
- * than letting a negative pointer difference wrap around to a huge size_t.
- */
-static inline size_t cip_error_data_size(uint8_t *data, uint8_t *buf_end) {
-    return (data < buf_end) ? (size_t)(buf_end - data) : 0;
-}

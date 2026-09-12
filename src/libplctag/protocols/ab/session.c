@@ -36,7 +36,7 @@
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
-#include <libplctag/protocols/ab/error_codes.h>
+#include <libplctag/protocols/cip/error_codes.h>
 #include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>

@@ -35,6 +35,7 @@
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/cip/error_codes.h>
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/defs.h>

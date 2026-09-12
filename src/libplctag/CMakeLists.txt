@@ -28,6 +28,9 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
+message("Adding CIP protocol sources to build.")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/cip")
+
 message("Adding AB protocol sources to build.")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/protocols/ab")
 
@@ -96,6 +99,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
+list(APPEND libplctag_SRCS "${CIP_PROTOCOL_SOURCES}")
 list(APPEND libplctag_SRCS "${AB_PROTOCOL_SOURCES}")
 
 

@@ -36,7 +36,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/error_codes.h>
+#include <libplctag/protocols/cip/error_codes.h>
 #include <libplctag/protocols/ab/pccc.h>
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
