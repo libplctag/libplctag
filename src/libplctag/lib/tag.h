@@ -151,8 +151,6 @@ struct tag_byte_order_s {
 typedef struct tag_byte_order_s tag_byte_order_t;
 
 
-typedef void (*tag_callback_func)(int32_t tag_id, int event, int status);
-typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status, void *user_data);
 
 /*
  * The base definition of the tag structure.  This is used
@@ -173,7 +171,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     nap_p tag_nap;                           \
     mutex_p api_mutex;                       \
     mutex_p ext_mutex;                       \
-    tag_extended_callback_func callback;     \
+    tag_extended_callback_func_t callback;     \
     tag_vtable_p vtable;                     \
     lib_instance_p instance;                 \
     void *userdata;                          \
@@ -257,7 +255,7 @@ extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
 extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
-                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                    tag_extended_callback_func_t tag_callback_func,
                                     void *userdata);
 
 static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {

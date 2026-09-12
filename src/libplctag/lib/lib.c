@@ -148,7 +148,7 @@ static int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index
 static int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size);
 static int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val);
 static int32_t plc_tag_create_impl(const char *attrib_str,
-                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   tag_extended_callback_func_t tag_callback_func,
                                    void *userdata, int timeout, plc_tag_p src_tag);
 
 
@@ -632,7 +632,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
 
 
 int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
-                             void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata) {
+                             tag_extended_callback_func_t tag_callback_func, void *userdata) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Starting.");
@@ -1076,14 +1076,14 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout) {
 
 
 LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
-                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                     tag_extended_callback_func_t tag_callback_func,
                                      void *userdata, int timeout) {
     return plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, NULL);
 }
 
 
 LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
-                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                           tag_extended_callback_func_t tag_callback_func,
                                            void *userdata, int timeout) {
     plc_tag_p src_tag = NULL;
     int32_t rc = PLCTAG_STATUS_OK;
@@ -1119,7 +1119,7 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
 
 
 static int32_t plc_tag_create_impl(const char *attrib_str,
-                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   tag_extended_callback_func_t tag_callback_func,
                                    void *userdata, int timeout, plc_tag_p src_tag) {
     plc_tag_p tag = PLC_TAG_P_NULL;
     int id = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1571,7 +1571,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
  * not guaranteed that they will work and they will possibly hang or fail.
  *
  * Return values:
- *void (*tag_callback_func)(int32_t tag_id, uint32_t event, int status)
+ *void (*tag_callback_func_t)(int32_t tag_id, uint32_t event, int status)
  * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
  * function may be registered at a time on each tag.
  *
@@ -1587,12 +1587,12 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 #    pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
 
-LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func) {
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func_t callback_func) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
 
-    rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func)callback_func, NULL);
+    rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func_t)callback_func, NULL);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Done.");
 
@@ -1642,7 +1642,7 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callb
  * Also see plc_tag_register_callback.
  */
 
-LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func callback_func, void *userdata) {
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func_t callback_func, void *userdata) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);
 

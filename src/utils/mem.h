@@ -56,7 +56,6 @@
 
 #include <stdint.h>
 
-#include <libplctag/lib/libplctag.h>
 
 
 /* returns zeroed memory, or NULL on failure or a non-positive size. */

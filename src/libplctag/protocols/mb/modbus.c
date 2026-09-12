@@ -313,7 +313,7 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 
 /* device tag functions */
 static plc_tag_p mb_connection_tag_create(attr attribs,
-                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                          tag_extended_callback_func_t tag_callback_func,
                                           void *userdata, plc_tag_p src_tag);
 static int mb_connection_tag_abort(plc_tag_p tag);
 static int mb_connection_tag_status(plc_tag_p tag);
@@ -394,7 +394,7 @@ struct tag_vtable_t modbus_vtable = {
 
 /****** main entry point *******/
 
-plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+plc_tag_p mb_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func,
                         void *userdata, plc_tag_p src_tag) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
@@ -3908,7 +3908,7 @@ static void mb_connection_tag_destructor(void *ptr) {
 }
 
 static plc_tag_p mb_connection_tag_create(attr attribs,
-                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                          tag_extended_callback_func_t tag_callback_func,
                                           void *userdata, plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, 0, "Starting.");
 

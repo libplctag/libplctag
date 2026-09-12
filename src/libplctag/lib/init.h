@@ -39,7 +39,7 @@
 
 extern int initialize_modules(void);
 typedef plc_tag_p (*tag_create_function)(attr attributes,
-                                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                         tag_extended_callback_func_t tag_callback_func,
                                          void *userdata, plc_tag_p src_tag);
 extern tag_create_function find_tag_create_func(attr attributes);
 extern void destroy_modules(void);

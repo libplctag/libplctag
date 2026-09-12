@@ -38,7 +38,7 @@
 #    include <utils/debug.h>
 #    include <libplctag/lib/tag.h>
 
-extern plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+extern plc_tag_p system_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func,
                                    void *userdata, plc_tag_p src_tag);
 
 #endif

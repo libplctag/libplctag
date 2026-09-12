@@ -44,7 +44,6 @@ typedef int socket_t;
 #endif
 
 
-#include <libplctag/lib/libplctag.h>
 
 /* set up any necessary socket libraries and global state */
 libplctag_error_code_t async_socket_init(void);

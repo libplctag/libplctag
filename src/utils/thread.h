@@ -59,7 +59,6 @@
 #    include <processthreadsapi.h>
 #endif
 
-#include <libplctag/lib/libplctag.h>
 
 
 #ifdef _WIN32

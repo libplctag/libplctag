@@ -174,7 +174,7 @@ void ab_teardown(void) {
 }
 
 
-plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func,
                         void *userdata, plc_tag_p src_tag) {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path = NULL;

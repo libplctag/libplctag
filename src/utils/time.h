@@ -54,7 +54,6 @@
 
 #include <stdint.h>
 
-#include <libplctag/lib/libplctag.h>
 
 
 /* milliseconds since the Unix epoch. */

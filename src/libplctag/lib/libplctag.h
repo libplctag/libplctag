@@ -259,6 +259,33 @@ LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_p
  */
 
 /**
+ * @brief Tag event callback.
+ *
+ * Called when an event fires on a tag.  See PLCTAG_EVENT_xyz for the event
+ * values and PLCTAG_STATUS_xyz / PLCTAG_ERR_xyz for the status.
+ *
+ * @param tag_id The tag the event is for.
+ * @param event One of the PLCTAG_EVENT_xyz values.
+ * @param status Status at the time of the event.
+ */
+typedef void (*tag_callback_func_t)(int32_t tag_id, int event, int status);
+
+
+/**
+ * @brief Tag event callback with a user data pointer.
+ *
+ * As tag_callback_func_t, plus the pointer handed to plc_tag_create_ex() or
+ * plc_tag_register_callback_ex().
+ *
+ * @param tag_id The tag the event is for.
+ * @param event One of the PLCTAG_EVENT_xyz values.
+ * @param status Status at the time of the event.
+ * @param userdata The caller's data pointer.
+ */
+typedef void (*tag_extended_callback_func_t)(int32_t tag_id, int event, int status, void *userdata);
+
+
+/**
  * @brief Create a new tag based on an attribute string.
  *
  * Creates a new tag based on the passed attribute string. The attributes
@@ -289,15 +316,14 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
  * allowing early creation-time events to be sent to user code.
  *
  * @param attrib_str Protocol-specific attribute string (must include "protocol=XXX").
- * @param tag_callback_func Callback function for tag events.
+ * @param callback_func Callback invoked on tag events.
  * @param userdata User-supplied data pointer passed to callback.
  * @param timeout Milliseconds to wait for creation (0 = return immediately).
  * @return Opaque tag handle (>0 on success, <0 on error with PLCTAG_ERR_xyz code).
  */
 
-LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
-                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                     void *userdata, int timeout);
+LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, tag_extended_callback_func_t callback_func, void *userdata,
+                                     int timeout);
 
 
 /**
@@ -305,14 +331,13 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
  *
  * @param src_tag_id Source tag ID to copy attributes from.
  * @param attrib_str additional attributes for a tag based on the protocol and device of the source tag.
- * @param tag_callback_func Callback function for tag events.
+ * @param callback_func Callback invoked on tag events.
  * @param userdata User-supplied data pointer passed to callback.
  * @param timeout Milliseconds to wait for creation (0 = return immediately).
  * @return Opaque tag handle (>0 on success, <0 on error with PLCTAG_ERR_xyz code).
  */
 LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
-                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                           void *userdata, int timeout);
+                                           tag_extended_callback_func_t callback_func, void *userdata, int timeout);
 
 
 /**
@@ -395,11 +420,11 @@ typedef enum {
  *          any tag functions as they are not guaranteed to work and may hang or fail.
  *
  * @param tag_id The tag ID handle returned by plc_tag_create().
- * @param tag_callback_func Callback function pointer.
+ * @param callback_func Callback invoked on tag events.
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_DUPLICATE if a callback is already registered.
  */
 
-LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func_t callback_func);
 
 /**
  * @brief Register a callback function for tag events with user data.
@@ -408,16 +433,14 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * data pointer passed to the callback function.
  *
  * @param tag_id The tag ID handle returned by plc_tag_create().
- * @param tag_callback_func Callback function pointer.
+ * @param callback_func Callback invoked on tag events.
  * @param userdata User-supplied data pointer passed to callback.
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_DUPLICATE if a callback is already registered.
  *
  * @see plc_tag_register_callback()
  */
 
-LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id,
-                                            void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                            void *userdata);
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func_t callback_func, void *userdata);
 
 
 /*

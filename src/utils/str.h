@@ -50,7 +50,6 @@
 
 #include <stdint.h>
 
-#include <libplctag/lib/libplctag.h>
 #include <utils/macros.h>
 
 

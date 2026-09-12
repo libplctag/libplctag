@@ -76,7 +76,6 @@
 
 #include <stdint.h>
 
-#include <libplctag/lib/libplctag.h>
 
 
 typedef struct nap_t *nap_p;

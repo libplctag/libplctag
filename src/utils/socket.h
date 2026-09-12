@@ -53,7 +53,6 @@
 
 #include <stdint.h>
 
-#include <libplctag/lib/libplctag.h>
 
 
 typedef struct sock_t *sock_p;
