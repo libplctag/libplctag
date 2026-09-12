@@ -54,6 +54,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <libplctag/lib/libplctag.h>
 #include <utils/atomic_utils.h>
 #include <utils/thread.h>
 

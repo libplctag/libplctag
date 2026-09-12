@@ -51,6 +51,7 @@ extern "C"
 #include <utils/debug.h>
 #include <utils/macros.h>
 #include <utils/mem.h>
+#include <utils/rc.h>
 
 
 START_PACK typedef struct {

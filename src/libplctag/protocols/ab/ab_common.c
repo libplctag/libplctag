@@ -56,6 +56,7 @@
 #include <utils/mem.h>
 #include <utils/mutex.h>
 #include <utils/nap.h>
+#include <utils/rc.h>
 #include <utils/spinlock.h>
 #include <utils/str.h>
 #include <utils/thread.h>

@@ -43,6 +43,7 @@
 #include <utils/macros.h>
 #include <utils/mem.h>
 #include <utils/mutex.h>
+#include <utils/rc.h>
 #include <utils/str.h>
 #include <stddef.h>
 #include <string.h>

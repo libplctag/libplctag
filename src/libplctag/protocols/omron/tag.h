@@ -42,6 +42,7 @@
 #    include <libplctag/lib/libplctag.h>
 #    include <libplctag/lib/tag.h>
 #    include <libplctag/protocols/omron/conn.h>
+#    include <libplctag/protocols/omron/defs.h>
 #    include <libplctag/protocols/omron/omron_common.h>
 
 typedef enum {

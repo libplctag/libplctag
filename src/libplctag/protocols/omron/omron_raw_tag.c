@@ -45,6 +45,7 @@
 #include <utils/mem.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
+#include <utils/rc.h>
 #include <utils/vector.h>
 
 /* raw tag functions */

@@ -42,6 +42,7 @@
 #    include <libplctag/lib/libplctag.h>
 #    include <libplctag/lib/tag.h>
 #    include <libplctag/protocols/ab/ab_common.h>
+#    include <libplctag/protocols/ab/defs.h>
 #    include <libplctag/protocols/ab/pccc.h>
 #    include <libplctag/protocols/ab/session.h>
 
