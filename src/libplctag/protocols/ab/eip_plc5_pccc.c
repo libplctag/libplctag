@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <libplctag/protocols/ab/eip_plc5_pccc.h>
 #include <libplctag/protocols/ab/tag.h>
 
 

@@ -33,7 +33,6 @@
 
 #pragma once
 
-#include <libplctag/protocols/ab/ab_common.h>
 
 
 /* PLC-5  */

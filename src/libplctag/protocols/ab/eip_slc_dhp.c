@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 
+#include <libplctag/protocols/ab/eip_slc_dhp.h>
 #include <libplctag/protocols/ab/tag.h>
 
 struct tag_vtable_t eip_slc_dhp_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */

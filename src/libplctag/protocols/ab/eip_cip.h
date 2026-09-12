@@ -34,6 +34,7 @@
 #ifndef __LIBPLCTAG_AB_EIP_CIP_H__
 #define __LIBPLCTAG_AB_EIP_CIP_H__
 
+#include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 
 extern struct tag_vtable_t eip_cip_vtable;

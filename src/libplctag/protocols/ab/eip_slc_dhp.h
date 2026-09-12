@@ -33,7 +33,6 @@
 
 #pragma once
 
-#include <libplctag/protocols/ab/ab_common.h>
 
 /* SLC/MicroLogix with DH+ last hop */
 extern struct tag_vtable_t eip_slc_dhp_vtable;

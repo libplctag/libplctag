@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <libplctag/protocols/ab/eip_plc5_dhp.h>
 #include <libplctag/protocols/ab/tag.h>
 
 struct tag_vtable_t eip_plc5_dhp_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
