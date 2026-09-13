@@ -60,7 +60,21 @@
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
-/* Omron is special */
+/*
+ * The payload size to ASK FOR in a Forward Open.  These are opening bids, not
+ * measured limits: a PLC that cannot manage the requested size rejects the
+ * Forward Open and reports what it does support, and receive_forward_open_response()
+ * clamps the guess to that and retries (see the PLCTAG_ERR_TOO_LARGE arm of the
+ * connection state machine).  Asking too high therefore costs one extra round trip
+ * at connect time, while asking too low is silent and permanent and costs
+ * throughput on every transfer for the life of the connection -- so these err
+ * high.
+ *
+ * Neither number is derived from a specification and neither has been checked
+ * against hardware; an NJ/NX is reported to top out nearer 1892.  Settling it
+ * needs one connection against a real PLC: the "unsupported size" branch logs the
+ * size the PLC reports.  Until then the negotiation is doing the real work.
+ */
 #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
 #define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
 
@@ -227,33 +241,8 @@ void conn_teardown(void) {
 }
 
 
-/*
- * conn_get_new_seq_id_unsafe
- *
- * A wrapper to get a new conn sequence ID.  Not thread safe.
- *
- * Note that this is dangerous to use in threaded applications
- * because 32-bit processors will not implement a 64-bit
- * integer as an atomic entity.
- */
-
-uint64_t conn_get_new_seq_id_unsafe(omron_conn_p conn) { return conn->conn_seq_id++; }
-
-/*
- * conn_get_new_seq_id
- *
- * A thread-safe function to get a new conn sequence ID.
- */
-
-uint64_t conn_get_new_seq_id(omron_conn_p conn) {
-    uint16_t res = 0;
-
-    // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "entering critical block %p",conn_mutex);
-    critical_block(conn->mutex) { res = (uint16_t)conn_get_new_seq_id_unsafe(conn); }
-    // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "leaving critical block %p", conn_mutex);
-
-    return res;
-}
+/* the shared version skips zero on rollover; see protocols/cip/conn.h. */
+uint64_t conn_get_new_seq_id(omron_conn_p conn) { return cip_conn_get_new_seq_id((cip_conn_p)conn); }
 
 
 int conn_get_max_payload(omron_conn_p conn) {

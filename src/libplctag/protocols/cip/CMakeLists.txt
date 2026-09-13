@@ -1,6 +1,8 @@
 set(CIP_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/cip.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/cip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/conn.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/conn.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/defs.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/path.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/path.h"

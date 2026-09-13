@@ -37,6 +37,7 @@
 #    include <stdbool.h>
 
 #    include <libplctag/protocols/ab/ab_common.h>
+#    include <libplctag/protocols/cip/conn.h>
 #    include <libplctag/protocols/ab/defs.h>
 #    include <utils/atomic_utils.h>
 #    include <utils/attr.h>
@@ -80,92 +81,30 @@ typedef struct session_conn_status_entry_s {
 
 
 struct ab_session_t {
-    //    int status;
-    int failed;
-    int on_list;
+    CIP_CONN_STRUCT;
 
-    /* gateway connection related info */
-    char *host;
-    int port;
-    char *path;
-    sock_p sock;
-
-    /* connection variables. */
-    bool use_connected_msg;
-    bool only_use_old_forward_open;
-    /* what this PLC model can do and how big its payloads may be. */
-    cip_plc_config_t plc_config;
-    uint16_t max_payload_guess;
-    uint16_t max_payload_size;
-
-    uint32_t orig_connection_id;
-    uint32_t targ_connection_id;
-    uint16_t conn_seq_num;
-    uint16_t conn_serial_number;
+    /* AB specific from here on. */
 
     plc_type_t plc_type;
 
-    uint8_t *conn_path;
-    uint8_t conn_path_size;
+    /* DH+ routing, for a PCCC PLC reached through a bridge. */
     uint16_t dhp_dest;
     int is_dhp;
 
-    int connection_group_id;
-
-    /* registration info */
-    uint32_t session_handle;
-
-    /* Sequence ID for requests. */
-    lock_t session_seq_id_lock;
-    uint64_t session_seq_id;
-
-    /* list of outstanding requests for this session */
-    vector_p requests;
-
-    uint64_t resp_seq_id;
-
-    /*
-     * What we last put on the wire.  The response has to be an answer to the request we
-     * actually sent, so these are snapshotted from the outgoing packet in send_eip_request()
-     * and checked against the incoming one in recv_eip_response().
-     */
-    uint16_t req_encap_command;
-    uint64_t req_seq_id;
-    bool req_sent;
-
-    /* data for receiving messages */
-    uint32_t data_offset;
-    uint32_t data_capacity;
-    uint32_t data_size;
-    uint8_t *data;
-    bool data_buffer_is_static;
-    // uint8_t data[MAX_PACKET_SIZE_EX];
-
-    uint64_t packet_count;
-
-    thread_p handler_thread;
-    atomic_int32_t terminating;
-    mutex_p session_mutex;
-    nap_p session_nap;
-
-    /* connection status - readable by tags via atomics */
-    atomic_int32_t connection_status;        /* plc_tag_conn_status_t values */
-    atomic_int32_t connection_status_reason; /* additional info about the connection status, such as error codes */
+    /* additional info about the connection status, such as error codes */
+    atomic_int32_t connection_status_reason;
 
     /* ring buffer of connection status changes; single writer (session thread), multiple independent readers */
     session_conn_status_entry_t conn_status_ring[SESSION_CONN_STATUS_RING_SIZE];
     atomic_int32_t
         conn_status_ring_write_idx; /* index of last written entry; wraps via & 0x07; tags drain by advancing their read idx */
-
-    /* connection inactivity timeout - readable/writable by tags via atomics */
-    atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
 };
 
 
 
 
 
-uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
+
 uint64_t session_get_new_seq_id(ab_session_p sess);
 
 extern int session_startup(void);

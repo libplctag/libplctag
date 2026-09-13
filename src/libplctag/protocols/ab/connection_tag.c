@@ -145,10 +145,10 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
     } else {
         /* Joining a session that already existed (found by session_find_or_create(),
          * or shared via src_tag): take both values as one atomic snapshot under
-         * session->session_mutex so we get a real, consistent point-in-time state
+         * session->mutex so we get a real, consistent point-in-time state
          * rather than a read_idx from before a transition paired with a status from
          * after it -- see the comment in session_set_connection_status(). */
-        critical_block(tag->session->session_mutex) {
+        critical_block(tag->session->mutex) {
             tag->status_ring_read_idx = atomic_get_int32(&tag->session->conn_status_ring_write_idx);
             tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
         }
