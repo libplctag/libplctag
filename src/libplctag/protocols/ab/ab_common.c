@@ -39,6 +39,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/cip/tag.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <libplctag/protocols/ab/connection_tag.h>
@@ -105,7 +106,6 @@ static int get_tag_data_type(ab_tag_p tag, attr attribs);
 static void ab_tag_destroy(ab_tag_p tag);
 static int default_abort(plc_tag_p tag);
 static int default_read(plc_tag_p tag);
-static int default_status(plc_tag_p tag);
 static int default_tickler(plc_tag_p tag);
 static int default_write(plc_tag_p tag);
 
@@ -114,7 +114,7 @@ static int default_write(plc_tag_p tag);
 struct tag_vtable_t default_vtable = {
     .abort = default_abort,
     .read = default_read,
-    .status = default_status,
+    .status = cip_default_tag_status,
     .tickler = default_tickler,
     .write = default_write,
     .wake_plc = NULL,
@@ -136,27 +136,23 @@ struct tag_vtable_t default_vtable = {
  * The shared CIP encoder takes only the six fields it needs.  Fill one in, call,
  * copy the three outputs back.
  */
-int encode_tag_name(ab_tag_p tag, const char *name) {
-    cip_tag_name_t ctx;
-    int rc = PLCTAG_STATUS_OK;
+/* the vtable entry; the shared check needs the connection, whose type is ours. */
+/* thin adapters: the shared versions live in <libplctag/protocols/cip/tag.h>. */
+static int encode_tag_name(ab_tag_p tag, const char *name) { return cip_fill_tag_name((cip_tag_p)tag, name); }
 
-    ctx.tag_id = tag->tag_id;
-    ctx.elem_count = tag->elem_count;
-    ctx.encoded_name = tag->encoded_name;
-    ctx.encoded_name_size = 0;
-    ctx.is_bit = 0;
-    ctx.bit = 0;
 
-    rc = cip_encode_tag_name(&ctx, name);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        tag->encoded_name_size = ctx.encoded_name_size;
-        tag->is_bit = (uint8_t)(ctx.is_bit ? 1 : 0);
-        tag->bit = (uint8_t)ctx.bit;
-    }
-
-    return rc;
+static int check_cpf_unconnected(ab_tag_p tag, ab_request_p request) {
+    return cip_check_cpf_unconnected((cip_tag_p)tag, request);
 }
+
+
+static int check_cpf_connected(ab_tag_p tag, ab_request_p request) {
+    return cip_check_cpf_connected((cip_tag_p)tag, request, tag->conn ? tag->conn->orig_connection_id : 0,
+                                   tag->conn ? tag->conn->targ_connection_id : 0);
+}
+
+
+int ab_tag_status(ab_tag_p tag) { return cip_tag_status((cip_tag_p)tag, tag->conn); }
 
 
 int ab_init(void) {
@@ -231,6 +227,13 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
     }
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "tag=%p", tag);
+
+    /*
+     * AB reads a tag in fragments; Omron NJ/NX cannot.  The field is shared
+     * (CIP_TAG_STRUCT) and only Omron's packing logic reads it today, but it must
+     * say what is true here or it will be wrong the moment that logic is shared.
+     */
+    tag->supports_fragmented_read = 1;
 
     /*
      * we got far enough to allocate memory, set the default vtable up
@@ -352,33 +355,33 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
             case TAG_PROTOCOL_AB:
             case TAG_PROTOCOL_OMRON: {
                 ab_tag_p src = (ab_tag_p)src_tag;
-                tag->session = rc_inc(src->session);
+                tag->conn = rc_inc(src->conn);
                 break;
             }
 
             case TAG_PROTOCOL_AB_CONNECTION: {
                 ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
-                tag->session = rc_inc(src_device->session);
+                tag->conn = rc_inc(src_device->session);
                 break;
             }
 
-            default: tag->session = NULL; break;
+            default: tag->conn = NULL; break;
         }
 
-        if(!tag->session) {
+        if(!tag->conn) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
             tag->status = PLCTAG_ERR_NOT_FOUND;
             return (plc_tag_p)tag;
         }
     } else {
-        if(session_find_or_create(&tag->session, attribs, NULL) != PLCTAG_STATUS_OK) {
+        if(session_find_or_create(&tag->conn, attribs, NULL) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
             tag->status = PLCTAG_ERR_BAD_GATEWAY;
             return (plc_tag_p)tag;
         }
     }
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->conn);
 
     /* get the tag data type, or try. */
     rc = get_tag_data_type(tag, attribs);
@@ -392,7 +395,7 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
     /* set up PLC-specific information. */
     switch(tag->plc_type) {
         case AB_PLC_PLC5:
-            if(!tag->session->is_dhp) {
+            if(!tag->conn->is_dhp) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up PLC/5 tag.");
 
                 if(str_length(path)) {
@@ -416,7 +419,7 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
 
         case AB_PLC_SLC:
         case AB_PLC_MLGX:
-            if(!tag->session->is_dhp) {
+            if(!tag->conn->is_dhp) {
 
                 if(str_length(path)) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0,
@@ -681,43 +684,43 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                 if(str_cmp_i(elem_type, "lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 64-bit integer.");
                     tag->elem_size = 8;
-                    tag->elem_type = AB_TYPE_INT64;
+                    tag->elem_type = CIP_TYPE_INT64;
                 } else if(str_cmp_i(elem_type, "dint") == 0 || str_cmp_i(elem_type, "udint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 32-bit integer.");
                     tag->elem_size = 4;
-                    tag->elem_type = AB_TYPE_INT32;
+                    tag->elem_type = CIP_TYPE_INT32;
                 } else if(str_cmp_i(elem_type, "int") == 0 || str_cmp_i(elem_type, "uint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 16-bit integer.");
                     tag->elem_size = 2;
-                    tag->elem_type = AB_TYPE_INT16;
+                    tag->elem_type = CIP_TYPE_INT16;
                 } else if(str_cmp_i(elem_type, "sint") == 0 || str_cmp_i(elem_type, "usint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 8-bit integer.");
                     tag->elem_size = 1;
-                    tag->elem_type = AB_TYPE_INT8;
+                    tag->elem_type = CIP_TYPE_INT8;
                 } else if(str_cmp_i(elem_type, "bool") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of bit.");
                     tag->elem_size = 1;
-                    tag->elem_type = AB_TYPE_BOOL;
+                    tag->elem_type = CIP_TYPE_BOOL;
                 } else if(str_cmp_i(elem_type, "bool array") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of bool array.");
                     tag->elem_size = 4;
-                    tag->elem_type = AB_TYPE_BOOL_ARRAY;
+                    tag->elem_type = CIP_TYPE_BOOL_ARRAY;
                 } else if(str_cmp_i(elem_type, "real") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 32-bit float.");
                     tag->elem_size = 4;
-                    tag->elem_type = AB_TYPE_FLOAT32;
+                    tag->elem_type = CIP_TYPE_FLOAT32;
                 } else if(str_cmp_i(elem_type, "lreal") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 64-bit float.");
                     tag->elem_size = 8;
-                    tag->elem_type = AB_TYPE_FLOAT64;
+                    tag->elem_type = CIP_TYPE_FLOAT64;
                 } else if(str_cmp_i(elem_type, "string") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of string.");
                     tag->elem_size = 88;
-                    tag->elem_type = AB_TYPE_STRING;
+                    tag->elem_type = CIP_TYPE_STRING;
                 } else if(str_cmp_i(elem_type, "short string") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of short string.");
                     tag->elem_size = 256; /* TODO - find the real length */
-                    tag->elem_type = AB_TYPE_SHORT_STRING;
+                    tag->elem_type = CIP_TYPE_SHORT_STRING;
                 } else {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Unknown tag type %s", elem_type);
                     return PLCTAG_ERR_UNSUPPORTED;
@@ -813,17 +816,6 @@ int default_read(plc_tag_p tag) {
 
     return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
-
-int default_status(plc_tag_p tag) {
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    if(tag) {
-        return tag->status;
-    } else {
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-}
-
 
 int default_tickler(plc_tag_p tag) {
     (void)tag;
@@ -948,24 +940,6 @@ int ab_tag_abort(ab_tag_p tag) {
  *
  * Generic status checker.   May be overridden by individual PLC types.
  */
-int ab_tag_status(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->session) {
-        rc = tag->status;
-    } else {
-        /* this is not OK.  This is fatal! */
-        rc = PLCTAG_ERR_CREATE;
-    }
-
-    return rc;
-}
-
-
 /*
  * ab_tag_destroy
  *
@@ -989,17 +963,17 @@ void ab_tag_destroy(ab_tag_p tag) {
     /* abort anything in flight */
     ab_tag_abort(tag);
 
-    session = tag->session;
+    session = tag->conn;
 
     /* tags should always have a session.  Release it. */
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag session %p",
-           tag ? tag->session : NULL);
+           tag ? tag->conn : NULL);
     if(session) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Removing tag from session.");
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing session reference of tag %" PRId32 ".",
                tag->tag_id);
         rc_dec(session);
-        tag->session = NULL;
+        tag->conn = NULL;
     } else {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "No session pointer!");
     }
@@ -1056,17 +1030,17 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_count;
     } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
         /* read connection status from session */
-        if(tag->session) {
-            res = atomic_get_int32(&tag->session->connection_status);
+        if(tag->conn) {
+            res = atomic_get_int32(&tag->conn->connection_status);
         } else {
             res = PLCTAG_CONN_STATUS_DOWN; /* no session = not connected */
         }
     } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
         /* read connection inactivity timeout from session */
-        if(tag->session) {
-            res = atomic_get_int32(&tag->session->connection_inactivity_timeout_ms);
+        if(tag->conn) {
+            res = atomic_get_int32(&tag->conn->connection_inactivity_timeout_ms);
         } else {
-            res = SESSION_DISCONNECT_TIMEOUT; /* no session = use default */
+            res = CIP_DISCONNECT_TIMEOUT; /* no session = use default */
         }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         switch(tag->plc_type) {
@@ -1108,7 +1082,7 @@ int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
     tag->status = PLCTAG_STATUS_OK;
 
     if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
+        /* Clamp to valid range: 100ms minimum, CIP_DISCONNECT_TIMEOUT (31000ms) maximum */
         int clamped_value = new_value;
         int out_of_bounds = 0;
 
@@ -1117,15 +1091,15 @@ int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
             out_of_bounds = 1;
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
                    "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", new_value);
-        } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
-            clamped_value = SESSION_DISCONNECT_TIMEOUT;
+        } else if(clamped_value > CIP_DISCONNECT_TIMEOUT) {
+            clamped_value = CIP_DISCONNECT_TIMEOUT;
             out_of_bounds = 1;
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, SESSION_DISCONNECT_TIMEOUT);
+                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, CIP_DISCONNECT_TIMEOUT);
         }
 
-        if(tag->session) {
-            atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, clamped_value);
+        if(tag->conn) {
+            atomic_set_int32(&tag->conn->connection_inactivity_timeout_ms, clamped_value);
             if(out_of_bounds) {
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1344,89 +1318,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
  * our connection rather than to some other conversation on the same socket, and the tag layer
  * copies the payload straight into the tag buffer on the strength of it.
  */
-static int check_cpf_connected(ab_tag_p tag, ab_request_p request) {
-    eip_cip_co_resp *resp = (eip_cip_co_resp *)(request->data);
-    size_t data_item_start = 0;
-    size_t data_item_length = 0;
-
-    if(le2h16(resp->cpf_item_count) != 2) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Connected response has %u CPF items, expected 2!",
-               le2h16(resp->cpf_item_count));
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h16(resp->cpf_cai_item_type) != EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != EIP_ITEM_CDI) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), EIP_ITEM_CAI, EIP_ITEM_CDI);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    /*
-     * Only meaningful once ForwardOpen has actually negotiated a connection.  Until then
-     * orig_connection_id is just the local placeholder, we send connection ID zero on the
-     * wire, and the target echoes zero back -- there is no connection identity to check.
-     */
-    if(tag->session && tag->session->targ_connection_id != 0
-       && le2h32(resp->cpf_orig_conn_id) != tag->session->orig_connection_id) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected response is for connection %" PRIx32 " but ours is %" PRIx32 "!", le2h32(resp->cpf_orig_conn_id),
-               tag->session->orig_connection_id);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    /*
-     * The connected data item covers the connection sequence number and everything after it.
-     * Require it to match what we actually received rather than merely fit, otherwise the PLC
-     * can shorten the item and leave the handlers reading bytes it never sent.
-     */
-    data_item_start = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - request->data);
-    data_item_length = (size_t)le2h16(resp->cpf_cdi_item_length);
-
-    if(data_item_start + data_item_length != (size_t)request->request_size) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, request->request_size, data_item_start);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 /* As above, but for the unconnected CPF header.  There is no connection ID to check here. */
-static int check_cpf_unconnected(ab_tag_p tag, ab_request_p request) {
-    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(request->data);
-    size_t data_item_start = 0;
-    size_t data_item_length = 0;
-
-    if(le2h16(resp->cpf_item_count) != 2) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unconnected response has %u CPF items, expected 2!",
-               le2h16(resp->cpf_item_count));
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h16(resp->cpf_nai_item_type) != EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != EIP_ITEM_UDI) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), EIP_ITEM_NAI, EIP_ITEM_UDI);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    data_item_start = (size_t)((uint8_t *)(&resp->reply_service) - request->data);
-    data_item_length = (size_t)le2h16(resp->cpf_udi_item_length);
-
-    if(data_item_start + data_item_length != (size_t)request->request_size) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Unconnected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, request->request_size, data_item_start);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 /**
  * @brief Check the status of the request
  *

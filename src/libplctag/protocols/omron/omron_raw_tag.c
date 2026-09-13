@@ -36,6 +36,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/omron/cip.h>
+#include <libplctag/protocols/cip/tag.h>
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/defs.h>
 #include <libplctag/protocols/omron/omron_common.h>
@@ -106,7 +107,7 @@ int omron_setup_raw_tag(omron_tag_p tag) {
 
     /* set up raw tag. */
     tag->special_tag = 1;
-    tag->elem_type = OMRON_TYPE_TAG_RAW;
+    tag->elem_type = CIP_TYPE_TAG_RAW;
     tag->elem_count = 1;
     tag->elem_size = 1;
 
@@ -174,39 +175,8 @@ int raw_tag_tickler(omron_tag_p tag) {
  */
 
 int raw_tag_write_start(omron_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting");
-
-    if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Raw tag found with a read in flight!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* the write is now in flight */
-    tag->write_in_progress = 1;
-
-    if(tag->use_connected_msg) {
-        rc = raw_tag_build_write_request_connected(tag);
-    } else {
-        rc = raw_tag_build_write_request_unconnected(tag);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
-        tag->write_in_progress = 0;
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_PENDING;
+    return cip_raw_tag_write_start((cip_tag_p)tag, (cip_build_request_func)raw_tag_build_write_request_connected,
+                                   (cip_build_request_func)raw_tag_build_write_request_unconnected);
 }
 
 

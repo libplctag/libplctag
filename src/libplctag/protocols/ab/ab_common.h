@@ -35,6 +35,7 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/cip/tag.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <utils/attr.h>
 #include <utils/vector.h>
@@ -45,7 +46,8 @@ typedef struct ab_tag_t *ab_tag_p;
 typedef struct ab_session_t *ab_session_p;
 #define AB_SESSION_NULL ((ab_session_p)NULL)
 
-typedef struct ab_request_t *ab_request_p;
+/* the request is fully shared now -- see protocols/cip/tag.h. */
+typedef cip_request_p ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 extern int ab_tag_abort_request_only(ab_tag_p tag);
@@ -98,9 +100,6 @@ extern int ab_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint
 
 
 // int ab_tag_destroy(ab_tag_p p_tag);
-/* fills in the tag's encoded_name, encoded_name_size, is_bit and bit from a tag name. */
-extern int encode_tag_name(ab_tag_p tag, const char *name);
-
 extern plc_type_t get_plc_type(attr attribs);
 extern int check_cpu(ab_tag_p tag, attr attribs);
 extern int check_tag_name(ab_tag_p tag, const char *name);

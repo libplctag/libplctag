@@ -1265,10 +1265,12 @@ int build_write_request_unconnected(omron_tag_p tag, int byte_offset) {
  * locked!
  */
 
-static int check_read_status_connected(omron_tag_p tag) {
+/*
+ * Connected and unconnected differ in the EIP and CPF headers ahead of the CIP
+ * reply, so where that reply sits and where its payload starts are passed in.
+ */
+static int check_read_status(omron_tag_p tag, cip_header *cip_resp, uint8_t *data) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
-    uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
 
@@ -1276,18 +1278,27 @@ static int check_read_status_connected(omron_tag_p tag) {
 
     /* the request reference is valid. */
 
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
-
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
-
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
 
     /* check the status */
     do {
         ptrdiff_t payload_size = 0;
+
+        /*
+         * A non-zero encapsulation status means the request failed before CIP ever
+         * saw it.  Only the unconnected form used to check this; nothing else in
+         * either module checks it for an ordinary response, so it now covers both
+         * frames.  The command check that sat beside it is gone: conn.c already
+         * rejects a response whose EIP command does not answer the request that was
+         * sent (see the req_encap_command comparison in recv_eip_response).
+         */
+        if(le2h32(((eip_encap *)(tag->req->data))->encap_status) != EIP_OK) {
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
+                   le2h32(((eip_encap *)(tag->req->data))->encap_status));
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
 
         if(cip_resp->reply_service != (CIP_CMD_READ | CIP_CMD_OK)) {
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
@@ -1464,231 +1475,17 @@ static int check_read_status_connected(omron_tag_p tag) {
     return rc;
 }
 
+static int check_read_status_connected(omron_tag_p tag) {
+    eip_cip_co_resp *resp = (eip_cip_co_resp *)(tag->req->data);
+
+    return check_read_status(tag, (cip_header *)&(resp->reply_service), (tag->req->data) + sizeof(eip_cip_co_resp));
+}
+
 
 static int check_read_status_unconnected(omron_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_resp *cip_resp;
-    uint8_t *data;
-    uint8_t *data_end;
-    int partial_data = 0;
+    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(tag->req->data);
 
-    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_uc_resp);
-
-    /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
-
-    /* check the status */
-    do {
-        ptrdiff_t payload_size = 0;
-
-        if(le2h16(cip_resp->encap_command) != EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unexpected EIP packet type received: %d!",
-                   cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != EIP_OK) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
-                   le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        /*
-         * TODO
-         *
-         * It probably should not be necessary to check for both as setting the type to anything other
-         * than fragmented is error-prone.
-         */
-
-        if(cip_resp->reply_service != (CIP_CMD_READ | CIP_CMD_OK)) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-
-            break;
-        }
-
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
-
-        /*
-         * check to see if there is any data to process.  If this is a packed
-         * response, there might not be.
-         */
-        payload_size = (data_end - data);
-        if(payload_size > 0) {
-            /* we got data, so the transfer is moving again. */
-            tag->fragment_retry_count = 0;
-
-            /* skip the copy if we already have type data */
-            if(tag->encoded_type_info_size == 0) {
-                int type_length = 0;
-
-                /* the first byte of the response is a type byte. */
-                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "type byte = %d (0x%02x)", (int)*data, (int)*data);
-
-                if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
-                    /* found it and we got the type data size */
-
-                    /* some types use the second byte to indicate how many bytes more are used. */
-                    if(type_length == 0) {
-                        if(payload_size < 2) {
-                            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                                   "Response too short to hold extended type length byte!");
-                            rc = PLCTAG_ERR_TOO_SMALL;
-                            break;
-                        }
-
-                        type_length = *(data + 1) + 2;
-                    }
-
-                    if(type_length <= 0 || type_length > (int)sizeof(tag->encoded_type_info)
-                       || type_length > (int)payload_size) {
-                        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                               "Type data length %d for type byte 0x%02x is out of range (max %d, available %d)!",
-                               type_length, *data, (int)sizeof(tag->encoded_type_info), (int)payload_size);
-                        rc = PLCTAG_ERR_TOO_LARGE;
-                        break;
-                    }
-
-                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Type data is %d bytes long.", type_length);
-                    pdebug_dump_bytes(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, data, type_length);
-
-                    tag->encoded_type_info_size = type_length;
-                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
-                } else {
-                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unsupported data type returned, type byte=0x%02x",
-                           *data);
-                    rc = PLCTAG_ERR_UNSUPPORTED;
-                    break;
-                }
-            }
-
-            /* skip past the type data */
-            data += (tag->encoded_type_info_size);
-
-            if((intptr_t)data > (intptr_t)data_end) {
-                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
-                rc = PLCTAG_ERR_TOO_SMALL;
-                break;
-            }
-
-            /* check payload size now that we have bumped past the data type info. */
-            payload_size = (data_end - data);
-
-            /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
-                tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
-
-                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
-
-                tag->data = (uint8_t *)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
-                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
-            }
-
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);
-
-            /*
-             * copy the data, but only if this is not
-             * a pre-read for a subsequent write!  We do not
-             * want to overwrite the data the upstream has
-             * put into the tag's data buffer.
-             */
-            if(!tag->pre_write_read) { mem_copy(tag->data + tag->offset, data, (int)payload_size); }
-
-            /* bump the byte offset */
-            tag->offset += (int)payload_size;
-        } else {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
-
-            /* no payload means no forward progress on a fragmented transfer. */
-            tag->fragment_retry_count++;
-        }
-
-        /* set the return code */
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-
-    /* clean up the request */
-    omron_tag_abort(tag);
-
-    /* are we actually done? */
-    if(rc == PLCTAG_STATUS_OK) {
-        /* this read is done. */
-        tag->read_in_progress = 0;
-
-        /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
-                   tag->fragment_retry_count);
-            rc = PLCTAG_ERR_PARTIAL;
-        } else if(!tag->pre_write_read && partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
-            /* FIXME - the abort function above resets the offset! */
-            rc = tag_read_start(tag);
-        } else {
-            tag->offset = 0;
-
-            /* the transfer is over one way or the other, so start the next one clean. */
-            tag->fragment_retry_count = 0;
-
-            /* if this is a pre-read for a write, then pass off to the write routine */
-            if(tag->pre_write_read) {
-                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-                tag->pre_write_read = 0;
-                rc = tag_write_start(tag);
-            }
-        }
-    }
-
-    /* this is not an else clause because the above if could result in bad rc. */
-    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        /* error ! */
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Error received!");
-
-        /* clean up everything. */
-        omron_tag_abort(tag);
-    }
-
-    /* release the referene to the request. */
-
-    // FIXME - why is this different than the connected case?
-    // rc_dec(request);
-
-    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
+    return check_read_status(tag, (cip_header *)&(resp->reply_service), (tag->req->data) + sizeof(eip_cip_uc_resp));
 }
 
 
@@ -1699,21 +1496,20 @@ static int check_read_status_unconnected(omron_tag_p tag) {
  * status of a write operation.  If the write is done, it triggers the clean up.
  */
 
-static int check_write_status_connected(omron_tag_p tag) {
-    eip_cip_co_resp *cip_resp;
+/*
+ * As on the AB side, the connected and unconnected forms differed only in which
+ * response struct the buffer was cast to, and both read only the CIP reply
+ * header -- the same four bytes in either frame.  The entry points below say
+ * where that header sits.
+ *
+ * The connected form also carried a null check that dereferenced tag->tag_id
+ * inside the if(!tag) branch, so it would have crashed before it could return
+ * PLCTAG_ERR_NULL_PTR.  Neither the unconnected form nor AB has one; it is gone.
+ */
+static int check_write_status(omron_tag_p tag, cip_header *cip_resp) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    if(!tag) {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
 
     do {
         if(cip_resp->reply_service != (CIP_CMD_WRITE | CIP_CMD_OK)
@@ -1763,64 +1559,17 @@ static int check_write_status_connected(omron_tag_p tag) {
     return rc;
 }
 
+static int check_write_status_connected(omron_tag_p tag) {
+    eip_cip_co_resp *resp = (eip_cip_co_resp *)(tag->req->data);
+
+    return check_write_status(tag, (cip_header *)&(resp->reply_service));
+}
+
 
 static int check_write_status_unconnected(omron_tag_p tag) {
-    eip_cip_uc_resp *cip_resp;
-    int rc = PLCTAG_STATUS_OK;
+    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(tag->req->data);
 
-    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    do {
-        if(cip_resp->reply_service != (CIP_CMD_WRITE | CIP_CMD_OK)
-           && cip_resp->reply_service != (CIP_CMD_RMW | CIP_CMD_OK)) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-
-        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
-
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
-    } while(0);
-
-    /* clean up the request. */
-    omron_tag_abort_request_only(tag);
-
-    /* write is done in one way or another */
-    tag->write_in_progress = 0;
-
-    if(rc == PLCTAG_STATUS_OK) {
-        if(tag->offset < tag->size) {
-
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Write not complete, triggering next round.");
-            /* FIXME - the above abort function resets the offset */
-            rc = tag_write_start(tag);
-        } else {
-            /* only clear this if we are done. */
-            tag->offset = 0;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Write failed!");
-        tag->offset = 0;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
+    return check_write_status(tag, (cip_header *)&(resp->reply_service));
 }
 
 

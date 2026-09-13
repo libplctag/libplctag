@@ -44,48 +44,23 @@
 #    include <libplctag/protocols/ab/defs.h>
 #    include <libplctag/protocols/ab/pccc.h>
 #    include <libplctag/protocols/ab/session.h>
+#    include <libplctag/protocols/cip/tag.h>
 
-typedef enum {
-    AB_TYPE_BOOL,
-    AB_TYPE_BOOL_ARRAY,
-    AB_TYPE_CONTROL,
-    AB_TYPE_COUNTER,
-    AB_TYPE_FLOAT32,
-    AB_TYPE_FLOAT64,
-    AB_TYPE_INT8,
-    AB_TYPE_INT16,
-    AB_TYPE_INT32,
-    AB_TYPE_INT64,
-    AB_TYPE_STRING,
-    AB_TYPE_SHORT_STRING,
-    AB_TYPE_TIMER,
-    AB_TYPE_TAG_ENTRY,   /* not a real AB type, but a pseudo type for AB's internal tag entry. */
-    AB_TYPE_TAG_UDT,     /* as above, but for UDTs. */
-    AB_TYPE_TAG_RAW,     /* raw CIP tag */
-    AB_TYPE_TAG_IDENTITY /* CIP Identity Object data */
-} elem_type_t;
+/* the element type list moved to <libplctag/protocols/cip/tag.h> as cip_elem_type_t. */
 
 
 struct ab_tag_t {
-    /*struct plc_tag_t p_tag;*/
     TAG_BASE_STRUCT;
+
+    CIP_TAG_STRUCT;
+
+    /* AB specific from here on. */
 
     /* how do we talk to this device? */
     plc_type_t plc_type;
 
-    /* pointers back to session */
-    ab_session_p session;
-    int use_connected_msg;
-
-    /* this contains the encoded name */
-    uint8_t encoded_name[MAX_TAG_NAME];
-    int encoded_name_size;
-
-    //    const char *read_group;
-
-    /* storage for the encoded type. */
-    uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
-    int encoded_type_info_size;
+    /* the connection this tag rides on. */
+    ab_session_p conn;
 
     /*
      * TNS of the PCCC request we last put on the wire.  The response has to carry the same
@@ -94,50 +69,9 @@ struct ab_tag_t {
      */
     uint16_t req_pccc_seq_num;
 
-    /* number of elements and size of each in the tag. */
     pccc_file_t file_type;
-    elem_type_t elem_type;
-
-    int elem_count;
-    int elem_size;
-
-    int special_tag;
-
-    /* Used for standard tags. How much data can we send per packet? */
-    int write_data_per_packet;
-
-    /* used for listing tags. */
-    uint32_t next_id;
-
-    /* used for UDT tags. */
-    uint8_t udt_get_fields;
-    uint16_t udt_id;
-
-    /*
-     * Consecutive fragment responses that carried no payload.
-     *
-     * A partial-transfer status with zero bytes is legitimate: when several requests are
-     * packed into one packet the earlier ones can consume all the room, leaving the later
-     * ones only a bare CIP header.  It is also what a PLC would send forever to keep us
-     * asking for the same fragment, so count them and give up rather than loop.  Reset
-     * whenever a response actually delivers data.
-     */
-    int fragment_retry_count;
-
-    /* requests */
-    // int abort_requested;
-    int pre_write_read;
-    int first_read;
-    ab_request_p req;
-    int offset;
-
-    int allow_packing;
-
-    /* flags for operations */
-    int read_in_progress;
-    int write_in_progress;
-    /*int connect_in_progress;*/
 };
+
 
 
 #endif

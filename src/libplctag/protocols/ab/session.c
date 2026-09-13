@@ -37,6 +37,7 @@
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <libplctag/protocols/cip/error_codes.h>
+#include <libplctag/protocols/cip/request.h>
 #include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
@@ -87,7 +88,6 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 #define RETRY_WAIT_MAX_MS (10000)
 
 /* Idle timeout.  One second less than that negotiated with the PLC. */
-#define SESSION_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define SESSION_IDLE_WAIT_TIME (100)
 
@@ -170,8 +170,6 @@ static uint16_t next_conn_serial_number(uint16_t current);
 static int send_old_forward_open_request(ab_session_p session);
 static int send_extended_forward_open_request(ab_session_p session);
 static int receive_forward_open_response(ab_session_p session);
-static void request_destroy(void *req_arg);
-static int session_request_increase_buffer(ab_request_p request, int new_capacity);
 static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason);
 
 
@@ -376,18 +374,18 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
-    int connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+    int connection_inactivity_timeout_ms = CIP_DISCONNECT_TIMEOUT;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
-    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
+    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CIP_DISCONNECT_TIMEOUT);
+    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CIP_DISCONNECT_TIMEOUT) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, SESSION_DISCONNECT_TIMEOUT);
-        connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+               connection_inactivity_timeout_ms, CIP_DISCONNECT_TIMEOUT, CIP_DISCONNECT_TIMEOUT);
+        connection_inactivity_timeout_ms = CIP_DISCONNECT_TIMEOUT;
     } else {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);
@@ -2207,7 +2205,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
                 return PLCTAG_ERR_TOO_LARGE;
             }
 
-            rc = session_request_increase_buffer(request, request_capacity);
+            rc = cip_request_increase_buffer(request, request_capacity);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id,
                        "Unable to increase request buffer size to %d bytes!", request_capacity);
@@ -2295,7 +2293,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
                 return PLCTAG_ERR_TOO_LARGE;
             }
 
-            rc = session_request_increase_buffer(request, request_capacity);
+            rc = cip_request_increase_buffer(request, request_capacity);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id,
                        "Unable to increase request buffer size to %d bytes!", request_capacity);
@@ -3415,7 +3413,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
         return PLCTAG_ERR_NO_MEM;
     }
 
-    res = (ab_request_p)rc_alloc((int)sizeof(struct ab_request_t), request_destroy);
+    res = (ab_request_p)rc_alloc((int)sizeof(struct cip_request_t), cip_request_destroy);
     if(!res) {
         mem_free(buffer);
         *req = NULL;
@@ -3436,48 +3434,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
 
 
 /*
- * request_destroy
+ * cip_request_destroy
  *
  * The request must be removed from any lists before this!
  */
-
-void request_destroy(void *req_arg) {
-    ab_request_p req = req_arg;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
-
-    atomic_set_int32(&req->abort_request, 1);
-
-    if(req->data) {
-        mem_free(req->data);
-        req->data = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
-}
-
-
-int session_request_increase_buffer(ab_request_p request, int new_capacity) {
-    uint8_t *old_buffer = NULL;
-    uint8_t *new_buffer = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, request->tag_id, "Starting.");
-
-    new_buffer = (uint8_t *)mem_alloc(new_capacity);
-    if(!new_buffer) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id, "Unable to allocate larger request buffer!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    spin_block(&request->lock) {
-        old_buffer = request->data;
-        request->request_capacity = new_capacity;
-        request->data = new_buffer;
-    }
-
-    mem_free(old_buffer);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, request->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}

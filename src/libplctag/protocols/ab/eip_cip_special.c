@@ -37,6 +37,7 @@
 #include <libplctag/protocols/cip/cip.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/cip/tag.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <libplctag/protocols/ab/eip_cip.h> /* for the Logix decode types. */
@@ -279,7 +280,7 @@ int setup_raw_tag(ab_tag_p tag) {
 
     /* set up raw tag. */
     tag->special_tag = 1;
-    tag->elem_type = AB_TYPE_TAG_RAW;
+    tag->elem_type = CIP_TYPE_TAG_RAW;
     tag->elem_count = 1;
     tag->elem_size = 1;
 
@@ -353,39 +354,8 @@ int raw_tag_tickler(ab_tag_p tag) {
  */
 
 int raw_tag_write_start(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
-
-    if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Raw tag found with a read in flight!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* the write is now in flight */
-    tag->write_in_progress = 1;
-
-    if(tag->use_connected_msg) {
-        rc = raw_tag_build_write_request_connected(tag);
-    } else {
-        rc = raw_tag_build_write_request_unconnected(tag);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
-        tag->write_in_progress = 0;
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_PENDING;
+    return cip_raw_tag_write_start((cip_tag_p)tag, (cip_build_request_func)raw_tag_build_write_request_connected,
+                                   (cip_build_request_func)raw_tag_build_write_request_unconnected);
 }
 
 
@@ -503,7 +473,7 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_create_request(tag->conn, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
                plc_tag_decode_error(rc));
@@ -551,7 +521,7 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -570,7 +540,7 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     tag->size = 0;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
+    rc = session_add_request(tag->conn, tag->req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! Error %s",
@@ -596,7 +566,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_create_request(tag->conn, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
                plc_tag_decode_error(rc));
@@ -604,7 +574,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     }
 
     /* how much space do we need? */
-    required_space = (size_t)tag->size + sizeof(eip_cip_uc_req) + (size_t)tag->session->conn_path_size;
+    required_space = (size_t)tag->size + sizeof(eip_cip_uc_req) + (size_t)tag->conn->conn_path_size;
 
     if(required_space > (size_t)tag->req->request_capacity) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -650,7 +620,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
      */
 
     /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
     data++;
     *data = 0;
     data++; /* copy the tag name into the request */
@@ -688,7 +658,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -707,7 +677,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     tag->size = 0;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
+    rc = session_add_request(tag->conn, tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! Error %s",
                plc_tag_decode_error(rc));
@@ -753,7 +723,7 @@ int setup_identity_tag(ab_tag_p tag) {
 
     /* set up identity tag */
     tag->special_tag = 1;
-    tag->elem_type = AB_TYPE_TAG_IDENTITY;
+    tag->elem_type = CIP_TYPE_TAG_IDENTITY;
     tag->elem_count = 1;
     tag->elem_size = 1;
 
@@ -858,7 +828,7 @@ int identity_tag_build_read_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request. Error %s!",
                plc_tag_decode_error(rc));
@@ -922,7 +892,7 @@ int identity_tag_build_read_request_connected(ab_tag_p tag) {
     critical_block(tag->api_mutex) { tag->req = req; }
 
     /* add the request to the session's list */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -951,10 +921,10 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* Determine if we need Unconnected Send (routing required) */
-    need_unconnected_send = (tag->session->conn_path_size > 0);
+    need_unconnected_send = (tag->conn->conn_path_size > 0);
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request. Error %s!",
                plc_tag_decode_error(rc));
@@ -1075,14 +1045,14 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
         mem_copy(embed_length_ptr, &embed_length_le, 2);
 
         /* Add routing information for the Unconnected Send (after the CIP request) */
-        uint8_t conn_path_size_words = (uint8_t)((tag->session->conn_path_size) / 2);
+        uint8_t conn_path_size_words = (uint8_t)((tag->conn->conn_path_size) / 2);
         mem_copy(data, &conn_path_size_words, 1);
         data++;
         uint8_t conn_path_reserved = 0;
         mem_copy(data, &conn_path_reserved, 1);
         data++;
-        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-        data += tag->session->conn_path_size;
+        mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+        data += tag->conn->conn_path_size;
     } else {
         /* Direct CIP request without Unconnected Send wrapper */
         uint8_t service = 0x01;
@@ -1123,7 +1093,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     critical_block(tag->api_mutex) { tag->req = req; }
 
     /* add the request to the session's list */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -1485,7 +1455,7 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
                 }
 
                 /* we have a program tag request! */
-                if(encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
+                if(cip_fill_tag_name((cip_tag_p)tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                            "Tag %s program listing is not able to be encoded!", name);
                     rc = PLCTAG_ERR_BAD_PARAM;
@@ -1511,7 +1481,7 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
     if(rc == PLCTAG_STATUS_OK) {
         /* yes we did */
         tag->special_tag = 1;
-        tag->elem_type = AB_TYPE_TAG_ENTRY;
+        tag->elem_type = CIP_TYPE_TAG_ENTRY;
         tag->elem_count = 1;
         tag->elem_size = 1;
 
@@ -1840,7 +1810,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1941,7 +1911,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -1957,7 +1927,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     /* add the request to the session's list. */
     tag->read_in_progress = 1;
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -2008,7 +1978,7 @@ int setup_udt_tag(ab_tag_p tag, const char *name) {
     /*fill in the blanks. */
     tag->udt_id = (uint16_t)(unsigned int)tag_id;
     tag->special_tag = 1;
-    tag->elem_type = AB_TYPE_TAG_UDT;
+    tag->elem_type = CIP_TYPE_TAG_UDT;
     tag->elem_count = 1;
     tag->elem_size = 1;
 
@@ -2321,7 +2291,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -2416,7 +2386,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -2431,7 +2401,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
         /* session_add_request() takes its own reference; ours is still outstanding. */
@@ -2622,7 +2592,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_create_request(tag->conn, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         ab_tag_abort_request(tag);
@@ -2710,7 +2680,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
@@ -2727,7 +2697,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     tag->read_in_progress = 1;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
+    rc = session_add_request(tag->conn, tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
         ab_tag_abort_request(tag);

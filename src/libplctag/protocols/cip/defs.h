@@ -54,6 +54,13 @@
 #define MAX_CONN_PATH (260) /* 256 plus padding. */
 #define MAX_IP_ADDR_SEG_LEN (16)
 
+/*
+ * How long a connection may sit idle before it is torn down.  This was defined
+ * four times -- ab/session.{c,h} and omron/conn.{c,h} -- as the same expression
+ * under two names.
+ */
+#define CIP_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
+
 
 
 #define CIP_CONN_PARAM ((uint16_t)0x4200)

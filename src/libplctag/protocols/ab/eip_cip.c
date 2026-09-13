@@ -388,7 +388,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -446,7 +446,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
@@ -461,7 +461,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -492,7 +492,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
@@ -553,13 +553,13 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
      * uint8_t reserved/pad (zero)
      * uint8_t[...] path (padded to even number of bytes)
      */
-    if(tag->session->conn_path_size > 0) {
-        *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    if(tag->conn->conn_path_size > 0) {
+        *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
         data++;
         *data = 0; /* reserved/pad */
         data++;
-        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-        data += tag->session->conn_path_size;
+        mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+        data += tag->conn->conn_path_size;
     }
 
     /* now we go back and fill in the fields of the static part */
@@ -595,7 +595,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
@@ -611,7 +611,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -640,7 +640,7 @@ int build_write_bit_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -766,7 +766,7 @@ int build_write_bit_request_connected(ab_tag_p tag) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -797,7 +797,7 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -912,12 +912,12 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
      */
 
     /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
     data++;
     *data = 0;
     data++;
-    mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-    data += tag->session->conn_path_size;
+    mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+    data += tag->conn->conn_path_size;
 
     /* now fill in the rest of the structure. */
 
@@ -957,7 +957,7 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -990,7 +990,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
     if(tag->is_bit) { return build_write_bit_request_connected(tag); }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1107,7 +1107,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -1142,7 +1142,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
     if(tag->is_bit) { return build_write_bit_request_unconnected(tag); }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1249,12 +1249,12 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
      */
 
     /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
     data++;
     *data = 0;
     data++;
-    mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-    data += tag->session->conn_path_size;
+    mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+    data += tag->conn->conn_path_size;
 
     /* now fill in the rest of the structure. */
 
@@ -1294,7 +1294,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -1322,22 +1322,27 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
  * locked!
  */
 
-static int check_read_status_connected(ab_tag_p tag) {
+/*
+ * The connected and unconnected forms of the read status check differed only in
+ * the EIP and CPF headers that sit in front of the CIP reply: where the reply
+ * header is, and where the payload starts behind it.  Both are worked out by the
+ * two entry points below and passed in, so the check itself is frame agnostic.
+ *
+ * The two forms had also drifted in their tail.  The connected one called
+ * ab_tag_abort_request() whenever the result was not PENDING, the unconnected
+ * one only on an error.  That turned out to be the same thing: neither
+ * tag_read_start() nor tag_write_start() ever returns PLCTAG_STATUS_OK, so an OK
+ * here means the read finished and started nothing else -- and by then
+ * ab_tag_abort_request_only() has already released the request and cleared the
+ * flags, and the branch above has already zeroed the offset.  The connected
+ * version is kept because it is the more exercised path and reports the error.
+ */
+static int check_read_status(ab_tag_p tag, cip_header *cip_resp, uint8_t *data) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
-    uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* The request is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
-
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -1531,212 +1536,17 @@ static int check_read_status_connected(ab_tag_p tag) {
     return rc;
 }
 
+static int check_read_status_connected(ab_tag_p tag) {
+    eip_cip_co_resp *resp = (eip_cip_co_resp *)(tag->req->data);
+
+    return check_read_status(tag, (cip_header *)&(resp->reply_service), (tag->req->data) + sizeof(eip_cip_co_resp));
+}
+
 
 static int check_read_status_unconnected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_resp *cip_resp;
-    uint8_t *data;
-    uint8_t *data_end;
-    int partial_data = 0;
+    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(tag->req->data);
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_uc_resp);
-
-    /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
-
-    /* check the status */
-    do {
-        ptrdiff_t payload_size = 0;
-
-        if(cip_resp->reply_service != (CIP_CMD_READ_FRAG | CIP_CMD_OK)
-           && cip_resp->reply_service != (CIP_CMD_READ | CIP_CMD_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-
-            break;
-        }
-
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
-
-        /*
-         * check to see if there is any data to process.  If this is a packed
-         * response, there might not be.
-         */
-        payload_size = (data_end - data);
-        if(payload_size > 0) {
-            /* we got data, so the transfer is moving again. */
-            tag->fragment_retry_count = 0;
-
-            /* skip the copy if we already have type data */
-            if(tag->encoded_type_info_size == 0) {
-                int type_length = 0;
-
-                /* the first byte of the response is a type byte. */
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "type byte = %d (0x%02x)", (int)*data, (int)*data);
-
-                if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
-                    /* found it and we got the type data size */
-
-                    /* some types use the second byte to indicate how many bytes more are used. */
-                    if(type_length == 0) {
-                        if(payload_size < 2) {
-                            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                                   "Response too short to hold extended type length byte!");
-                            rc = PLCTAG_ERR_TOO_SMALL;
-                            break;
-                        }
-
-                        type_length = *(data + 1) + 2;
-                    }
-
-                    if(type_length <= 0 || type_length > (int)sizeof(tag->encoded_type_info)
-                       || type_length > (int)payload_size) {
-                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                               "Type data length %d for type byte 0x%02x is out of range (max %d, available %d)!",
-                               type_length, *data, (int)sizeof(tag->encoded_type_info), (int)payload_size);
-                        rc = PLCTAG_ERR_TOO_LARGE;
-                        break;
-                    }
-
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Type data is %d bytes long.", type_length);
-                    pdebug_dump_bytes(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, data, type_length);
-
-                    tag->encoded_type_info_size = type_length;
-                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
-                } else {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unsupported data type returned, type byte=0x%02x",
-                           *data);
-                    rc = PLCTAG_ERR_UNSUPPORTED;
-                    break;
-                }
-            }
-
-            /* skip past the type data */
-            data += (tag->encoded_type_info_size);
-
-            if((intptr_t)data > (intptr_t)data_end) {
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
-                rc = PLCTAG_ERR_TOO_SMALL;
-                break;
-            }
-
-            /* check payload size now that we have bumped past the data type info. */
-            payload_size = (data_end - data);
-
-            /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
-                /* a PLC can keep returning fragments forever.  Do not grow without bound. */
-                if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
-                           (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
-                    rc = PLCTAG_ERR_TOO_LARGE;
-                    break;
-                }
-
-                tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
-
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
-
-                tag->data = (uint8_t *)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
-            }
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);
-
-            /*
-             * copy the data, but only if this is not
-             * a pre-read for a subsequent write!  We do not
-             * want to overwrite the data the upstream has
-             * put into the tag's data buffer.
-             */
-            if(!tag->pre_write_read) { mem_copy(tag->data + tag->offset, data, (int)payload_size); }
-
-            /* bump the byte offset */
-            tag->offset += (int)payload_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
-
-            /* no payload means no forward progress on a fragmented transfer. */
-            tag->fragment_retry_count++;
-        }
-
-        /* set the return code */
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    ab_tag_abort_request_only(tag);
-
-    /* are we actually done? */
-    if(rc == PLCTAG_STATUS_OK) {
-        /* this read is done. */
-        tag->read_in_progress = 0;
-
-        /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
-                   tag->fragment_retry_count);
-            rc = PLCTAG_ERR_PARTIAL;
-        } else if(!tag->pre_write_read && partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
-            rc = tag_read_start((plc_tag_p)tag);
-        } else {
-            tag->offset = 0;
-
-            /* the transfer is over one way or the other, so start the next one clean. */
-            tag->fragment_retry_count = 0;
-
-            /* if this is a pre-read for a write, then pass off to the write routine */
-            if(tag->pre_write_read) {
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-                tag->pre_write_read = 0;
-                rc = tag_write_start((plc_tag_p)tag);
-            }
-        }
-    }
-
-    /* this is not an else clause because the above if could result in bad rc. */
-    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        /* error ! */
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Error received!");
-
-        /* clean up everything. */
-        ab_tag_abort_request(tag);
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
+    return check_read_status(tag, (cip_header *)&(resp->reply_service), (tag->req->data) + sizeof(eip_cip_uc_resp));
 }
 
 
@@ -1747,16 +1557,17 @@ static int check_read_status_unconnected(ab_tag_p tag) {
  * status of a write operation.  If the write is done, it triggers the clean up.
  */
 
-static int check_write_status_connected(ab_tag_p tag) {
-    eip_cip_co_resp *cip_resp;
+/*
+ * The connected and unconnected forms of this check differed only in which
+ * response struct they cast the buffer to, and both used just the CIP reply
+ * header -- which sits at the same four-byte layout in either frame.  So the
+ * check takes a pointer to that header and the two entry points below say where
+ * it is.
+ */
+static int check_write_status(ab_tag_p tag, cip_header *cip_resp) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
 
     do {
         if(cip_resp->reply_service != (CIP_CMD_WRITE_FRAG | CIP_CMD_OK)
@@ -1802,59 +1613,17 @@ static int check_write_status_connected(ab_tag_p tag) {
     return rc;
 }
 
+static int check_write_status_connected(ab_tag_p tag) {
+    eip_cip_co_resp *resp = (eip_cip_co_resp *)(tag->req->data);
+
+    return check_write_status(tag, (cip_header *)&(resp->reply_service));
+}
+
 
 static int check_write_status_unconnected(ab_tag_p tag) {
-    eip_cip_uc_resp *cip_resp;
-    int rc = PLCTAG_STATUS_OK;
+    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(tag->req->data);
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    do {
-        if(cip_resp->reply_service != (CIP_CMD_WRITE_FRAG | CIP_CMD_OK)
-           && cip_resp->reply_service != (CIP_CMD_WRITE | CIP_CMD_OK)
-           && cip_resp->reply_service != (CIP_CMD_RMW | CIP_CMD_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
-    } while(0);
-
-    ab_tag_abort_request_only(tag);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        if(tag->offset < tag->size) {
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Write not complete, triggering next round.");
-            rc = tag_write_start((plc_tag_p)tag);
-        } else {
-            /* only clear this if we are done. */
-            tag->offset = 0;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Write failed!");
-        tag->offset = 0;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
+    return check_write_status(tag, (cip_header *)&(resp->reply_service));
 }
 
 
@@ -1866,7 +1635,7 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     /* if we are here, then we have all the type data etc. */
-    available_payload = session_get_available_cip_payload_space(tag->session);
+    available_payload = session_get_available_cip_payload_space(tag->conn);
 
     if(tag->use_connected_msg) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Connected tag.");

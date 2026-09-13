@@ -43,6 +43,7 @@
 #include <libplctag/protocols/omron/omron_connection_tag.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/omron/omron_common.h>
+#include <libplctag/protocols/cip/tag.h>
 #include <libplctag/protocols/omron/omron_raw_tag.h>
 #include <libplctag/protocols/omron/omron_standard_tag.h>
 #include <libplctag/protocols/omron/tag.h>
@@ -97,7 +98,6 @@ static int check_tag_name(omron_tag_p tag, const char *name);
 static void omron_tag_destroy(omron_tag_p tag);
 static int default_abort(plc_tag_p tag);
 static int default_read(plc_tag_p tag);
-static int default_status(plc_tag_p tag);
 static int default_tickler(plc_tag_p tag);
 static int default_write(plc_tag_p tag);
 
@@ -111,7 +111,7 @@ typedef struct omron_connection_tag_view_s {
 static struct tag_vtable_t default_vtable = {
     .abort = default_abort,
     .read = default_read,
-    .status = default_status,
+    .status = cip_default_tag_status,
     .tickler = default_tickler,
     .write = default_write,
     .wake_plc = NULL,
@@ -133,27 +133,23 @@ static struct tag_vtable_t default_vtable = {
  * The shared CIP encoder takes only the six fields it needs.  Fill one in, call,
  * copy the three outputs back.
  */
-static int encode_tag_name(omron_tag_p tag, const char *name) {
-    cip_tag_name_t ctx;
-    int rc = PLCTAG_STATUS_OK;
+/* the vtable entry; the shared check needs the connection, whose type is ours. */
+/* thin adapters: the shared versions live in <libplctag/protocols/cip/tag.h>. */
+static int encode_tag_name(omron_tag_p tag, const char *name) { return cip_fill_tag_name((cip_tag_p)tag, name); }
 
-    ctx.tag_id = tag->tag_id;
-    ctx.elem_count = tag->elem_count;
-    ctx.encoded_name = tag->encoded_name;
-    ctx.encoded_name_size = 0;
-    ctx.is_bit = 0;
-    ctx.bit = 0;
 
-    rc = cip_encode_tag_name(&ctx, name);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        tag->encoded_name_size = ctx.encoded_name_size;
-        tag->is_bit = (uint8_t)(ctx.is_bit ? 1 : 0);
-        tag->bit = (uint8_t)ctx.bit;
-    }
-
-    return rc;
+static int check_cpf_unconnected(omron_tag_p tag, omron_request_p request) {
+    return cip_check_cpf_unconnected((cip_tag_p)tag, request);
 }
+
+
+static int check_cpf_connected(omron_tag_p tag, omron_request_p request) {
+    return cip_check_cpf_connected((cip_tag_p)tag, request, tag->conn ? tag->conn->orig_connection_id : 0,
+                                   tag->conn ? tag->conn->targ_connection_id : 0);
+}
+
+
+int omron_tag_status(omron_tag_p tag) { return cip_tag_status((cip_tag_p)tag, tag->conn); }
 
 
 int omron_init(void) {
@@ -431,44 +427,44 @@ int get_tag_data_type(omron_tag_p tag, attr attribs) {
         if(str_cmp_i(elem_type, "lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 64-bit integer.");
             tag->elem_size = 8;
-            tag->elem_type = OMRON_TYPE_INT64;
+            tag->elem_type = CIP_TYPE_INT64;
         } else if(str_cmp_i(elem_type, "dint") == 0 || str_cmp_i(elem_type, "udint") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 32-bit integer.");
             tag->elem_size = 4;
-            tag->elem_type = OMRON_TYPE_INT32;
+            tag->elem_type = CIP_TYPE_INT32;
         } else if(str_cmp_i(elem_type, "int") == 0 || str_cmp_i(elem_type, "uint") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 16-bit integer.");
             tag->elem_size = 2;
-            tag->elem_type = OMRON_TYPE_INT16;
+            tag->elem_type = CIP_TYPE_INT16;
         } else if(str_cmp_i(elem_type, "sint") == 0 || str_cmp_i(elem_type, "usint") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 8-bit integer.");
             tag->elem_size = 1;
-            tag->elem_type = OMRON_TYPE_INT8;
+            tag->elem_type = CIP_TYPE_INT8;
         } else if(str_cmp_i(elem_type, "bool") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of bit.");
             tag->elem_size = 1;
-            tag->elem_type = OMRON_TYPE_BOOL;
+            tag->elem_type = CIP_TYPE_BOOL;
         } else if(str_cmp_i(elem_type, "bool array") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of bool array.");
             tag->elem_size = 4;
-            tag->elem_type = OMRON_TYPE_BOOL_ARRAY;
+            tag->elem_type = CIP_TYPE_BOOL_ARRAY;
         } else if(str_cmp_i(elem_type, "real") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 32-bit float.");
             tag->elem_size = 4;
-            tag->elem_type = OMRON_TYPE_FLOAT32;
+            tag->elem_type = CIP_TYPE_FLOAT32;
         } else if(str_cmp_i(elem_type, "lreal") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 64-bit float.");
             tag->elem_size = 8;
-            tag->elem_type = OMRON_TYPE_FLOAT64;
+            tag->elem_type = CIP_TYPE_FLOAT64;
         } else if(str_cmp_i(elem_type, "string") == 0) {
             /* FIXME - is this correct? */
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Fount tag element type of string.");
             tag->elem_size = 88;
-            tag->elem_type = OMRON_TYPE_STRING;
+            tag->elem_type = CIP_TYPE_STRING;
         } else if(str_cmp_i(elem_type, "short string") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of short string.");
             tag->elem_size = 256; /* TODO - find the real length */
-            tag->elem_type = OMRON_TYPE_SHORT_STRING;
+            tag->elem_type = CIP_TYPE_SHORT_STRING;
         } else {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Unknown tag type %s", elem_type);
             return PLCTAG_ERR_UNSUPPORTED;
@@ -534,17 +530,6 @@ int default_read(plc_tag_p tag) {
 
     return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
-
-int default_status(plc_tag_p tag) {
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    if(tag) {
-        return tag->status;
-    } else {
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-}
-
 
 int default_tickler(plc_tag_p tag) {
     (void)tag;
@@ -688,24 +673,6 @@ int omron_tag_abort(omron_tag_p tag) {
  *
  * Generic status checker.   May be overridden by individual PLC types.
  */
-int omron_tag_status(omron_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->conn) {
-        rc = tag->status;
-    } else {
-        /* this is not OK.  This is fatal! */
-        rc = PLCTAG_ERR_CREATE;
-    }
-
-    return rc;
-}
-
-
 /*
  * omron_tag_destroy
  *
@@ -803,7 +770,7 @@ int omron_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default
         if(tag->conn) {
             res = atomic_get_int32(&tag->conn->connection_inactivity_timeout_ms);
         } else {
-            res = CONN_DISCONNECT_TIMEOUT; /* no connection = use default */
+            res = CIP_DISCONNECT_TIMEOUT; /* no connection = use default */
         }
     } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
         res = (int)(tag->elem_type);
@@ -827,7 +794,7 @@ int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_val
     tag->status = PLCTAG_STATUS_OK;
 
     if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* Clamp to valid range: 100ms minimum, CONN_DISCONNECT_TIMEOUT (31000ms) maximum */
+        /* Clamp to valid range: 100ms minimum, CIP_DISCONNECT_TIMEOUT (31000ms) maximum */
         int clamped_value = new_value;
         int out_of_bounds = 0;
 
@@ -836,11 +803,11 @@ int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_val
             out_of_bounds = 1;
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
                    "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", new_value);
-        } else if(clamped_value > CONN_DISCONNECT_TIMEOUT) {
-            clamped_value = CONN_DISCONNECT_TIMEOUT;
+        } else if(clamped_value > CIP_DISCONNECT_TIMEOUT) {
+            clamped_value = CIP_DISCONNECT_TIMEOUT;
             out_of_bounds = 1;
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, CONN_DISCONNECT_TIMEOUT);
+                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, CIP_DISCONNECT_TIMEOUT);
         }
 
         if(tag->conn) {
@@ -972,88 +939,7 @@ int check_tag_name(omron_tag_p tag, const char *name) {
  * our connection rather than to some other conversation on the same socket, and the tag layer
  * copies the payload straight into the tag buffer on the strength of it.
  */
-static int check_cpf_connected(omron_tag_p tag, omron_request_p req) {
-    eip_cip_co_resp *resp = (eip_cip_co_resp *)(req->data);
-    size_t data_item_start = 0;
-    size_t data_item_length = 0;
-
-    if(le2h16(resp->cpf_item_count) != 2) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Connected response has %u CPF items, expected 2!",
-               le2h16(resp->cpf_item_count));
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h16(resp->cpf_cai_item_type) != EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != EIP_ITEM_CDI) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), EIP_ITEM_CAI, EIP_ITEM_CDI);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    /*
-     * Only meaningful once ForwardOpen has actually negotiated a connection.  Until then
-     * orig_connection_id is just the local placeholder, we send connection ID zero on the
-     * wire, and the target echoes zero back -- there is no connection identity to check.
-     */
-    if(tag->conn && tag->conn->targ_connection_id != 0 && le2h32(resp->cpf_orig_conn_id) != tag->conn->orig_connection_id) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected response is for connection %" PRIx32 " but ours is %" PRIx32 "!", le2h32(resp->cpf_orig_conn_id),
-               tag->conn->orig_connection_id);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    /*
-     * The connected data item covers the connection sequence number and everything after it.
-     * Require it to match what we actually received rather than merely fit, otherwise the PLC
-     * can shorten the item and leave the handlers reading bytes it never sent.
-     */
-    data_item_start = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - req->data);
-    data_item_length = (size_t)le2h16(resp->cpf_cdi_item_length);
-
-    if(data_item_start + data_item_length != (size_t)req->request_size) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, req->request_size, data_item_start);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 /* As above, but for the unconnected CPF header.  There is no connection ID to check here. */
-static int check_cpf_unconnected(omron_tag_p tag, omron_request_p req) {
-    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(req->data);
-    size_t data_item_start = 0;
-    size_t data_item_length = 0;
-
-    if(le2h16(resp->cpf_item_count) != 2) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unconnected response has %u CPF items, expected 2!",
-               le2h16(resp->cpf_item_count));
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h16(resp->cpf_nai_item_type) != EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != EIP_ITEM_UDI) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), EIP_ITEM_NAI, EIP_ITEM_UDI);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    data_item_start = (size_t)((uint8_t *)(&resp->reply_service) - req->data);
-    data_item_length = (size_t)le2h16(resp->cpf_udi_item_length);
-
-    if(data_item_start + data_item_length != (size_t)req->request_size) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Unconnected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, req->request_size, data_item_start);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 int omron_check_request_status(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     omron_request_p req = NULL;

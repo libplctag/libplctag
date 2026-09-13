@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,39 +33,19 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+/*
+ * Operations on a CIP request buffer.
+ *
+ * These were byte-identical in ab/session.c and omron/conn.c apart from the
+ * debug module name, and they touch nothing but the request itself, which is
+ * already shared.
+ */
 
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
 #include <libplctag/protocols/cip/tag.h>
-#include <libplctag/protocols/omron/defs.h>
-#include <utils/vector.h>
-
-typedef struct omron_tag_t *omron_tag_p;
-#define OMRON_TAG_NULL ((omron_tag_p)NULL)
-
-typedef struct omron_conn_t *omron_conn_p;
-#define OMRON_CONN_NULL ((omron_conn_p)NULL)
-
-/* the request is fully shared now -- see protocols/cip/tag.h. */
-typedef cip_request_p omron_request_p;
-#define OMRON_REQUEST_NULL ((omron_request_p)NULL)
 
 
-extern int omron_tag_abort(omron_tag_p tag);
-extern int omron_tag_status(omron_tag_p tag);
+/* rc_alloc destructor for a request. */
+extern void cip_request_destroy(void *req_arg);
 
-extern int omron_tag_abort_request(omron_tag_p tag);
-extern int omron_tag_abort_request_only(omron_tag_p tag);
-
-extern int omron_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
-extern int omron_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
-
-extern int omron_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
-
-// THREAD_FUNC(request_handler_func);
-
-/* helpers for checking request status. */
-extern int omron_check_request_status(omron_tag_p tag);
-
-#define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
+/* swap in a larger buffer, under the request's own lock. */
+extern int cip_request_increase_buffer(cip_request_p request, int new_capacity);

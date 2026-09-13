@@ -50,7 +50,6 @@
 /* #define MAX_CONN_HOST    (128) */
 
 #    define CONN_DEFAULT_TIMEOUT (2000)
-#    define CONN_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
 
 #    define MAX_PACKET_SIZE_EX (44 + 4002)
 
@@ -150,35 +149,7 @@ struct omron_conn_t {
 };
 
 
-struct omron_request_t {
-    /* used to force interlocks with other threads. */
-    lock_t lock;
 
-    int status;
-
-    /* flags for communicating with background thread */
-    int resp_received;
-    atomic_int32_t abort_request;
-
-    /* debugging info */
-    int tag_id;
-
-    /* allow requests to be packed in the conn */
-    int allow_packing;
-    int packing_num;
-
-    /* time stamp for debugging output */
-    int64_t time_sent;
-
-    /* used by the background thread for incrementally getting data */
-    int request_size; /* total bytes, not just data */
-    int request_capacity;
-    int response_size; /* size of data we expect to be returned by this request */
-
-    int first_read;               /* whether this tag is being read for the first time and its size is therefor unknown*/
-    int supports_fragmented_read; /* if fragmented read is supported then we do not need to worry about the response*/
-    uint8_t *data;
-};
 
 
 uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess);

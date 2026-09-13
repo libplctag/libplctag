@@ -1432,16 +1432,16 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
         pccc_dhp_cmd_resp *dhp_resp = (pccc_dhp_cmd_resp *)((eip_cpf_co_header *)(tag->req->data) + 1);
 
         /* we sent this to dhp_dest from node zero, so the answer has to come back the other way. */
-        if(!tag->session) {
+        if(!tag->conn) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Called without a session!");
             return PLCTAG_ERR_NULL_PTR;
         }
 
-        if(le2h16(dhp_resp->src_node) != tag->session->dhp_dest || le2h16(dhp_resp->dest_node) != 0) {
+        if(le2h16(dhp_resp->src_node) != tag->conn->dhp_dest || le2h16(dhp_resp->dest_node) != 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
                    "DH+ response is from node %u to node %u but we sent to node %u from node 0!",
                    (unsigned int)le2h16(dhp_resp->src_node), (unsigned int)le2h16(dhp_resp->dest_node),
-                   (unsigned int)tag->session->dhp_dest);
+                   (unsigned int)tag->conn->dhp_dest);
             return PLCTAG_ERR_BAD_DATA;
         }
 
@@ -1492,7 +1492,7 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
  * get the tag status.
  */
 int pccc_tag_status(ab_tag_p tag) {
-    if(!tag->session) {
+    if(!tag->conn) {
         /* this is not OK.  This is fatal! */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "returning PLCTAG_ERR_CREATE (no session)");
         return PLCTAG_ERR_CREATE;
@@ -1576,11 +1576,11 @@ int pccc_tag_tickler(ab_tag_p tag) {
 
 int pccc_tag_read_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     ab_request_p req = NULL;
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
-    int cip_payload_space = session_get_available_cip_payload_space(tag->session);
+    int cip_payload_space = session_get_available_cip_payload_space(tag->conn);
 
     /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
     tag->req_pccc_seq_num = conn_seq_id;
@@ -1643,7 +1643,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         }
 
         /* create the request */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             break;
@@ -1746,7 +1746,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
             break;
@@ -1862,7 +1862,7 @@ int pccc_check_read_status(ab_tag_p tag) {
 int pccc_tag_write_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
@@ -1896,7 +1896,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
                    + (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
                    + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+        int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
         if(session_payload_space <= 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
@@ -1933,7 +1933,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -2024,7 +2024,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
             break;
@@ -2062,7 +2062,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
 int plc5_tag_write_bit_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
@@ -2086,7 +2086,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         /* How much overhead? */
         overhead = sizeof(cip_pccc_req) + sizeof(plc5_pccc_write_cmd_req) + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+        int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
         if(session_payload_space <= 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
@@ -2123,7 +2123,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -2225,7 +2225,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
             break;
@@ -2264,7 +2264,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
 int slc_tag_write_bit_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
@@ -2296,7 +2296,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         /* How much overhead? */
         overhead = sizeof(cip_pccc_req) + sizeof(slc_pccc_write_cmd_req) + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+        int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
         if(session_payload_space <= 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
@@ -2333,7 +2333,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -2428,7 +2428,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
             break;
@@ -2531,7 +2531,7 @@ int pccc_check_write_status(ab_tag_p tag) {
  * to check on the completion of async requests.
  */
 int pccc_dhp_tag_status(ab_tag_p tag) {
-    if(!tag->session) {
+    if(!tag->conn) {
         /* this is not OK.  This is fatal! */
         return PLCTAG_ERR_CREATE;
     }
@@ -2596,11 +2596,11 @@ int pccc_dhp_tag_tickler(ab_tag_p tag) {
 
 int pccc_dhp_tag_read_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     ab_request_p req = NULL;
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
-    int cip_payload_space = session_get_available_cip_payload_space(tag->session);
+    int cip_payload_space = session_get_available_cip_payload_space(tag->conn);
 
     /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
     tag->req_pccc_seq_num = conn_seq_id;
@@ -2664,7 +2664,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         }
 
         /* create the request */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             break;
@@ -2689,7 +2689,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
 
         /* fill in DH+ fields */
         dhp_routing->dest_link = h2le16(0);
-        dhp_routing->dest_node = h2le16(tag->session->dhp_dest);
+        dhp_routing->dest_node = h2le16(tag->conn->dhp_dest);
         dhp_routing->src_link = h2le16(0);
         dhp_routing->src_node = h2le16(0);
 
@@ -2750,7 +2750,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         cip_req->cpf_item_count = h2le16(2);
         cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
+        cip_req->cpf_targ_conn_id = h2le32(tag->conn->targ_connection_id);
         cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
@@ -2770,7 +2770,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
             break;
@@ -2875,7 +2875,7 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
 int pccc_dhp_tag_write_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead, data_per_packet;
@@ -2909,7 +2909,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
                    + (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
                    + (size_t)tag->encoded_name_size;
 
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+        int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
         if(session_payload_space <= 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
@@ -2946,7 +2946,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -2960,7 +2960,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
 
         /* fill in DH+ fields */
         dhp_routing->dest_link = h2le16(0);
-        dhp_routing->dest_node = h2le16(tag->session->dhp_dest);
+        dhp_routing->dest_node = h2le16(tag->conn->dhp_dest);
         dhp_routing->src_link = h2le16(0);
         dhp_routing->src_node = h2le16(0);
 
@@ -3019,7 +3019,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
         cip_req->cpf_item_count = h2le16(2);
         cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
+        cip_req->cpf_targ_conn_id = h2le32(tag->conn->targ_connection_id);
         cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
@@ -3039,7 +3039,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
                req->request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
             break;
@@ -3077,7 +3077,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
 int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead = 0;
@@ -3103,7 +3103,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         overhead = sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_rmw_cmd_req) + (size_t)tag->encoded_name_size
                    + (size_t)(tag->elem_size * 2); /* AND/OR masks */
 
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+        int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
         if(session_payload_space <= 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
@@ -3135,7 +3135,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -3200,7 +3200,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
 
         /* fill in DH+ fields */
         pccc_cmd->dest_link = h2le16(0);
-        pccc_cmd->dest_node = h2le16(tag->session->dhp_dest);
+        pccc_cmd->dest_node = h2le16(tag->conn->dhp_dest);
         pccc_cmd->src_link = h2le16(0);
         pccc_cmd->src_node = h2le16(0);
 
@@ -3214,7 +3214,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         cip_req->cpf_item_count = h2le16(2);
         cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
+        cip_req->cpf_targ_conn_id = h2le32(tag->conn->targ_connection_id);
         cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
@@ -3231,7 +3231,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
                req->request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add bit write request to session! rc=%d", rc);
             break;
@@ -3270,7 +3270,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
 int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
     size_t overhead = 0;
@@ -3304,7 +3304,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         overhead = sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_routing_header) + sizeof(slc_pccc_write_cmd_req)
                    + (size_t)tag->encoded_name_size + (size_t)(tag->elem_size) + 2; /* the mask */
 
-        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+        int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
         if(session_payload_space <= 0) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
@@ -3336,7 +3336,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* get a request buffer */
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request.  rc=%d", rc);
             tag->write_in_progress = 0;
@@ -3395,7 +3395,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
 
         /* fill in DH+ fields */
         pccc_cmd->dest_link = h2le16(0);
-        pccc_cmd->dest_node = h2le16(tag->session->dhp_dest);
+        pccc_cmd->dest_node = h2le16(tag->conn->dhp_dest);
         pccc_cmd->src_link = h2le16(0);
         pccc_cmd->src_node = h2le16(0);
 
@@ -3409,7 +3409,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         cip_req->cpf_item_count = h2le16(2);
         cip_req->cpf_cai_item_type = h2le16(EIP_ITEM_CAI);
         cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
+        cip_req->cpf_targ_conn_id = h2le32(tag->conn->targ_connection_id);
         cip_req->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI);
         cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
         cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
@@ -3426,7 +3426,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
                req->request_size);
 
         /* add request to session */
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add bit write request to session! rc=%d", rc);
             break;

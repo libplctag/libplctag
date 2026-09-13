@@ -109,7 +109,7 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: tag->session = rc_inc(((ab_tag_p)src_tag)->session); break;
+            case TAG_PROTOCOL_OMRON: tag->session = rc_inc(((ab_tag_p)src_tag)->conn); break;
 
             case TAG_PROTOCOL_AB_CONNECTION: tag->session = rc_inc(((ab_connection_tag_p)src_tag)->session); break;
 

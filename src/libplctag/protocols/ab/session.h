@@ -50,7 +50,6 @@
 /* #define MAX_SESSION_HOST    (128) */
 
 #    define SESSION_DEFAULT_TIMEOUT (2000)
-#    define SESSION_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
 
 #    define MAX_PACKET_SIZE_EX (44 + 4002)
 
@@ -163,31 +162,7 @@ struct ab_session_t {
 };
 
 
-struct ab_request_t {
-    /* used to force interlocks with other threads. */
-    lock_t lock;
 
-    int status;
-
-    /* flags for communicating with background thread */
-    int resp_received;
-    atomic_int32_t abort_request;
-
-    /* debugging info */
-    int tag_id;
-
-    /* allow requests to be packed in the session */
-    int allow_packing;
-    int packing_num;
-
-    /* time stamp for debugging output */
-    int64_t time_sent;
-
-    /* used by the background thread for incrementally getting data */
-    int request_size; /* total bytes, not just data */
-    int request_capacity;
-    uint8_t *data;
-};
 
 
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);

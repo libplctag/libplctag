@@ -31,39 +31,53 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+#include <libplctag/protocols/cip/request.h>
 
 #include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
-#include <libplctag/protocols/cip/tag.h>
-#include <libplctag/protocols/omron/defs.h>
-#include <utils/vector.h>
-
-typedef struct omron_tag_t *omron_tag_p;
-#define OMRON_TAG_NULL ((omron_tag_p)NULL)
-
-typedef struct omron_conn_t *omron_conn_p;
-#define OMRON_CONN_NULL ((omron_conn_p)NULL)
-
-/* the request is fully shared now -- see protocols/cip/tag.h. */
-typedef cip_request_p omron_request_p;
-#define OMRON_REQUEST_NULL ((omron_request_p)NULL)
+#include <utils/atomic_utils.h>
+#include <utils/debug.h>
+#include <utils/mem.h>
+#include <utils/spinlock.h>
 
 
-extern int omron_tag_abort(omron_tag_p tag);
-extern int omron_tag_status(omron_tag_p tag);
+extern void cip_request_destroy(void *req_arg) {
+    cip_request_p req = req_arg;
 
-extern int omron_tag_abort_request(omron_tag_p tag);
-extern int omron_tag_abort_request_only(omron_tag_p tag);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
 
-extern int omron_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
-extern int omron_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
+    atomic_set_int32(&req->abort_request, 1);
 
-extern int omron_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
+    if(req->data) {
+        mem_free(req->data);
+        req->data = NULL;
+    }
 
-// THREAD_FUNC(request_handler_func);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
+}
 
-/* helpers for checking request status. */
-extern int omron_check_request_status(omron_tag_p tag);
 
-#define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
+extern int cip_request_increase_buffer(cip_request_p request, int new_capacity) {
+    uint8_t *old_buffer = NULL;
+    uint8_t *new_buffer = NULL;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Starting.");
+
+    new_buffer = (uint8_t *)mem_alloc(new_capacity);
+
+    if(!new_buffer) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Unable to allocate larger request buffer!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    spin_block(&request->lock) {
+        old_buffer = request->data;
+        request->request_capacity = new_capacity;
+        request->data = new_buffer;
+    }
+
+    mem_free(old_buffer);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}

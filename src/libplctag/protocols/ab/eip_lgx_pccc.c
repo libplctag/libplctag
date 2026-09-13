@@ -101,7 +101,7 @@ static int check_write_status(ab_tag_p tag);
  * CIP/PCCC-specific status.
  */
 int tag_status(ab_tag_p tag) {
-    if(!tag->session) {
+    if(!tag->conn) {
         /* this is not OK.  This is fatal! */
         return PLCTAG_ERR_CREATE;
     }
@@ -167,10 +167,10 @@ int tag_tickler(ab_tag_p tag) {
 int tag_read_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
-    int session_payload_space = session_get_available_cip_payload_space(tag->session);
+    int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
     /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
     tag->req_pccc_seq_num = conn_seq_id;
@@ -200,7 +200,7 @@ int tag_read_start(ab_tag_p tag) {
             break;
         }
 
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             tag->read_in_progress = 0;
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request. rc=%d", rc);
@@ -252,18 +252,18 @@ int tag_read_start(ab_tag_p tag) {
         lgx_pccc->secs_per_tick = CIP_SECS_PER_TICK;
         lgx_pccc->timeout_ticks = CIP_TIMEOUT_TICKS;
         lgx_pccc->uc_cmd_length = h2le16((uint16_t)(data - embed_start));
-        if(tag->session->conn_path_size > 0) {
-            *data = (tag->session->conn_path_size) / 2;
+        if(tag->conn->conn_path_size > 0) {
+            *data = (tag->conn->conn_path_size) / 2;
             data++;
             *data = 0;
             data++;
-            mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-            data += tag->session->conn_path_size;
+            mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+            data += tag->conn->conn_path_size;
         }
         lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
         req->request_size = (int)(data - (req->data));
         req->allow_packing = tag->allow_packing;
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
             req = rc_dec(req);
@@ -425,10 +425,10 @@ static int check_read_status(ab_tag_p tag) {
 int tag_write_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->conn));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
-    int session_payload_space = session_get_available_cip_payload_space(tag->session);
+    int session_payload_space = session_get_available_cip_payload_space(tag->conn);
 
     /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
     tag->req_pccc_seq_num = conn_seq_id;
@@ -455,7 +455,7 @@ int tag_write_start(ab_tag_p tag) {
 
         int request_overhead = (int)sizeof(eip_cip_uc_req) + (int)sizeof(embedded_pccc) + tag->encoded_name_size
                                + tag->encoded_type_info_size
-                               + (int)((tag->session->conn_path_size > 0) ? (2 + tag->session->conn_path_size) : 0);
+                               + (int)((tag->conn->conn_path_size > 0) ? (2 + tag->conn->conn_path_size) : 0);
 
         int request_payload_space = session_payload_space - request_overhead;
 
@@ -468,7 +468,7 @@ int tag_write_start(ab_tag_p tag) {
             break;
         }
 
-        rc = session_create_request(tag->session, tag->tag_id, &req);
+        rc = session_create_request(tag->conn, tag->tag_id, &req);
         if(rc != PLCTAG_STATUS_OK) {
             tag->write_in_progress = 0;
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to get new request. rc=%d", rc);
@@ -522,18 +522,18 @@ int tag_write_start(ab_tag_p tag) {
         lgx_pccc->secs_per_tick = CIP_SECS_PER_TICK;
         lgx_pccc->timeout_ticks = CIP_TIMEOUT_TICKS;
         lgx_pccc->uc_cmd_length = h2le16((uint16_t)(data - embed_start));
-        if(tag->session->conn_path_size > 0) {
-            *data = (tag->session->conn_path_size) / 2;
+        if(tag->conn->conn_path_size > 0) {
+            *data = (tag->conn->conn_path_size) / 2;
             data++;
             *data = 0;
             data++;
-            mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-            data += tag->session->conn_path_size;
+            mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+            data += tag->conn->conn_path_size;
         }
         lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
         req->request_size = (int)(data - (req->data));
         req->allow_packing = tag->allow_packing;
-        rc = session_add_request(tag->session, req);
+        rc = session_add_request(tag->conn, req);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
             req = rc_dec(req);
