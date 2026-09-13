@@ -229,11 +229,16 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "tag=%p", tag);
 
     /*
-     * AB reads a tag in fragments; Omron NJ/NX cannot.  The field is shared
-     * (CIP_TAG_STRUCT) and only Omron's packing logic reads it today, but it must
-     * say what is true here or it will be wrong the moment that logic is shared.
+     * AB fragments with the CIP fragmented read and write services.  Only Omron's
+     * packing guard reads this today and AB's packing ignores it, but the flag has
+     * to be true here or that guard would throttle AB the moment the two are shared.
+     *
+     * NOTE: this is set for every AB PLC type, and the fragmented services are then
+     * used unconditionally by the CIP builders.  Whether every CIP-class AB PLC
+     * really accepts them -- Micro800 in particular -- is an open question; see the
+     * note in docs/deferred_fixes.md.
      */
-    tag->supports_fragmented_read = 1;
+    tag->supports_fragmented_operations = 1;
 
     /*
      * we got far enough to allocate memory, set the default vtable up

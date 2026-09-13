@@ -340,7 +340,7 @@ plc_tag_p omron_tag_create(attr attribs, tag_extended_callback_func_t tag_callba
 
     tag->use_connected_msg = 1;
     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-    tag->supports_fragmented_read = 0; /* fragmented read is not currently supported */
+    tag->supports_fragmented_operations = 0; /* Omron NJ/NX has a 0x80 data segment mechanism, not implemented yet. */
 
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);

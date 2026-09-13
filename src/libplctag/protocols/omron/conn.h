@@ -85,8 +85,8 @@ struct omron_conn_t {
     /* connection variables. */
     bool use_connected_msg;
     bool only_use_old_forward_open;
-    int fo_conn_size;    /* old FO max connection size */
-    int fo_ex_conn_size; /* extended FO max connection size */
+    /* what this PLC model can do and how big its payloads may be. */
+    cip_plc_config_t plc_config;
     uint16_t max_payload_guess;
     uint16_t max_payload_size;
 

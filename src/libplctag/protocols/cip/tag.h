@@ -52,6 +52,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/spinlock.h>
 #include <libplctag/protocols/cip/defs.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 
@@ -92,6 +93,46 @@ typedef enum {
     CIP_TYPE_TAG_RAW,     /* raw CIP tag */
     CIP_TYPE_TAG_IDENTITY /* CIP Identity Object data */
 } cip_elem_type_t;
+
+
+
+/*
+ * What a PLC's capabilities mean for connection setup and request sizing.
+ *
+ * Every field here is a property of the PLC model, not of the vendor: a Micro800
+ * fragments a single operation exactly as a ControlLogix does but cannot pack
+ * several operations into one packet, and the PCCC families can do neither.  The
+ * module fills one of these in when it works out the PLC type, and the shared CIP
+ * code reads it instead of asking what vendor it is talking to.
+ */
+typedef struct {
+    /*
+     * Largest connection payload to ask for.  fo_ex_conn_size is zero on a PLC with
+     * no Forward Open Extended, which is what selects the old Forward Open.
+     */
+    int fo_conn_size;
+    int fo_ex_conn_size;
+
+    /*
+     * Smallest payload that can still carry one request.  A PLC offering less than
+     * this is not a size that can be negotiated down to -- see CIP_MIN_PAYLOAD_SIZE_*.
+     */
+    int min_payload_size;
+
+    /*
+     * Level one: a vendor-specific way to split an operation too large for one
+     * packet.  AB uses the CIP fragmented services with a byte offset and CIP status
+     * 0x06; Omron NJ/NX uses a 0x80 data segment with an offset and an element count,
+     * which is not implemented yet; the PCCC families have no mechanism at all.
+     */
+    bool supports_fragmented_operations;
+
+    /*
+     * Level two: CIP service 0x0A, several tags' operations in one packet.  Entirely
+     * independent of level one -- Micro800 has the first and not the second.
+     */
+    bool supports_packed_requests;
+} cip_plc_config_t;
 
 
 typedef struct cip_request_t *cip_request_p;
@@ -156,11 +197,21 @@ typedef struct cip_request_t *cip_request_p;
     int allow_packing;                                                                       \
                                                                                              \
     /*                                                                                       \
-     * Whether the device can read a tag in fragments.  AB can; Omron NJ/NX cannot,          \
-     * which is the one behavioural difference between the two implementations this          \
-     * code was merged from.                                                                 \
+     * Whether this PLC has a vendor-specific way to fragment an operation that will         \
+     * not fit in one request or response packet.  It says only that a mechanism             \
+     * exists, not which one: AB uses the CIP fragmented read and write services with a      \
+     * byte offset and signals more data with CIP status 0x06, while Omron NJ/NX uses a       \
+     * 0x80 data segment carrying an offset and an element count.  A PLC with no             \
+     * mechanism at all -- the PCCC families -- would need the client to chop the            \
+     * operation up itself, which is not implemented either.                                 \
+     *                                                                                       \
+     * This is a capability of a single tag operation, and is separate from                  \
+     * allow_packing, which is about combining operations from DIFFERENT tags into one       \
+     * packet with CIP service 0x0A.  The two do interact: packing several responses         \
+     * into one packet risks overflowing it, and only a PLC that can fragment is able        \
+     * to recover, so this flag relaxes the packing size guard.                              \
      */                                                                                      \
-    int supports_fragmented_read;                                                            \
+    int supports_fragmented_operations;                                                            \
                                                                                              \
     /* flags for operations */                                                               \
     int read_in_progress;                                                                    \
@@ -197,13 +248,13 @@ typedef struct cip_request_t *cip_request_p;
     uint8_t *data;                                                                           \
                                                                                              \
     /*                                                                                       \
-     * Packing decisions need to know how much the response may be.  A first read does        \
-     * not know the tag's size yet, and a device that cannot fragment cannot recover from     \
-     * guessing wrong, so both are carried here.                                              \
+     * Packing decisions need to know how large the response may be.  A first read does      \
+     * not know the tag's size yet, and a PLC with no fragmentation mechanism cannot          \
+     * recover from guessing wrong, so both travel with the request.                          \
      */                                                                                      \
     int response_size;                                                                       \
     int first_read;                                                                          \
-    int supports_fragmented_read
+    int supports_fragmented_operations
 
 
 /*

@@ -61,6 +61,16 @@
  */
 #define CIP_DISCONNECT_TIMEOUT (CIP_CONN_TIMEOUT_MS - 1000)
 
+/*
+ * The smallest connection payload that can still carry one request.  Every
+ * protocol family has a fixed per-request overhead, and a payload below that
+ * leaves no room at all -- the size arithmetic downstream then has an overhead
+ * larger than the space, which is where the underflows live.  A PLC offering
+ * less than this is not a size that can be negotiated down to.
+ */
+#define CIP_MIN_PAYLOAD_SIZE_PCCC (92)
+#define CIP_MIN_PAYLOAD_SIZE_CIP (500)
+
 
 
 #define CIP_CONN_PARAM ((uint16_t)0x4200)

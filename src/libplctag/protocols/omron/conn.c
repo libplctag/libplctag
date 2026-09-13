@@ -80,7 +80,7 @@
 /* make sure we try hard to get a good payload size */
 #define GET_MAX_PAYLOAD_SIZE(conn)                             \
     ((conn->max_payload_size > 0) ? (conn->max_payload_size) : \
-                                    ((conn->fo_conn_size > 0) ? (conn->fo_conn_size) : (conn->fo_ex_conn_size)))
+                                    ((conn->plc_config.fo_conn_size > 0) ? (conn->plc_config.fo_conn_size) : (conn->plc_config.fo_ex_conn_size)))
 
 
 /* plc-specific conn constructors */
@@ -286,7 +286,7 @@ int conn_get_available_cip_payload_space(omron_conn_p conn) {
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,
                "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               conn->max_payload_size, conn->fo_conn_size, conn->fo_ex_conn_size, max_payload_size);
+               conn->max_payload_size, conn->plc_config.fo_conn_size, conn->plc_config.fo_ex_conn_size, max_payload_size);
 
         // Account for CPF data item overhead
         if(conn->use_connected_msg) {
@@ -516,9 +516,13 @@ omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *path, i
                                   connection_group_id);
         if(conn != NULL) {
             conn->only_use_old_forward_open = false;
-            conn->fo_conn_size = MAX_CIP_OMRON_MSG_SIZE;
-            conn->fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX;
-            conn->max_payload_size = (uint16_t)conn->fo_conn_size;
+            conn->plc_config.fo_conn_size = MAX_CIP_OMRON_MSG_SIZE;
+            conn->plc_config.fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX;
+            conn->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_CIP;
+            /* NJ/NX has a 0x80 data segment mechanism, not implemented yet. */
+            conn->plc_config.supports_fragmented_operations = false;
+            conn->plc_config.supports_packed_requests = true;
+            conn->max_payload_size = (uint16_t)conn->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create *Logix conn!");
         }
@@ -1654,7 +1658,7 @@ int process_requests(omron_conn_p conn) {
 
                     /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must have
                      * been read before, so that its response size is known */
-                    allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
+                    allow_packing = request->allow_packing && (request->supports_fragmented_operations || !request->first_read);
 
                     /* If the first request is packable, try to pack more requests */
                     if(allow_packing && vector_length(conn->requests) > 0) {
@@ -1673,7 +1677,7 @@ int process_requests(omron_conn_p conn) {
 
                             /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must
                              * have been read before, so that its response size is known */
-                            allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
+                            allow_packing = request->allow_packing && (request->supports_fragmented_operations || !request->first_read);
                             if(!allow_packing) { break; }
 
                             int next_request_size = get_payload_size(request) + multi_request_overhead;
@@ -1687,7 +1691,7 @@ int process_requests(omron_conn_p conn) {
                             int next_response_space = remaining_response_space - request->response_size - 8 - 2;
 
                             /* Check response space only if fragmented reads are not supported */
-                            if(!request->supports_fragmented_read && next_response_space < 0) { break; }
+                            if(!request->supports_fragmented_operations && next_response_space < 0) { break; }
 
                             bundled_requests[num_bundled_requests] = request;
                             num_bundled_requests++;
@@ -2628,7 +2632,7 @@ int send_forward_open_request(omron_conn_p conn) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Flag prohibiting use of extended ForwardOpen is %d.",
            conn->only_use_old_forward_open);
 
-    max_payload = (conn->only_use_old_forward_open ? (uint16_t)conn->fo_conn_size : (uint16_t)conn->fo_ex_conn_size);
+    max_payload = (conn->only_use_old_forward_open ? (uint16_t)conn->plc_config.fo_conn_size : (uint16_t)conn->plc_config.fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
     conn->max_payload_guess =
@@ -2896,7 +2900,20 @@ int receive_forward_open_response(omron_conn_p conn) {
                          * was allocated based on our request, and a PLC claiming to "support" a larger size
                          * than we asked for is a protocol disagreement, not a legitimate response.
                          */
-                        if(supported_size <= conn->max_payload_guess) {
+                        if(supported_size < conn->plc_config.min_payload_size) {
+                            /*
+                             * There is a floor as well as a ceiling.  A payload below the
+                             * per-request overhead leaves no room for a request at all, and the
+                             * size arithmetic downstream then has an overhead larger than the
+                             * space.  A PLC offering less than we can use is not a size we can
+                             * negotiate to.
+                             */
+                            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+                                   "PLC reported a supported size of %u, below the %d bytes this protocol needs for a "
+                                   "single request!",
+                                   supported_size, conn->plc_config.min_payload_size);
+                            rc = PLCTAG_ERR_TOO_SMALL;
+                        } else if(supported_size <= conn->max_payload_guess) {
                             conn->max_payload_guess = supported_size;
                             rc = PLCTAG_ERR_TOO_LARGE;
                         } else {

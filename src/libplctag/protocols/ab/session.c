@@ -100,19 +100,12 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
  * for its command header and addressing; CIP needs 500 for a minimal fragmented transfer.
  * Both are payload only -- the EIP and CPF encapsulation is accounted for separately.
  */
-#define MIN_PAYLOAD_SIZE_PCCC (92)
-#define MIN_PAYLOAD_SIZE_CIP (500)
 
-#define MIN_PAYLOAD_SIZE(session)                                                                                   \
-    (((session)->plc_type == AB_PLC_PLC5 || (session)->plc_type == AB_PLC_SLC || (session)->plc_type == AB_PLC_MLGX \
-      || (session)->plc_type == AB_PLC_LGX_PCCC) ?                                                                  \
-         MIN_PAYLOAD_SIZE_PCCC :                                                                                    \
-         MIN_PAYLOAD_SIZE_CIP)
 
 /* make sure we try hard to get a good payload size */
 #define GET_MAX_PAYLOAD_SIZE(session)                                \
     ((session->max_payload_size > 0) ? (session->max_payload_size) : \
-                                       ((session->fo_conn_size > 0) ? (session->fo_conn_size) : (session->fo_ex_conn_size)))
+                                       ((session->plc_config.fo_conn_size > 0) ? (session->plc_config.fo_conn_size) : (session->plc_config.fo_ex_conn_size)))
 
 
 /* plc-specific session constructors */
@@ -342,7 +335,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
                "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               session->max_payload_size, session->fo_conn_size, session->fo_ex_conn_size, max_payload_size);
+               session->max_payload_size, session->plc_config.fo_conn_size, session->plc_config.fo_ex_conn_size, max_payload_size);
 
         // Account for CPF data item overhead
         if(session->use_connected_msg) {
@@ -620,9 +613,13 @@ ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int 
             session_create_unsafe(MAX_CIP_PLC5_MSG_SIZE, true, host, path, AB_PLC_PLC5, use_connected_msg, connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_PLC5_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->plc_config.fo_conn_size = MAX_CIP_PLC5_MSG_SIZE;
+            session->plc_config.fo_ex_conn_size = 0;
+            session->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_PCCC;
+            /* the PCCC families have neither fragmentation nor packing. */
+            session->plc_config.supports_fragmented_operations = false;
+            session->plc_config.supports_packed_requests = false;
+            session->max_payload_size = (uint16_t)session->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create PLC/5 session!");
         }
@@ -644,9 +641,13 @@ ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *
             session_create_unsafe(MAX_CIP_SLC_MSG_SIZE, true, host, path, AB_PLC_SLC, use_connected_msg, connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_SLC_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->plc_config.fo_conn_size = MAX_CIP_SLC_MSG_SIZE;
+            session->plc_config.fo_ex_conn_size = 0;
+            session->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_PCCC;
+            /* the PCCC families have neither fragmentation nor packing. */
+            session->plc_config.supports_fragmented_operations = false;
+            session->plc_config.supports_packed_requests = false;
+            session->max_payload_size = (uint16_t)session->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create SLC 500 session!");
         }
@@ -668,9 +669,13 @@ ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int 
             session_create_unsafe(MAX_CIP_MLGX_MSG_SIZE, true, host, path, AB_PLC_MLGX, use_connected_msg, connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_MLGX_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->plc_config.fo_conn_size = MAX_CIP_MLGX_MSG_SIZE;
+            session->plc_config.fo_ex_conn_size = 0;
+            session->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_PCCC;
+            /* the PCCC families have neither fragmentation nor packing. */
+            session->plc_config.supports_fragmented_operations = false;
+            session->plc_config.supports_packed_requests = false;
+            session->max_payload_size = (uint16_t)session->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create Micrologix session!");
         }
@@ -692,9 +697,12 @@ ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *
             session_create_unsafe(MAX_CIP_LGX_MSG_SIZE_EX, true, host, path, AB_PLC_LGX, use_connected_msg, connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = false;
-            session->fo_conn_size = MAX_CIP_LGX_MSG_SIZE;
-            session->fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->plc_config.fo_conn_size = MAX_CIP_LGX_MSG_SIZE;
+            session->plc_config.fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX;
+            session->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_CIP;
+            session->plc_config.supports_fragmented_operations = true;
+            session->plc_config.supports_packed_requests = true;
+            session->max_payload_size = (uint16_t)session->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create *Logix session!");
         }
@@ -716,9 +724,13 @@ ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, 
                                         connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_LGX_PCCC_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->plc_config.fo_conn_size = MAX_CIP_LGX_PCCC_MSG_SIZE;
+            session->plc_config.fo_ex_conn_size = 0;
+            session->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_PCCC;
+            /* the PCCC families have neither fragmentation nor packing. */
+            session->plc_config.supports_fragmented_operations = false;
+            session->plc_config.supports_packed_requests = false;
+            session->max_payload_size = (uint16_t)session->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create Micrologix session!");
         }
@@ -740,9 +752,13 @@ ab_session_p create_micro800_session_unsafe(const char *host, const char *path, 
                                         connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE;
-            session->fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->plc_config.fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE;
+            session->plc_config.fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX;
+            session->plc_config.min_payload_size = CIP_MIN_PAYLOAD_SIZE_CIP;
+            /* Micro800 fragments a single operation but cannot pack several. */
+            session->plc_config.supports_fragmented_operations = true;
+            session->plc_config.supports_packed_requests = false;
+            session->max_payload_size = (uint16_t)session->plc_config.fo_conn_size;
         } else {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create Micro800 session!");
         }
@@ -2914,7 +2930,7 @@ int send_forward_open_request(ab_session_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Flag prohibiting use of extended ForwardOpen is %d.",
            session->only_use_old_forward_open);
 
-    max_payload = (uint16_t)(session->only_use_old_forward_open ? session->fo_conn_size : session->fo_ex_conn_size);
+    max_payload = (uint16_t)(session->only_use_old_forward_open ? session->plc_config.fo_conn_size : session->plc_config.fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
     critical_block(session->session_mutex) {
@@ -3197,7 +3213,7 @@ int receive_forward_open_response(ab_session_p session) {
                          * was allocated based on our request, and a PLC claiming to "support" a larger size
                          * than we asked for is a protocol disagreement, not a legitimate response.
                          */
-                        if(supported_size < MIN_PAYLOAD_SIZE(session)) {
+                        if(supported_size < session->plc_config.min_payload_size) {
                             /*
                              * There is a floor as well as a ceiling.  Every protocol family has a
                              * fixed per-request overhead, and a payload below that leaves no room
@@ -3208,7 +3224,7 @@ int receive_forward_open_response(ab_session_p session) {
                             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                                    "PLC reported a supported size of %u, below the %d bytes this protocol needs for a "
                                    "single request!",
-                                   supported_size, MIN_PAYLOAD_SIZE(session));
+                                   supported_size, session->plc_config.min_payload_size);
                             rc = PLCTAG_ERR_TOO_SMALL;
                         } else if(supported_size <= session->max_payload_guess) {
                             critical_block(session->session_mutex) { session->max_payload_guess = supported_size; }
@@ -3248,11 +3264,16 @@ int receive_forward_open_response(ab_session_p session) {
             break;
         }
 
-        /* success! */
-        session->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
-        session->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
-
-        critical_block(session->session_mutex) { session->max_payload_size = session->max_payload_guess; }
+        /*
+         * success!  session_create_request() reads max_payload_size (via
+         * GET_MAX_PAYLOAD_SIZE) under session_mutex, and the connection IDs are read by
+         * the request builders, so all three are committed together under that lock.
+         */
+        critical_block(session->session_mutex) {
+            session->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
+            session->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
+            session->max_payload_size = session->max_payload_guess;
+        }
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
                "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
