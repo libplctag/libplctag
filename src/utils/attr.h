@@ -37,7 +37,6 @@
 typedef struct attr_entry_t *attr_entry;
 typedef struct attr_t *attr;
 
-attr_entry find_entry(attr a, const char *name);
 extern attr attr_create(void);
 extern attr attr_create_from_str(const char *attr_str);
 extern int attr_set_str(attr attrs, const char *name, const char *val);

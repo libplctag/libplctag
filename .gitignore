@@ -64,3 +64,10 @@ src/tests/log.txt
 external_docs/
 build_perf/*
 build_*/*
+
+# local build trees
+build/
+build_*/
+
+# ab_server writes one of these per run into the working directory
+ab_server_*.log

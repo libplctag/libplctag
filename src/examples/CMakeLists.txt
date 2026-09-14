@@ -21,7 +21,6 @@ endif()
   multithread
   multithread_cached_read
   multithread_plc5
-  multithread_plc5_dhp
   plc5
   simple
   simple_cpp

@@ -31,10 +31,9 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __UTIL_HASHTABLE_H__
-#    define __UTIL_HASHTABLE_H__ 1
+#pragma once
 
-#    include <stdint.h>
+#include <stdint.h>
 
 // struct hashtable_entry_t;
 //
@@ -54,4 +53,3 @@ extern void *hashtable_remove(hashtable_p table, int64_t key);
 extern int hashtable_destroy(hashtable_p table);
 
 
-#endif

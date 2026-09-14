@@ -40,6 +40,11 @@
 
 #define REQUIRED_VERSION 2, 1, 0
 
+/*
+ * A DH+ bridged PLC5 differs only in the tag string, e.g.
+ *   "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_size=2&elem_count=1&name=N7:0"
+ * so there is no separate example for it.
+ */
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&plc=PLC5&elem_size=4&elem_count=1&name=F8:10"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 4

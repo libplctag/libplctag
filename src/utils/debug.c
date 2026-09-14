@@ -115,7 +115,7 @@ static atomic_bool stderr_buffering_initialized = ATOMIC_BOOL_STATIC_INIT;
 static atomic_int32_t log_call_count = ATOMIC_INT_STATIC_INIT;
 
 
-/* Module name lookup table is now defined in debug_generated.h */
+/* the module name lookup table is defined in debug_module_names.c; the header only declares it. */
 
 /* Per-module debug levels - indexed directly by debug_module_t value. Written by
  * set_debug_level()/debug_module_set_level()/debug_set_all_modules() (rarely, from

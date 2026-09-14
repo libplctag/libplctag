@@ -42,7 +42,13 @@
 #define REQUIRED_VERSION 2, 4, 0
 
 #define TAG_STRING_SIZE (200)
-#define TAG_STRING_TEMPLATE "protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&name="
+/*
+ * A path names a CPU in a chassis, so a PLC that has one is a Logix.  A Micro800
+ * has no chassis and takes no path, which is the whole of the difference between
+ * this and the separate list_tags_micro8x0 program that used to exist.
+ */
+#define TAG_STRING_TEMPLATE_LOGIX "protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&name="
+#define TAG_STRING_TEMPLATE_MICRO800 "protocol=ab-eip&gateway=%s&plc=Micro800&name="
 #define TIMEOUT_MS 5000
 
 
@@ -152,7 +158,7 @@ int main(int argc, char **argv) {
 
     /* this means that the args are right. */
     host = argv[1];
-    path = argv[2];
+    path = (argc > 2) ? argv[2] : NULL;
 
     /* set up the tag for the listing first. */
     controller_listing_tag = open_tag(tag_string_base, "@tags");
@@ -298,11 +304,22 @@ int main(int argc, char **argv) {
 
         /* print the tag string */
         if(!tag->parent) {
-            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\"\n",
-                   host, path, tag->elem_size, tag->elem_count, tag->name);
+            if(path) {
+                printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\"\n",
+                       host, path, tag->elem_size, tag->elem_count, tag->name);
+            } else {
+                printf("tag string = \"protocol=ab-eip&gateway=%s&plc=Micro800&elem_size=%u&elem_count=%u&name=%s\"\n", host,
+                       tag->elem_size, tag->elem_count, tag->name);
+            }
         } else {
-            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s.%s\"\n",
-                   host, path, tag->elem_size, tag->elem_count, tag->parent->name, tag->name);
+            if(path) {
+                printf(
+                    "tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s.%s\"\n",
+                    host, path, tag->elem_size, tag->elem_count, tag->parent->name, tag->name);
+            } else {
+                printf("tag string = \"protocol=ab-eip&gateway=%s&plc=Micro800&elem_size=%u&elem_count=%u&name=%s.%s\"\n", host,
+                       tag->elem_size, tag->elem_count, tag->parent->name, tag->name);
+            }
         }
     }
 
@@ -394,7 +411,10 @@ int main(int argc, char **argv) {
 
 void usage(void) {
     // NOLINTNEXTLINE
-    fprintf(stderr, "Usage: list_tags <PLC IP> <PLC path>\nExample: list_tags 10.1.2.3 1,0\n");
+    fprintf(stderr,
+            "Usage: list_tags_logix <PLC IP> [<PLC path>]\n"
+            "  With a path, the PLC is treated as a ControlLogix: list_tags_logix 10.1.2.3 1,0\n"
+            "  Without one, as a Micro800:                        list_tags_logix 10.1.2.3\n");
     exit(1);
 }
 
@@ -403,7 +423,7 @@ char *setup_tag_string(int argc, char **argv) {
     const char *gateway = NULL;
     const char *path = NULL;
 
-    if(argc < 3) { usage(); }
+    if(argc < 2) { usage(); }
 
     if(!argv[1] || strlen(argv[1]) == 0) {
         // NOLINTNEXTLINE
@@ -413,17 +433,23 @@ char *setup_tag_string(int argc, char **argv) {
 
     gateway = argv[1];
 
-    if(!argv[2] || strlen(argv[2]) == 0) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "PLC path must not be zero length!\n");
-        usage();
-    }
+    if(argc > 2) {
+        if(strlen(argv[2]) == 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "PLC path must not be zero length!\n");
+            usage();
+        }
 
-    path = argv[2];
+        path = argv[2];
+    }
 
     /* build the tag string. */
     // NOLINTNEXTLINE
-    snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway, path);
+    if(path) {
+        snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE_LOGIX, gateway, path);
+    } else {
+        snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE_MICRO800, gateway);
+    }
 
     /* FIXME - check size! */
     if(debug_level >= PLCTAG_DEBUG_INFO) {

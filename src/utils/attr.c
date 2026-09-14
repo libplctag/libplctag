@@ -57,6 +57,9 @@ struct attr_t {
 };
 
 
+static attr_entry find_entry(attr a, const char *name);
+
+
 /*
  * find_entry
  *
@@ -64,7 +67,7 @@ struct attr_t {
  * passed name.
  */
 
-attr_entry find_entry(attr a, const char *name) {
+static attr_entry find_entry(attr a, const char *name) {
     attr_entry e;
 
     if(!a) { return NULL; }
