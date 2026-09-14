@@ -757,6 +757,14 @@ def build_manifest() -> Manifest:
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
+    # Micro800 supports unconnected messaging with the same ~500 byte payload as the other
+    # CIP PLCs; ab_common.c used to force connected for it.  It still cannot pack requests,
+    # which is the other, independent capability.
+    sec.test("Micro800 unconnected messaging",
+              [exe("tag_rw2"), "--type=sint32",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray&use_connected_msg=0",
+               "--debug=4"], F)
+
     # Micro800's STRING is a SHORT_STRING: a 1-byte count and that many characters, up to 255.
     # Two things have to be spelled out by hand here.  First, the library maps every AB CIP PLC
     # onto the Logix 88-byte string definition (eip_cip.c cip_tag_byte_order), so it does not
@@ -787,6 +795,15 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=string",
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=TestString",
                "--debug=4", "--write=str_zero,str_one,CipStr,str_three"], F)
+    # Omron NJ/NX can use unconnected messaging exactly as a ControlLogix can; the module
+    # used to force connected and silently discard the attribute.  Now that it honours it,
+    # this covers the unconnected request builders on the Omron side -- the AB suite already
+    # covers them via its own use_connected_msg=0 tests.
+    sec.test("Omron unconnected messaging",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray&use_connected_msg=0",
+               "--debug=4"], F)
+
     # The Omron module has its own copies of the attribute checks -- same wording, different
     # module tag in the log -- so they need their own tests rather than riding on the AB ones.
     # Note that omron_common.c only guards the element count; it has no elem_size or overall

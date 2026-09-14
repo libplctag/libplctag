@@ -267,10 +267,14 @@ plc_tag_p omron_tag_create(attr attribs, tag_extended_callback_func_t tag_callba
         }
     }
 
-    /* set up any required settings based on the PLC type. */
-    tag->use_connected_msg = 1;
+    /*
+     * NJ/NX can do unconnected messaging exactly as a ControlLogix can, so the
+     * attribute is honoured rather than overridden.  Connected is the default
+     * because it is what the library has always used here.
+     */
+    tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
 
-    /* make sure that the connection requirement is forced. */
+    /* pass the decision down to the connection layer. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
     /* get the connection path.  We need this to make a decision about the PLC. */
@@ -338,11 +342,11 @@ plc_tag_p omron_tag_create(attr attribs, tag_extended_callback_func_t tag_callba
         tag->vtable = &omron_standard_tag_vtable;
     }
 
-    tag->use_connected_msg = 1;
+    tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
     tag->supports_fragmented_operations = 0; /* Omron NJ/NX has a 0x80 data segment mechanism, not implemented yet. */
 
-    /* pass the connection requirement since it may be overridden above. */
+    /* pass the decision down to the connection layer. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
     /* get the element count, default to 1 if missing. */

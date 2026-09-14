@@ -52,6 +52,7 @@
 #include <utils/atomic_utils.h>
 #include <utils/spinlock.h>
 #include <libplctag/protocols/cip/defs.h>
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -132,10 +133,25 @@ typedef struct {
      * independent of level one -- Micro800 has the first and not the second.
      */
     bool supports_packed_requests;
+
+    /*
+     * Connection parameters to send in a Forward Open INSTEAD of the usual
+     * CIP_CONN_PARAM plus the negotiated payload size.  Zero means use the usual
+     * form.  A PCCC PLC reached over a DH+ bridge needs a fixed value here; nothing
+     * else does.
+     */
+    uint16_t conn_params_override;
 } cip_plc_config_t;
 
 
 typedef struct cip_request_t *cip_request_p;
+
+/*
+ * The connection, as an opaque pointer.  Its fields are in cip/conn.h; the
+ * declaration lives here so that shared tag code can name one without the two
+ * headers including each other.
+ */
+typedef struct cip_conn_t *cip_conn_p;
 
 #define CIP_REQUEST_NULL ((cip_request_p)NULL)
 
@@ -292,6 +308,17 @@ typedef struct cip_tag_t *cip_tag_p;
 typedef int (*cip_build_request_func)(cip_tag_p tag);
 
 
+/*
+ * What a shared request builder needs from the module that owns the connection.
+ * Queuing a request and abandoning one both reach into module state, so they
+ * arrive here rather than being reimplemented.
+ */
+typedef struct {
+    int (*add_request)(void *conn, cip_request_p req);
+    int (*abort_request)(cip_tag_p tag);
+} cip_build_io_t;
+
+
 extern int cip_default_tag_status(plc_tag_p tag);
 extern int cip_tag_status(cip_tag_p tag, void *conn);
 extern int cip_raw_tag_write_start(cip_tag_p tag, cip_build_request_func build_connected,
@@ -308,3 +335,13 @@ extern int cip_fill_tag_name(cip_tag_p tag, const char *name);
 extern int cip_check_cpf_unconnected(cip_tag_p tag, cip_request_p request);
 extern int cip_check_cpf_connected(cip_tag_p tag, cip_request_p request, uint32_t orig_connection_id,
                                    uint32_t targ_connection_id);
+
+/* how much tag data fits in one write request on this connection. */
+extern int cip_calculate_write_data_per_packet(cip_tag_p tag, cip_conn_p conn);
+
+extern int cip_build_write_bit_request_connected(cip_tag_p tag, cip_conn_p conn, const cip_build_io_t *io);
+extern int cip_build_write_bit_request_unconnected(cip_tag_p tag, cip_conn_p conn, const cip_build_io_t *io);
+extern int cip_build_write_request_connected(cip_tag_p tag, cip_conn_p conn, const cip_build_io_t *io, int byte_offset);
+extern int cip_build_write_request_unconnected(cip_tag_p tag, cip_conn_p conn, const cip_build_io_t *io, int byte_offset);
+extern int cip_build_read_request_connected(cip_tag_p tag, cip_conn_p conn, const cip_build_io_t *io, int byte_offset);
+extern int cip_build_read_request_unconnected(cip_tag_p tag, cip_conn_p conn, const cip_build_io_t *io, int byte_offset);

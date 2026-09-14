@@ -136,8 +136,6 @@ struct cip_conn_t {
     CIP_CONN_STRUCT;
 };
 
-typedef struct cip_conn_t *cip_conn_p;
-
 
 /*
  * The next sequence ID for a request on this connection.
@@ -146,3 +144,72 @@ typedef struct cip_conn_t *cip_conn_p;
  * skipped on rollover: a zero could collide with an unset sender context.
  */
 extern uint64_t cip_conn_get_new_seq_id(cip_conn_p conn);
+
+
+/*
+ * The socket belongs to the module, so the shared code asks it to move bytes.
+ * Both calls keep the signature the modules already use.
+ */
+typedef struct {
+    int (*send_request)(cip_conn_p conn, int timeout);
+    int (*recv_response)(cip_conn_p conn, int timeout);
+} cip_conn_io_t;
+
+/* the timeout both modules used for connection setup traffic. */
+#define CIP_CONN_DEFAULT_TIMEOUT (2000)
+
+/*
+ * The OFFSET of the payload within a connected request frame, not the size of any
+ * struct.  It is offsetof(eip_cip_co_req, cpf_conn_seq_num), and the request
+ * builders measure a payload from that same field onwards -- so
+ *
+ *     EIP_CIP_PREFIX_SIZE + payload == the bytes written
+ *
+ * holds by construction, and a buffer of available_payload + EIP_CIP_PREFIX_SIZE is
+ * exactly the worst case with no slack.
+ *
+ * CAUTION: sizeof(eip_cip_co_req) is 46 and sizeof(eip_cip_uc_req) is 50, so this
+ * constant looks two and six bytes short against them.  It is not; those trailing
+ * bytes are counted as part of the payload.  Do not "correct" it to a struct size
+ * without also changing how the builders measure, or every request buffer grows.
+ *
+ * The unconnected frame puts its payload at offset 40 rather than 44, and
+ * available_payload_unsafe() makes up the difference by subtracting the encoded
+ * connection path plus its length and padding bytes.
+ */
+#define EIP_CIP_PREFIX_SIZE (44)
+
+/*
+ * The payload size to work with: what the PLC agreed to if a Forward Open has
+ * completed, otherwise the size we intend to ask for.
+ */
+#define GET_MAX_PAYLOAD_SIZE(conn)                                                  \
+    (((conn)->max_payload_size > 0)                                                 \
+         ? ((conn)->max_payload_size)                                               \
+         : (((conn)->plc_config.fo_conn_size > 0) ? ((conn)->plc_config.fo_conn_size) \
+                                                  : ((conn)->plc_config.fo_ex_conn_size)))
+
+
+/*
+ * Forward Open.  send_forward_open() picks the old or the extended form and sends
+ * it; receive_forward_open_response() handles the reply, including negotiating the
+ * payload size down and retrying, which the caller sees as PLCTAG_ERR_TOO_LARGE.
+ */
+extern int cip_send_forward_open(cip_conn_p conn, const cip_conn_io_t *io);
+extern int cip_receive_forward_open_response(cip_conn_p conn, const cip_conn_io_t *io);
+
+
+/* payload left for a request once the CPF framing is accounted for. */
+extern int cip_conn_get_available_payload_space(cip_conn_p conn);
+
+/* allocate a request and a buffer big enough for one packet on this connection. */
+extern int cip_conn_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
+
+/* pull one response out of a packed multi-response packet. */
+extern int cip_unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet);
+
+/* tear the CIP connection down. */
+extern int cip_perform_forward_close(cip_conn_p conn, const cip_conn_io_t *io);
+
+/* payload size of a built request, or INT_MAX if it cannot be measured. */
+extern int cip_get_payload_size(cip_request_p request);

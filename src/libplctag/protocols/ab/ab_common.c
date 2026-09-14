@@ -320,9 +320,13 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
             break;
 
         case AB_PLC_MICRO800:
-            /* we must use connected messaging here. */
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Micro800 needs connected messaging.");
-            tag->use_connected_msg = 1;
+            /*
+             * Micro800 supports unconnected messaging like the other CIP PLCs, with the
+             * same default payload of about 500 bytes, so the attribute is honoured.
+             * Connected remains the default.  It cannot pack several operations into one
+             * packet, which is a separate capability -- see cip_plc_config_t.
+             */
+            tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
 
             /* Micro800 cannot pack requests. */
             tag->allow_packing = 0;
