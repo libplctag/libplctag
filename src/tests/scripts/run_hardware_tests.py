@@ -43,6 +43,11 @@ class Test:
     log_file: str
     expect_failure: bool = False
 
+    # A regex the run's log must contain.  An exit code alone is a weak assertion for a
+    # test that expects failure -- an unplugged PLC, a missing data file or a wrong path
+    # all exit non-zero too.  Naming the message the code should emit pins the reason.
+    expect_log: str | None = None
+
 
 @dataclasses.dataclass
 class Result:
@@ -68,12 +73,12 @@ def exe(name: str) -> str:
     raise FileNotFoundError(f"{name} not found in {TEST_DIR}")
 
 
-def test(name: str, cmd: list[str], *, expect_failure: bool = False) -> Test:
+def test(name: str, cmd: list[str], *, expect_failure: bool = False, expect_log: str | None = None) -> Test:
     tid = _next_id[0]
     _next_id[0] += 1
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
     log_file = str(LOG_DIR / f"{tid}_{slug}.log")
-    return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_failure=expect_failure)
+    return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_failure=expect_failure, expect_log=expect_log)
 
 
 REQUIRED_EXECUTABLES = [
@@ -160,7 +165,8 @@ def build_manifest() -> list[Test]:
         test("L bit data file Micrologix tag write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
               "--write=1", "--debug=4"],
-             expect_failure=True),  # this write should NOT succeed
+             expect_failure=True),  # this write should NOT succeed -- the PLC rejects it, so there is
+                                    # no library-side message to match on
         test("B data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0",
               "--debug=4", "--write=0"]),
@@ -200,6 +206,66 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=uint8",
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10",
               "--debug=4", "--write=0"]),
+        # ------------------------------------------------------------------
+        # Large PCCC transfers.  Every other PCCC test above moves one element, so
+        # nothing exercised the payload-size arithmetic until these.  N101 is the
+        # large integer file on the lab PLC5, exactly 100 INT elements of two bytes,
+        # so 100 elements is the whole file and the largest transfer it can support.
+        #
+        # A PLC5 negotiates a 244-byte connection.  session_get_available_cip_payload_space()
+        # reports 238 of that, having already subtracted the cpf_connected_data_item --
+        # type, length and connection sequence number.  So the 238 is the budget for the
+        # bytes AFTER the sequence number, and an overhead figure measured against it must
+        # count only those bytes.  Adding sizeof(eip_cpf_co_header) counts the 44-byte
+        # prefix a second time; see EIP_CIP_PREFIX_SIZE in cip/conn.h.
+        #
+        # For DH+ PCCC that gives, with a 3-byte encoded name:
+        #
+        #   read   238 - sizeof(pccc_dhp_cmd_resp) 12           = 226 -> 113 elements
+        #   write  238 - (routing 8 + cmd 9 + name 3) = 20      = 218 -> 109 elements
+        #
+        # 100 elements is 200 bytes and fits both ways, with 26 and 18 bytes to spare.
+        # An earlier version of this block asserted that a 100-element DH+ write was
+        # refused.  That was wrong: it was written against an overhead that double-counted
+        # the CPF header, and it locked in a regression against released behavior.
+        # ------------------------------------------------------------------
+        test("PLC5 whole N file read",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=100&name=N101:0", "--debug=4"]),
+        test("PLC5 whole N file write",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=100&name=N101:0", "--debug=4",
+              "--write=" + ",".join(str(i) for i in range(100))]),
+
+        # The same 200 bytes over the DH+ bridge, which has the tighter ceiling of the
+        # two.  The write is the one that catches an inflated overhead estimate: at 200
+        # bytes it clears the real limit of 218 but not a double-counted one of 172.
+        test("DH+ bridging whole N file read",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=100&elem_size=2&name=N101:0",
+              "--debug=4"]),
+        test("DH+ bridging whole N file write",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=100&elem_size=2&name=N101:0",
+              "--debug=4", "--write=" + ",".join(str(i) for i in range(100))]),
+
+        # 115 elements is 230 bytes, past the 226-byte read ceiling.  DH+ PCCC has no
+        # fragmentation, so the library must refuse this itself.  It is refused before
+        # any request is built, so it does not matter that N101 is only 100 elements
+        # long -- nothing reaches the PLC and no address error can be mistaken for a
+        # size refusal.
+        #
+        # Note that the write ceiling, 109 elements, has no test of its own.  tag_rw2
+        # always reads before it writes, and a read of more than 109 elements needs a
+        # data file longer than any known one on the lab PLC5.  Add one if a longer
+        # file turns up.
+        test("DH+ bridging oversized read is refused",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=115&elem_size=2&name=N101:0",
+              "--debug=4"],
+             expect_failure=True,
+             expect_log=r"exceeds available response data space"),
+
         test("basic CIP bridging",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
@@ -252,7 +318,15 @@ def run_test(t: Test) -> Result:
     start = time.monotonic()
     with open(t.log_file, "w") as log:
         proc = subprocess.run(t.cmd, stdout=log, stderr=subprocess.STDOUT)
+
     ok = (proc.returncode == 0) != t.expect_failure
+
+    if ok and t.expect_log:
+        with open(t.log_file, errors="replace") as log:
+            if not re.search(t.expect_log, log.read()):
+                print(f"    expected log pattern not found: {t.expect_log}")
+                ok = False
+
     end = time.monotonic()
     return Result(test=t, ok=ok, start=start, end=end)
 
