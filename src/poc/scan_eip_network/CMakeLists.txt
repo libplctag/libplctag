@@ -5,20 +5,20 @@ set(SCAN_EIP_NETWORK_FILES
 )
 
 add_executable(scan_eip_network ${SCAN_EIP_NETWORK_FILES}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/socket.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/socket.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/buf.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/buf.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/args.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/args.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/log.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/log.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/utils.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/utils.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/coro_net.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/coro_net.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/err.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/err.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/socket.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/socket.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/buf.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/buf.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/args.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/args.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/log.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/log.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/utils.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/coro_net.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/coro_net.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/err.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/err.h
 )
 
 # Link base libraries

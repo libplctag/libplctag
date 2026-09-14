@@ -48,13 +48,13 @@
 #    include <net/if.h>
 #endif
 
-#include "poc/utils/socket.h"
-#include "poc/utils/buf.h"
-#include "poc/utils/args.h"
-#include "poc/utils/log.h"
-#include "poc/utils/utils.h"
-#include "poc/utils/coro_net.h"
-#include "poc/utils/err.h"
+#include "tools/utils/socket.h"
+#include "tools/utils/buf.h"
+#include "tools/utils/args.h"
+#include "tools/utils/log.h"
+#include "tools/utils/utils.h"
+#include "tools/utils/coro_net.h"
+#include "tools/utils/err.h"
 
 
 /* EtherNet/IP List Identity constants */

@@ -894,3 +894,175 @@ extern int cip_get_payload_size(cip_request_p request) {
 
     return request_data_size;
 }
+
+
+/*
+ * Concatenate already-built requests into one CIP Multiple Service Packet.
+ *
+ * This is pure assembly -- whether the requests may be packed at all, and how much
+ * room is left, are decided by the caller.  That is process_requests(), which does
+ * still differ between the modules.
+ */
+extern int cip_pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
+    eip_cip_co_req *new_req = NULL;
+    eip_cip_co_req *packed_req = NULL;
+    /* FIXME - is this the right way to check? */
+    int header_size = 0;
+    cip_multi_req_header *multi_header = NULL;
+    int current_offset = 0;
+    uint8_t *pkt_start = NULL;
+    int pkt_len = 0;
+    size_t pkt_offset = 0;
+    size_t src_offset = 0;
+    uint8_t *first_pkt_data = NULL;
+    uint8_t *next_pkt_data = NULL;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Starting.");
+
+    if((uint32_t)requests[0]->request_size > conn->data_capacity) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+               "Request of %d bytes exceeds the conn buffer capacity of %u bytes!", requests[0]->request_size,
+               conn->data_capacity);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    /* get the header info from the first request. Just copy the whole thing. */
+    mem_copy(conn->data, requests[0]->data, requests[0]->request_size);
+    conn->data_size = (uint32_t)requests[0]->request_size;
+
+    /* special case the case where there is just one request. */
+    if(num_requests == 1) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Only one request, so done.");
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* set up multi-packet header. */
+
+    header_size =
+        (int)(sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests)); /* offsets for each request. */
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "header size %d", header_size);
+
+    packed_req = (eip_cip_co_req *)(conn->data);
+
+    /* make room in the request packet in the conn for the header. */
+    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - conn->data) + sizeof(packed_req->cpf_conn_seq_num);
+    pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
+
+    /*
+     * Bounds check before shifting data forward to make room for the multi-request header.
+     *
+     * Do this in offsets rather than pointers.  Forming first_pkt_data + pkt_len is itself
+     * undefined when the result would land outside the buffer, so a pointer comparison cannot
+     * be what decides whether it does -- the compiler may assume the addition stayed in bounds
+     * and fold the test away.  Each subtraction below is guarded by the term before it so none
+     * of them can wrap.
+     *
+     * pkt_len is signed and comes from a length field, so reject a negative one here too: it
+     * would move the destination backwards and hand mem_move() a negative size.
+     */
+    if(pkt_len < 0 || header_size < 0 || pkt_offset > (size_t)conn->data_capacity
+       || (size_t)header_size > (size_t)conn->data_capacity - pkt_offset
+       || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset - (size_t)header_size) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+               "Bundled request header does not fit in the conn buffer of %u bytes!", conn->data_capacity);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    pkt_start = conn->data + pkt_offset;
+
+    /* point to where we want the current packet to start. */
+    first_pkt_data = pkt_start + header_size;
+
+    /* move the data over to make room */
+    mem_move(first_pkt_data, pkt_start, pkt_len);
+
+    /* now fill in the header. Use pkt_start as it is pointing to the right location. */
+    multi_header = (cip_multi_req_header *)pkt_start;
+    multi_header->service_code = CIP_CMD_MULTI;
+    multi_header->req_path_size = 0x02; /* length of path in words */
+    multi_header->req_path[0] = 0x20;   /* Class */
+    multi_header->req_path[1] = 0x02;   /* CM */
+    multi_header->req_path[2] = 0x24;   /* Instance */
+    multi_header->req_path[3] = 0x01;   /* #1 */
+    multi_header->request_count = h2le16((uint16_t)num_requests);
+
+    /* set up the offset for the first request. */
+    current_offset = (int)(sizeof(uint16_le) + (sizeof(uint16_le) * (size_t)num_requests));
+    multi_header->request_offsets[0] = h2le16((uint16_t)current_offset);
+
+    next_pkt_data = first_pkt_data + pkt_len;
+    current_offset = current_offset + pkt_len;
+
+    /* now process the rest of the requests. */
+    for(int i = 1; i < num_requests; i++) {
+
+        /* set up the offset */
+        multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "new_req=%p", requests[i]);
+
+        /* get a pointer to the request. */
+        new_req = (eip_cip_co_req *)(requests[i]->data);
+
+        /* calculate the request start and length */
+        pkt_start = (uint8_t *)(&new_req->cpf_conn_seq_num) + sizeof(new_req->cpf_conn_seq_num);
+        pkt_len = (int)le2h16(new_req->cpf_cdi_item_length) - (int)sizeof(new_req->cpf_conn_seq_num);
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "packet %d is of length %d.", i,
+               pkt_len);
+
+        /* as above: bound in offsets, and reject a negative length. */
+        if(pkt_len < 0) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
+                   "Bundled request %d has a negative payload length of %d!", i, pkt_len);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        /*
+         * pkt_len has to fit the SOURCE as well.  It comes from a length field in the request
+         * buffer, so bounding it only against the destination leaves mem_copy() free to read
+         * past the end of requests[i]->data.
+         */
+        src_offset = (size_t)(pkt_start - requests[i]->data);
+
+        if(requests[i]->request_size < 0 || src_offset > (size_t)requests[i]->request_size
+           || (size_t)pkt_len > (size_t)requests[i]->request_size - src_offset) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
+                   "Bundled request %d claims %d payload bytes but its buffer only holds %d!", i, pkt_len,
+                   requests[i]->request_size);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        pkt_offset = (size_t)(next_pkt_data - conn->data);
+
+        if(pkt_offset > (size_t)conn->data_capacity || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
+                   "Bundled requests do not fit in the conn buffer of %u bytes!", conn->data_capacity);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        /* copy the request into the conn buffer. */
+        mem_copy(next_pkt_data, pkt_start, pkt_len);
+
+        /* calculate the next packet info. */
+        next_pkt_data += pkt_len;
+        current_offset += pkt_len;
+    }
+
+    /* stitch up the CPF packet length */
+    packed_req->cpf_cdi_item_length = h2le16((uint16_t)(next_pkt_data - (uint8_t *)(&packed_req->cpf_conn_seq_num)));
+
+    /* stick up the EIP packet length */
+    packed_req->encap_length = h2le16((uint16_t)((size_t)(next_pkt_data - conn->data) - sizeof(eip_encap)));
+
+    /* set the total data size */
+    conn->data_size = (uint32_t)(next_pkt_data - conn->data);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}

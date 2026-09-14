@@ -213,3 +213,6 @@ extern int cip_perform_forward_close(cip_conn_p conn, const cip_conn_io_t *io);
 
 /* payload size of a built request, or INT_MAX if it cannot be measured. */
 extern int cip_get_payload_size(cip_request_p request);
+
+/* concatenate built requests into one Multiple Service Packet. */
+extern int cip_pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests);
