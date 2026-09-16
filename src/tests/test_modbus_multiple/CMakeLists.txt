@@ -8,7 +8,7 @@ endif()
 
 set(TEST_MODBUS_MULTIPLE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_modbus_multiple.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_modbus_multiple ${TEST_MODBUS_MULTIPLE_FILES})

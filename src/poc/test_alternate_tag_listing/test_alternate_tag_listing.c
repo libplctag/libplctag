@@ -32,7 +32,6 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdbool.h>

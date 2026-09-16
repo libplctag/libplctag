@@ -8,7 +8,7 @@ endif()
 
 set(TEST_SHUTDOWN_RESTART_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_shutdown_restart.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_shutdown_restart ${TEST_SHUTDOWN_RESTART_FILES})

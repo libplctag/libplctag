@@ -35,7 +35,7 @@
 /* need this for strdup */
 #define POSIX_C_SOURCE 200809L
 
-#include "compat_utils.h"
+#include <utils/str.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/version.h>
@@ -122,27 +122,27 @@ void parse_args(int argc, char **argv) {
         if(!strcmp(argv[i], "-t")) {
             i++; /* get the arg next */
             if(i < argc) {
-                if(!compat_strcasecmp("bit", argv[i])) {
+                if(!str_cmp_i("bit", argv[i])) {
                     data_type = PLC_LIB_BIT;
-                } else if(!compat_strcasecmp("uint8", argv[i])) {
+                } else if(!str_cmp_i("uint8", argv[i])) {
                     data_type = PLC_LIB_UINT8;
-                } else if(!compat_strcasecmp("sint8", argv[i])) {
+                } else if(!str_cmp_i("sint8", argv[i])) {
                     data_type = PLC_LIB_SINT8;
-                } else if(!compat_strcasecmp("uint16", argv[i])) {
+                } else if(!str_cmp_i("uint16", argv[i])) {
                     data_type = PLC_LIB_UINT16;
-                } else if(!compat_strcasecmp("sint16", argv[i])) {
+                } else if(!str_cmp_i("sint16", argv[i])) {
                     data_type = PLC_LIB_SINT16;
-                } else if(!compat_strcasecmp("uint32", argv[i])) {
+                } else if(!str_cmp_i("uint32", argv[i])) {
                     data_type = PLC_LIB_UINT32;
-                } else if(!compat_strcasecmp("sint32", argv[i])) {
+                } else if(!str_cmp_i("sint32", argv[i])) {
                     data_type = PLC_LIB_SINT32;
-                } else if(!compat_strcasecmp("uint64", argv[i])) {
+                } else if(!str_cmp_i("uint64", argv[i])) {
                     data_type = PLC_LIB_UINT64;
-                } else if(!compat_strcasecmp("sint64", argv[i])) {
+                } else if(!str_cmp_i("sint64", argv[i])) {
                     data_type = PLC_LIB_SINT64;
-                } else if(!compat_strcasecmp("real32", argv[i])) {
+                } else if(!str_cmp_i("real32", argv[i])) {
                     data_type = PLC_LIB_REAL32;
-                } else if(!compat_strcasecmp("real64", argv[i])) {
+                } else if(!str_cmp_i("real64", argv[i])) {
                     data_type = PLC_LIB_REAL64;
                 } else {
                     printf("ERROR: unknown data type: %s\n", argv[i]);
@@ -157,7 +157,7 @@ void parse_args(int argc, char **argv) {
         } else if(!strcmp(argv[i], "-w")) {
             i++;
             if(i < argc) {
-                write_str = compat_strdup(argv[i]);
+                write_str = str_dup(argv[i]);
             } else {
                 printf("ERROR: you must have a value to write after -w\n");
                 usage();
@@ -166,7 +166,7 @@ void parse_args(int argc, char **argv) {
         } else if(!strcmp(argv[i], "-p")) {
             i++;
             if(i < argc) {
-                path = compat_strdup(argv[i]);
+                path = str_dup(argv[i]);
             } else {
                 printf("ERROR: you must have a tag string after -p\n");
                 usage();
@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
                 /* fall through */
             case PLC_LIB_UINT8:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNu8 "", &u_val8) != 1) {
+                if(sscanf(write_str, "%" SCNu8 "", &u_val8) != 1) {
                     printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_UINT16:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNu16 "", &u_val16) != 1) {
+                if(sscanf(write_str, "%" SCNu16 "", &u_val16) != 1) {
                     printf("ERROR: bad format for unsigned 16-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_UINT32:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNu32 "", &u_val32) != 1) {
+                if(sscanf(write_str, "%" SCNu32 "", &u_val32) != 1) {
                     printf("ERROR: bad format for unsigned 32-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -267,7 +267,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_UINT64:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNu64 "", &u_val64) != 1) {
+                if(sscanf(write_str, "%" SCNu64 "", &u_val64) != 1) {
                     printf("ERROR: bad format for unsigned 64-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -277,7 +277,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT8:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNd8 "", &i_val8) != 1) {
+                if(sscanf(write_str, "%" SCNd8 "", &i_val8) != 1) {
                     printf("ERROR: bad format for signed 8-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT16:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNd16 "", &i_val16) != 1) {
+                if(sscanf(write_str, "%" SCNd16 "", &i_val16) != 1) {
                     printf("ERROR: bad format for signed 16-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -297,7 +297,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT32:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNd32 "", &i_val32) != 1) {
+                if(sscanf(write_str, "%" SCNd32 "", &i_val32) != 1) {
                     printf("ERROR: bad format for signed 32-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -307,7 +307,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT64:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%" SCNd64 "", &i_val64) != 1) {
+                if(sscanf(write_str, "%" SCNd64 "", &i_val64) != 1) {
                     printf("ERROR: bad format for signed 64-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -317,7 +317,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_REAL32:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%f", &f_val32) != 1) {
+                if(sscanf(write_str, "%f", &f_val32) != 1) {
                     printf("ERROR: bad format for 32-bit floating point for write value.\n");
                     usage();
                     exit(1);
@@ -327,7 +327,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_REAL64:
                 // NOLINTNEXTLINE
-                if(compat_sscanf(write_str, "%lf", &f_val64) != 1) {
+                if(sscanf(write_str, "%lf", &f_val64) != 1) {
                     printf("ERROR: bad format for 64-bit floating point for write value.\n");
                     usage();
                     exit(1);

@@ -45,7 +45,7 @@
  *   6. If destroy does not return within DESTROY_TIMEOUT_MS the test fails.
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/atomic_utils.h>
 #include <utils/nap.h>
 #include <utils/thread.h>
@@ -106,7 +106,7 @@
 #endif
 
 #define log(...)                          \
-    compat_fprintf(stderr, __VA_ARGS__);  \
+    fprintf(stderr, __VA_ARGS__);  \
     fflush(stderr)
 
 /* State shared between main and the destroy thread. */
@@ -121,7 +121,7 @@ static void stop_server(int test_pid) {
     char cmd[512] = {0};
     snprintf(cmd, sizeof(cmd), SERVER_STOP, test_pid, test_pid);
     system(cmd);
-    compat_sleep_ms(500, NULL);
+    sleep_ms(500);
 }
 
 
@@ -145,7 +145,7 @@ static void start_server(const char *ab_server_path, int test_pid, int server_po
         }
 
         /* range-checked against 1..65535 in main() before we get here. */
-        if(compat_wait_for_listener("127.0.0.1", (uint16_t)server_port, 30000)) {
+        if(test_wait_for_listener("127.0.0.1", (uint16_t)server_port, 30000)) {
             return;
         }
 

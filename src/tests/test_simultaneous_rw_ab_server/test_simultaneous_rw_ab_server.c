@@ -1,4 +1,4 @@
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
@@ -70,7 +70,7 @@ THREAD_FUNC(reader_thread) {
             fprintf(stderr, "[ERROR] Read failed: %s\n", plc_tag_decode_error(rc));
             read_passed = 0;
         }
-        compat_sleep_ms(SLEEP_MS, NULL);
+        sleep_ms((int32_t)(SLEEP_MS));
     }
 
     plc_tag_destroy(tag);
@@ -120,7 +120,7 @@ void start_server(int test_pid) {
         exit(1);
     }
 
-    compat_sleep_ms(1000, NULL);  // wait for server to initialize
+    sleep_ms(1000);  // wait for server to initialize
 }
 
 void stop_server(int test_pid) {
@@ -131,7 +131,7 @@ void stop_server(int test_pid) {
     snprintf(cmd, sizeof(cmd), SERVER_CMD_STOP, test_pid, test_pid);
 
     system(cmd);
-    compat_sleep_ms(500, NULL);
+    sleep_ms(500);
 }
 
 int main(void) {
@@ -157,7 +157,7 @@ int main(void) {
     thread_create(&writer, writer_thread, 0, (void *)(intptr_t)tag);
     thread_create(&reader, reader_thread, 0, (void *)(intptr_t)tag);
 
-    compat_sleep_ms(RUN_TIME_MS, NULL);
+    sleep_ms((int32_t)(RUN_TIME_MS));
     running = 0;
 
     thread_join(&reader);

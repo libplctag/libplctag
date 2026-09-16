@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -56,10 +56,10 @@
 
 #define NUM_TAGS (10)
 
-static compat_atomic_int32_t read_start_count = {0};
-static compat_atomic_int32_t read_complete_count = {0};
-static compat_atomic_int32_t write_start_count = {0};
-static compat_atomic_int32_t write_complete_count = {0};
+static atomic_int32_t read_start_count = 0;
+static atomic_int32_t read_complete_count = 0;
+static atomic_int32_t write_start_count = 0;
+static atomic_int32_t write_complete_count = 0;
 
 
 static THREAD_FUNC(reader_function);
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "\nWaiting for threads to stabilize %dms.\n", RUN_PERIOD / 2);
 
     /* let everything run for a while */
-    compat_sleep_ms(RUN_PERIOD / 2, NULL);
+    sleep_ms((int32_t)(RUN_PERIOD / 2));
 
     /* forcible shut down the entire library. */
     // NOLINTNEXTLINE
@@ -151,12 +151,12 @@ int main(int argc, char **argv) {
 
     /* Join all threads with periodic status logging */
     int threads_remaining = NUM_TAGS * 2;
-    int64_t wait_start = compat_time_ms();
+    int64_t wait_start = time_ms();
     int64_t wait_timeout = 30000; /* 30 second timeout */
 
     for(int i = 0; i < NUM_TAGS; i++) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "Joining reader thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
+        fprintf(stderr, "Joining reader thread for tag %d at time %" PRId64 "ms\n", i, time_ms() - wait_start);
         fflush(stderr);
         thread_join(&read_threads[i]);
         threads_remaining--;
@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
         fflush(stderr);
 
         // NOLINTNEXTLINE
-        fprintf(stderr, "Joining writer thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
+        fprintf(stderr, "Joining writer thread for tag %d at time %" PRId64 "ms\n", i, time_ms() - wait_start);
         fflush(stderr);
         thread_join(&write_threads[i]);
         threads_remaining--;
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
         fflush(stderr);
 
         /* Check if we're taking too long */
-        int64_t elapsed = compat_time_ms() - wait_start;
+        int64_t elapsed = time_ms() - wait_start;
         if(elapsed > wait_timeout) {
             // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Thread join timeout after %" PRId64 "ms with %d threads still remaining!\n", elapsed,
@@ -185,7 +185,7 @@ int main(int argc, char **argv) {
     }
 
     // NOLINTNEXTLINE
-    fprintf(stderr, "Done at time %" PRId64 "ms.\n", compat_time_ms() - wait_start);
+    fprintf(stderr, "Done at time %" PRId64 "ms.\n", time_ms() - wait_start);
     fflush(stderr);
 
     return rc;
@@ -194,11 +194,11 @@ int main(int argc, char **argv) {
 
 THREAD_FUNC(reader_function) {
     int32_t tag_id = (int32_t)(intptr_t)arg;
-    int64_t start_time = compat_time_ms();
+    int64_t start_time = time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    while(run_until > compat_time_ms()) {
+    while(run_until > time_ms()) {
         int status = plc_tag_status(tag_id);
         int32_t val = plc_tag_get_int32(tag_id, 0);
 
@@ -210,9 +210,9 @@ THREAD_FUNC(reader_function) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "READER: Tag %" PRId32 " iteration %d, got value: %d at time %" PRId64 "\n", tag_id, iteration++, val,
-                compat_time_ms() - start_time);
+                time_ms() - start_time);
 
-        compat_sleep_ms(READ_SLEEP_MS, NULL);
+        sleep_ms((int32_t)(READ_SLEEP_MS));
     }
 
     // NOLINTNEXTLINE
@@ -224,13 +224,13 @@ THREAD_FUNC(reader_function) {
 
 THREAD_FUNC(writer_function) {
     int32_t tag_id = (int32_t)(intptr_t)arg;
-    int64_t start_time = compat_time_ms();
+    int64_t start_time = time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    compat_sleep_ms(WRITE_SLEEP_MS, NULL);
+    sleep_ms((int32_t)(WRITE_SLEEP_MS));
 
-    while(run_until > compat_time_ms()) {
+    while(run_until > time_ms()) {
         int32_t val = plc_tag_get_int32(tag_id, 0);
         int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
         int status = plc_tag_status(tag_id);
@@ -246,9 +246,9 @@ THREAD_FUNC(writer_function) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "WRITER: Tag %" PRId32 " iteration %d, wrote value: %d at time %" PRId64 "\n", tag_id, iteration++,
-                new_val, compat_time_ms() - start_time);
+                new_val, time_ms() - start_time);
 
-        compat_sleep_ms(WRITE_SLEEP_MS, NULL);
+        sleep_ms((int32_t)(WRITE_SLEEP_MS));
     }
 
     // NOLINTNEXTLINE
@@ -279,28 +279,28 @@ void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            compat_atomic_inc_int32(&read_complete_count);
+            atomic_add_int32(&read_complete_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic read operation completed with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            compat_atomic_inc_int32(&read_start_count);
+            atomic_add_int32(&read_start_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic read operation started with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            compat_atomic_inc_int32(&write_complete_count);
+            atomic_add_int32(&write_complete_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic write operation completed with status %s.\n", tag_id,
                     plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            compat_atomic_inc_int32(&write_start_count);
+            atomic_add_int32(&write_start_count, 1);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " automatic write operation started with status %s.\n", tag_id,
                     plc_tag_decode_error(status));

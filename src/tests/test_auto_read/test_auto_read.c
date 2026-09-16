@@ -57,7 +57,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include "stats.h"
 #include <libplctag/lib/libplctag.h>
 
@@ -84,13 +84,13 @@ static volatile int recording = 0;
 /*--- Per-tag statistics ---*/
 
 typedef struct {
-    compat_atomic_int32_t tag_id;
-    compat_atomic_int64_t ready_time;   /* non-zero once PLCTAG_EVENT_CREATED fires */
-    compat_atomic_int32_t read_count;   /* successful reads while recording */
-    compat_atomic_int64_t last_read_ms; /* wall-clock timestamp of most recent recorded read */
-    compat_atomic_int64_t total_gap_ms; /* sum of inter-read gaps */
-    compat_atomic_int64_t min_gap_ms;   /* smallest inter-read gap seen (0 = not yet set) */
-    compat_atomic_int64_t max_gap_ms;   /* largest inter-read gap seen */
+    atomic_int32_t tag_id;
+    atomic_int64_t ready_time;   /* non-zero once PLCTAG_EVENT_CREATED fires */
+    atomic_int32_t read_count;   /* successful reads while recording */
+    atomic_int64_t last_read_ms; /* wall-clock timestamp of most recent recorded read */
+    atomic_int64_t total_gap_ms; /* sum of inter-read gaps */
+    atomic_int64_t min_gap_ms;   /* smallest inter-read gap seen (0 = not yet set) */
+    atomic_int64_t max_gap_ms;   /* largest inter-read gap seen */
 } tag_stats_t;
 
 
@@ -125,27 +125,27 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
 
     switch(event) {
         case PLCTAG_EVENT_CREATED:
-            compat_atomic_store_int64(&s->ready_time, compat_time_ms());
+            atomic_set_int64(&s->ready_time, time_ms());
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             if(status == PLCTAG_STATUS_OK && recording) {
-                int64_t now  = compat_time_ms();
-                int64_t last = compat_atomic_load_int64(&s->last_read_ms);
+                int64_t now  = time_ms();
+                int64_t last = atomic_get_int64(&s->last_read_ms);
 
                 if(last > 0) {
                     int64_t gap     = now - last;
-                    int64_t cur_max = compat_atomic_load_int64(&s->max_gap_ms);
-                    int64_t cur_min = compat_atomic_load_int64(&s->min_gap_ms);
+                    int64_t cur_max = atomic_get_int64(&s->max_gap_ms);
+                    int64_t cur_min = atomic_get_int64(&s->min_gap_ms);
 
-                    compat_atomic_add_int64(&s->total_gap_ms, gap);
+                    atomic_add_int64(&s->total_gap_ms, gap);
 
-                    if(gap > cur_max) { compat_atomic_store_int64(&s->max_gap_ms, gap); }
-                    if(cur_min == 0 || gap < cur_min) { compat_atomic_store_int64(&s->min_gap_ms, gap); }
+                    if(gap > cur_max) { atomic_set_int64(&s->max_gap_ms, gap); }
+                    if(cur_min == 0 || gap < cur_min) { atomic_set_int64(&s->min_gap_ms, gap); }
                 }
 
-                compat_atomic_store_int64(&s->last_read_ms, now);
-                compat_atomic_inc_int32(&s->read_count);
+                atomic_set_int64(&s->last_read_ms, now);
+                atomic_add_int32(&s->read_count, 1);
             }
             break;
 
@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
         }
 
         tag_ids[i] = id;
-        compat_atomic_store_int32(&stats[i].tag_id, id);
+        atomic_set_int32(&stats[i].tag_id, id);
 
         if((i + 1) % 50 == 0) { fprintf(stderr, "  Created %d tags...\n", i + 1); }
     }
@@ -255,25 +255,25 @@ int main(int argc, char **argv) {
 
     /*--- Wait for all tags to be ready ---*/
     fprintf(stderr, "Waiting for all tags to become ready...\n");
-    int64_t create_deadline = compat_time_ms() + TAG_CREATE_TIMEOUT_MS;
+    int64_t create_deadline = time_ms() + TAG_CREATE_TIMEOUT_MS;
     int all_ready = 0;
 
-    while(compat_time_ms() < create_deadline) {
+    while(time_ms() < create_deadline) {
         all_ready = 1;
         for(int i = 0; i < num_tags; i++) {
-            if(compat_atomic_load_int64(&stats[i].ready_time) == 0) {
+            if(atomic_get_int64(&stats[i].ready_time) == 0) {
                 all_ready = 0;
                 break;
             }
         }
         if(all_ready) { break; }
-        compat_sleep_ms(100, NULL);
+        sleep_ms(100);
     }
 
     if(!all_ready) {
         fprintf(stderr, "Warning: not all tags became ready within %d ms.\n", TAG_CREATE_TIMEOUT_MS);
         for(int i = 0; i < num_tags; i++) {
-            if(compat_atomic_load_int64(&stats[i].ready_time) == 0) {
+            if(atomic_get_int64(&stats[i].ready_time) == 0) {
                 fprintf(stderr, "  Tag %d (id=%d): %s\n", i, tag_ids[i],
                         plc_tag_decode_error(plc_tag_status(tag_ids[i])));
             }
@@ -285,15 +285,15 @@ int main(int argc, char **argv) {
     /*--- Enable recording and start measurement ---*/
     fprintf(stderr, "\nRunning test for %d seconds...\n", duration_s);
     double  cpu_start  = get_cpu_time_ms();
-    int64_t wall_start = compat_time_ms();
+    int64_t wall_start = time_ms();
 
     recording = 1; /* callbacks begin accumulating stats */
 
-    compat_sleep_ms((uint32_t)(duration_s * 1000), NULL);
+    sleep_ms((int32_t)((duration_s * 1000)));
 
     recording = 0; /* stop accumulating before destroying tags */
 
-    int64_t wall_end = compat_time_ms();
+    int64_t wall_end = time_ms();
     double  cpu_end  = get_cpu_time_ms();
 
     int64_t duration_ms  = wall_end - wall_start;
@@ -323,16 +323,16 @@ int main(int argc, char **argv) {
     int64_t global_max_gap = 0;
 
     for(int i = 0; i < num_tags; i++) {
-        int32_t count     = compat_atomic_load_int32(&stats[i].read_count);
-        int64_t total_gap = compat_atomic_load_int64(&stats[i].total_gap_ms);
-        int64_t min_gap   = compat_atomic_load_int64(&stats[i].min_gap_ms);
-        int64_t max_gap   = compat_atomic_load_int64(&stats[i].max_gap_ms);
+        int32_t count     = atomic_get_int32(&stats[i].read_count);
+        int64_t total_gap = atomic_get_int64(&stats[i].total_gap_ms);
+        int64_t min_gap   = atomic_get_int64(&stats[i].min_gap_ms);
+        int64_t max_gap   = atomic_get_int64(&stats[i].max_gap_ms);
         int64_t avg_gap   = (count > 1) ? (total_gap / (count - 1)) : 0;
 
         fprintf(stderr,
                 "Tag %3d (id=%d): reads=%d  avg_gap=%" PRId64 "ms"
                 "  min_gap=%" PRId64 "ms  max_gap=%" PRId64 "ms\n",
-                i, compat_atomic_load_int32(&stats[i].tag_id), count, avg_gap, min_gap, max_gap);
+                i, atomic_get_int32(&stats[i].tag_id), count, avg_gap, min_gap, max_gap);
 
         read_counts[i] = (int)count;
 

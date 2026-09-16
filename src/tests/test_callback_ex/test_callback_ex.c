@@ -31,7 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -253,9 +253,9 @@ int main(int argc, const char **argv) {
 
         /* test a timeout. */
         printf("Testing timeout behavior.\n");
-        start = compat_time_ms();
+        start = time_ms();
         rc = plc_tag_read(tag, 1); /* This might not work against the emulator.  It is too fast! */
-        end = compat_time_ms();
+        end = time_ms();
 
         if(rc != PLCTAG_ERR_TIMEOUT) {
             printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));

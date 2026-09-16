@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for %dms.\n", (wait_time_sec * 1000));
-    compat_sleep_ms((uint32_t)wait_time_sec * 1000, NULL);
+    sleep_ms((int32_t)(wait_time_sec * 1000));
 
     /* update the data again */
     update_tag(tag);

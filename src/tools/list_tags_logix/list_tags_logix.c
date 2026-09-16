@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include <utils/str.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -457,7 +457,7 @@ char *setup_tag_string(int argc, char **argv) {
         fprintf(stderr, "Using tag string \"%s\".\n", tag_string);
     }
 
-    return compat_strdup(tag_string);
+    return str_dup(tag_string);
 }
 
 

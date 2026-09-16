@@ -8,7 +8,7 @@ endif()
 
 set(TEST_CALLBACK_EX_ASYNC_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_callback_ex_async.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_callback_ex_async ${TEST_CALLBACK_EX_ASYNC_FILES})

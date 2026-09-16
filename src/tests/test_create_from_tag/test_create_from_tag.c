@@ -67,7 +67,7 @@
  *     --timeout=5000
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -86,23 +86,23 @@ static const char *connection_tag_attribs = NULL;
 static int timeout_ms = DEFAULT_TIMEOUT_MS;
 
 /* Shared flags for test 16 (callback fires on clone). */
-static compat_atomic_int32_t clone_created_cb_fired = {0};
-static compat_atomic_int32_t clone_read_completed_cb_fired = {0};
+static atomic_int32_t clone_created_cb_fired = 0;
+static atomic_int32_t clone_read_completed_cb_fired = 0;
 
 /* -------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------- */
 
 static int wait_for_tag_ready(int32_t tag, int timeout) {
-    int64_t end_time = compat_time_ms() + (int64_t)timeout;
+    int64_t end_time = time_ms() + (int64_t)timeout;
     int rc = PLCTAG_STATUS_PENDING;
 
     do {
         rc = plc_tag_status(tag);
         if(rc == PLCTAG_STATUS_OK) { return rc; }
         if(rc != PLCTAG_STATUS_PENDING) { return rc; }
-        compat_sleep_ms(POLL_SLEEP_MS, NULL);
-    } while(compat_time_ms() < end_time);
+        sleep_ms((int32_t)(POLL_SLEEP_MS));
+    } while(time_ms() < end_time);
 
     return PLCTAG_ERR_TIMEOUT;
 }
@@ -630,14 +630,14 @@ static void clone_event_callback(int32_t tag_id, int event, int status, void *us
     (void)status;
     (void)userdata;
 
-    if(event == PLCTAG_EVENT_CREATED) { compat_atomic_store_int32(&clone_created_cb_fired, 1); }
-    if(event == PLCTAG_EVENT_READ_COMPLETED) { compat_atomic_store_int32(&clone_read_completed_cb_fired, 1); }
+    if(event == PLCTAG_EVENT_CREATED) { atomic_set_int32(&clone_created_cb_fired, 1); }
+    if(event == PLCTAG_EVENT_READ_COMPLETED) { atomic_set_int32(&clone_read_completed_cb_fired, 1); }
 }
 
 /* Test 16: callback registered on clone receives CREATED and READ_COMPLETED. */
 static int test_callback_fires_on_clone(void) {
-    compat_atomic_store_int32(&clone_created_cb_fired, 0);
-    compat_atomic_store_int32(&clone_read_completed_cb_fired, 0);
+    atomic_set_int32(&clone_created_cb_fired, 0);
+    atomic_set_int32(&clone_read_completed_cb_fired, 0);
 
     int32_t src = create_ready_src_tag();
     if(src < 0) { return (int)src; }
@@ -657,7 +657,7 @@ static int test_callback_fires_on_clone(void) {
         return rc;
     }
 
-    if(!compat_atomic_load_int32(&clone_created_cb_fired)) {
+    if(!atomic_get_int32(&clone_created_cb_fired)) {
         fprintf(stderr, "  FAIL: PLCTAG_EVENT_CREATED did not fire on clone.\n");
         plc_tag_destroy(clone);
         return PLCTAG_ERR_BAD_STATUS;
@@ -670,7 +670,7 @@ static int test_callback_fires_on_clone(void) {
         return rc;
     }
 
-    if(!compat_atomic_load_int32(&clone_read_completed_cb_fired)) {
+    if(!atomic_get_int32(&clone_read_completed_cb_fired)) {
         fprintf(stderr, "  FAIL: PLCTAG_EVENT_READ_COMPLETED did not fire on clone.\n");
         plc_tag_destroy(clone);
         return PLCTAG_ERR_BAD_STATUS;

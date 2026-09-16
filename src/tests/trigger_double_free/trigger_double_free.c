@@ -1,4 +1,4 @@
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -41,7 +41,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
         // Invoke async read for both tag handles
         for(int i = 0; i < 2; i++) {
             rc[i] = plc_tag_read(tagHandles[i], 0);
-            compat_sleep_ms(TIME_BETW_TAG, NULL);
+            sleep_ms((int32_t)(TIME_BETW_TAG));
         }
 
         // Wait for both tag handles to be finish reading
@@ -51,7 +51,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
                     FATAL("Error[%d] %d: %s\n", i, rc[i], plc_tag_decode_error(rc[i]));
                 }
 
-                compat_sleep_ms(10, NULL);
+                sleep_ms(10);
                 rc[i] = plc_tag_status(tagHandles[i]);
             }
         }
@@ -64,7 +64,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
             }
         }
 
-        compat_sleep_ms(TIME_BETW_OP, NULL);
+        sleep_ms((int32_t)(TIME_BETW_OP));
     }
 
     for(int i = 0; i < 2; i++) { plc_tag_destroy(tagHandles[i]); }

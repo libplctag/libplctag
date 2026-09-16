@@ -48,7 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "compat_utils.h"
+#include "test_utils.h"
 #include "stats.h"
 #include <libplctag/lib/libplctag.h>
 
@@ -57,18 +57,18 @@
 #define TAG_CREATE_TIMEOUT_MS 10000   /* Timeout for tags to become ready */
 
 typedef struct {
-    compat_atomic_int32_t tag_id;
-    compat_atomic_int32_t read_started_count;
-    compat_atomic_int32_t read_completed_count;
-    compat_atomic_int32_t read_failed_count;
-    compat_atomic_int64_t ready_time;
-    compat_atomic_int64_t last_read_time;
-    compat_atomic_int64_t total_wait_time;
-    compat_atomic_int64_t max_wait_time;
-    compat_atomic_int64_t min_wait_time;
+    atomic_int32_t tag_id;
+    atomic_int32_t read_started_count;
+    atomic_int32_t read_completed_count;
+    atomic_int32_t read_failed_count;
+    atomic_int64_t ready_time;
+    atomic_int64_t last_read_time;
+    atomic_int64_t total_wait_time;
+    atomic_int64_t max_wait_time;
+    atomic_int64_t min_wait_time;
 } tag_stats_t;
 
-static compat_mutex_t stats_mutex;
+static mutex_p stats_mutex = NULL;
 static int shutting_down = 0;
 
 void usage(const char *prog_name) {
@@ -93,58 +93,58 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     (void)tag_id; /* tag_id is not used but kept for callback signature compatibility */
     tag_stats_t *stats = (tag_stats_t *)userdata;
 
-    if(compat_mutex_lock(&stats_mutex) != 0) { return; }
+    if(mutex_lock(stats_mutex) != 0) { return; }
 
     if(shutting_down) {
-        compat_mutex_unlock(&stats_mutex);
+        mutex_unlock(stats_mutex);
         return;
     }
 
-    int64_t now = compat_time_ms();
+    int64_t now = time_ms();
 
     switch(event) {
-        case PLCTAG_EVENT_CREATED: compat_atomic_store_int64(&stats->ready_time, now); break;
-        case PLCTAG_EVENT_READ_STARTED: compat_atomic_inc_int32(&stats->read_started_count); break;
+        case PLCTAG_EVENT_CREATED: atomic_set_int64(&stats->ready_time, now); break;
+        case PLCTAG_EVENT_READ_STARTED: atomic_add_int32(&stats->read_started_count, 1); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             if(status == PLCTAG_STATUS_OK) {
-                compat_atomic_inc_int32(&stats->read_completed_count);
+                atomic_add_int32(&stats->read_completed_count, 1);
 
                 /* Calculate wait time since last read */
-                int64_t last_time = compat_atomic_load_int64(&stats->last_read_time);
+                int64_t last_time = atomic_get_int64(&stats->last_read_time);
                 if(last_time > 0) {
                     int64_t wait = now - last_time;
-                    compat_atomic_add_int64(&stats->total_wait_time, wait);
+                    atomic_add_int64(&stats->total_wait_time, wait);
 
                     /* Update max wait time if needed (simple store, race is benign) */
-                    int64_t current_max = compat_atomic_load_int64(&stats->max_wait_time);
-                    if(wait > current_max) { compat_atomic_store_int64(&stats->max_wait_time, wait); }
+                    int64_t current_max = atomic_get_int64(&stats->max_wait_time);
+                    if(wait > current_max) { atomic_set_int64(&stats->max_wait_time, wait); }
 
                     /* Update min wait time if needed (simple store, race is benign) */
-                    int64_t current_min = compat_atomic_load_int64(&stats->min_wait_time);
-                    if(current_min == 0 || wait < current_min) { compat_atomic_store_int64(&stats->min_wait_time, wait); }
+                    int64_t current_min = atomic_get_int64(&stats->min_wait_time);
+                    if(current_min == 0 || wait < current_min) { atomic_set_int64(&stats->min_wait_time, wait); }
                 }
 
-                compat_atomic_store_int64(&stats->last_read_time, now);
+                atomic_set_int64(&stats->last_read_time, now);
             } else {
-                compat_atomic_inc_int32(&stats->read_failed_count);
+                atomic_add_int32(&stats->read_failed_count, 1);
             }
             break;
 
         default: break;
     }
 
-    compat_mutex_unlock(&stats_mutex);
+    mutex_unlock(stats_mutex);
 }
 
 static void cleanup_tags(tag_stats_t *stats, int num_created) {
 
-    compat_mutex_lock(&stats_mutex);
+    mutex_lock(stats_mutex);
     shutting_down = 1;
-    compat_mutex_unlock(&stats_mutex);
+    mutex_unlock(stats_mutex);
 
     for(int i = 0; i < num_created; i++) {
-        int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
+        int32_t tag_id = atomic_get_int32(&stats[i].tag_id);
         plc_tag_destroy(tag_id);
     }
 
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if(compat_mutex_init(&stats_mutex) != 0) {
+    if(mutex_create(&stats_mutex) != 0) {
         fprintf(stderr, "Error initializing stats mutex!\n");
         free(stats);
         return 1;
@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
         }
 
         /* initialize stats with tag ID - must be set AFTER tag creation */
-        compat_atomic_store_int32(&stats[i].tag_id, tag_id);
+        atomic_set_int32(&stats[i].tag_id, tag_id);
         num_created++;
 
         if((i + 1) % 10 == 0) { fprintf(stderr, "  Created %d tags...\n", i + 1); }
@@ -233,12 +233,12 @@ int main(int argc, char **argv) {
 
     /* Wait for all tags to be ready */
     fprintf(stderr, "\nWaiting for all tags to become ready...\n");
-    int64_t tag_create_timeout = compat_time_ms() + TAG_CREATE_TIMEOUT_MS;
+    int64_t tag_create_timeout = time_ms() + TAG_CREATE_TIMEOUT_MS;
     int all_ready = 0;
-    while(compat_time_ms() < tag_create_timeout) {
+    while(time_ms() < tag_create_timeout) {
         all_ready = 1;
         for(int i = 0; i < num_tags; i++) {
-            if(compat_atomic_load_int64(&stats[i].ready_time) == 0) {
+            if(atomic_get_int64(&stats[i].ready_time) == 0) {
                 all_ready = 0;
                 break;
             }
@@ -246,13 +246,13 @@ int main(int argc, char **argv) {
 
         if(all_ready) { break; }
 
-        compat_sleep_ms(100, NULL);
+        sleep_ms(100);
     }
 
     if(!all_ready) {
         fprintf(stderr, "Warning: Not all tags became ready before timeout!\n");
         for(int i = 0; i < num_tags; i++) {
-            int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
+            int32_t tag_id = atomic_get_int32(&stats[i].tag_id);
             int status = plc_tag_status(tag_id);
             if(status != PLCTAG_STATUS_OK) { fprintf(stderr, "  Tag %d: %s\n", i, plc_tag_decode_error(status)); }
         }
@@ -261,12 +261,12 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr, "\nRunning test for %d seconds...\n", test_duration_secs);
-    start_time = compat_time_ms();
+    start_time = time_ms();
 
     /* Wait for test duration */
-    compat_sleep_ms((uint32_t)test_duration_ms, NULL);
+    sleep_ms((int32_t)(test_duration_ms));
 
-    end_time = compat_time_ms();
+    end_time = time_ms();
     int64_t actual_duration = end_time - start_time;
 
     /* stop debug output so that the statistics etc. are the last thing in the log. */
@@ -290,13 +290,13 @@ int main(int argc, char **argv) {
     }
 
     for(int i = 0; i < num_tags; i++) {
-        int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
-        int32_t started = compat_atomic_load_int32(&stats[i].read_started_count);
-        int32_t completed = compat_atomic_load_int32(&stats[i].read_completed_count);
-        int32_t failed = compat_atomic_load_int32(&stats[i].read_failed_count);
-        int64_t total_wait = compat_atomic_load_int64(&stats[i].total_wait_time);
-        int64_t min_wait = compat_atomic_load_int64(&stats[i].min_wait_time);
-        int64_t max_wait = compat_atomic_load_int64(&stats[i].max_wait_time);
+        int32_t tag_id = atomic_get_int32(&stats[i].tag_id);
+        int32_t started = atomic_get_int32(&stats[i].read_started_count);
+        int32_t completed = atomic_get_int32(&stats[i].read_completed_count);
+        int32_t failed = atomic_get_int32(&stats[i].read_failed_count);
+        int64_t total_wait = atomic_get_int64(&stats[i].total_wait_time);
+        int64_t min_wait = atomic_get_int64(&stats[i].min_wait_time);
+        int64_t max_wait = atomic_get_int64(&stats[i].max_wait_time);
 
         fprintf(stderr,
                 "Tag %2d (ID=%d): started=%d, completed=%d, failed=%d, avg_wait=%" PRId64 "ms, min_wait=%" PRId64

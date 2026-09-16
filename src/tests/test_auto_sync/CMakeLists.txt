@@ -8,7 +8,7 @@ endif()
 
 set(TEST_AUTO_SYNC_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_auto_sync.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_auto_sync ${TEST_AUTO_SYNC_FILES})

@@ -31,7 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/nap.h>
 #include <utils/thread.h>
 #include <inttypes.h>
@@ -76,7 +76,7 @@ typedef struct {
 } tag_state;
 
 
-static compat_atomic_int32_t done = {0};
+static atomic_int32_t done = 0;
 
 /*
  * The test used to run until ^C and always exit 0, which made it useless to a
@@ -84,10 +84,10 @@ static compat_atomic_int32_t done = {0};
  * thread_failures, every completed read bumps reads_completed, and main turns
  * the pair into an exit code.
  */
-static compat_atomic_int32_t thread_failures = {0};
-static compat_atomic_int32_t reads_completed = {0};
+static atomic_int32_t thread_failures = 0;
+static atomic_int32_t reads_completed = 0;
 
-void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
+void interrupt_handler(void) { atomic_set_int32(&done, 1); }
 
 static int num_threads = 0;
 static const char *tag_attribs = DEFAULT_TAG_ATTRIBS;
@@ -132,21 +132,21 @@ THREAD_FUNC(thread_func) {
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        compat_atomic_add_int32(&thread_failures, 1);
+        atomic_add_int32(&thread_failures, 1);
         THREAD_RETURN(0);
     }
 
     while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
-        if(compat_atomic_load_int32(&done)) { break; }
+        if(atomic_get_int32(&done)) { break; }
         thread_yield();
     }
 
     if(rc != PLCTAG_STATUS_OK) {
         /* a shutdown while the tag was still setting up is not a failure. */
-        if(!compat_atomic_load_int32(&done)) {
+        if(!atomic_get_int32(&done)) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
-            compat_atomic_add_int32(&thread_failures, 1);
+            atomic_add_int32(&thread_failures, 1);
         }
         plc_tag_destroy(tag);
         nap_destroy(&states[tid].read_event);
@@ -156,12 +156,12 @@ THREAD_FUNC(thread_func) {
     /* use extended callback to pass the thread index/id */
     plc_tag_register_callback_ex(tag, tag_callback, (void *)(intptr_t)tid);
 
-    while(!compat_atomic_load_int32(&done)) {
+    while(!atomic_get_int32(&done)) {
         int64_t start;
         int64_t end;
 
         /* capture the starting time */
-        start = compat_time_ms();
+        start = time_ms();
 
         do {
             /*
@@ -175,7 +175,7 @@ THREAD_FUNC(thread_func) {
             // NOLINTNEXTLINE
             if(rc < 0) {
                 fprintf(stderr, "Error starting tag read. %s\n", plc_tag_decode_error(rc));
-                compat_atomic_add_int32(&thread_failures, 1);
+                atomic_add_int32(&thread_failures, 1);
                 break;
             }
             if(rc == PLCTAG_STATUS_PENDING) {
@@ -184,17 +184,17 @@ THREAD_FUNC(thread_func) {
                 if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
                     // NOLINTNEXTLINE
                     fprintf(stderr, "something is wrong for tag(%d), status(%s)\n", tag, plc_tag_decode_error(rc));
-                    compat_atomic_add_int32(&thread_failures, 1);
+                    atomic_add_int32(&thread_failures, 1);
                     plc_tag_destroy(tag);
                     nap_destroy(&states[tid].read_event);
                     THREAD_RETURN(0);
                 }
             }
             value = plc_tag_get_int32(tag, 0);
-            compat_atomic_add_int32(&reads_completed, 1);
+            atomic_add_int32(&reads_completed, 1);
         } while(0);
 
-        end = compat_time_ms();
+        end = time_ms();
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d got result %d with return code %s in %" PRId64 "ms\n", tid, value, plc_tag_decode_error(rc),
@@ -221,7 +221,7 @@ int main(int argc, char **argv) {
     int reads = 0;
 
     /* set up handler for ^C etc. */
-    compat_set_interrupt_handler(interrupt_handler);
+    test_set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
@@ -285,21 +285,21 @@ int main(int argc, char **argv) {
     }
 
     /* wait until ^C, or until the deadline if one was given */
-    deadline = (run_seconds > 0) ? (compat_time_ms() + ((int64_t)run_seconds * 1000)) : 0;
+    deadline = (run_seconds > 0) ? (time_ms() + ((int64_t)run_seconds * 1000)) : 0;
 
-    while(!compat_atomic_load_int32(&done)) {
-        if(deadline > 0 && compat_time_ms() >= deadline) {
-            compat_atomic_store_int32(&done, 1);
+    while(!atomic_get_int32(&done)) {
+        if(deadline > 0 && time_ms() >= deadline) {
+            atomic_set_int32(&done, 1);
             break;
         }
 
-        compat_sleep_ms(100, NULL);
+        sleep_ms(100);
     }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) { thread_join(&thread[thread_id]); }
 
-    failures = compat_atomic_load_int32(&thread_failures);
-    reads = compat_atomic_load_int32(&reads_completed);
+    failures = atomic_get_int32(&thread_failures);
+    reads = atomic_get_int32(&reads_completed);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "%d reads completed, %d thread failures.\n", reads, failures);

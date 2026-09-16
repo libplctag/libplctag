@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -82,18 +82,18 @@ static void set_val(int32_t tag, int32_t val) {
 
 THREAD_FUNC(reader_function) {
     int32_t tag = (int32_t)(intptr_t)arg;
-    int64_t start_time = compat_time_ms();
+    int64_t start_time = time_ms();
     int64_t run_until = start_time + g_run_period_ms;
     int iteration = 1;
 
-    while(run_until > compat_time_ms()) {
+    while(run_until > time_ms()) {
         int32_t val = get_val(tag);
 
         // NOLINTNEXTLINE
         fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val,
-                compat_time_ms() - start_time);
+                time_ms() - start_time);
 
-        compat_sleep_ms(g_read_sleep_ms, NULL);
+        sleep_ms((int32_t)(g_read_sleep_ms));
     }
 
     THREAD_RETURN(0);
@@ -102,11 +102,11 @@ THREAD_FUNC(reader_function) {
 
 THREAD_FUNC(writer_function) {
     int32_t tag = (int32_t)(intptr_t)arg;
-    int64_t start_time = compat_time_ms();
+    int64_t start_time = time_ms();
     int64_t run_until = start_time + g_run_period_ms;
     int iteration = 1;
 
-    while(run_until > compat_time_ms()) {
+    while(run_until > time_ms()) {
         int32_t val = get_val(tag);
         int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
 
@@ -115,9 +115,9 @@ THREAD_FUNC(writer_function) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "WRITER: Iteration %d, wrote value: %d at time %" PRId64 "\n", iteration++, new_val,
-                compat_time_ms() - start_time);
+                time_ms() - start_time);
 
-        compat_sleep_ms(g_write_sleep_ms, NULL);
+        sleep_ms((int32_t)(g_write_sleep_ms));
     }
 
     THREAD_RETURN(0);

@@ -61,7 +61,7 @@
  * Diagnostics go to stderr.
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include "stats.h"
 #include <inttypes.h>
@@ -118,13 +118,13 @@ static double get_cpu_time_ms(void) {
 
 /*--- Global synchronisation flags ---*/
 
-static compat_atomic_int32_t go = {0};   /* set to 1 to start all threads */
-static compat_atomic_int32_t done = {0}; /* set to 1 to stop all threads  */
-static compat_atomic_int32_t terminate = {0};
+static atomic_int32_t go = 0;   /* set to 1 to start all threads */
+static atomic_int32_t done = 0; /* set to 1 to stop all threads  */
+static atomic_int32_t terminate = 0;
 
 static void handle_interrupt(void) {
-    compat_atomic_store_int32(&terminate, 1);
-    compat_atomic_store_int32(&done, 1);
+    atomic_set_int32(&terminate, 1);
+    atomic_set_int32(&done, 1);
 }
 
 
@@ -151,7 +151,7 @@ static THREAD_FUNC(thread_func) {
     td->error_count = 0;
 
     /* Spin until signalled to start. */
-    while(!compat_atomic_load_int32(&go) && !compat_atomic_load_int32(&done)) { thread_yield(); }
+    while(!atomic_get_int32(&go) && !atomic_get_int32(&done)) { thread_yield(); }
 
     if(td->is_async) {
         /* Async: fire reads on all tags, then poll all for completion.
@@ -161,7 +161,7 @@ static THREAD_FUNC(thread_func) {
         int *read_rc = (int *)calloc((size_t)td->num_tags, sizeof(int));
         if(!read_rc) { THREAD_RETURN(0); }
 
-        while(!compat_atomic_load_int32(&done)) {
+        while(!atomic_get_int32(&done)) {
             /* Phase 1: Start reads on all tags. */
             for(int i = 0; i < td->num_tags; i++) {
                 read_rc[i] = plc_tag_read(td->tags[i], 0);
@@ -178,7 +178,7 @@ static THREAD_FUNC(thread_func) {
                     }
                 }
                 if(pending) { thread_yield(); }
-            } while(pending && !compat_atomic_load_int32(&done));
+            } while(pending && !atomic_get_int32(&done));
 
             /* Phase 3: Tally completed reads. */
             for(int i = 0; i < td->num_tags; i++) {
@@ -186,7 +186,7 @@ static THREAD_FUNC(thread_func) {
                     int status = plc_tag_status(td->tags[i]);
                     if(status == PLCTAG_STATUS_OK) {
                         td->read_count++;
-                    } else if(!compat_atomic_load_int32(&done)) {
+                    } else if(!atomic_get_int32(&done)) {
                         td->error_count++;
                     }
                 }
@@ -197,7 +197,7 @@ static THREAD_FUNC(thread_func) {
     } else {
         /* Sync: blocking read.
          * No locking needed -- this thread exclusively owns its tags. */
-        while(!compat_atomic_load_int32(&done)) {
+        while(!atomic_get_int32(&done)) {
             int32_t tag = td->tags[tag_idx];
             int rc = plc_tag_read(tag, TAG_READ_TIMEOUT_MS);
 
@@ -205,7 +205,7 @@ static THREAD_FUNC(thread_func) {
                 td->read_count++;
             } else {
                 td->error_count++;
-                if(!compat_atomic_load_int32(&done)) {
+                if(!atomic_get_int32(&done)) {
                     fprintf(stderr, "Thread %d: read error %s on tag idx %d\n", td->thread_id, plc_tag_decode_error(rc), tag_idx);
                 }
             }
@@ -300,7 +300,7 @@ int main(int argc, char **argv) {
     }
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
-    compat_set_interrupt_handler(handle_interrupt);
+    test_set_interrupt_handler(handle_interrupt);
 
     const char *mode_str = is_async ? "async" : "sync";
     fprintf(stderr, "perf_benchmark: mode=%s groups=%d threads=%d tags=%d duration=%ds tag=%s\n", mode_str, num_groups,
@@ -355,7 +355,7 @@ int main(int argc, char **argv) {
     for(int i = 0; i < num_threads; i++) {
         if(thread_create(&threads[i], thread_func, 0, &tdata[i]) != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Failed to create thread %d\n", i);
-            compat_atomic_store_int32(&done, 1);
+            atomic_set_int32(&done, 1);
             for(int j = 0; j < i; j++) { thread_join(&threads[j]); }
             for(int j = 0; j < num_tags; j++) { plc_tag_destroy(tag_handles[j]); }
             return 1;
@@ -363,23 +363,23 @@ int main(int argc, char **argv) {
     }
 
     /* Brief pause for threads to reach their spin-wait. */
-    compat_sleep_ms(50, NULL);
+    sleep_ms(50);
 
     /*--- Run the benchmark ---*/
     double cpu_start = get_cpu_time_ms();
-    int64_t wall_start = compat_time_ms();
+    int64_t wall_start = time_ms();
 
-    compat_atomic_store_int32(&go, 1); /* release all threads */
+    atomic_set_int32(&go, 1); /* release all threads */
 
     /* Sleep for the test duration. */
-    for(int s = 0; s < duration_s && !compat_atomic_load_int32(&terminate); s++) { compat_sleep_ms(1000, NULL); }
+    for(int s = 0; s < duration_s && !atomic_get_int32(&terminate); s++) { sleep_ms(1000); }
 
-    compat_atomic_store_int32(&done, 1); /* signal threads to stop */
+    atomic_set_int32(&done, 1); /* signal threads to stop */
 
     /* Join all threads. */
     for(int i = 0; i < num_threads; i++) { thread_join(&threads[i]); }
 
-    int64_t wall_end = compat_time_ms();
+    int64_t wall_end = time_ms();
     double cpu_end = get_cpu_time_ms();
 
     int64_t duration_ms = wall_end - wall_start;
@@ -449,5 +449,5 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "Done.\n");
 
-    return (compat_atomic_load_int32(&terminate)) ? 1 : 0;
+    return (atomic_get_int32(&terminate)) ? 1 : 0;
 }

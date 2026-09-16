@@ -45,7 +45,7 @@
 // #define CLOG_MAIN
 // #include "clog.h"
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -88,16 +88,16 @@ void usage(void) {
 }
 
 
-static compat_atomic_int32_t go = {0};
+static atomic_int32_t go = 0;
 
 /* Counts threads that have finished trying to create their tag (success or
  * failure). main() waits for this to reach num_threads before releasing
  * everyone via go=1 -- otherwise a thread still inside plc_tag_create() when
  * go flips back to 0 at the end of the run would wait forever for a go=1
  * that never comes again. */
-static compat_atomic_int32_t ready_count = {0};
+static atomic_int32_t ready_count = 0;
 
-static void interrupt_handler(void) { compat_atomic_store_int32(&go, 1); }
+static void interrupt_handler(void) { atomic_set_int32(&go, 1); }
 
 /*
  * This test program creates a lot of threads that read the same tag in
@@ -141,7 +141,7 @@ THREAD_FUNC(test_runner) {
     /* Spread out connection setup instead of all threads hitting the server at
      * once -- wait a random 1-2000ms before creating this thread's tag. */
     delay_ms = 1U + (uint32_t)random_u64(2000);
-    compat_sleep_ms(delay_ms, NULL);
+    sleep_ms((int32_t)(delay_ms));
 
     /* Append connection_group_id to force separate connection per thread */
     // NOLINTNEXTLINE
@@ -157,33 +157,33 @@ THREAD_FUNC(test_runner) {
         // NOLINTNEXTLINE
         fprintf(stderr, "!!! Failed to create tag for thread %d with error %s!\n", tid, plc_tag_decode_error(tag));
         *status = tag;
-        compat_atomic_inc_int32(&ready_count);
+        atomic_add_int32(&ready_count, 1);
         THREAD_RETURN(0);
     }
 
-    compat_atomic_inc_int32(&ready_count);
+    atomic_add_int32(&ready_count, 1);
 
     /* wait until all threads ready. */
-    while(!compat_atomic_load_int32(&go)) { compat_sleep_ms(10, NULL); }
+    while(!atomic_get_int32(&go)) { sleep_ms(10); }
 
-    while(compat_atomic_load_int32(&go)) {
+    while(atomic_get_int32(&go)) {
         int64_t start = 0;
         int64_t io_time = 0;
 
         (*iteration)++;
 
         /* capture the starting time */
-        start = compat_time_ms();
+        start = time_ms();
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
             fprintf(stderr, "!!! Thread %d, iteration %d, read failed after %" PRId64 "ms  with error %s\n", tid, *iteration,
-                    (int64_t)(compat_time_ms() - start), plc_tag_decode_error(rc));
+                    (int64_t)(time_ms() - start), plc_tag_decode_error(rc));
             break;
         }
 
-        io_time = compat_time_ms() - start;
+        io_time = time_ms() - start;
 
         *total_io_time += io_time;
 
@@ -273,7 +273,7 @@ static bool parse_gateway_host_port(const char *tag_string, char *host_out, size
 /* At least 10 threads even on a single-detected-CPU runner -- the test still
  * needs to exercise real concurrency, just not thousands of threads' worth. */
 static int compute_max_threads_for_platform(void) {
-    int scaled = compat_cpu_count() * THREADS_PER_CPU;
+    int scaled = test_cpu_count() * THREADS_PER_CPU;
 
     if(scaled < 10) { scaled = 10; }
     if(scaled > MAX_THREADS_STATIC_CAP) { scaled = MAX_THREADS_STATIC_CAP; }
@@ -305,7 +305,7 @@ int main(int argc, char **argv) {
     }
 
     /* cat ^C etc. */
-    compat_set_interrupt_handler(interrupt_handler);
+    test_set_interrupt_handler(interrupt_handler);
 
     fprintf(stderr, "Hit ^C to terminate the test.\n");
 
@@ -342,7 +342,7 @@ int main(int argc, char **argv) {
     if(num_threads > max_threads_for_platform) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Limiting thread count to %d on this platform (requested %d, %d CPUs detected).\n",
-                max_threads_for_platform, num_threads, compat_cpu_count());
+                max_threads_for_platform, num_threads, test_cpu_count());
         num_threads = max_threads_for_platform;
     }
 
@@ -364,7 +364,7 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "--- Waiting for %s:%u to accept connections...\n", gateway_host, gateway_port);
 
-    if(!compat_wait_for_listener(gateway_host, gateway_port, TAG_CREATE_TIMEOUT)) {
+    if(!test_wait_for_listener(gateway_host, gateway_port, TAG_CREATE_TIMEOUT)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "!!! Server %s:%u did not start listening in time!\n", gateway_host, gateway_port);
         exit(1);
@@ -395,23 +395,23 @@ int main(int argc, char **argv) {
      * the comment on ready_count. Each thread's own plc_tag_create() call is
      * already bounded by TAG_CREATE_TIMEOUT, so this loop is implicitly
      * bounded too; it does not need its own separate timeout. */
-    while(compat_atomic_load_int32(&ready_count) < num_threads) { compat_sleep_ms(10, NULL); }
+    while(atomic_get_int32(&ready_count) < num_threads) { sleep_ms(10); }
 
     /* launch the threads */
-    compat_atomic_store_int32(&go, 1);
+    atomic_set_int32(&go, 1);
 
-    start = compat_time_ms();
+    start = time_ms();
 
-    while(compat_atomic_load_int32(&go) && (--count_down) > 0) { compat_sleep_ms(100, NULL); }
+    while(atomic_get_int32(&go) && (--count_down) > 0) { sleep_ms(100); }
 
-    compat_atomic_store_int32(&go, 0);
+    atomic_set_int32(&go, 0);
 
-    total_run_time = compat_time_ms() - start;
+    total_run_time = time_ms() - start;
 
     success = 1;
 
     /* FIXME - wait for the threads to stop. */
-    compat_sleep_ms(100, NULL);
+    sleep_ms(100);
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&thread[tid]); }
 

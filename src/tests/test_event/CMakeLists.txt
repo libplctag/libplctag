@@ -8,7 +8,7 @@ endif()
 
 set(TEST_EVENT_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_event.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_event ${TEST_EVENT_FILES})

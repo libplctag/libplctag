@@ -4,7 +4,7 @@ Status: design, not yet implemented.
 
 ## 1. Problem
 
-Library-scoped infrastructure (`tags` hashtable, `tag_lookup_mutex`, `tag_tickler_wait`,
+Library-scoped infrastructure (`tags` hashtable, `tag_lookup_mutex`, `tag_tickler_nap`,
 tickler thread) is created and destroyed once per init cycle. Application threads can be
 inside an API call at any instant, entering through `lookup_tag()` or directly through
 `critical_block(tag_lookup_mutex)`.
@@ -77,7 +77,7 @@ typedef struct lib_instance_t *lib_instance_p;
 struct lib_instance_t {
     hashtable_p tags;
     mutex_p     tag_lookup_mutex;
-    cond_p      tag_tickler_wait;
+    nap_p       tag_tickler_nap;
     thread_p    tag_tickler_thread;
 };
 ```
@@ -275,7 +275,7 @@ keep the void wrapper.
    proceeds.
 
 2. **Wake the IO threads** so they observe the phase promptly (`socket_wake`,
-   `wake_plc_thread`, `cond_signal`). A thread parked in a long socket wait would otherwise
+   `wake_plc_thread`, `nap_interrupt`). A thread parked in a long socket wait would otherwise
    not notice.
 
 3. **Destroy all tags.** Walk `inst->tags` under `inst->tag_lookup_mutex`, `rc_inc` each,
@@ -602,7 +602,7 @@ bool session_destroy(void *arg, bool pre_queue) {
         /* fast, non-blocking: start the wind-down now, in parallel with every
          * other session being released at about the same time. */
         atomic_set_int32(&session->terminating, 1);
-        cond_signal(session->session_wait_cond);
+        nap_interrupt(session->session_nap);
         socket_wake(session->sock);
         return true;                 /* still need the join */
     }
@@ -635,7 +635,7 @@ It runs on whatever thread dropped the last reference — an application thread 
 `plc_tag_destroy()`, the tickler thread inside a callback, the RC thread during a transitive
 release, or an IO thread. So it must be:
 
-- **Non-blocking.** Flag stores, `cond_signal`, `socket_wake`. No network I/O, no joins,
+- **Non-blocking.** Flag stores, `nap_interrupt`, `socket_wake`. No network I/O, no joins,
   no waits.
 - **Lock-free with respect to the object's own mutexes.** `rc_dec` is called from inside
   `critical_block(session->session_mutex)` in places; taking that mutex in phase 1 would

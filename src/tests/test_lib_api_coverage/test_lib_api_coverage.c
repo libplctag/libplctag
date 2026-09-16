@@ -43,7 +43,7 @@
  * test was written to close.
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <math.h>
 #include <stdio.h>

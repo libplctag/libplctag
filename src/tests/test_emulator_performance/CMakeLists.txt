@@ -8,7 +8,7 @@ endif()
 
 set(TEST_EMULATOR_PERFORMANCE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_emulator_performance.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_emulator_performance ${TEST_EMULATOR_PERFORMANCE_FILES})

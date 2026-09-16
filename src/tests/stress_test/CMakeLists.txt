@@ -8,7 +8,7 @@ endif()
 
 set(STRESS_TEST_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/stress_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(stress_test ${STRESS_TEST_FILES})

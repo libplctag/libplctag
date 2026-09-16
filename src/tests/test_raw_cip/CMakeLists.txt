@@ -8,7 +8,7 @@ endif()
 
 set(TEST_RAW_CIP_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_raw_cip.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_raw_cip ${TEST_RAW_CIP_FILES})

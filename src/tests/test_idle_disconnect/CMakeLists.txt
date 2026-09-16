@@ -8,7 +8,7 @@ endif()
 
 set(TEST_IDLE_DISCONNECT_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_idle_disconnect.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_idle_disconnect ${TEST_IDLE_DISCONNECT_FILES})

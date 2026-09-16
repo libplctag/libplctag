@@ -8,7 +8,7 @@ endif()
 
 set(TEST_LIB_API_COVERAGE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_lib_api_coverage.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_lib_api_coverage ${TEST_LIB_API_COVERAGE_FILES})

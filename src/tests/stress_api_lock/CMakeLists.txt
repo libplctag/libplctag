@@ -8,7 +8,7 @@ endif()
 
 set(STRESS_API_LOCK_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/stress_api_lock.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(stress_api_lock ${STRESS_API_LOCK_FILES})

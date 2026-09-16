@@ -139,7 +139,7 @@ between them. Making `tag->req` atomic converts a mutex into a use-after-free.
 Both files removed; full build clean. The rationale is kept below as the record of why.
 
 Dead code, and a second competing lifetime model. It is in no `CMakeLists.txt`, has zero
-callers outside itself, and calls `mutex_create()` / `cond_create()` with no arguments
+callers outside itself, and calls `mutex_create()` / `nap_create()` with no arguments
 against `int mutex_create(mutex_p *m)` — it cannot compile.
 
 If anyone ever revived it, it also has:

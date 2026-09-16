@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,24 +124,24 @@ static void read_tag(int32_t tag) {
 
 
 static void wait_until(int64_t end_time_ms) {
-    int64_t now_ms = compat_time_ms();
+    int64_t now_ms = time_ms();
     int64_t start_time_ms = now_ms;
     int64_t wait_duration_ms = end_time_ms - start_time_ms;
 
     do {
-        int64_t sleep_ms = end_time_ms - now_ms;
+        int64_t sleep_time_ms = end_time_ms - now_ms;
 
         /* clamp max wait at 500ms*/
-        if(sleep_ms > 500) { sleep_ms = 500; }
+        if(sleep_time_ms > 500) { sleep_time_ms = 500; }
 
-        if(sleep_ms <= 0) { break; }
+        if(sleep_time_ms <= 0) { break; }
 
-        compat_sleep_ms((uint32_t)sleep_ms, NULL);
+        sleep_ms((int32_t)(sleep_time_ms));
 
         // NOLINTNEXTLINE
         fprintf(stderr, "    Waiting... %.2f%% complete\n", ((float)(now_ms - start_time_ms) * 100.0f) / (float)wait_duration_ms);
 
-        now_ms = compat_time_ms();
+        now_ms = time_ms();
     } while(now_ms < end_time_ms);
 }
 
@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting %" PRId64 " ms (50%% of timeout)...\n", wait_time_ms);
 
-    wait_until(compat_time_ms() + wait_time_ms);
+    wait_until(time_ms() + wait_time_ms);
 
     /* check connection status - should still be UP */
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
@@ -227,7 +227,7 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting %" PRId64 "ms (150%% of timeout)...\n", wait_time_ms);
 
-    wait_until(compat_time_ms() + wait_time_ms);
+    wait_until(time_ms() + wait_time_ms);
 
     /* check connection status - should be DOWN or WAIT */
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
@@ -313,7 +313,7 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting %" PRId64 "ms (near-maximum timeout)...\n", wait_time_ms);
 
-    wait_until(compat_time_ms() + wait_time_ms);
+    wait_until(time_ms() + wait_time_ms);
 
     /* check connection status - should still be UP */
     status = plc_tag_get_int_attribute(tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
@@ -330,11 +330,11 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Reading tag after near-max timeout wait (should be immediate)...\n");
 
-    int64_t start_time_ms = compat_time_ms();
+    int64_t start_time_ms = time_ms();
 
     read_tag(tag);
 
-    int64_t end_time_ms = compat_time_ms();
+    int64_t end_time_ms = time_ms();
     uint32_t read_time_ms = (uint32_t)(end_time_ms - start_time_ms);
     // NOLINTNEXTLINE
     fprintf(stderr, "Read completed in %u ms (should be fast, < 100ms)\n", read_time_ms);

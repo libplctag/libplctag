@@ -90,7 +90,7 @@ static inline int compat_sscanf(const char *str, const char *format, ...) {
     int rc;
 
     va_start(args, format);
-#    ifdef _MSVC_VER
+#    ifdef _MSC_VER
     rc = vsscanf_s(str, format, args);
 #    else
     rc = vsscanf(str, format, args);

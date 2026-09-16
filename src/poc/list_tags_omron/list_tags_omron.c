@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include <utils/str.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
@@ -750,13 +750,13 @@ char *setup_tag_string(int argc, char **argv) {
         // printf("INFO: argv[2] = \"%s\".\n", argv[2]);
 
         /* two args */
-        if(compat_strcasecmp("--debug", argv[1]) == 0) {
+        if(str_cmp_i("--debug", argv[1]) == 0) {
             // printf("INFO: debug arg is in argv[1]=\"%s\"", argv[1]);
             // printf("INFO: host arg is in argv[2]=\"%s\"", argv[2]);
 
             gateway = argv[2];
             plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
-        } else if(compat_strcasecmp("--debug", argv[2]) == 0) {
+        } else if(str_cmp_i("--debug", argv[2]) == 0) {
             // printf("INFO: debug arg is in argv[2]=\"%s\"", argv[2]);
             // printf("INFO: host arg is in argv[1]=\"%s\"", argv[1]);
 
@@ -779,7 +779,7 @@ char *setup_tag_string(int argc, char **argv) {
     /* FIXME - check size! */
     printf("INFO: Using tag string \"%s\".\n", tag_string);
 
-    return compat_strdup(tag_string);
+    return str_dup(tag_string);
 }
 
 

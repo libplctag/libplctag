@@ -8,7 +8,7 @@ endif()
 
 set(TRIGGER_DOUBLE_FREE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/trigger_double_free.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(trigger_double_free ${TRIGGER_DOUBLE_FREE_FILES})

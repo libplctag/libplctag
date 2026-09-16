@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdint.h>
@@ -95,12 +95,12 @@ THREAD_FUNC(test_tag) {
         int64_t end = 0;
 
         /* capture the starting time */
-        start = compat_time_ms();
+        start = time_ms();
 
         /* read the tag */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
 
-        end = compat_time_ms();
+        end = time_ms();
 
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
@@ -177,10 +177,10 @@ int main(int argc, char **argv) {
         thread_create(&threads[tid], test_tag, 0, (void *)(intptr_t)tid);
     }
 
-    start_time = compat_time_ms();
+    start_time = time_ms();
     end_time = start_time + (seconds * 1000);
 
-    while(!done && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
+    while(!done && time_ms() < end_time) { sleep_ms(100); }
 
     if(done) {
         // NOLINTNEXTLINE

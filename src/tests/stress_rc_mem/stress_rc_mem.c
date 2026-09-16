@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -49,7 +49,7 @@
 */
 
 
-static compat_atomic_int32_t terminate = {0};
+static atomic_int32_t terminate = 0;
 
 static void interrupt_handler(void);
 static THREAD_FUNC(thread_func);
@@ -60,10 +60,10 @@ static THREAD_FUNC(thread_func);
 
 int main(void) {
     thread_p threads[NUM_THREADS] = {0};
-    int64_t end_time = compat_time_ms() + (10 * 1000);
+    int64_t end_time = time_ms() + (10 * 1000);
 
     /* Set up the signal handler */
-    compat_set_interrupt_handler(interrupt_handler);
+    test_set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Interrupt handlers set up.\n");
@@ -85,13 +85,13 @@ int main(void) {
     }
 
     /* wait while we test */
-    while(!compat_atomic_load_int32(&terminate) && (end_time > compat_time_ms())) {
-        compat_sleep_ms(1000, NULL);
+    while(!atomic_get_int32(&terminate) && (end_time > time_ms())) {
+        sleep_ms(1000);
         // NOLINTNEXTLINE
-        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - compat_time_ms()));
+        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - time_ms()));
     }
 
-    compat_atomic_store_int32(&terminate, 1);
+    atomic_set_int32(&terminate, 1);
 
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) { thread_join(&threads[task_id]); }
 
@@ -100,7 +100,7 @@ int main(void) {
 
 
 /* a signal handling function that sets terminate to 1. */
-void interrupt_handler(void) { compat_atomic_store_int32(&terminate, 1); }
+void interrupt_handler(void) { atomic_set_int32(&terminate, 1); }
 
 
 /*
@@ -118,7 +118,7 @@ THREAD_FUNC(thread_func) {
     snprintf(tag_str, sizeof(tag_str),
              "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray&connection_group_id=%d", task_id);
 
-    while(!compat_atomic_load_int32(&terminate)) {
+    while(!atomic_get_int32(&terminate)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Task %d creating tag\n", task_id);
 
@@ -127,7 +127,7 @@ THREAD_FUNC(thread_func) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Task %d tag creation failed with error %s\n", task_id, plc_tag_decode_error(tag));
 
-            compat_sleep_ms(100, NULL);
+            sleep_ms(100);
             continue;
         }
 
@@ -140,7 +140,7 @@ THREAD_FUNC(thread_func) {
                 // NOLINTNEXTLINE
                 fprintf(stderr, "Task %d read failed with error %s\n", task_id, plc_tag_decode_error(rc));
             }
-        } while(rc == PLCTAG_STATUS_OK && !compat_atomic_load_int32(&terminate));
+        } while(rc == PLCTAG_STATUS_OK && !atomic_get_int32(&terminate));
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Task %d destroying tag %" PRId32 "\n", task_id, tag);

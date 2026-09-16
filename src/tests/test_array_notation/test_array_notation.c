@@ -31,7 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     }
 
     /* small delay to ensure writes complete */
-    compat_sleep_ms(100, NULL);
+    sleep_ms(100);
 
     /* read back and verify all values */
     // NOLINTNEXTLINE

@@ -83,7 +83,7 @@
  *     --idle-timeout-ms=5000
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -104,7 +104,7 @@
 
 /* -------------------------------------------------------------------------
  * Per-tag state — fields written by callback, read by main thread.
- * compat_atomic_int32_t is used for all shared fields; 0 = false, 1 = true
+ * atomic_int32_t is used for all shared fields; 0 = false, 1 = true
  * for the flag fields.
  * ---------------------------------------------------------------------- */
 
@@ -112,10 +112,10 @@ typedef struct {
     /* For logging only; the callback identifies its tag_state_t via userdata,
      * not by looking this up, since events can be dispatched before the
      * create loop below stores the returned tag_id here. */
-    compat_atomic_int32_t tag_id;
-    compat_atomic_int32_t next_expected_idx;
-    compat_atomic_int32_t failed;
-    compat_atomic_int32_t completed;
+    atomic_int32_t tag_id;
+    atomic_int32_t next_expected_idx;
+    atomic_int32_t failed;
+    atomic_int32_t completed;
 } tag_state_t;
 
 static tag_state_t tag_states[MAX_TAGS];
@@ -136,13 +136,13 @@ static int idle_timeout_ms = 0;
  * Runtime state shared between callback threads and the main thread
  * ---------------------------------------------------------------------- */
 
-static compat_atomic_int32_t running = {1};            /* 1 = keep looping */
-static compat_atomic_int32_t need_reconnect = {0};
-static compat_atomic_int32_t read_started_count = {0};
-static compat_atomic_int32_t read_completed_count = {0};
-static compat_atomic_int32_t write_started_count = {0};
-static compat_atomic_int32_t write_completed_count = {0};
-static compat_atomic_int32_t io_order_failed = {0};
+static atomic_int32_t running = 1;            /* 1 = keep looping */
+static atomic_int32_t need_reconnect = 0;
+static atomic_int32_t read_started_count = 0;
+static atomic_int32_t read_completed_count = 0;
+static atomic_int32_t write_started_count = 0;
+static atomic_int32_t write_completed_count = 0;
+static atomic_int32_t io_order_failed = 0;
 
 /* -------------------------------------------------------------------------
  * Expected states (built at startup from options; read-only after that)
@@ -192,7 +192,7 @@ static void build_expected_states(void) {
  * Helpers
  * ---------------------------------------------------------------------- */
 
-static void interrupt_handler(void) { compat_atomic_store_int32(&running, 0); }
+static void interrupt_handler(void) { atomic_set_int32(&running, 0); }
 
 static const char *conn_status_name(int32_t s) {
     if(s >= PLCTAG_EVENT_CONN_STATUS_OFFSET) { s -= PLCTAG_EVENT_CONN_STATUS_OFFSET; }
@@ -209,7 +209,7 @@ static const char *conn_status_name(int32_t s) {
 
 /* Advance a tag's expected-state machine from within the callback. */
 static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
-    int idx = compat_atomic_load_int32(&ts->next_expected_idx);
+    int idx = atomic_get_int32(&ts->next_expected_idx);
     int new_idx;
     int i;
 
@@ -217,31 +217,31 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
 
     if(expected_states[idx] == conn_status) {
         new_idx = idx + 1;
-        compat_atomic_store_int32(&ts->next_expected_idx, new_idx);
+        atomic_set_int32(&ts->next_expected_idx, new_idx);
 
         /* IDLE_WAIT at a non-final position means another cycle follows. */
         if(conn_status == PLCTAG_CONN_STATUS_IDLE_WAIT && new_idx < num_expected_states) {
-            compat_atomic_store_int32(&need_reconnect, 1);
+            atomic_set_int32(&need_reconnect, 1);
         }
 
-        if(new_idx >= num_expected_states) { compat_atomic_store_int32(&ts->completed, 1); }
+        if(new_idx >= num_expected_states) { atomic_set_int32(&ts->completed, 1); }
     } else {
-        fprintf(stderr, "ERROR [tag %d]: expected %s but got %s (at index %d).\n", (int)compat_atomic_load_int32(&ts->tag_id),
+        fprintf(stderr, "ERROR [tag %d]: expected %s but got %s (at index %d).\n", (int)atomic_get_int32(&ts->tag_id),
                 conn_status_name(expected_states[idx]), conn_status_name(conn_status), idx);
-        compat_atomic_store_int32(&ts->failed, 1);
+        atomic_set_int32(&ts->failed, 1);
     }
 
     /* Stop as soon as all tags are done or any tag failed. */
-    if(compat_atomic_load_int32(&ts->completed) || compat_atomic_load_int32(&ts->failed)) {
+    if(atomic_get_int32(&ts->completed) || atomic_get_int32(&ts->failed)) {
         bool all_done = true;
         for(i = 0; i < num_tags; i++) {
-            if(!compat_atomic_load_int32(&tag_states[i].completed) &&
-               !compat_atomic_load_int32(&tag_states[i].failed)) {
+            if(!atomic_get_int32(&tag_states[i].completed) &&
+               !atomic_get_int32(&tag_states[i].failed)) {
                 all_done = false;
                 break;
             }
         }
-        if(all_done) { compat_atomic_store_int32(&running, 0); }
+        if(all_done) { atomic_set_int32(&running, 0); }
     }
 }
 
@@ -273,28 +273,28 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            compat_atomic_inc_int32(&read_started_count);
+            atomic_add_int32(&read_started_count, 1);
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            rc = compat_atomic_inc_int32(&read_completed_count);
-            if(rc > compat_atomic_load_int32(&read_started_count)) {
+            rc = atomic_add_int32(&read_completed_count, 1);
+            if(rc > atomic_get_int32(&read_started_count)) {
                 fprintf(stderr, "ERROR [tag %d]: READ_COMPLETED before READ_STARTED.\n", (int)tag_id);
-                compat_atomic_store_int32(&io_order_failed, 1);
-                compat_atomic_store_int32(&running, 0);
+                atomic_set_int32(&io_order_failed, 1);
+                atomic_set_int32(&running, 0);
             }
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            compat_atomic_inc_int32(&write_started_count);
+            atomic_add_int32(&write_started_count, 1);
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            ws = compat_atomic_inc_int32(&write_completed_count);
-            if(ws > compat_atomic_load_int32(&write_started_count)) {
+            ws = atomic_add_int32(&write_completed_count, 1);
+            if(ws > atomic_get_int32(&write_started_count)) {
                 fprintf(stderr, "ERROR [tag %d]: WRITE_COMPLETED before WRITE_STARTED.\n", (int)tag_id);
-                compat_atomic_store_int32(&io_order_failed, 1);
-                compat_atomic_store_int32(&running, 0);
+                atomic_set_int32(&io_order_failed, 1);
+                atomic_set_int32(&running, 0);
             }
             break;
 
@@ -425,7 +425,7 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "Library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    compat_set_interrupt_handler(interrupt_handler);
+    test_set_interrupt_handler(interrupt_handler);
 
     build_expected_states();
 
@@ -465,10 +465,10 @@ int main(int argc, char **argv) {
     for(i = 0; i < num_tags; i++) {
         int32_t tag;
 
-        compat_atomic_store_int32(&tag_states[i].tag_id, 0);
-        compat_atomic_store_int32(&tag_states[i].next_expected_idx, 0);
-        compat_atomic_store_int32(&tag_states[i].failed, 0);
-        compat_atomic_store_int32(&tag_states[i].completed, 0);
+        atomic_set_int32(&tag_states[i].tag_id, 0);
+        atomic_set_int32(&tag_states[i].next_expected_idx, 0);
+        atomic_set_int32(&tag_states[i].failed, 0);
+        atomic_set_int32(&tag_states[i].completed, 0);
 
         fprintf(stderr, "Creating @connection tag %d/%d: %s\n", i + 1, num_tags, tag_path);
         tag = plc_tag_create_ex(tag_path, tag_callback, &tag_states[i], 0);
@@ -478,22 +478,22 @@ int main(int argc, char **argv) {
             if(data_tag) { plc_tag_destroy(data_tag); }
             return 1;
         }
-        compat_atomic_store_int32(&tag_states[i].tag_id, tag);
+        atomic_set_int32(&tag_states[i].tag_id, tag);
         tag_handles[i] = tag;
     }
 
     fprintf(stderr, "Waiting up to %.1f seconds for %d tag(s), %d cycle(s).\n", (double)run_duration_ms / 1000.0,
             num_tags, num_cycles);
 
-    end_time = compat_time_ms() + run_duration_ms;
+    end_time = time_ms() + run_duration_ms;
 
-    while(compat_atomic_load_int32(&running) && compat_time_ms() < end_time) {
-        if(compat_atomic_load_int32(&need_reconnect) && data_tag != 0) {
-            compat_atomic_store_int32(&need_reconnect, 0);
+    while(atomic_get_int32(&running) && time_ms() < end_time) {
+        if(atomic_get_int32(&need_reconnect) && data_tag != 0) {
+            atomic_set_int32(&need_reconnect, 0);
             plc_tag_read(data_tag, 0);
             fprintf(stderr, "Triggered reconnect read on data tag.\n");
         }
-        compat_sleep_ms(POLL_INTERVAL_MS, NULL);
+        sleep_ms((int32_t)(POLL_INTERVAL_MS));
     }
 
     fprintf(stderr, "Shutting down.\n");
@@ -514,18 +514,18 @@ int main(int argc, char **argv) {
     if(data_tag) { plc_tag_destroy(data_tag); }
 
     for(i = 0; i < num_tags; i++) {
-        if(compat_atomic_load_int32(&tag_states[i].failed)) {
+        if(atomic_get_int32(&tag_states[i].failed)) {
             fprintf(stderr, "FAIL [tag %d]: unexpected state transition.\n", (int)tag_handles[i]);
             total_failed++;
-        } else if(!compat_atomic_load_int32(&tag_states[i].completed)) {
-            int idx = compat_atomic_load_int32(&tag_states[i].next_expected_idx);
+        } else if(!atomic_get_int32(&tag_states[i].completed)) {
+            int idx = atomic_get_int32(&tag_states[i].next_expected_idx);
             fprintf(stderr, "FAIL [tag %d]: only %d of %d expected states received (next expected: %s).\n",
                     (int)tag_handles[i], idx, num_expected_states, conn_status_name(expected_states[idx]));
             total_failed++;
         }
     }
 
-    if(compat_atomic_load_int32(&io_order_failed)) { total_failed++; }
+    if(atomic_get_int32(&io_order_failed)) { total_failed++; }
 
     if(total_failed > 0) {
         fprintf(stderr, "RESULT: FAIL\n");

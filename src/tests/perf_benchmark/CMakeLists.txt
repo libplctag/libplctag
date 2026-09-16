@@ -8,7 +8,7 @@ endif()
 
 set(PERF_BENCHMARK_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/perf_benchmark.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/stats.c
 )
 

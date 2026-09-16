@@ -57,7 +57,7 @@
  *     --timeout=5000
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <libplctag/lib/libplctag.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -72,8 +72,8 @@ static const char *data_tag_attribs = NULL;
 static const char *conn_tag_attribs = NULL;
 static int timeout_ms = DEFAULT_TIMEOUT_MS;
 
-static compat_atomic_int32_t got_up = {0};
-static compat_atomic_int32_t got_err_wait = {0};
+static atomic_int32_t got_up = 0;
+static atomic_int32_t got_err_wait = 0;
 
 static void conn_tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     (void)tag_id;
@@ -83,11 +83,11 @@ static void conn_tag_callback(int32_t tag_id, int event, int status, void *userd
     switch(event) {
         case PLCTAG_EVENT_CONN_STATUS_UP:
             fprintf(stderr, "  @connection tag received UP event.\n");
-            compat_atomic_store_int32(&got_up, 1);
+            atomic_set_int32(&got_up, 1);
             break;
         case PLCTAG_EVENT_CONN_STATUS_ERR_WAIT:
             fprintf(stderr, "  @connection tag received ERR_WAIT — session failed.\n");
-            compat_atomic_store_int32(&got_err_wait, 1);
+            atomic_set_int32(&got_err_wait, 1);
             break;
         default: break;
     }
@@ -173,22 +173,22 @@ int main(int argc, char **argv) {
 
     /* Step 3: Wait for UP — should arrive quickly since the session is already connected. */
     fprintf(stderr, "Waiting up to %d ms for UP event on late-joining @connection tag.\n", timeout_ms);
-    deadline = compat_time_ms() + (int64_t)timeout_ms;
+    deadline = time_ms() + (int64_t)timeout_ms;
 
-    while(!compat_atomic_load_int32(&got_up) && !compat_atomic_load_int32(&got_err_wait) &&
-          compat_time_ms() < deadline) {
-        compat_sleep_ms(POLL_SLEEP_MS, NULL);
+    while(!atomic_get_int32(&got_up) && !atomic_get_int32(&got_err_wait) &&
+          time_ms() < deadline) {
+        sleep_ms((int32_t)(POLL_SLEEP_MS));
     }
 
     plc_tag_destroy(conn_tag);
     plc_tag_destroy(data_tag);
 
-    if(compat_atomic_load_int32(&got_err_wait)) {
+    if(atomic_get_int32(&got_err_wait)) {
         fprintf(stderr, "RESULT: FAIL — @connection tag received ERR_WAIT instead of UP.\n");
         return 1;
     }
 
-    if(!compat_atomic_load_int32(&got_up)) {
+    if(!atomic_get_int32(&got_up)) {
         fprintf(stderr, "RESULT: FAIL — UP event not received within %d ms.\n", timeout_ms);
         return 1;
     }

@@ -8,7 +8,7 @@ endif()
 
 set(TEST_SIMULTANEOUS_RW_AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_simultaneous_rw_ab_server.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_simultaneous_rw_ab_server ${TEST_SIMULTANEOUS_RW_AB_SERVER_FILES})

@@ -40,7 +40,7 @@
  */
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -76,9 +76,9 @@ void usage(void) {
 }
 
 
-static compat_atomic_int32_t go = {0};
+static atomic_int32_t go = 0;
 
-static void interrupt_handler(void) { compat_atomic_store_int32(&go, 1); }
+static void interrupt_handler(void) { atomic_set_int32(&go, 1); }
 
 /*
  * This test program creates a lot of threads that read the same tag in
@@ -116,26 +116,26 @@ THREAD_FUNC(test_runner) {
     *min_io_time = 1000000000L;
 
     /* wait until all threads ready. */
-    while(!compat_atomic_load_int32(&go)) { compat_sleep_ms(10, NULL); }
+    while(!atomic_get_int32(&go)) { sleep_ms(10); }
 
-    while(compat_atomic_load_int32(&go)) {
+    while(atomic_get_int32(&go)) {
         int64_t start = 0;
         int64_t io_time = 0;
 
         (*iteration)++;
 
         /* capture the starting time */
-        start = compat_time_ms();
+        start = time_ms();
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
             fprintf(stderr, "!!! Thread %d, iteration %d, read failed after %" PRId64 "ms  with error %s\n", tid, *iteration,
-                    (int64_t)(compat_time_ms() - start), plc_tag_decode_error(rc));
+                    (int64_t)(time_ms() - start), plc_tag_decode_error(rc));
             break;
         }
 
-        io_time = compat_time_ms() - start;
+        io_time = time_ms() - start;
 
         *total_io_time += io_time;
 
@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
     }
 
     /* cat ^C etc. */
-    compat_set_interrupt_handler(interrupt_handler);
+    test_set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
@@ -239,23 +239,23 @@ int main(int argc, char **argv) {
     }
 
     /* wait for threads to create and start. */
-    compat_sleep_ms(100, NULL);
+    sleep_ms(100);
 
     /* launch the threads */
-    compat_atomic_store_int32(&go, 1);
+    atomic_set_int32(&go, 1);
 
-    start = compat_time_ms();
+    start = time_ms();
 
-    while(compat_atomic_load_int32(&go) && (--count_down) > 0) { compat_sleep_ms(100, NULL); }
+    while(atomic_get_int32(&go) && (--count_down) > 0) { sleep_ms(100); }
 
-    compat_atomic_store_int32(&go, 0);
+    atomic_set_int32(&go, 0);
 
-    total_run_time = compat_time_ms() - start;
+    total_run_time = time_ms() - start;
 
     success = 1;
 
     /* FIXME - wait for the threads to stop. */
-    compat_sleep_ms(100, NULL);
+    sleep_ms(100);
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&thread[tid]); }
 

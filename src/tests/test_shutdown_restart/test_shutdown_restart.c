@@ -39,7 +39,7 @@
  * 4. The new tags can be read/written successfully
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
      * Step 2: Wait for threads to run
      */
     fprintf(stderr, "\n=== Step 2: Waiting %u ms for threads to run ===\n", pre_shutdown_wait_ms);
-    compat_sleep_ms(pre_shutdown_wait_ms, NULL);
+    sleep_ms((int32_t)(pre_shutdown_wait_ms));
 
     /*
      * Step 3: Shutdown the library
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
      * Step 4: Wait for threads to recover
      */
     fprintf(stderr, "\n=== Step 4: Waiting %u ms for threads to recover ===\n", post_shutdown_wait_ms);
-    compat_sleep_ms(post_shutdown_wait_ms, NULL);
+    sleep_ms((int32_t)(post_shutdown_wait_ms));
 
     /*
      * Step 5: Signal threads to terminate
@@ -291,9 +291,9 @@ static THREAD_FUNC(worker_thread) {
     /*
      * Create initial tag
      */
-    start_time = compat_time_ms();
+    start_time = time_ms();
     tag_id = plc_tag_create(tag_string, (int)data_timeout_ms);
-    stats->initial_tag_create_time_ms = compat_time_ms() - start_time;
+    stats->initial_tag_create_time_ms = time_ms() - start_time;
 
     if(tag_id < 0) {
         fprintf(stderr, "Thread %d: ERROR creating initial tag: %s\n", stats->thread_id, plc_tag_decode_error(tag_id));
@@ -316,16 +316,16 @@ static THREAD_FUNC(worker_thread) {
 
             fprintf(stderr, "Thread %d: Attempting to recreate tag...\n", stats->thread_id);
 
-            start_time = compat_time_ms();
+            start_time = time_ms();
             tag_id = plc_tag_create(tag_string, (int)data_timeout_ms);
-            stats->recreate_time_ms = compat_time_ms() - start_time;
+            stats->recreate_time_ms = time_ms() - start_time;
 
             if(tag_id < 0) {
                 fprintf(stderr, "Thread %d: ERROR recreating tag: %s, retrying...\n", stats->thread_id,
                         plc_tag_decode_error(tag_id));
                 stats->error_count++;
                 stats->last_error = tag_id;
-                compat_sleep_ms(LOOP_INTERVAL_MS, NULL);
+                sleep_ms((int32_t)(LOOP_INTERVAL_MS));
                 continue;
             }
 
@@ -372,7 +372,7 @@ static THREAD_FUNC(worker_thread) {
         stats->write_count++;
 
         /* Wait before next iteration */
-        compat_sleep_ms(LOOP_INTERVAL_MS, NULL);
+        sleep_ms((int32_t)(LOOP_INTERVAL_MS));
     }
 
     /*

@@ -8,7 +8,7 @@ endif()
 
 set(TEST_TAG_TYPE_ATTRIBUTE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_tag_type_attribute.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_tag_type_attribute ${TEST_TAG_TYPE_ATTRIBUTE_FILES})

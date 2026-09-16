@@ -8,7 +8,7 @@ endif()
 
 set(TEST_RECONNECT_AFTER_OUTAGE_SYNC_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_reconnect_after_outage_sync.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_reconnect_after_outage_sync ${TEST_RECONNECT_AFTER_OUTAGE_SYNC_FILES})

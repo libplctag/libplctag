@@ -40,7 +40,7 @@
  */
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -63,9 +63,9 @@
 #define TEST_TAG_PATH_TEMPLATE \
     "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray&connection_group_id=%d"
 
-static compat_atomic_int32_t terminate = {0};
+static atomic_int32_t terminate = 0;
 
-void handle_interrupt(void) { compat_atomic_store_int32(&terminate, 1); }
+void handle_interrupt(void) { atomic_set_int32(&terminate, 1); }
 
 static void run_test(size_t num_threads);
 static THREAD_FUNC(test_func);
@@ -80,18 +80,18 @@ int main(void) {
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
-    compat_set_interrupt_handler(handle_interrupt);
+    test_set_interrupt_handler(handle_interrupt);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Starting tests...\n\n");
 
     /* increase the connection group count each time */
-    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !compat_atomic_load_int32(&terminate);
+    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !atomic_get_int32(&terminate);
         thread_count += THREAD_INC) {
         run_test((thread_count == 0) ? 1 : thread_count);
     }
 
-    if(compat_atomic_load_int32(&terminate)) {
+    if(atomic_get_int32(&terminate)) {
         // NOLINTNEXTLINE
         fprintf(stderr, "\nTests aborted by user!\n");
     } else {
@@ -103,7 +103,7 @@ int main(void) {
 }
 
 
-static compat_atomic_int32_t end_test_run = {0};
+static atomic_int32_t end_test_run = 0;
 
 /*
  * Each thread stores its own iteration count in its own slot, so run_test()
@@ -115,11 +115,11 @@ static size_t thread_iterations[MAX_THREADS] = {0};
 void run_test(size_t thread_count) {
     size_t total_iterations = 0;
     thread_p threads[MAX_THREADS] = {0};
-    int64_t start_time_ms = compat_time_ms();
+    int64_t start_time_ms = time_ms();
     int64_t end_time_ms = start_time_ms + TEST_TIME_MS;
     int64_t total_test_run_time = 0;
 
-    compat_atomic_store_int32(&end_test_run, 0);
+    atomic_set_int32(&end_test_run, 0);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Test %zu threads for %dms... \n", thread_count, TEST_TIME_MS);
@@ -131,9 +131,9 @@ void run_test(size_t thread_count) {
     }
 
     /* wait for the test to end. */
-    while(end_time_ms > compat_time_ms() && !compat_atomic_load_int32(&terminate)) { compat_sleep_ms(100, NULL); }
+    while(end_time_ms > time_ms() && !atomic_get_int32(&terminate)) { sleep_ms(100); }
 
-    compat_atomic_store_int32(&end_test_run, 1);
+    atomic_set_int32(&end_test_run, 1);
 
     /* join with the threads and add up the iterations. */
     for(size_t thread_index = 0; thread_index < thread_count; thread_index++) {
@@ -142,7 +142,7 @@ void run_test(size_t thread_count) {
         total_iterations += thread_iterations[thread_index];
     }
 
-    total_test_run_time = compat_time_ms() - start_time_ms;
+    total_test_run_time = time_ms() - start_time_ms;
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Test %zu threads ran for %" PRId64 "ms and completed with %zu total iterations per millisecond.\n",
@@ -155,7 +155,7 @@ THREAD_FUNC(test_func) {
     int iteration_count = 0;
     int64_t longest_read = 0;
 
-    while(!compat_atomic_load_int32(&end_test_run)) {
+    while(!atomic_get_int32(&end_test_run)) {
         char tag_str[250] = {0};
         int32_t tag = 0;
         int rc = PLCTAG_STATUS_OK;
@@ -167,9 +167,9 @@ THREAD_FUNC(test_func) {
         snprintf(tag_str, sizeof(tag_str), TEST_TAG_PATH_TEMPLATE, (int)(size_t)thread_id);
 
         /* create the tag */
-        start_ms = compat_time_ms();
+        start_ms = time_ms();
         tag = plc_tag_create(tag_str, TAG_CREATE_TIMEOUT_MS);
-        end_ms = compat_time_ms();
+        end_ms = time_ms();
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d: tag creation took %" PRId64 "ms\n", thread_id, end_ms - start_ms);
@@ -182,10 +182,10 @@ THREAD_FUNC(test_func) {
         }
 
         /* read as fast as we can */
-        while(!compat_atomic_load_int32(&end_test_run)) {
-            start_ms = compat_time_ms();
+        while(!atomic_get_int32(&end_test_run)) {
+            start_ms = time_ms();
             rc = plc_tag_read(tag, TAG_OP_TIMEOUT_MS);
-            end_ms = compat_time_ms();
+            end_ms = time_ms();
 
             if(end_ms - start_ms > longest_read) { longest_read = end_ms - start_ms; }
 

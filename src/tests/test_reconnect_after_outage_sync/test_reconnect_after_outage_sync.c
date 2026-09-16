@@ -33,7 +33,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -83,7 +83,7 @@ static const char *g_port = "44818";
 #endif
 
 #define log(...)                         \
-    compat_fprintf(stderr, __VA_ARGS__); \
+    fprintf(stderr, __VA_ARGS__); \
     fflush(stderr)
 
 typedef struct {
@@ -116,7 +116,7 @@ static void do_reconnect(int64_t current_time, test_state_t *test_state);
 static void tag_callback(int32_t tag_id, int event, int status, void *data);
 static int run_manual_test(const char *ab_server_cmd);
 static int calc_test_stats(test_state_t *test_state);
-static void wait_until_time_ms(int64_t time_ms);
+static void wait_until_time_ms(int64_t target_time_ms);
 
 int main(int argc, char **argv) {
     const char *ab_server_cmd = NULL;
@@ -201,7 +201,7 @@ void start_server(test_state_t *test_state) {
         exit(1);
     }
 
-    if(!compat_wait_for_listener("127.0.0.1", (uint16_t)atoi(g_port), 15000)) {
+    if(!test_wait_for_listener("127.0.0.1", (uint16_t)atoi(g_port), 15000)) {
         log("Error: AB server did not start listening on port %s in time!\n", g_port);
         exit(1);
     }
@@ -224,7 +224,7 @@ void stop_server(void) {
     }
 
     /* wait for it to die */
-    compat_sleep_ms(1000, NULL);
+    sleep_ms(1000);
 }
 
 void tag_callback(int32_t tag_id, int event, int status, void *data) {
@@ -256,7 +256,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             if(status != PLCTAG_STATUS_OK && status != PLCTAG_STATUS_PENDING) {
                 fputs("RSe ", stderr);
                 fflush(stderr);
-                compat_fprintf(stderr, "[CALLBACK] READ_STARTED error: %s\n", plc_tag_decode_error(status));
+                fprintf(stderr, "[CALLBACK] READ_STARTED error: %s\n", plc_tag_decode_error(status));
             } else {
                 fputs("RS ", stderr);
                 fflush(stderr);
@@ -276,11 +276,11 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
 
                 fputs("RCe ", stderr);
                 fflush(stderr);
-                compat_fprintf(stderr, "[CALLBACK] READ_COMPLETED error: %s\n", plc_tag_decode_error(status));
+                fprintf(stderr, "[CALLBACK] READ_COMPLETED error: %s\n", plc_tag_decode_error(status));
             }
             break;
 
-        default: compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status)); break;
+        default: fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status)); break;
     }
 }
 
@@ -372,7 +372,7 @@ int run_manual_test(const char *ab_server_cmd) {
 
     /* initialize test state */
     manual_test_state.ab_server_cmd = ab_server_cmd;
-    manual_test_state.start_time = compat_time_ms();
+    manual_test_state.start_time = time_ms();
     manual_test_state.end_time = manual_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS + SECOND_RUN_TIME;
     manual_test_state.disconnect_time = manual_test_state.start_time + FIRST_RUN_TIME;
     manual_test_state.read_timeout_ms = READ_TIMEOUT;
@@ -398,7 +398,7 @@ int run_manual_test(const char *ab_server_cmd) {
 
     log("[DEBUG] Entering Phase 1 - reading until disconnect at %" PRId64 "ms\n",
         manual_test_state.disconnect_time - manual_test_state.start_time);
-    while((current_time = compat_time_ms()) < manual_test_state.disconnect_time) {
+    while((current_time = time_ms()) < manual_test_state.disconnect_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
         log("[DEBUG] Phase 1: plc_tag_read at offset %" PRId64 "ms (target disconnect at %" PRId64 "ms), reads so far: %d\n",
@@ -423,7 +423,7 @@ int run_manual_test(const char *ab_server_cmd) {
 
     log("[DEBUG] Entering Phase 2 - waiting while disconnected until %" PRId64 "ms\n",
         manual_test_state.reconnect_time - manual_test_state.start_time);
-    while((current_time = compat_time_ms()) < manual_test_state.reconnect_time) {
+    while((current_time = time_ms()) < manual_test_state.reconnect_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
         log("[DEBUG] Phase 2: plc_tag_read at offset %" PRId64 "ms (target reconnect at %" PRId64 "ms)\n",
@@ -448,7 +448,7 @@ int run_manual_test(const char *ab_server_cmd) {
 
     log("[DEBUG] Entering Phase 3 - reading after reconnect until %" PRId64 "ms\n",
         manual_test_state.end_time - manual_test_state.start_time);
-    while((current_time = compat_time_ms()) < manual_test_state.end_time) {
+    while((current_time = time_ms()) < manual_test_state.end_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
         log("[DEBUG] Phase 3: plc_tag_read at offset %" PRId64 "ms (target end at %" PRId64 "ms), reads after reconnect: %d\n",
@@ -490,11 +490,11 @@ int run_manual_test(const char *ab_server_cmd) {
 }
 
 
-void wait_until_time_ms(int64_t time_ms) {
-    int64_t current_time = compat_time_ms();
-    int64_t remaining_time = time_ms - current_time;
+void wait_until_time_ms(int64_t target_time_ms) {
+    int64_t current_time = time_ms();
+    int64_t remaining_time = target_time_ms - current_time;
 
     if(remaining_time <= 0) { return; }
 
-    compat_sleep_ms((uint32_t)(uint64_t)remaining_time, NULL);
+    sleep_ms((int32_t)remaining_time);
 }

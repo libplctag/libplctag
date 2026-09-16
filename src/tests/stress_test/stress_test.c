@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <utils/thread.h>
 #include <libplctag/lib/libplctag.h>
 #include <signal.h>
@@ -65,7 +65,7 @@ typedef struct {
 
 
 /* global to cheat on passing it to threads. */
-static compat_atomic_int32_t done = {0};
+static atomic_int32_t done = 0;
 
 
 static FILE *open_log(int tid) {
@@ -88,10 +88,10 @@ static void close_log(FILE *log) {
 static int wait_ms(int timeout_ms) {
     int64_t timeout = 0;
 
-    timeout = compat_time_ms() + timeout_ms;
-    while(!compat_atomic_load_int32(&done) && timeout > compat_time_ms()) { compat_sleep_ms(5, NULL); }
+    timeout = time_ms() + timeout_ms;
+    while(!atomic_get_int32(&done) && timeout > time_ms()) { sleep_ms(5); }
 
-    if(!compat_atomic_load_int32(&done)) {
+    if(!atomic_get_int32(&done)) {
         return PLCTAG_STATUS_OK;
     } else {
         return PLCTAG_ERR_ABORT;
@@ -149,7 +149,7 @@ static THREAD_FUNC(test_cip) {
     int start_index = (tid - 1) * num_elems;
 
     /* a hack to allow threads to start. */
-    compat_sleep_ms((uint32_t)tid, NULL);
+    sleep_ms((int32_t)(tid));
 
     log = open_log(tid);
 
@@ -158,11 +158,11 @@ static THREAD_FUNC(test_cip) {
     // NOLINTNEXTLINE
     fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, start_index);
 
-    while(!compat_atomic_load_int32(&done)) {
+    while(!atomic_get_int32(&done)) {
         int64_t start = 0;
         int64_t end = 0;
 
-        while(tag <= 0 && !compat_atomic_load_int32(&done)) {
+        while(tag <= 0 && !atomic_get_int32(&done)) {
             if(!first_time) { wait_ms(RETRY_TIMEOUT); }
 
             first_time = 0;
@@ -176,7 +176,7 @@ static THREAD_FUNC(test_cip) {
         }
 
         /* capture the starting time */
-        start = compat_time_ms();
+        start = time_ms();
 
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -205,7 +205,7 @@ static THREAD_FUNC(test_cip) {
             }
         } while(0);
 
-        end = compat_time_ms();
+        end = time_ms();
 
         total_io_time += (end - start);
 
@@ -219,7 +219,7 @@ static THREAD_FUNC(test_cip) {
             // NOLINTNEXTLINE
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems,
                     (int)(end - start));
-            compat_sleep_ms(10, NULL);
+            sleep_ms(10);
         }
 
         iteration++;
@@ -237,7 +237,7 @@ static THREAD_FUNC(test_cip) {
 }
 
 
-static void interrupt_handler(void) { compat_atomic_store_int32(&done, 1); }
+static void interrupt_handler(void) { atomic_set_int32(&done, 1); }
 
 
 #define MAX_THREADS (100)
@@ -252,7 +252,7 @@ int main(int argc, char **argv) {
     int success = 0;
     thread_args args[MAX_THREADS];
 
-    compat_set_interrupt_handler(interrupt_handler);
+    test_set_interrupt_handler(interrupt_handler);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -298,14 +298,14 @@ int main(int argc, char **argv) {
         thread_create(&threads[tid], test_cip, 0, &args[tid]);
     }
 
-    start_time = compat_time_ms();
+    start_time = time_ms();
     end_time = start_time + (int64_t)(seconds * 1000);
 
-    while(!compat_atomic_load_int32(&done) && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
+    while(!atomic_get_int32(&done) && time_ms() < end_time) { sleep_ms(100); }
 
-    success = !compat_atomic_load_int32(&done);
+    success = !atomic_get_int32(&done);
 
-    compat_atomic_store_int32(&done, 1);
+    atomic_set_int32(&done, 1);
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thread_join(&threads[tid]); }
 

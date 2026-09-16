@@ -8,7 +8,7 @@ endif()
 
 set(TEST_CONNECTION_TAG_LATE_JOIN_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_connection_tag_late_join.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_connection_tag_late_join ${TEST_CONNECTION_TAG_LATE_JOIN_FILES})

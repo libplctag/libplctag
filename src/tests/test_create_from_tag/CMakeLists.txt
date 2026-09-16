@@ -8,7 +8,7 @@ endif()
 
 set(TEST_CREATE_FROM_TAG_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_create_from_tag.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/test_utils.c
 )
 
 add_executable(test_create_from_tag ${TEST_CREATE_FROM_TAG_FILES})

@@ -48,7 +48,7 @@
  * Usage: test_callback_destroy "<tag string>"
  */
 
-#include "compat_utils.h"
+#include "test_utils.h"
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
