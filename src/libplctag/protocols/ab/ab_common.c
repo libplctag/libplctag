@@ -457,7 +457,19 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
             tag->vtable = &lgx_pccc_vtable;
 
             tag->byte_order = &slc_tag_byte_order;
-            tag->first_read = 0; /* no first read for this kind of PLC. */
+
+            /*
+             * No read at creation, but for a different reason than the PCCC families above.
+             *
+             * PLC5, SLC and MicroLogix write with the untyped range commands
+             * (AB_EIP_PLC5_RANGE_WRITE_FUNC, AB_EIP_SLC_RANGE_WRITE_FUNC) and put no
+             * data-type descriptor on the wire at all.  Logix-mapped PCCC uses the typed
+             * pair (AB_EIP_PCCCLGX_TYPED_READ_FUNC/_WRITE_FUNC), so a write does need a
+             * descriptor -- eip_lgx_pccc.c builds one from the data file type where it can
+             * and asks the PLC where it cannot.  See write_pre_request() there, and 1.10 in
+             * docs/deferred_fixes.md for the v2.6.8 regression this replaces.
+             */
+            tag->first_read = 0; /* the write builds its own type descriptor or asks for one. */
 
             break;
 

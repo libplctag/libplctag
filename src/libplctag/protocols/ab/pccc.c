@@ -685,61 +685,210 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
 }
 
 
-int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size) {
-    uint8_t *dt_byte = data;
-    uint8_t d_byte;
-    uint8_t t_byte;
-    int size_bytes;
+/*
+ * Map a PCCC data file type to the data type code a typed read/write descriptor uses.
+ *
+ * These are two different encodings and it is easy to assume they are one.  pccc_file_t
+ * holds the *file* type byte that appears in an SLC logical address -- PCCC_FILE_INT is
+ * 0x89, and slc_encode_address() writes it as the address's second field.  The descriptor
+ * on a typed read or write carries the *data* type instead, from the AB_PCCC_DATA_* set,
+ * where an integer is 4.  The two ranges do not even overlap: AB_PCCC_DATA_* runs 1 to 16
+ * and pccc_file_t runs 0x82 to 0x93.
+ *
+ * Only PCCC_FILE_INT is here, because only PCCC_FILE_INT has been on a wire.  A
+ * ControlLogix answered a typed read of N7:0 with the descriptor 99 09 03 42 -- an array of
+ * 3 bytes holding one AB_PCCC_DATA_INT of 2 -- and accepted a write carrying the descriptor
+ * this file builds for the same tag.  See 1.10 in docs/deferred_fixes.md.
+ *
+ * The other file types line up with an AB_PCCC_DATA_* value by name -- F with REAL, T with
+ * TIMER, and so on -- and that is exactly why they are not here.  A mapping that looks
+ * obvious is still a guess until a PLC has accepted it, and a wrong type code is worse than
+ * the round trip it saves: the PLC may refuse the command, or it may store the bytes as
+ * something else.  Everything unmapped returns PLCTAG_ERR_UNSUPPORTED and the caller asks
+ * the PLC instead, which is what this code did for every type before the mapping existed.
+ *
+ * Adding one is cheap: run src/tests/probe_lgx_pccc_write_first against a PLC that has the
+ * data file, confirm the write is accepted, and add the case.
+ */
+static int pccc_file_type_to_data_type(pccc_file_t file_type, uint32_t *data_type) {
+    switch(file_type) {
+        case PCCC_FILE_INT: /* N */ *data_type = AB_PCCC_DATA_INT; return PLCTAG_STATUS_OK;
 
-    /* increment past the dt_byte */
-    data++;
-    buf_size--;
+        default:
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "No verified data type for PCCC file type 0x%02x.",
+                   (unsigned int)file_type);
+            return PLCTAG_ERR_UNSUPPORTED;
+    }
+}
 
-    /* if data type fits in 3 bits then
-     * just use the dt_byte.
+
+/*
+ * Build the type descriptor a PCCC typed write puts ahead of its data.
+ *
+ * The shape is the one a PLC sends back on a typed read: an array descriptor whose size
+ * counts the bytes that follow it -- the element descriptor plus the element data --
+ * wrapping one element descriptor that gives the element type and its size in bytes.
+ *
+ * A ControlLogix answered a typed read of one N7:0 element with 99 09 03 42:
+ *
+ *      99      type nybble 9 -> one extension byte follows; size nybble 9 -> likewise
+ *      09      type  = AB_PCCC_DATA_ARRAY
+ *      03      size  = 3 bytes follow: the 42 below plus two bytes of data
+ *      42      type 4 = AB_PCCC_DATA_INT, size 2, both inline
+ *
+ * This produces 93 09 42 for the same tag: identical meaning, one byte shorter, because
+ * pccc_encode_dt_byte() puts a size of 3 in the nybble rather than escaping it. Whether a
+ * PLC accepts the shorter form is not yet known -- see 1.10.
+ *
+ * Returns the number of bytes written, or a negative status.
+ */
+int pccc_encode_type_info(uint8_t *data, int buf_size, pccc_file_t file_type, int elem_size, int elem_count) {
+    uint32_t data_type = 0;
+    int rc = PLCTAG_STATUS_OK;
+    int array_size = 0;
+    int element_desc_size = 0;
+    int array_desc_size = 0;
+    uint8_t element_desc[9] = {0};
+
+    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Starting.");
+
+    if(!data) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Called with null data!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(elem_size <= 0 || elem_count <= 0) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Element size %d and count %d must both be positive!", elem_size,
+               elem_count);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    rc = pccc_file_type_to_data_type(file_type, &data_type);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    /*
+     * The element descriptor goes into scratch first, because the array descriptor that
+     * precedes it needs its length in the array's size field.  Nine bytes is the most
+     * pccc_encode_dt_byte() can emit: the nybble byte plus four extension bytes each.
      */
+    element_desc_size = pccc_encode_dt_byte(element_desc, (int)sizeof(element_desc), data_type, (uint32_t)elem_size);
+    if(element_desc_size <= 0) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Unable to encode the element type descriptor!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    /* the array size counts the element descriptor and every element's bytes. */
+    array_size = element_desc_size + (elem_size * elem_count);
+
+    array_desc_size = pccc_encode_dt_byte(data, buf_size, AB_PCCC_DATA_ARRAY, (uint32_t)array_size);
+    if(array_desc_size <= 0) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Unable to encode the array type descriptor!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(array_desc_size + element_desc_size > buf_size) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Descriptor needs %d bytes but only %d are available!",
+               array_desc_size + element_desc_size, buf_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    mem_copy(data + array_desc_size, element_desc, element_desc_size);
+
+    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "PCCC type descriptor:");
+    pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, data, array_desc_size + element_desc_size);
+
+    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Done.");
+
+    return array_desc_size + element_desc_size;
+}
+
+
+/*
+ * Build a PCCC data type/size descriptor.
+ *
+ * The descriptor is one byte split into a type nybble and a size nybble.  A nybble
+ * either holds its value outright, when it fits in three bits, or has bit 0x08 set
+ * and holds the count of little-endian bytes that carry the value instead.  Those
+ * bytes follow the descriptor byte, type first.  pccc_decode_dt_byte() reads them
+ * back in that order.
+ *
+ * Returns the number of bytes written, or 0 if they would not fit.
+ *
+ * This function shipped uncalled for years -- eip_lgx_pccc.c kept the descriptor
+ * from a read reply rather than building one -- so what follows is the first time
+ * it has been exercised.  Three things were wrong with it:
+ *
+ *   - Both extension loops ran while `(value & 0xFF)` rather than while `value`, so
+ *     any value with a zero low byte stopped the loop immediately.  256 is the first
+ *     one, and an array of 255 single-byte elements plus its element descriptor is
+ *     exactly that.
+ *   - The type loop's condition was `(data_type & 0xFF) && data_size`, testing the
+ *     size while encoding the type.
+ *   - Bytes were written before the buffer was checked, and the check that followed
+ *     treated exactly filling the buffer as failure.
+ */
+int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size) {
+    uint8_t type_bytes[4] = {0};
+    uint8_t size_bytes[4] = {0};
+    int type_byte_count = 0;
+    int size_byte_count = 0;
+    int total_size = 0;
+    uint8_t type_nybble = 0;
+    uint8_t size_nybble = 0;
+
+    if(!data || buf_size < 1) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Called with null data or an empty buffer!");
+        return 0;
+    }
 
     if(data_type <= 0x07) {
-        t_byte = (uint8_t)data_type;
-        data_type = 0;
+        type_nybble = (uint8_t)data_type;
     } else {
-        size_bytes = 0;
+        uint32_t remaining = data_type;
 
-        while((data_type & 0xFF) && data_size) {
-            *data = data_type & 0xFF;
-            data_type >>= 8;
-            size_bytes++;
-            buf_size--;
-            data++;
+        while(remaining) {
+            type_bytes[type_byte_count] = (uint8_t)(remaining & (uint32_t)0xFF);
+            remaining >>= 8;
+            type_byte_count++;
         }
 
-        t_byte = (uint8_t)(0x08 | size_bytes);
+        type_nybble = (uint8_t)(0x08 | type_byte_count);
     }
 
     if(data_size <= 0x07) {
-        d_byte = (uint8_t)data_size;
-        data_size = 0;
+        size_nybble = (uint8_t)data_size;
     } else {
-        size_bytes = 0;
+        uint32_t remaining = data_size;
 
-        while((data_size & 0xFF) && data_size) {
-            *data = data_size & 0xFF;
-            data_size >>= 8;
-            size_bytes++;
-            buf_size--;
-            data++;
+        while(remaining) {
+            size_bytes[size_byte_count] = (uint8_t)(remaining & (uint32_t)0xFF);
+            remaining >>= 8;
+            size_byte_count++;
         }
 
-        d_byte = (uint8_t)(0x08 | size_bytes);
+        size_nybble = (uint8_t)(0x08 | size_byte_count);
     }
 
-    *dt_byte = (uint8_t)((t_byte << 4) | d_byte);
+    /* a uint32_t needs at most four bytes, so neither count can overflow its three bits. */
+    total_size = 1 + type_byte_count + size_byte_count;
 
-    /* did we succeed? */
-    if(buf_size == 0 || data_type != 0 || data_size != 0) { return 0; }
+    if(total_size > buf_size) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Descriptor needs %d bytes but only %d are left!", total_size,
+               buf_size);
+        return 0;
+    }
 
+    *data = (uint8_t)((type_nybble << 4) | size_nybble);
+    data++;
 
-    return (int)(data - dt_byte);
+    if(type_byte_count) {
+        mem_copy(data, type_bytes, type_byte_count);
+        data += type_byte_count;
+    }
+
+    if(size_byte_count) { mem_copy(data, size_bytes, size_byte_count); }
+
+    return total_size;
 }
 
 

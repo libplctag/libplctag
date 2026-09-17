@@ -82,6 +82,7 @@ extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
 extern const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length);
 extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
+extern int pccc_encode_type_info(uint8_t *data, int buf_size, pccc_file_t file_type, int elem_size, int elem_count);
 
 /* generic direct ethernet tag functions */
 extern int pccc_check_response_header(ab_tag_p tag, bool is_dhp);

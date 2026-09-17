@@ -1798,16 +1798,100 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 }
 
 
-int listing_tag_build_read_request_connected(ab_tag_p tag) {
+/*
+ * Both the tag listing and the UDT metadata request are the same CIP frame: a
+ * Connected Send carrying a get-attribute-list service against one instance of
+ * one class.  They differ in the service code, the class, where the instance ID
+ * comes from, the four attributes asked for, and whether the encoded tag name is
+ * spliced into the request path.  One builder covers both; this table holds the
+ * differences.
+ */
+typedef struct {
+    const char *name;
+
+    /* CIP service byte. */
+    uint8_t request_service;
+
+    /* CIP class in the request path. */
+    uint8_t class_code;
+
+    /*
+     * The tag listing puts the encoded name into the path ahead of the routing
+     * header, so a listing can be scoped to a program.  The UDT request has no
+     * name to place and its path size is the fixed three words.
+     */
+    bool path_includes_name;
+
+    /* which instance to ask about. */
+    uint16_t (*instance_id)(ab_tag_p tag);
+
+    /* the four attribute numbers, in the order they go on the wire. */
+    uint16_t attributes[4];
+} cip_attr_list_variant_t;
+
+
+static uint16_t listing_instance_id(ab_tag_p tag) { return (uint16_t)tag->next_id; }
+
+
+static uint16_t udt_instance_id(ab_tag_p tag) { return (uint16_t)tag->udt_id; }
+
+
+static const cip_attr_list_variant_t listing_attr_variant = {
+    .name = "tag listing",
+    .request_service = CIP_CMD_LIST_TAGS,
+    .class_code = 0x6B, /* tag info/symbol class */
+    .path_includes_name = true,
+    .instance_id = listing_instance_id,
+    .attributes =
+        {
+            0x02, /* symbol type */
+            0x07, /* base type size (array element) in bytes */
+            0x08, /* array dimensions (3xu32) */
+            0x01, /* symbol name */
+        },
+};
+
+
+static const cip_attr_list_variant_t udt_metadata_attr_variant = {
+    .name = "UDT metadata",
+    .request_service = CIP_CMD_GET_ATTR_LIST,
+    .class_code = 0x6C, /* UDT class */
+    .path_includes_name = false,
+    .instance_id = udt_instance_id,
+    .attributes =
+        {
+            0x04, /* number of 32-bit words in the template definition */
+            0x05, /* number of bytes in the structure on the wire */
+            0x02, /* number of structure members */
+            0x01, /* handle/type of structure */
+        },
+};
+
+
+/*
+ * Build and send one get-attribute-list request.
+ *
+ *      uint8_t request_service;    variant->request_service
+ *      uint8_t request_path_size;  in 16-bit words
+ *      uint8_t request_path[6];        0x20    get class
+ *                                      class   variant->class_code
+ *                                      0x25    get instance (16-bit)
+ *                                      0x00    padding
+ *                                      0x00    instance byte 0
+ *                                      0x00    instance byte 1
+ *      uint16_le num_attributes;   ALWAYS 4
+ *      uint16_le requested_attributes[4];  variant->attributes
+ */
+static int cip_attr_list_request_build(ab_tag_p tag, const cip_attr_list_variant_t *variant) {
     eip_cip_co_req *cip = NULL;
-    // tag_list_req *list_req = NULL;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
     uint16_le tmp_u16 = UINT16_LE_INIT(0);
+    const size_t attr_count = sizeof(variant->attributes) / sizeof(variant->attributes[0]);
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting %s request.", variant->name);
 
     /* get a request buffer */
     rc = session_create_request(tag->conn, tag->tag_id, &req);
@@ -1822,77 +1906,52 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     /* point to the end of the struct */
     data_start = data = (uint8_t *)(cip + 1);
 
-    /*
-     * set up the embedded CIP tag list request packet
-        uint8_t request_service;    CIP_CMD_LIST_TAGS=0x55
-        uint8_t request_path_size;  3 word = 6 bytes
-        uint8_t request_path[6];        0x20    get class
-                                        0x6B    tag info/symbol class
-                                        0x25    get instance (16-bit)
-                                        0x00    padding
-                                        0x00    instance byte 0
-                                        0x00    instance byte 1
-        uint16_le instance_id;      NOTE! this is the last two bytes above for convenience!
-        uint16_le num_attributes;   0x04    number of attributes to get
-        uint16_le requested_attributes[4];      0x02 attribute #2 - symbol type
-                                                0x07 attribute #7 - base type size (array element) in bytes
-                                                0x08    attribute #8 - array dimensions (3xu32)
-                                                0x01    attribute #1 - symbol name
-    */
-
-    *data = CIP_CMD_LIST_TAGS;
+    *data = variant->request_service;
     data++;
 
     /* request path size, in 16-bit words */
-    *data = (uint8_t)(3 + ((tag->encoded_name_size - 1) / 2)); /* size in words of routing header + routing and instance ID. */
+    if(variant->path_includes_name) {
+        /* size in words of routing header + routing and instance ID. */
+        *data = (uint8_t)(3 + ((tag->encoded_name_size - 1) / 2));
+    } else {
+        *data = (uint8_t)(3); /* size in words of routing header + routing and instance ID. */
+    }
     data++;
 
-    /* add in the encoded name, but without the leading word count byte! */
-    if(tag->encoded_name_size > 1) {
-        mem_copy(data, &tag->encoded_name[1], (tag->encoded_name_size - 1));
-        data += (tag->encoded_name_size - 1);
+    if(variant->path_includes_name) {
+        /* add in the encoded name, but without the leading word count byte! */
+        if(tag->encoded_name_size > 1) {
+            mem_copy(data, &tag->encoded_name[1], (tag->encoded_name_size - 1));
+            data += (tag->encoded_name_size - 1);
+        }
     }
 
     /* add in the routing header . */
 
     /* first the fixed part. */
-    data[0] = 0x20; /* class type */
-    data[1] = 0x6B; /* tag info/symbol class */
-    data[2] = 0x25; /* 16-bit instance ID type */
-    data[3] = 0x00; /* padding */
+    data[0] = 0x20;                 /* class type */
+    data[1] = variant->class_code;  /* class */
+    data[2] = 0x25;                 /* 16-bit instance ID type */
+    data[3] = 0x00;                 /* padding */
     data += 4;
 
     /* now the instance ID */
-    tmp_u16 = h2le16((uint16_t)tag->next_id);
+    tmp_u16 = h2le16(variant->instance_id(tag));
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
     /* set up the request itself.  We are asking for a number of attributes. */
 
     /* set up the request attributes, first the number of attributes. */
-    tmp_u16 = h2le16((uint16_t)4); /* MAGIC, we have four attributes we want. */
+    tmp_u16 = h2le16((uint16_t)attr_count);
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
-    /* first attribute: symbol type */
-    tmp_u16 = h2le16((uint16_t)0x02); /* MAGIC, symbol type. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* second attribute: base type size in bytes */
-    tmp_u16 = h2le16((uint16_t)0x07); /* MAGIC, element size in bytes. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* third attribute: tag array dimensions */
-    tmp_u16 = h2le16((uint16_t)0x08); /* MAGIC, array dimensions. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* fourth attribute: symbol/tag name */
-    tmp_u16 = h2le16((uint16_t)0x01); /* MAGIC, symbol name. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+    for(size_t attr_index = 0; attr_index < attr_count; attr_index++) {
+        tmp_u16 = h2le16(variant->attributes[attr_index]);
+        mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+        data += (int)sizeof(tmp_u16);
+    }
 
     /* now we go back and fill in the fields of the static part */
 
@@ -1903,9 +1962,9 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+    cip->cpf_item_count = h2le16(2);               /* ALWAYS 2 */
     cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
+    cip->cpf_cai_item_length = h2le16(4);          /* ALWAYS 4, size of connection ID*/
     cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
@@ -1916,6 +1975,8 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
+        /* nothing took a reference to the request, so ours is the only one. */
+        req = rc_dec(req);
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -1925,8 +1986,16 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the session's list. */
+    /*
+     * Flag the read before the request becomes visible to the session thread.  The
+     * UDT builder used to set this after session_add_request() returned, which left
+     * a window where a completed request belonged to a tag that did not yet believe
+     * it had a read outstanding.  ab_tag_abort_request() clears the flag on the
+     * failure path below, so setting it early costs nothing.
+     */
     tag->read_in_progress = 1;
+
+    /* add the request to the session's list. */
     rc = session_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -1943,6 +2012,11 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done");
 
     return PLCTAG_STATUS_OK;
+}
+
+
+int listing_tag_build_read_request_connected(ab_tag_p tag) {
+    return cip_attr_list_request_build(tag, &listing_attr_variant);
 }
 
 
@@ -2280,144 +2354,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
 
 
 int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
-    // tag_list_req *list_req = NULL;
-    ab_request_p req = NULL;
-    int rc = PLCTAG_STATUS_OK;
-    uint8_t *data_start = NULL;
-    uint8_t *data = NULL;
-    uint16_le tmp_u16 = UINT16_LE_INIT(0);
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    /* get a request buffer */
-    rc = session_create_request(tag->conn, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
-
-    /*
-     * set up the embedded CIP UDT metadata request packet
-        uint8_t request_service;    CIP_CMD_GET_ATTR_LIST=0x03
-        uint8_t request_path_size;  3 word = 6 bytes
-        uint8_t request_path[6];        0x20    get class
-                                        0x6C    UDT class
-                                        0x25    get instance (16-bit)
-                                        0x00    padding
-                                        0x00    instance byte 0
-                                        0x00    instance byte 1
-        uint16_le instance_id;      NOTE! this is the last two bytes above for convenience!
-        uint16_le num_attributes;   0x04    number of attributes to get
-        uint16_le requested_attributes[4];      0x04    attribute #4 - Number of 32-bit words in the template definition.
-                                                0x05    attribute #5 - Number of bytes in the structure on the wire.
-                                                0x02    attribute #2 - Number of structure members.
-                                                0x01    attribute #1 - Handle/type of structure.
-    */
-
-    *data = CIP_CMD_GET_ATTR_LIST;
-    data++;
-
-    /* request path size, in 16-bit words */
-    *data = (uint8_t)(3); /* size in words of routing header + routing and instance ID. */
-    data++;
-
-    /* add in the routing header . */
-
-    /* first the fixed part. */
-    data[0] = 0x20; /* class type */
-    data[1] = 0x6C; /* UDT class */
-    data[2] = 0x25; /* 16-bit instance ID type */
-    data[3] = 0x00; /* padding */
-    data += 4;
-
-    /* now the instance ID */
-    tmp_u16 = h2le16((uint16_t)tag->udt_id);
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* set up the request itself.  We are asking for a number of attributes. */
-
-    /* set up the request attributes, first the number of attributes. */
-    tmp_u16 = h2le16((uint16_t)4); /* MAGIC, we have four attributes we want. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* first attribute: symbol type */
-    tmp_u16 = h2le16((uint16_t)0x04); /* MAGIC, Total field definition size in 32-bit words. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* second attribute: base type size in bytes */
-    tmp_u16 = h2le16((uint16_t)0x05); /* MAGIC, struct size in bytes. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* third attribute: tag array dimensions */
-    tmp_u16 = h2le16((uint16_t)0x02); /* MAGIC, number of structure members. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* fourth attribute: symbol/tag name */
-    tmp_u16 = h2le16((uint16_t)0x01); /* MAGIC, struct type/handle. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->conn);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
-
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->conn, req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        /* session_add_request() takes its own reference; ours is still outstanding. */
-        req = rc_dec(req);
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    tag->read_in_progress = 1;
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
+    return cip_attr_list_request_build(tag, &udt_metadata_attr_variant);
 }
 
 

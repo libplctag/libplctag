@@ -180,3 +180,17 @@ add_custom_target(unit_tests
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"
 )
+# test_pccc_type_encode: byte-exact expectations for the PCCC type descriptor encoder.
+# pccc_encode_dt_byte() had no callers at all until 1.10, so nothing had ever run it;
+# three of the cases pin bugs that were in it the whole time. The anchor case is a real
+# ControlLogix reply, which is the only part of this that is not derived from the code.
+add_executable(test_pccc_type_encode test_pccc_type_encode.c)
+
+target_include_directories(test_pccc_type_encode PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_pccc_type_encode PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
