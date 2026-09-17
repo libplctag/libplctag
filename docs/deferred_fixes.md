@@ -240,6 +240,145 @@ from. An offset is not a size, and neither is a conservative estimate. When a pa
 and an overhead estimate meet, the only safe question is "from which byte is each one
 counted?"
 
+### 1.10 Logix-mapped PCCC writes send no type information if the tag is never read — FIXED 2026-09-16
+
+Found while auditing `eip_lgx_pccc.c` for 2.43, confirmed on hardware, then fixed.
+
+`tag_write_start()` builds a PCCC *typed* write, which carries an encoded type descriptor
+ahead of the data. The descriptor lives in `tag->encoded_type_info`, and in this file the
+only thing that ever wrote it was `check_read_status()` (`eip_lgx_pccc.c:394`, `:401`), so a
+write needed a completed read behind it. The guard for that is the `first_read` branch at the
+top of `tag_write_start()`, which turns a write into a read when none has happened — and
+`ab_common.c` cleared `first_read` for `AB_PLC_LGX_PCCC`, so the branch could not run.
+
+**Root cause: v2.6.8, commit `9ccbd9cc` "Fix for #558".** Before it, `ab_tag_create` read at
+creation unconditionally —
+
+```c
+tag->first_read = 1;
+tag->read_in_flight = 1;
+tag->vtable->read((plc_tag_p)tag);
+```
+
+— for every non-special tag with a read function. Every Logix-mapped PCCC tag therefore
+fetched its type descriptor the moment it was created, long before any write could be
+issued. The `pre_write_read` path was never the normal route; it was a backstop for a write
+racing the creation read, and it almost never fired. That is why this code was tested and
+worked.
+
+`9ccbd9cc` replaced the unconditional read with a per-PLC-type decision in the setup switch
+and gave `AB_PLC_LGX_PCCC` its own case reading `first_read = 0; /* no first read for this
+kind of PLC. */` — the same line, comment included, as the `AB_PLC_PLC5`, `AB_PLC_SLC` and
+`AB_PLC_MLGX` cases just above it. Correct for those three: they write with the untyped range
+commands (`AB_EIP_PLC5_RANGE_WRITE_FUNC` 0x00, `AB_EIP_SLC_RANGE_WRITE_FUNC` 0xAA) and carry
+no data-type descriptor at all. Wrong for `AB_PLC_LGX_PCCC`, which uses the typed pair
+(0x67/0x68) and needs one. The same edit removed both the type source and the guard meant to
+catch its absence, because `first_read` gates both. Every release since v2.6.8 has it;
+v2.7.2 at `ab_common.c:415`.
+
+**Why it went unnoticed.** Every test goes through `tag_rw2`, which reads before it writes.
+Nothing in the tree wrote to one of these tags without reading it first.
+
+**Confirmed by `src/tests/probe_lgx_pccc_write_first/`**, which puts both frames on the wire
+in one process against the same address:
+
+| target | write, no preceding read | write after a read |
+|---|---|---|
+| `ab_server --plc=LgxPccc` | 82 bytes, `PLCTAG_ERR_REMOTE_ERR`, PCCC 240 | 84 bytes, OK |
+| ControlLogix 10.206.1.40 slot 5 | 82 bytes, `PLCTAG_ERR_REMOTE_ERR`, PCCC 240 | **86 bytes**, OK |
+
+A real PLC refuses it, which is the part that mattered — the simulator agreeing was not
+evidence on its own, and the two targets do not in fact agree on the numbers.
+
+**The fix went in two stages.** First `AB_PLC_LGX_PCCC` went back into the
+`first_read = 1` group, restoring pre-2.6.8 behaviour exactly; that was verified on the CPU.
+Then, once the built descriptor was verified on the same CPU, `first_read` went back to 0 and
+`eip_lgx_pccc.c` took responsibility for its own descriptor. The shipped state is the second
+one: **no read at creation, and `ab_common.c:477` explains why this family's 0 means something
+different from the three PCCC cases above it.** `PLCTAG_EVENT_CREATED` therefore still fires
+at creation (`ab_common.c:645`), as it has since v2.6.8, and `plc_tag_create()` does not wait
+on a round trip.
+
+Verified on the same ControlLogix that showed the failure: both probe scenarios return
+`PLCTAG_STATUS_OK` where write-first previously returned `PLCTAG_ERR_REMOTE_ERR` with PCCC
+240. The trace shows the intended path — write-first now does a creation read (82-byte
+request, 37-byte reply) before its 86-byte write, and 86 is the CPU's own four-byte
+descriptor, so route 1 supplied it. `built a N byte type descriptor` appears zero times,
+confirming route 2 stayed dormant. Also `ab_server` clean and simulator 184/184.
+
+**A second route was built as a backstop: `pccc_encode_type_info()`.** The descriptor never
+needed a round trip. `parse_pccc_logical_address()` already yields `file_type` and
+`element_size_bytes`, and `ab_common.c:682-683` stores both, so the tag name says everything
+required. `write_pre_request()` now tries three things in order:
+
+1. the descriptor a read reply carried — the PLC's own answer, and since this family reads at
+   creation again, this is every ordinary write;
+2. one built from the data file type, no traffic;
+3. a read issued now, with the write restarted when it lands.
+
+Route 1 stays first because a descriptor the PLC itself sent is not a guess. Route 2 is
+what removes the round trip, and route 3 is what makes it safe to map only what has been
+proven.
+
+Forcing route 2 by temporarily clearing `first_read` produced an accepted 84-byte write
+against `ab_server` **and against the ControlLogix**. So a real CPU takes a size in the
+nybble where it would itself have escaped it into a following byte.
+
+That settles the descriptor *structure* in both of its shapes: the compact one by this run,
+the escaped one by being byte-identical to what the PLC sends whenever the array exceeds
+seven bytes. It does **not** settle the file-type mapping — only `N` ->
+`AB_PCCC_DATA_INT` has ever been on a wire. Every frame size measured across all runs fits one model — 81 bytes
+before the descriptor, then padded up to an even length:
+
+| descriptor | bytes | frame |
+|---|---|---|
+| none (the bug) | 0 | 81 → pad → **82**, refused |
+| `ab_server`'s, from its read reply | 2 | 83 → pad → **84** |
+| `pccc_encode_type_info()` | 3 | 84 → **84** |
+| the ControlLogix's, from its read reply | 4 | 85 → pad → **86** |
+
+**`pccc_encode_dt_byte()` had three real bugs**, unsurprising for a function that shipped for
+years with no callers at all. All three are fixed and pinned by
+`src/tests/unit/test_pccc_type_encode.c`:
+
+- Both extension loops ran while `(value & 0xFF)` rather than while `value`, so any value
+  with a zero low byte ended the loop before it began. 256 is the first one, and an array of
+  255 single-byte elements plus its element descriptor is exactly 256.
+- The type loop's condition was `(data_type & 0xFF) && data_size` — testing the size while
+  encoding the type.
+- Bytes went into the buffer before its size was checked, and the check that followed counted
+  exactly filling the buffer as failure.
+
+The unit test also round-trips 169 type/size pairs through encode and decode, and pins the
+`99 09 03 42` the ControlLogix actually sent as the one expectation in the file not derived
+from our own code.
+
+**The `pccc_file_t` → `AB_PCCC_DATA_*` mapping holds exactly one entry: N.** These are two
+different encodings that are easy to conflate: `PCCC_FILE_INT` is 0x89 and belongs in an SLC
+logical address, `AB_PCCC_DATA_INT` is 4 and belongs in a descriptor; the ranges do not even
+overlap.
+
+Every other file type lines up with an `AB_PCCC_DATA_*` value by name — F with REAL, T with
+TIMER — and that is precisely why none of them is mapped. A mapping that looks obvious is
+still a guess until a PLC has accepted it, and a wrong type code is worse than the round trip
+it saves: the PLC may refuse the command, or store the bytes as something else. Everything
+unmapped returns `PLCTAG_ERR_UNSUPPORTED` and takes route 3, which is what this code did for
+every type before the mapping existed.
+
+Adding an entry is cheap and the bar is one probe run against a PLC that has the data file.
+
+All three routes are exercised against `ab_server`: `N7:0` builds its descriptor and never
+reads, `F8:0` and `B3:0` log "no descriptor can be built for this file type, doing pre-read"
+and then write successfully. Route 3 had been unreachable since v2.6.8, so that check is not
+a formality.
+
+**The probe stays.** It reproduces in the sandbox against `ab_server` and is the regression
+test for this fix. It is deliberately **not** in `run_hardware_tests.py`: as written it exits
+0 whichever way the PLC answers — a refusal is the measurement — so it has no assertion to
+fail on. Now that the expected answer is "both writes succeed", it could become a suite entry.
+The suite's existing lgxpccc test (`run_hardware_tests.py:197`) cannot catch this: it runs
+`tag_rw2`, which reads before it writes.
+
 ## 2. Consolidation still to do
 
 Original scope was threads, mutexes, condition variables, sockets out of `platform.h`
@@ -2197,6 +2336,73 @@ were pushed. Unreachable in practice, both in the same dead guard, and invisible
 
 Verified: both configs clean, simulator **184/184** (183s reported, 182s wall), hardware
 **45/45**. DH+ has no simulator coverage, so tests 28, 29, 32, 33 and 34 are the whole check.
+
+### 2.43 Logix-mapped PCCC read and write merged — DONE 2026-09-16
+
+`tag_read_start` and `tag_write_start` in `eip_lgx_pccc.c` were 116 and 121 lines that
+agreed on 95 of them, including the entire 40-line Unconnected Send frame. They differ in
+six places, now a two-entry `lgx_pccc_variant_t` table over one
+`lgx_pccc_request_start()` skeleton: the in-progress flag, the pre-write read, the overhead
+estimate, the PCCC function code, and the bytes written after the encoded tag name.
+
+**Equivalence proved by reconstruction, not by inspection.** A script substitutes each
+variant's pieces back into the skeleton and diffs the result against the pre-merge functions
+from git. Both come back byte-identical — read 101 code lines, write 112. The same check
+should be the price of admission for the remaining merges: reading two 120-line functions
+side by side is how the 1.9 mistake got made.
+
+**The overhead formulas are carried over unchanged, and they disagree with each other.**
+The read counts a trailing `uint16_le` and ignores the connection path; the write counts
+`2 + conn_path_size` and ignores the trailing pad byte. Both add `sizeof(eip_cip_uc_req)`,
+which is measured from byte 0 of `req->data` and so includes the 24-byte EIP encapsulation
+header. Meanwhile `AB_PLC_LGX_PCCC` always sets `use_connected_msg = 0`
+(`ab_common.c:311`), so `available_payload_unsafe()` takes its unconnected branch and has
+already subtracted `conn_path_size + 2` — which means at least one of the two counts the
+path twice.
+
+Not reconciled here, deliberately. Shrinking a size estimate is the direction that lets a
+longer frame onto the wire, and working out which byte each side counts from is the whole of
+2.40. 1.9 is what happens when that question gets answered by inspection in passing. The
+comment on `request_overhead` in the variant table records the discrepancy at the site.
+
+### 2.44 Tag listing and UDT metadata request builders merged — DONE 2026-09-16
+
+`listing_tag_build_read_request_connected` (156 lines) and
+`udt_tag_build_read_metadata_request_connected` (152) are the same CIP frame: a Connected
+Send carrying a get-attribute-list against one instance of one class. They differ only in a
+table of constants — service code (`0x55`/`0x03`), class (`0x6B`/`0x6C`), instance-id source
+(`next_id`/`udt_id`), four attribute numbers, and whether the encoded tag name is spliced
+into the request path. Now one `cip_attr_list_request_build()` over a
+`cip_attr_list_variant_t` table. The hardcoded `4` in the num-attributes field is derived
+from the array instead.
+
+Same reconstruction check as 2.43: the rebuilt functions differ from the originals in
+exactly the three places below and nowhere else, so the wire bytes are unchanged.
+
+**`udt_tag_build_read_fields_request_connected` was left alone.** 97 of its 129 lines
+differ — it is a Read Template request with an offset and a size, not the same frame.
+
+**Two fixes folded in, both pre-existing:**
+
+- **The request leaked on the `PLCTAG_ERR_TOO_LARGE` path, in both functions.**
+  `session_create_request()` hands back a reference; the oversize path called
+  `ab_tag_abort_request(tag)` and returned without ever releasing it. `tag->req` is still
+  NULL at that point, so abort had nothing to free. The `session_add_request()` failure
+  path a few lines below gets this right — `req = rc_dec(req);` first — and the merged
+  builder now does the same. Never caught under ASan because no test reaches the oversize
+  path: the listing and UDT requests are a fixed ~20 bytes against a connection of at least
+  500.
+- **The UDT builder set `tag->read_in_progress` after `session_add_request()` returned.**
+  The listing builder set it before. Both cannot be right: `session_add_request()` makes the
+  request visible to the session thread immediately, so setting the flag afterwards leaves a
+  window in which a completed request belongs to a tag that does not believe it has a read
+  outstanding. The merged builder uses the listing order. This is a behaviour change for
+  the UDT path. It costs nothing on the failure path, because `ab_tag_abort_request()`
+  clears the flag (`ab_common.c:881`).
+
+Verified: both configs clean, 0 warnings; simulator **184/184** (179s reported, 179s wall)
+after 2.43 and again after 2.44. Neither path has simulator coverage of the failure cases,
+so the hardware suite is the real check — `@tags` and `@udt` listing in particular.
 
 ## 3. Verification gaps
 
