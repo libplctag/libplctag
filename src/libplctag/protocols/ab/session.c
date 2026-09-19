@@ -817,13 +817,11 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     total_allocation_size += (size_t)tmp_conn_path_size;
 
     /* allocate the session struct and the buffer in the same allocation. */
-    pdebug(
-        DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-        "Allocating %" PRIu64 " total bytes of memory with %" PRIu64
-        " bytes for data buffer static data, %" PRId32 " bytes for the host name, %" PRId32 " bytes for the path, %" PRId32
-        " bytes for the encoded path.",
-        (uint64_t)total_allocation_size, (uint64_t)(data_buffer_is_static ? data_buffer_capacity : 0),
-        (int32_t)(str_length(host) + 1), (int32_t)(path_offset == 0 ? 0 : str_length(path) + 1), (int32_t)tmp_conn_path_size);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
+           "Allocating %" PRIu64 " total bytes of memory with %" PRIu64 " bytes for data buffer static data, %" PRId32
+           " bytes for the host name, %" PRId32 " bytes for the path, %" PRId32 " bytes for the encoded path.",
+           (uint64_t)total_allocation_size, (uint64_t)(data_buffer_is_static ? data_buffer_capacity : 0),
+           (int32_t)(str_length(host) + 1), (int32_t)(path_offset == 0 ? 0 : str_length(path) + 1), (int32_t)tmp_conn_path_size);
 
     session = (ab_session_p)rc_alloc((int)total_allocation_size, session_destroy);
     if(!session) {
@@ -1989,8 +1987,9 @@ int process_requests(ab_session_p session) {
                     /* check the passed UDI data item size against what we really got. */
                     if((size_t)udi_item_length != response_size) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Incorrectly constructed response! UDI data length field is %zu but actual size is %zu!",
-                               (size_t)udi_item_length, response_size);
+                               "Incorrectly constructed response! UDI data length field is %" PRIu64
+                               " but actual size is %" PRIu64 "!",
+                               (uint64_t)udi_item_length, (uint64_t)response_size);
 
                         rc = PLCTAG_ERR_BAD_DATA;
                         break;
@@ -2035,14 +2034,15 @@ int process_requests(ab_session_p session) {
                     response_overhead = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - session->data);
                     response_size = (size_t)session->data_size - response_overhead;
 
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "response_overhead=%zu", response_overhead);
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "response_size=%zu", response_size);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "response_overhead=%" PRIu64, (uint64_t)response_overhead);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "response_size=%" PRIu64, (uint64_t)response_size);
 
                     /* check the passed CDI data item size against what we really got. */
                     if((size_t)cdi_item_length != response_size) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                               "Incorrectly constructed response! CDI data length field is %zu but actual size is %zu!",
-                               (size_t)cdi_item_length, response_size);
+                               "Incorrectly constructed response! CDI data length field is %" PRIu64
+                               " but actual size is %" PRIu64 "!",
+                               (uint64_t)cdi_item_length, (uint64_t)response_size);
 
                         rc = PLCTAG_ERR_BAD_DATA;
                         break;
@@ -2082,25 +2082,26 @@ int process_requests(ab_session_p session) {
                 if(le2h16(multi_resp->request_count) == num_bundled_requests) {
                     size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - session->data);
 
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "offset_base=%" PRIu64, (uint64_t)offset_base);
 
                     /* check all the offsets */
                     for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
                         size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
 
-                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
-                               resp_offset);
+                        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Response %d starts at byte offset %" PRIu64, resp_index,
+                               (uint64_t)resp_offset);
 
                         if(resp_offset >= (size_t)session->data_size) {
                             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
-                                   "Response %d has offset %zu which is outside the session data!", resp_index, resp_offset);
+                                   "Response %d has offset %" PRIu64 " which is outside the session data!", resp_index,
+                                   (uint64_t)resp_offset);
                             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
                             break;
                         }
                     }
                 } else {
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
-                           num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Expected %d packed responses back but got %" PRIu64 "!",
+                           num_bundled_requests, (uint64_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
@@ -2186,7 +2187,7 @@ int prepare_request(ab_session_p session) {
         // request->conn_seq_id = session->conn_seq_id;
         encap->encap_sender_context = h2le64(session->conn_seq_id); /* link up the request seq ID and the packet seq ID */
 
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Preparing unconnected packet with session sequence ID %llx",
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Preparing unconnected packet with session sequence ID %" PRIx64,
                session->conn_seq_id);
     } else if(le2h16(encap->encap_command) == EIP_CONNECTED_SEND) {
         eip_cip_co_req *conn_req = (eip_cip_co_req *)(session->data);

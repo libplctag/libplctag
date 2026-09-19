@@ -3890,7 +3890,8 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
                 if(char_index < (size_t)tag->size) {
                     buffer[i] = (char)tag->data[char_index];
                 } else {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Out of bounds index, %zu, generated!", char_index);
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Out of bounds index, %" PRIu64 ", generated!",
+                           (uint64_t)char_index);
                     rc = PLCTAG_ERR_OUT_OF_BOUNDS;
                     break;
                 }
@@ -4101,8 +4102,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
                 tag->data[char_index] = (uint8_t)string_val[i];
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
-                       "Out of bounds index, %zu, generated during string copy!  Tag size is %" PRId32 ".", char_index,
-                       tag->size);
+                       "Out of bounds index, %" PRIu64 ", generated during string copy!  Tag size is %" PRId32 ".",
+                       (uint64_t)char_index, tag->size);
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
 
                 /* note: only breaks out of the for loop, we need another break. */

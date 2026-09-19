@@ -45,6 +45,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <stdarg.h>
@@ -292,7 +293,7 @@ extern int str_to_int(const char *str, int *val) {
     tmp_val = strtol(str, &endptr, 0);
 
     if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "strtol returned %ld with errno %d", tmp_val, errno);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "strtol returned %" PRId64 " with errno %d", (int64_t)tmp_val, errno);
         return -1;
     }
 
@@ -304,7 +305,7 @@ extern int str_to_int(const char *str, int *val) {
      * LP64 and the caller has no way to tell that from a real zero.  Reject instead.
      */
     if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Value %" PRId64 " does not fit in an int!", (int64_t)tmp_val);
         return -1;
     }
 

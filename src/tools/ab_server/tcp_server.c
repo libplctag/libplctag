@@ -32,6 +32,8 @@
  ***************************************************************************/
 
 #include "tcp_server.h"
+
+#include <inttypes.h>
 #include "err.h"
 #include "plc.h"
 #include "slice.h"
@@ -177,7 +179,7 @@ THREAD_FUNC(conn_handler) {
     plc_s *plc = (plc_s *)session->server_context;
 
     log_info("Got new client connection, going into processing loop.");
-    log_info("server_to_client_max_packet = %zu", plc->server_to_client_max_packet);
+    log_info("server_to_client_max_packet = %" PRIu64, (uint64_t)plc->server_to_client_max_packet);
 
     /* no one will join this thread, so clean ourselves up. */
     thread_detach();

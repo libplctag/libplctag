@@ -291,7 +291,6 @@ int find_key(hashtable_p table, int64_t key) {
 
     if(iteration >= MAX_ITERATIONS) {
         /* FIXME - does not work on Windows. */
-        // pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Key %ld not found.", key);
         return PLCTAG_ERR_NOT_FOUND;
     } else {
         // pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Key %d found at index %d.", (int)table->entries[index].key, index);

@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include <stdint.h>
 
 #ifdef _WIN32
@@ -139,7 +140,7 @@ static util_err_t parse_cidr(const char *cidr_str, cidr_net_t *out) {
     /* Parse prefix length */
     prefix_val = strtoul(slash + 1, NULL, 10);
     if(prefix_val > 32) {
-        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "Prefix length must be 0-32, got %lu", prefix_val);
+        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "Prefix length must be 0-32, got %" PRIu64, (uint64_t)prefix_val);
         return UTIL_EINVAL;
     }
     prefix_len = (int)prefix_val;
@@ -195,7 +196,7 @@ static util_err_t find_interface_windows(const cidr_net_t *net, struct in_addr *
     }
 
     if(ret_val != NO_ERROR) {
-        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "GetAdaptersAddresses failed: %ld", ret_val);
+        pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_ERROR, "GetAdaptersAddresses failed: %" PRIu32, (uint32_t)ret_val);
         free(adapters);
         return UTIL_EINTERNAL;
     }
@@ -602,7 +603,7 @@ static void timer_handler(coro_task_handle_t handle, socket_t unused_fd, void *c
         elapsed_ms = (util_time_us() - ctx->start_time_us) / 1000;
 
         if(elapsed_ms >= (int64_t)ctx->timeout_ms) {
-            pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Timeout reached (%ld ms)", elapsed_ms);
+            pdlog(LOG_MODULE_SCAN_EIP_NETWORK, LOG_LEVEL_INFO, "Timeout reached (%" PRId64 " ms)", elapsed_ms);
             g_running = 0;
             coro_stop(handle.coro_net);
             break;
@@ -759,7 +760,7 @@ int main(int argc, char *argv[]) {
     coro_run(&coro_net, 15); /* 15ms tick interval */
 
     /* Print results */
-    printf("\nScan complete. Found %zu unique devices.\n", receiver_ctx.dedup.count);
+    printf("\nScan complete. Found %" PRIu64 " unique devices.\n", (uint64_t)receiver_ctx.dedup.count);
 
     exit_code = EXIT_SUCCESS;
 

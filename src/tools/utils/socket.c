@@ -1,6 +1,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include "socket.h"
 #include "log.h"
@@ -525,7 +526,7 @@ util_err_t socket_send_buf(socket_t sock, buf_t *out) {
 
     const uint8_t *data = buf_read_ptr(out);
 
-    pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, "socket_send_buf: Attempting to send %zu bytes", to_send);
+    pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, "socket_send_buf: Attempting to send %" PRIu64 " bytes", (uint64_t)to_send);
     pdlog_bytes(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, out);
 
 #ifdef _WIN32
@@ -542,7 +543,8 @@ util_err_t socket_send_buf(socket_t sock, buf_t *out) {
     }
 #endif
 
-    pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, "socket_send_buf: Successfully sent %zd bytes out of %zu", sent, to_send);
+    pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, "socket_send_buf: Successfully sent %" PRId64 " bytes out of %" PRIu64,
+          (int64_t)sent, (uint64_t)to_send);
 
     /* Advance read cursor by amount actually sent */
     buf_read_advance(out, (size_t)sent);

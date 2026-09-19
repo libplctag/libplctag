@@ -128,8 +128,8 @@ static inline int32_t mini_mock_run_group_tests(const struct CMUnitTest tests[],
          * test keep passing after the call it exists to verify has gone away.
          */
         if(mini_mock_queue_len != 0) {
-            fprintf(stderr, "%s: %zu queued mock value(s) never consumed (first: %s)\n", tests[i].name, mini_mock_queue_len,
-                    mini_mock_queue[0].function);
+            fprintf(stderr, "%s: %" PRIu64 " queued mock value(s) never consumed (first: %s)\n", tests[i].name,
+                    (uint64_t)mini_mock_queue_len, mini_mock_queue[0].function);
             abort();
         }
 
@@ -138,7 +138,7 @@ static inline int32_t mini_mock_run_group_tests(const struct CMUnitTest tests[],
 
     if(group_teardown) { group_teardown(NULL); }
 
-    printf("[==========] %zu test(s) passed.\n", num_tests);
+    printf("[==========] %" PRIu64 " test(s) passed.\n", (uint64_t)num_tests);
 
     return 0;
 }

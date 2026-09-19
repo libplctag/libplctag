@@ -122,7 +122,7 @@ void run_test(size_t thread_count) {
     atomic_set_int32(&end_test_run, 0);
 
     // NOLINTNEXTLINE
-    fprintf(stderr, "Test %zu threads for %dms... \n", thread_count, TEST_TIME_MS);
+    fprintf(stderr, "Test %" PRIu64 " threads for %dms... \n", (uint64_t)thread_count, TEST_TIME_MS);
 
     for(size_t thread_id = 0; thread_id < thread_count; thread_id++) {
         /* create the threads that run the test. */
@@ -145,8 +145,10 @@ void run_test(size_t thread_count) {
     total_test_run_time = time_ms() - start_time_ms;
 
     // NOLINTNEXTLINE
-    fprintf(stderr, "Test %zu threads ran for %" PRId64 "ms and completed with %zu total iterations per millisecond.\n",
-            thread_count, total_test_run_time, (size_t)(total_iterations / (size_t)(uint64_t)total_test_run_time));
+    fprintf(stderr,
+            "Test %" PRIu64 " threads ran for %" PRId64 "ms and completed with %" PRIu64 " total iterations per millisecond.\n",
+            (uint64_t)thread_count, total_test_run_time,
+            (uint64_t)((size_t)(total_iterations / (size_t)(uint64_t)total_test_run_time)));
 }
 
 

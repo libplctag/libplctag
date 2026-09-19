@@ -33,6 +33,7 @@
 
 #include "compat.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -679,13 +680,21 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[2] = 1;
 
     /* match the size. */
+    /*
+     * scanf() has no z length modifier on every CRT: MinGW linked against msvcrt.dll
+     * rejects it.  Parse into a fixed-width temporary and narrow afterwards.
+     */
+    uint64_t parsed_size = 0;
+
     // NOLINTNEXTLINE
-    num_dims = str_scanf(size_str, "%zu", &tag->dimensions[0]);
+    num_dims = str_scanf(size_str, "%" SCNu64, &parsed_size);
     if(num_dims != 1) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag size in \"%s\"!\n", tag_str);
         usage();
     }
+
+    tag->dimensions[0] = (size_t)parsed_size;
 
     /* check the size. */
     if(tag->dimensions[0] <= 0) {
@@ -706,7 +715,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
+    log_info("allocating %" PRIu64 " elements of %" PRIu64 " bytes each.", (uint64_t)tag->elem_count, (uint64_t)tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -715,8 +724,8 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         exit(1);
     }
 
-    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
-             tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
+    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%" PRIu64 ", %" PRIu64 ", %" PRIu64 ").", tag_str,
+             tag->name, tag->tag_type, (uint64_t)tag->dimensions[0], (uint64_t)tag->dimensions[1], (uint64_t)tag->dimensions[2]);
 
     /* add the tag to the list. */
     tag->next_tag = plc->tags;
@@ -901,13 +910,18 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[1] = 0;
     tag->dimensions[2] = 0;
 
+    /* see the note on str_scanf() and the z modifier above. */
+    uint64_t parsed_dims[3] = {0, 0, 0};
+
     // NOLINTNEXTLINE
-    num_dims = str_scanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
+    num_dims = str_scanf(dim_str, "%" SCNu64 ",%" SCNu64 ",%" SCNu64 ",%*u", &parsed_dims[0], &parsed_dims[1], &parsed_dims[2]);
     if(num_dims < 1 || num_dims > 3) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Tag dimensions must have at least one dimension non-zero and no more than three dimensions.");
         usage();
     }
+
+    for(size_t dim_index = 0; dim_index < 3; dim_index++) { tag->dimensions[dim_index] = (size_t)parsed_dims[dim_index]; }
 
     /* check the dimensions. */
     if(tag->dimensions[0] <= 0) {
@@ -942,7 +956,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
+    log_info("allocating %" PRIu64 " elements of %" PRIu64 " bytes each.", (uint64_t)tag->elem_count, (uint64_t)tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -951,8 +965,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         exit(1);
     }
 
-    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
-             tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
+    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%" PRIu64 ", %" PRIu64 ", %" PRIu64 ").", tag_str,
+             tag->name, tag->tag_type, (uint64_t)tag->dimensions[0], (uint64_t)tag->dimensions[1], (uint64_t)tag->dimensions[2]);
 
     /* add the tag to the list. */
     tag->next_tag = plc->tags;

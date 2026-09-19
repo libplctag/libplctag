@@ -292,7 +292,7 @@ void log_bytes_impl(const char *func, int line_num, log_level_t lvl, log_module_
         char row_buf[(COLUMNS * 3) + 6] = {0};
         char *p = row_buf;
 
-        p += sprintf(p, "%04zx:", row * COLUMNS);
+        p += sprintf(p, "%04" PRIx64 ":", (uint64_t)(row * COLUMNS));
 
         size_t start = row * COLUMNS;
         size_t end = start + COLUMNS;

@@ -379,7 +379,7 @@ fail on. Now that the expected answer is "both writes succeed", it could become 
 The suite's existing lgxpccc test (`run_hardware_tests.py:197`) cannot catch this: it runs
 `tag_rw2`, which reads before it writes.
 
-### 1.11 2,692 width-variable format specifiers — OPEN, a class of latent errors
+### 1.11 2,692 width-variable format specifiers — groups 1 and 2 DONE 2026-09-19, group 3 OPEN
 
 Filed 2026-09-19 after 3.4 put a `format(printf)` attribute on `pdebug_impl` and 117 warnings
 fell out of a tree that had looked clean for years. **`%d`, `%u`, `%x` and the `%l`/`%z`/`%t`
@@ -412,9 +412,8 @@ urgency:**
    wrong somewhere no matter what the argument is. Highest priority, smallest count.
 2. **`%zu`, `%zd`, `%zx`, `%td` (150 sites) -- correct C99, unavailable on MinGW.** MinGW
    linked against `msvcrt.dll` does not implement the `z` or `t` length modifiers; it wants
-   `%Iu`. Whether this bites depends on which CRT the toolchain picks, which is a thing the
-   first MinGW build (3.1) will answer and nobody can answer by reading. 96 of the 150 are in
-   `tools/`, which matters less than the library's 48.
+   `%Iu`. **Confirmed broken and fixed 2026-09-19**, all 150 sites -- see the group 2 note
+   below.
 3. **Bare `%d`, `%u`, `%x` (2,528 sites) -- correct today, unguarded tomorrow.** The build is
    warning-clean, so every one of these currently matches an `int` or `unsigned int`. They are
    not bugs. They are the absence of a statement: nothing records that the argument is
@@ -430,12 +429,64 @@ construction rather than by the host's type sizes. `PRIu16` for a `uint16_t`, `(
 target -- `(uint64_t)` plus `PRIu64` for a `size_t`, `(int64_t)` plus `PRId64` for a `time_t`.
 Do not reach for `%zu` to fix a `size_t`; that is problem 2, not the fix for problem 3.
 
-**Suggested order:** the 14 sites in group 1 first, as a self-contained change. Then the
+**Suggested order:** group 1 first, as a self-contained change -- done, see below; the count
+came to eleven live sites rather than 14 once `src/vendor/libyafl` was deleted in 2.46. Then the
 library's 48 sites in group 2, once a MinGW build exists to say whether they are broken. Group
 3 is 2,528 sites across 128 files and should not be done as one commit; the honest approach is
 to convert a file whenever it is being edited anyway, and to require exact-width specifiers in
 new code. Note that any bulk pass over these must add `<inttypes.h>` where it is missing --
 four files needed it for the handful of conversions in 3.4 alone.
+
+**Group 1 -- DONE 2026-09-19.** Ten sites converted, one deleted. The two 64-bit sequence
+IDs (`ab/session.c:2189`, `omron/conn.c:1964`) were `uint64_t` printed with `%llx`; now
+`PRIx64`. `cip/cip.c:331` printed `(long)INT32_MAX` with `%ld`; now `(int32_t)` plus `PRId32`.
+`utils/str.c:295` and `:307` print a `strtol` result, which has to stay `long` for the range
+checks around it to mean anything, so the value widens to `(int64_t)` with `PRId64` at the call
+-- the bare `%d` for `errno` beside it stays, `errno` is an `int` by standard.
+`utils/hashtable.c:294` was a commented-out `pdebug`; the line is gone rather than fixed.
+Outside the library: `poc/scan_eip_network.c:142` (`unsigned long` from `strtoul` -> `PRIu64`),
+`:198` (a Windows `DWORD` -> `PRIu32`), `:605` (already `int64_t` -> `PRId64`), and
+`tools/ab_server/fault.c:88` (a `strtol` result -> `PRId64`). Four files needed
+`<inttypes.h>`: `cip.c`, `str.c`, `scan_eip_network.c`, `fault.c`.
+
+`examples/clog.h:450` still has a `%ld`. It is third-party C89 single-header code, the argument
+is declared `long int`, and the pair is self-consistent on every target. Left alone.
+
+Verified: `--clean-first` rebuild, 0 warnings; unit **8/8**; simulator **184/184** (181s).
+
+Note on what this bought: none of the ten were printing a wrong number today, because `long`
+and `long long` are both 64 bits on this host and the arguments matched. They were wrong on
+Windows and on every 32-bit target in `cmake_toolchains/`, where `long` is 32 bits -- which is
+to say, on the targets nothing has built yet (3.1). The value is that the specifier now states
+the width instead of inheriting it.
+
+**Group 2 -- DONE 2026-09-19.** All 38 library sites converted: `%zu`/`%zx` -> `(uint64_t)` plus
+`PRIu64`/`PRIx64`, `%td` -> `(int64_t)` plus `PRId64`, across `pccc.c` (14 calls), `session.c`
+(8), `omron/conn.c` (8), `lib.c` (2), `eip_cip_special.c` (2), `cip/tag.c` (2) and
+`cip/conn.c` (2). `pccc.c` needed `<inttypes.h>`; the other six already had it.
+
+**The 11 `%d`-for-a-`size_t` warnings were not real.** They were GCC's parser recovering from
+the unknown `z`/`t` conversion: having failed to consume a specifier, it paired the next `%d`
+with the argument the `%z` should have taken. All eleven vanished when the `%z`/`%t` sites were
+fixed, with no edit of their own. Worth remembering the next time this toolchain reports a
+format mismatch on a line that also has a `%z` -- read the `%z` warning first.
+
+**Then the rest of the tree, same day.** The 96 sites in `tools/` were converted too, plus the
+last 7 in `tests/` and `poc/` -- 72 call sites in all, across `ab_server` (10 files),
+`modbus_server` (2), `tools/utils` (4), `mini_mock.h`, `test_emulator_performance.c`,
+`test_modbus_multiple.c` and `scan_eip_network.c`. Eight files needed `<inttypes.h>`. Those
+targets compile without the format attribute, so none of them warned -- but the CRT does not
+care which flags found them, and `ab_server` and `modbus_server` are what the simulator suite
+runs against all day. **No `%z` or `%t` remains anywhere under `src/`.**
+
+Two sites needed real code, not a specifier swap: `ab_server/main.c:683` and `:905` parse tag
+sizes and dimensions with `str_scanf(..., "%zu", &tag->dimensions[0])`. **`scanf` has no `z`
+either**, and a conversion cannot be cast at the call because the argument is a pointer to the
+destination. Both now read into a `uint64_t` temporary with `SCNu64` and narrow to `size_t`
+afterwards.
+
+Verified: MinGW x86-64 and i686 clean rebuilds, **0 errors, 0 format warnings** on both, down
+from 38 and 38. Native Debug rebuild 0 warnings; unit **8/8**; simulator **184/184**.
 
 **Do not treat this as cosmetic.** The count is large because the cost of each one is small
 and the cost of the class is not: the nine bugs 3.4 found had each been printing a wrong number
@@ -2503,9 +2554,35 @@ Net: -7,401 bytes of header, -17 build lines, two directories.
 Verified: fresh `cmake` configure plus `--clean-first` build, 0 warnings; unit **8/8**;
 simulator **184/184** (181s).
 
+### 2.46 `src/vendor/libyafl` deleted — DONE 2026-09-19
+
+The vendored fiber library was a parked dependency for device-tag work on
+`origin/device_tag_libyafl`. Nothing on `release` ever built it: no `add_subdirectory` named
+it, and the only build references were indirect.
+
+Before deleting it, the vendored tree was diffed against the standalone repo at
+`~/Projects/yafl`, which had fallen behind it by four months. Eleven files' worth of updates
+were applied upstream — the sanitizer fiber-switch notifications in `src/yafl.c`, the
+`NOINLINE`/`volatile` rewrite of `tests/check_stack_direction.c` (the old probe inlined at
+`-O2` and could report the stack growing the wrong way), the CMake sanitizer deference and
+probe-skip branches, four i386 MS-PE assembly files and four cross toolchains. The branch that
+wants libyafl should re-vendor from `~/Projects/yafl`, not recover this directory.
+
+Also removed, both dead once the directory went:
+
+- `src/poc/CMakeLists.txt:9-21` — a `TRIPLE` block setting four target triples. Its only
+  consumer was `src/vendor/libyafl/CMakeLists.txt:126`.
+- `cmake_toolchains/mingw_i686_windows.cmake:29-31` — a comment claiming the 32-bit flag also
+  selected the `i386-pc-windows-gnu` triple for libyafl. It still sets `-m32`; it no longer
+  selects anything for anyone.
+
+Net: -1.0 MB, one vendored project, 13 build lines.
+
+Verified: fresh `cmake` configure plus build, 0 warnings.
+
 ## 3. Verification gaps
 
-### 3.1 No Windows build — STILL OPEN, but now one command away
+### 3.1 No Windows build — RESOLVED 2026-09-19, both widths compile
 
 No compiler on this machine can build for Windows, so everything below is unexercised there.
 Reviewed again 2026-09-18; four bullets came off the list by reading, and the build itself is
@@ -2527,6 +2604,55 @@ Release or MinSizeRel, not Debug: the Debug build turns on ASan/UBSan and MinGW-
 sanitizer runtime. This is a compile check, not a test run -- the binaries do not execute on
 the host. Confirmed here that the configure reaches the compiler check and stops only because
 `x86_64-w64-mingw32-gcc` is absent.
+
+**Built 2026-09-19.** `brew install mingw-w64` (GCC 16.2.0), then both cross toolchains:
+
+| target | file | result |
+|---|---|---|
+| x86-64 Windows | `cmake_toolchains/mingw_x86_64_cross.cmake` | **0 errors**, 109 distinct warnings |
+| i386 Windows | `cmake_toolchains/mingw_i686_cross.cmake` (new) | **0 errors**, 98 distinct warnings |
+
+`mingw_i686_cross.cmake` is the 32-bit twin of the file that was already here, and it is the
+only build in the tree where `long` is 32 bits -- which is the width 1.11 group 1 was fixed
+for. It is a compile check, not a test run; the binaries do not execute on this host.
+
+The build wiring turned out to be right without changes. `CMAKE_SYSTEM_NAME Windows` makes
+`WIN32` true and `APPLE`/`UNIX` false, so `CMakeLists.txt:130` includes `windows.cmake` and
+`EXTRA_LINKER_LIBS` picks up `ws2_32 bcrypt`; `scan_eip_network` adds `iphlpapi` under its
+`if(WIN32)` + `if(NOT MSVC)` guard. Note that compiler dispatch lands on `clang_or_gcc.cmake`,
+**not** `mingw.cmake` -- that one is keyed on the "MinGW Makefiles" generator, which a POSIX
+host never selects, so `-DMINGW=1` is not defined in a cross build.
+
+**What the compiler found, and what it did not.** Nothing in the list of "still genuinely
+unverified" below turned out to be broken. `socket.c`'s 1,111-line `_WIN32` half compiles, as
+do `thread.c`'s Windows branches, the `InterlockedCompareExchange` Winsock guard, and the
+three round-9 time fixes. The warnings are all pre-existing classes:
+
+- **38 `%z`/`%t` sites -- 1.11 group 2, now confirmed real.** MinGW's GCC checks against the
+  msvcrt printf, which has no `z` or `t` length modifier: `unknown conversion type character
+  'z' in format`, and then `too many arguments for format` because the argument no longer
+  pairs with anything. All 38 are in the library -- 28 `%z`, 10 `%t`, in `pccc.c`,
+  `session.c`, `omron/conn.c`, `cip/tag.c`, `cip/conn.c`, `eip_cip_special.c` and `lib.c`.
+  These log lines print garbage on Windows today. The 96 `%z` sites in `tools/` produced no
+  warning: those files build with their own flags.
+- **11 `%d` for a `size_t` or `ptrdiff_t`**, on the x86-64 build only. On i686 `size_t` is
+  `unsigned int` and the pair matches, which is exactly why this class hides.
+- **13 `-Wsign-conversion`, 3 `-Wtype-limits`, 2 `-Wsign-compare`**, all in `tools/`, plus one
+  `-Wmaybe-uninitialized` in `test_event.c` and one `-Wstringop-truncation` in
+  `modbus_server.c`. `tools/utils/socket.c:363` looks alarming -- "changes value from
+  '2147772030' to '-2147195266'" -- but it is `ioctlsocket(sock, FIONBIO, &mode)`, and
+  `FIONBIO`'s bit pattern is what the call wants. Not a bug.
+- **15 `-Wcpp`** from `winsock2.h` itself: `#warning Please include winsock2.h before
+  windows.h`, reached through `tools/ab_server/compat.h:76`. The library's own `socket.c` gets
+  the order right; `ab_server` does not.
+- **6 `-Wunknown-pragmas`** for the `#pragma comment(lib, ...)` lines in `scan_eip_network.c`
+  and `tools/utils/coro_net.h`. MSVC reads those; GCC ignores them, which is why the CMake
+  files link `ws2_32` and `iphlpapi` explicitly.
+
+Group 1's conversions produced no warning on either build -- the point of the exercise.
+
+**Still unverified after this:** everything MSVC-only -- filed as its own item in 3.5, with
+the inventory and one path that no available compiler can reach.
 
 **Retired by reading, 2026-09-18:**
 
@@ -2720,6 +2846,50 @@ from the checked-in style at HEAD. That churn was backed out here, hunk by hunk,
 lines these fixes actually touch are rewrapped. Anyone reformatting should do it as its own
 commit across the whole tree, not incidentally.
 
+
+### 3.5 No MSVC build — OPEN, and one path is provably MinGW-proof
+
+Filed 2026-09-19, after 3.1 closed the MinGW gap and made this one visible as the remainder.
+The two Windows cross builds compile with GCC. Everything that depends on the *compiler* being
+MSVC rather than the *platform* being Windows is still unexercised.
+
+**What is MSVC-only, by inventory.** Six `_MSC_VER` branches in code that ships:
+
+| where | what | reachable by MinGW? |
+|---|---|---|
+| `utils/macros.h:54` | `START_PACK`/`END_PACK` as `__pragma(pack(push, 1))` | no -- MinGW takes the `__attribute__((packed))` arm |
+| `utils/debug.h:78`, `utils/mutex.h:64` | `#define __func__ __FUNCTION__` | no -- guarded `_WIN32 && _MSC_VER` |
+| `utils/str.c:454,458` | `_stricmp` / `_strnicmp` | **yes** -- these compiled in 3.1 |
+| `tools/ab_server/compat.h:64` | `str_scanf` as `sscanf_s` | no -- MinGW gets plain `sscanf` |
+| `utils/atomic_utils.c` | the whole non-C11 fallback, `Interlocked*` | **no, and it cannot be made to** |
+
+The struct-packing one is the one to worry about first if this ever gets built: every wire
+struct in the library is packed through those macros, and MSVC's `#pragma pack` and GCC's
+`__attribute__((packed))` are different mechanisms reached by different arms of the same
+`#ifdef`. A mistake there is not a warning, it is every packet off by some bytes.
+
+**`atomic_utils.c`'s fallback cannot be compile-checked with MinGW.** Worth stating plainly,
+because the obvious idea -- force the branch on and see if it builds -- was tried here and does
+not work:
+
+```
+$ x86_64-w64-mingw32-gcc -std=c11 -D__STDC_NO_ATOMICS__ -Isrc -c src/utils/atomic_utils.c
+src/utils/atomic_utils.c:60:12: error: implicit declaration of function 'InterlockedExchange16'
+```
+
+MinGW-w64's headers define `InterlockedCompareExchange16` but have no `InterlockedExchange16`
+anywhere -- not in `winnt.h`, not as the `_InterlockedExchange16` intrinsic in `intrin.h`. It
+is an MSVC intrinsic. So the branch holding **fixes 1.2 and 1.3** -- the lost-update bug that
+deadlocked a spinlock, and the compare-and-set that returned the wrong thing -- has never been
+through any compiler, and no compiler available on this machine can take it.
+
+Note the fallback is not reached on Windows merely by being Windows: it is gated on
+`__STDC_NO_ATOMICS__ || __STDC_VERSION__ < 201112L`, and both MinGW builds reported the C11
+atomics path. MSVC is the case that lands in it, because MSVC does not implement C11 atomics.
+
+**Closing this needs a real MSVC**, on a Windows host or a CI runner; there is no cross
+compiler for it. Short of that, the honest status is that these paths are reviewed, not built.
+Do not let 3.1's green result imply otherwise.
 
 ## 4. Dead code and cleanup (from the repo audit)
 

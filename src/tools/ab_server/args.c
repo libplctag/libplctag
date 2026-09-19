@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <inttypes.h>
 #include <errno.h>
 #include <math.h>
 #include "args.h"
@@ -175,7 +176,7 @@ static bool parse_value(args_value_t *val, const char *str,
 util_err_t args_parse(int argc, const char *argv[],
                       const args_flag_def_t *flags, size_t flags_count,
                       args_result_t *result) {
-    log_detail("args_parse: entry (argc=%d, flags_count=%zu)", argc, flags_count);
+    log_detail("args_parse: entry (argc=%d, flags_count=%" PRIu64 ")", argc, (uint64_t)flags_count);
 
     if (!argv || !flags || !result) {
         log_error("args_parse: NULL argument");
@@ -183,7 +184,7 @@ util_err_t args_parse(int argc, const char *argv[],
     }
 
     if (flags_count == 0 || flags_count > ARGS_MAX_FLAGS) {
-        log_error("args_parse: invalid flags_count %zu", flags_count);
+        log_error("args_parse: invalid flags_count %" PRIu64, (uint64_t)flags_count);
         return UTIL_EINVAL;
     }
 

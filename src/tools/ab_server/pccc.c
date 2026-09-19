@@ -397,15 +397,18 @@ slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     tag_size = tag->elem_count * tag->elem_size;
     start_byte_offset = data_file_element * tag->elem_size;  // MAGIC - 3 is offset of first mask byte in RMW packet
 
-    log_info("Element size %zu, start byte offset %zu, tag size %zu.", elem_size, start_byte_offset, tag_size);
+    log_info("Element size %" PRIu64 ", start byte offset %" PRIu64 ", tag size %" PRIu64 ".", (uint64_t)elem_size,
+             (uint64_t)start_byte_offset, (uint64_t)tag_size);
 
     if(start_byte_offset >= tag_size) {
-        log_info("Starting offset, %zu, is greater than tag size, %zu!", start_byte_offset, tag_size);
+        log_info("Starting offset, %" PRIu64 ", is greater than tag size, %" PRIu64 "!", (uint64_t)start_byte_offset,
+                 (uint64_t)tag_size);
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
     if(start_byte_offset + elem_size > tag_size) {
-        log_info("Ending offset, %zu, is greater than tag size, %zu!", start_byte_offset + elem_size, tag_size);
+        log_info("Ending offset, %" PRIu64 ", is greater than tag size, %" PRIu64 "!", (uint64_t)(start_byte_offset + elem_size),
+                 (uint64_t)tag_size);
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
@@ -424,11 +427,12 @@ slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc) {
         uint8_t and_mask = slice_get_uint8(input, and_mask_offset + i);
         uint8_t or_mask = slice_get_uint8(input, or_mask_offset + i);
 
-        log_info("Byte %zu: AND mask=%02x, OR mask=%02x, old value=%02x", i, and_mask, or_mask, tag->data[start_byte_offset + i]);
+        log_info("Byte %" PRIu64 ": AND mask=%02x, OR mask=%02x, old value=%02x", (uint64_t)i, and_mask, or_mask,
+                 tag->data[start_byte_offset + i]);
 
         tag->data[start_byte_offset + i] = (tag->data[start_byte_offset + i] & and_mask) | or_mask;
 
-        log_info("Byte %zu: new value=%02x", i, tag->data[start_byte_offset + i]);
+        log_info("Byte %" PRIu64 ": new value=%02x", (uint64_t)i, tag->data[start_byte_offset + i]);
     }
 
     log_info("RMW operation complete.");
@@ -662,7 +666,8 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     data_file_element = slice_get_uint8(input, 4);
     data_file_subelement = slice_get_uint8(input, 5);
 
-    log_info("Transfer size %u, file type %zu, element %zu.", transfer_size, data_file_type, data_file_element);
+    log_info("Transfer size %u, file type %" PRIu64 ", element %" PRIu64 ".", transfer_size, (uint64_t)data_file_type,
+             (uint64_t)data_file_element);
 
     /* SLC RMW only supports 16-bit (2-byte) elements. */
     if(transfer_size != 2) {
@@ -684,13 +689,14 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     }
 
     if(tag->tag_type != data_file_type) {
-        log_info("Data file type requested, %zu, does not match file type of tag, %d!", data_file_type, tag->tag_type);
+        log_info("Data file type requested, %" PRIu64 ", does not match file type of tag, %d!", (uint64_t)data_file_type,
+                 tag->tag_type);
         return make_pccc_log_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
     }
 
     /* Check element size is 2 bytes. */
     if(tag->elem_size != 2) {
-        log_info("Tag element size %zu is not 2 bytes for RMW!", tag->elem_size);
+        log_info("Tag element size %" PRIu64 " is not 2 bytes for RMW!", (uint64_t)tag->elem_size);
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
@@ -698,15 +704,17 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     tag_size = tag->elem_count * tag->elem_size;
     start_byte_offset = data_file_element * tag->elem_size;
 
-    log_info("Start byte offset %zu, tag size %zu.", start_byte_offset, tag_size);
+    log_info("Start byte offset %" PRIu64 ", tag size %" PRIu64 ".", (uint64_t)start_byte_offset, (uint64_t)tag_size);
 
     if(start_byte_offset >= tag_size) {
-        log_info("Starting offset, %zu, is greater than tag size, %zu!", start_byte_offset, tag_size);
+        log_info("Starting offset, %" PRIu64 ", is greater than tag size, %" PRIu64 "!", (uint64_t)start_byte_offset,
+                 (uint64_t)tag_size);
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
     if(start_byte_offset + 2 > tag_size) {
-        log_info("Ending offset, %zu, is greater than tag size, %zu!", start_byte_offset + 2, tag_size);
+        log_info("Ending offset, %" PRIu64 ", is greater than tag size, %" PRIu64 "!", (uint64_t)(start_byte_offset + 2),
+                 (uint64_t)tag_size);
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
@@ -730,7 +738,7 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
         /* Preserve bits not in the mask, apply new data for bits in the mask. */
         tag->data[start_byte_offset + i] = (uint8_t)((tag->data[start_byte_offset + i] & ~mask) | (new_data & mask));
 
-        log_info("Byte %zu: new value=%02x", i, tag->data[start_byte_offset + i]);
+        log_info("Byte %" PRIu64 ": new value=%02x", (uint64_t)i, tag->data[start_byte_offset + i]);
     }
 
     log_info("RMW operation complete.");

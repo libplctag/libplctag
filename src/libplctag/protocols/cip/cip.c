@@ -36,6 +36,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <libplctag/lib/libplctag.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -328,8 +329,8 @@ static int parse_numeric_segment(cip_tag_name_t *ctx, const char *name, int *enc
      * largest legal segment.
      */
     if(errno == ERANGE || val > (long)INT32_MAX) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, ctx->tag_id, "Numeric segment must be less than or equal to %ld!",
-               (long)INT32_MAX);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, ctx->tag_id, "Numeric segment must be less than or equal to %" PRId32 "!",
+               (int32_t)INT32_MAX);
         return PLCTAG_ERR_BAD_PARAM;
     }
 

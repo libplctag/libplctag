@@ -297,8 +297,8 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
     /* calculate the maximum slice of the multi-response payload */
     slice_s multi_response_payload = slice_from_slice(output, output_offset, slice_len(output) - output_offset);
 
-    log_info("Response payload starts at offset %zu", output_offset);
-    log_info("Response payload length: %zu", slice_len(multi_response_payload));
+    log_info("Response payload starts at offset %" PRIu64, (uint64_t)output_offset);
+    log_info("Response payload length: %" PRIu64, (uint64_t)(slice_len(multi_response_payload)));
 
     /* Track if any sub-response has an error status */
     bool any_error = false;
@@ -313,13 +313,14 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
             (i + 1 < service_count) ? slice_get_uint16_le(cip_service_payload, 2 + (i + 1) * 2) : slice_len(cip_service_payload);
 
         if(request_start >= slice_len(cip_service_payload)) {
-            log_info("Request %zu offset %u is out of bounds", i, request_offset);
+            log_info("Request %" PRIu64 " offset %u is out of bounds", (uint64_t)i, request_offset);
             return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
         }
 
         /* Validate that offsets are in ascending order */
         if(request_start >= next_request_start) {
-            log_info("Request %zu has invalid offset range: start=%zu >= next=%zu", i, request_start, next_request_start);
+            log_info("Request %" PRIu64 " has invalid offset range: start=%" PRIu64 " >= next=%" PRIu64, (uint64_t)i,
+                     (uint64_t)request_start, (uint64_t)next_request_start);
             return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
         }
 
@@ -330,22 +331,23 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
         slice_s response_output = slice_from_slice(
             output, output_offset, (slice_len(output) - (output_offset + ((service_count - i) * CIP_MINIMAL_RESPONSE_SIZE))));
 
-        log_info("Response output slice starts at offset %zu with length %zu", output_offset, slice_len(response_output));
+        log_info("Response output slice starts at offset %" PRIu64 " with length %" PRIu64, (uint64_t)output_offset,
+                 (uint64_t)(slice_len(response_output)));
 
-        log_info("Sub-request %zu:", i);
+        log_info("Sub-request %" PRIu64 ":", (uint64_t)i);
         log_info_slice(request);
 
         /* Process the request - each is a complete CIP request */
         slice_s response = cip_dispatch_request(request, response_output, plc);
 
-        log_info("Sub-request %zu response:", i);
+        log_info("Sub-request %" PRIu64 " response:", (uint64_t)i);
         log_info_slice(response);
 
         /* Check the CIP status byte (byte 2) of the response - if non-zero, there's an error */
         if(!slice_has_err(response) && slice_len(response) > 2) {
             uint8_t cip_status = slice_get_uint8(response, 2);
             if(cip_status != CIP_OK) {
-                log_info("Sub-request %zu returned CIP status error: 0x%02x", i, cip_status);
+                log_info("Sub-request %" PRIu64 " returned CIP status error: 0x%02x", (uint64_t)i, cip_status);
                 any_error = true;
             }
         }
@@ -356,7 +358,7 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
         output_offset += slice_len(response);
         offset_from_response_count += slice_len(response);
 
-        log_info("Output up to request %zu:", i);
+        log_info("Output up to request %" PRIu64 ":", (uint64_t)i);
         log_info_slice(slice_from_slice(output, 0, output_offset));
     }
 
@@ -379,7 +381,7 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
     /* Service count */
     slice_set_uint16_le(output, multi_payload_start, service_count);
 
-    log_info("Multi-service response completed, total size %zu bytes", output_offset);
+    log_info("Multi-service response completed, total size %" PRIu64 " bytes", (uint64_t)output_offset);
     log_info_slice(slice_from_slice(output, 0, output_offset));
 
     return slice_from_slice(output, 0, output_offset);
@@ -429,7 +431,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     log_info("CIP Payload:");
     log_info_slice(cip_service_payload);
 
-    log_info("output buffer size: %zu", slice_len(output));
+    log_info("output buffer size: %" PRIu64, (uint64_t)(slice_len(output)));
 
 
     if(!slice_match_data_exact(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
@@ -600,7 +602,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     slice_set_uint8(output, offset, 0);
     offset++;
 
-    log_info("Forward Open response completed, size %zu bytes", offset);
+    log_info("Forward Open response completed, size %" PRIu64 " bytes", (uint64_t)offset);
     log_info_slice(slice_from_slice(output, 0, offset));
 
     return slice_from_slice(output, 0, offset);
@@ -970,7 +972,7 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 
     /* are the number of indexes correct? */
     if(num_indexes > 0 && num_indexes != tag->num_dimensions) {
-        log_info("Wrong number of indexes passed.   Must be zero or %zu indexes.", tag->num_dimensions);
+        log_info("Wrong number of indexes passed.   Must be zero or %" PRIu64 " indexes.", (uint64_t)tag->num_dimensions);
         return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
@@ -1221,7 +1223,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
                 break;
 
             default:
-                log_info("Unexpected numeric segment marker %x at position %zu!", segment_type, offset);
+                log_info("Unexpected numeric segment marker %x at position %" PRIu64 "!", segment_type, (uint64_t)offset);
                 return false;
                 break;
         }
@@ -1231,7 +1233,8 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
 
     /* the only valid number of indexes is zero or the number of dimensions in the tag. */
     if(*num_indexes != 0 && *num_indexes != (*tag)->num_dimensions) {
-        log_info("Required zero or %zu numeric segments, but only found %zu!", (*tag)->num_dimensions, (size_t)*num_indexes);
+        log_info("Required zero or %" PRIu64 " numeric segments, but only found %" PRIu64 "!", (uint64_t)((*tag)->num_dimensions),
+                 (uint64_t)((size_t)*num_indexes));
         return false;
     }
 
@@ -1292,7 +1295,8 @@ bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexe
     /* check index bounds */
     for(size_t index = 0; index < num_indexes; index++) {
         if(indexes[index] >= tag->dimensions[index]) {
-            log_info("Index %zu out of bounds for dimension %zu.", (size_t)indexes[index], index);
+            log_info("Index %" PRIu64 " out of bounds for dimension %" PRIu64 ".", (uint64_t)((size_t)indexes[index]),
+                     (uint64_t)index);
             return false;
         }
     }
@@ -1335,13 +1339,15 @@ bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexe
 
     /* Check if the start offset exceeds the total size of the tag */
     if(*request_start_byte_offset > tag_size) {
-        log_info("Request start byte offset %d exceeds total tag size %zu", (size_t)*request_start_byte_offset, tag_size);
+        log_info("Request start byte offset %d exceeds total tag size %" PRIu64, (size_t)*request_start_byte_offset,
+                 (uint64_t)tag_size);
         return false;
     }
 
     /* Check if the end offset exceeds the total size of the tag */
     if(*request_end_byte_offset > tag_size) {
-        log_info("Request end byte offset %d exceeds total tag size %zu", (size_t)*request_end_byte_offset, tag_size);
+        log_info("Request end byte offset %d exceeds total tag size %" PRIu64, (size_t)*request_end_byte_offset,
+                 (uint64_t)tag_size);
         return false;
     }
 

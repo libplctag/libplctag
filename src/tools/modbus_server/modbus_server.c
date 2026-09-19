@@ -365,8 +365,8 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         /* compact the receive buffer */
         buf_compact(&client->recv_buf);
 
-        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "%zu bytes space in receive buffer before read",
-              buf_write_size(&client->recv_buf));
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "%" PRIu64 " bytes space in receive buffer before read",
+              (uint64_t)(buf_write_size(&client->recv_buf)));
 
         /* Reset timestamps for new request */
         client->timing.first_byte_us = 0;
@@ -396,7 +396,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
         /* we got at least enough data for a full packet */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
-              "Received complete Modbus request of %zu bytes:", buf_read_size(&client->recv_buf));
+              "Received complete Modbus request of %" PRIu64 " bytes:", (uint64_t)(buf_read_size(&client->recv_buf)));
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->recv_buf);
 
         /* get the header info */
@@ -435,14 +435,15 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         }
 
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
-              "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
+              "Prepared response of %" PRIu64 " bytes:", (uint64_t)(buf_read_size(&client->send_buf)));
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
 
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
 
         /* Send response */
-        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %" PRIu64 " bytes",
+              (uint64_t)(buf_write_pos(&client->send_buf)));
         while((err = socket_send_buf(fd, &client->send_buf)) == UTIL_EAGAIN) { coro_yield(handle, CORO_EVENT_WRITE); }
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
@@ -693,10 +694,10 @@ int main(int argc, char *argv[]) {
     server.storage = temp_storage;
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server starting");
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Coils: %zu", (size_t)coils_val);
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Discrete Inputs: %zu", (size_t)di_val);
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Holding Registers: %zu", (size_t)hr_val);
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Input Registers: %zu", (size_t)ir_val);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Coils: %" PRIu64, (uint64_t)((size_t)coils_val));
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Discrete Inputs: %" PRIu64, (uint64_t)((size_t)di_val));
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Holding Registers: %" PRIu64, (uint64_t)((size_t)hr_val));
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Input Registers: %" PRIu64, (uint64_t)((size_t)ir_val));
 
     /* Initialize the coroutine system */
     util_err_t err = coro_create(&g_server->coro_net, 256);

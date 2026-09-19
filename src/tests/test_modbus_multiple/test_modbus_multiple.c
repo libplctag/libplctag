@@ -307,7 +307,8 @@ int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
             if(rc == PLCTAG_STATUS_PENDING) {
                 all_ok = false;
             } else if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "wait_for_ok(): Error %s returned on tag %zu operation!\n", plc_tag_decode_error(rc), i);
+                fprintf(stderr, "wait_for_ok(): Error %s returned on tag %" PRIu64 " operation!\n", plc_tag_decode_error(rc),
+                        (uint64_t)i);
                 return rc;
             }
         }

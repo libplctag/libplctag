@@ -866,26 +866,25 @@ extern int cip_get_payload_size(cip_request_p request) {
 
         /* get length of embedded command */
         uint16_t cip_packet_size = le2h16(uc_req->cpf_udi_item_length);
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Unconnected request packet size is %d bytes.",
-               cip_packet_size);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Unconnected request packet size is %d bytes.", cip_packet_size);
 
         request_data_size = (int)le2h16(uc_req->cpf_udi_item_length);
 
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Unconnected request data size is %d bytes.",
-               request_data_size);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Unconnected request data size is %d bytes.", request_data_size);
 
         /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
         ptrdiff_t cal_req_size =
             (ptrdiff_t)(request->request_size) - (((uint8_t *)(&uc_req->cpf_udi_item_length) + 2) - request->data);
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Calculated request size is %td bytes.", cal_req_size);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Calculated request size is %" PRId64 " bytes.",
+               (int64_t)cal_req_size);
 
         if(cal_req_size < 0) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
-                   "Calculated request size is negative, something is wrong!");
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Calculated request size is negative, something is wrong!");
             request_data_size = 0;
         } else if((uint16_t)cal_req_size != request_data_size) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
-                   "Calculated request size %td does not match the request data size %d!", cal_req_size, request_data_size);
+                   "Calculated request size %" PRId64 " does not match the request data size %d!", (int64_t)cal_req_size,
+                   request_data_size);
         }
     } else {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id,

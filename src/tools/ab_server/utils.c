@@ -37,6 +37,7 @@
 #include "plc.h"
 #include "log.h"
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -241,7 +242,7 @@ void slice_dump(slice_s s) {
 
         /* print the prefix and address */
         // NOLINTNEXTLINE
-        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03zu", offset);
+        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03" PRIu64, (uint64_t)offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf);
             column++) {
@@ -281,8 +282,8 @@ void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s)
     max_row = (slice_len(s) + (COLUMNS - 1)) / COLUMNS;
 
     /* diagnostic: log the slice length */
-    fprintf(stderr, "[DEBUG] log_slice_impl_func called: func=%s, line=%d, lvl=%d, slice_len=%zu, max_row=%zu\n", func, line, lvl,
-            slice_len(s), max_row);
+    fprintf(stderr, "[DEBUG] log_slice_impl_func called: func=%s, line=%d, lvl=%d, slice_len=%" PRIu64 ", max_row=%" PRIu64 "\n",
+            func, line, lvl, (uint64_t)(slice_len(s)), (uint64_t)max_row);
 
     for(row = 0; row < max_row; row++) {
         size_t offset = (row * COLUMNS);
@@ -290,7 +291,7 @@ void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s)
 
         /* print the prefix and address */
         // NOLINTNEXTLINE
-        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03zu", offset);
+        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03" PRIu64, (uint64_t)offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf);
             column++) {

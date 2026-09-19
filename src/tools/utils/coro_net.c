@@ -189,7 +189,7 @@ util_err_t coro_create(coro_net_t **out_coro_net, size_t max_tasks) {
 
     *out_coro_net = NULL;
 
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Creating coro_net instance: max_tasks=%zu", max_tasks);
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Creating coro_net instance: max_tasks=%" PRIu64, (uint64_t)max_tasks);
 
     // Calculate total memory needed for single allocation
     size_t total_size = sizeof(coro_net_t);
@@ -218,7 +218,8 @@ util_err_t coro_create(coro_net_t **out_coro_net, size_t max_tasks) {
     // Allocate single contiguous block
     void *mem = calloc(1, total_size);
     if(!mem) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to allocate coro_net instance (%zu bytes)", total_size);
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to allocate coro_net instance (%" PRIu64 " bytes)",
+              (uint64_t)total_size);
         return UTIL_ERESOURCE;
     }
 
@@ -423,22 +424,25 @@ util_err_t coro_run(coro_net_t **net_ptr, uint32_t tick_interval_ms) {
             /* is there something to run? */
             if(net->task_fds[actual_index] != INVALID_SOCKET) { /* is this an allocated task? */
                 if(net->task_handlers[actual_index] == NULL) {
-                    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "Task %zu has no handler set, skipping!", actual_index);
+                    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "Task %" PRIu64 " has no handler set, skipping!",
+                          (uint64_t)actual_index);
                     continue;
                 }
 
                 /* is it an ALWAYS task with a handler? */
                 if(net->task_events[actual_index] == CORO_EVENT_ALWAYS) {
                     /* we will run these tasks immediately */
-                    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Dispatching ALWAYS task immediately: index=%zu", actual_index);
+                    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Dispatching ALWAYS task immediately: index=%" PRIu64,
+                          (uint64_t)actual_index);
                     coro_task_handle_t task_handle = {.coro_net = net, .index = (int)actual_index};
                     net->task_handlers[actual_index](task_handle, net->task_fds[actual_index], net->task_contexts[actual_index]);
                 }
 
                 /* Add socket tasks to poll array if they have a valid socket and a poll event set */
                 if(net->task_fds[actual_index] != CORO_NO_SOCKET && net->task_events[actual_index] != CORO_EVENT_NONE) {
-                    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Adding socket task to poll array: index=%zu fd=%d events=0x%04x",
-                          actual_index, (int)net->task_fds[actual_index], net->task_events[actual_index]);
+                    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW,
+                          "Adding socket task to poll array: index=%" PRIu64 " fd=%d events=0x%04x", (uint64_t)actual_index,
+                          (int)net->task_fds[actual_index], net->task_events[actual_index]);
                     net->pfds[nfds].fd = net->task_fds[actual_index];
                     net->pfds[nfds].events = net->task_events[actual_index];
                     net->pfds[nfds].revents = 0;
@@ -506,8 +510,9 @@ util_err_t coro_run(coro_net_t **net_ptr, uint32_t tick_interval_ms) {
         if(net->iteraction_count % 100 == 0) {
             // Log iteration statistics every 100 iterations
             pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL,
-                  "Iteration %zu: rebuild=%" PRId64 "us, poll=%" PRId64 "us, dispatch=%" PRId64 "us, nfds=%zu",
-                  net->iteraction_count, (int64_t)rebuild_time, (int64_t)poll_time, (int64_t)dispatch_time, nfds);
+                  "Iteration %" PRIu64 ": rebuild=%" PRId64 "us, poll=%" PRId64 "us, dispatch=%" PRId64 "us, nfds=%" PRIu64,
+                  (uint64_t)net->iteraction_count, (int64_t)rebuild_time, (int64_t)poll_time, (int64_t)dispatch_time,
+                  (uint64_t)nfds);
         }
     }
 

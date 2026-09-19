@@ -32,6 +32,8 @@
  ***************************************************************************/
 
 #include "eip.h"
+
+#include <inttypes.h>
 #include "cpf.h"
 #include "err.h"
 #include "fault.h"
@@ -66,12 +68,12 @@ static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip
 
 
 slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
-    log_info("eip_dispatch_request(): raw_output size = %zu, server_to_client_max_packet = %zu", slice_len(raw_output),
-             plc->server_to_client_max_packet);
+    log_info("eip_dispatch_request(): raw_output size = %" PRIu64 ", server_to_client_max_packet = %" PRIu64,
+             (uint64_t)(slice_len(raw_output)), (uint64_t)plc->server_to_client_max_packet);
 
     slice_s output = slice_from_slice(raw_output, 0, plc->server_to_client_max_packet);
 
-    log_info("eip_dispatch_request(): output size = %zu", slice_len(output));
+    log_info("eip_dispatch_request(): output size = %" PRIu64, (uint64_t)(slice_len(output)));
 
     slice_s response = slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE);
 

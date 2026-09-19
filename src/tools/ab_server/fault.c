@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -85,7 +86,7 @@ bool fault_parse(const char *spec, plc_s *plc) {
     for(int kind = FAULT_NONE + 1; kind < FAULT_MAX; kind++) {
         if(strlen(fault_names[kind]) == name_len && strncmp(spec, fault_names[kind], name_len) == 0) {
             atomic_store_int32(plc->fault_counts[kind], (int32_t)count);
-            log_info_always("Corrupting the next %ld response(s) with fault \"%s\".", count, fault_names[kind]);
+            log_info_always("Corrupting the next %" PRId64 " response(s) with fault \"%s\".", (int64_t)count, fault_names[kind]);
             return true;
         }
     }

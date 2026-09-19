@@ -33,6 +33,7 @@
 
 #include <ctype.h>
 #include <float.h>
+#include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
@@ -1756,10 +1757,11 @@ int pccc_tag_read_start(ab_tag_p tag) {
             + (tag->plc_type == AB_PLC_PLC5 ? (int)sizeof(plc5_pccc_read_cmd_req) : (int)sizeof(slc_pccc_read_cmd_req))
             + tag->encoded_name_size + 1;
 
-        pdebug(
-            DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id,
-            "PLC5 request overhead: CIP/PCCC header size %zu, PCCC read command header size %zu, encoded_name=%d, data_size=1, total=%d bytes",
-            sizeof(cip_pccc_req), sizeof(plc5_pccc_read_cmd_req), tag->encoded_name_size, request_overhead);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id,
+               "PLC5 request overhead: CIP/PCCC header size %" PRIu64 ", PCCC read command header size %" PRIu64
+               ", encoded_name=%d, data_size=1, total=%d bytes",
+               (uint64_t)(sizeof(cip_pccc_req)), (uint64_t)(sizeof(plc5_pccc_read_cmd_req)), tag->encoded_name_size,
+               request_overhead);
 
         int request_payload_space = cip_payload_space - request_overhead;
 
@@ -1847,12 +1849,13 @@ int pccc_tag_read_start(ab_tag_p tag) {
 
         /* debug: request full data length */
         ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request full data length: %td bytes.",
-               calculated_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request full data length: %" PRId64 " bytes.",
+               (int64_t)calculated_request_size);
 
         /* debug: CIP data length */
         ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request CIP data length: %td bytes.", cip_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request CIP data length: %" PRId64 " bytes.",
+               (int64_t)cip_request_size);
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
@@ -2250,8 +2253,8 @@ static int pccc_write_start(ab_tag_p tag, const pccc_write_variant_t *variant) {
          */
         if((size_t)session_payload_space <= overhead) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
-                   session_payload_space);
+                   "Unable to send request.  Packet overhead, %" PRIu64 " bytes, is too large for available payload, %d bytes!",
+                   (uint64_t)overhead, session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
@@ -2261,8 +2264,8 @@ static int pccc_write_start(ab_tag_p tag, const pccc_write_variant_t *variant) {
 
         if(data_per_packet < (size_t)tag->size) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag size is %d, write overhead is %zu, and write data per packet is %zu.", tag->size, overhead,
-                   data_per_packet);
+                   "Tag size is %d, write overhead is %" PRIu64 ", and write data per packet is %" PRIu64 ".", tag->size,
+                   (uint64_t)overhead, (uint64_t)data_per_packet);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
@@ -2308,8 +2311,8 @@ static int pccc_write_start(ab_tag_p tag, const pccc_write_variant_t *variant) {
 
         /* debug: request full data length */
         ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request full data length: %td bytes.",
-               calculated_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request full data length: %" PRId64 " bytes.",
+               (int64_t)calculated_request_size);
 
         /* debug: dump request data */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request data:");
@@ -2317,8 +2320,8 @@ static int pccc_write_start(ab_tag_p tag, const pccc_write_variant_t *variant) {
 
         /* debug: CIP data length */
         ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CIP data length: %td bytes.",
-               cip_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CIP data length: %" PRId64 " bytes.",
+               (int64_t)cip_request_size);
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
@@ -2566,8 +2569,8 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
             + tag->encoded_name_size + 1;
 
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id,
-               "PLC5 request overhead: PCCC read command header size %zu, encoded_name=%d, data_size=1, total=%d bytes",
-               (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_read_cmd_req) : sizeof(slc_pccc_read_cmd_req)),
+               "PLC5 request overhead: PCCC read command header size %" PRIu64 ", encoded_name=%d, data_size=1, total=%d bytes",
+               (uint64_t)((tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_read_cmd_req) : sizeof(slc_pccc_read_cmd_req))),
                tag->encoded_name_size, request_overhead);
 
         int request_payload_space = cip_payload_space - request_overhead;
@@ -2657,12 +2660,13 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
 
         /* debug: request full data length */
         ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request full data length: %td bytes.",
-               calculated_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request full data length: %" PRId64 " bytes.",
+               (int64_t)calculated_request_size);
 
         /* debug: CIP data length */
         ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request CIP data length: %td bytes.", cip_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request CIP data length: %" PRId64 " bytes.",
+               (int64_t)cip_request_size);
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);
@@ -2972,8 +2976,8 @@ static int pccc_dhp_write_start(ab_tag_p tag, const pccc_dhp_write_variant_t *va
          */
         if((size_t)session_payload_space <= overhead) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!", overhead,
-                   session_payload_space);
+                   "Unable to send request.  Packet overhead, %" PRIu64 " bytes, is too large for available payload, %d bytes!",
+                   (uint64_t)overhead, session_payload_space);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
@@ -2983,8 +2987,8 @@ static int pccc_dhp_write_start(ab_tag_p tag, const pccc_dhp_write_variant_t *va
 
         if(data_per_packet < variant->required_payload(tag)) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                   "Tag needs %zu bytes, write overhead is %zu, and write data per packet is %zu.",
-                   variant->required_payload(tag), overhead, data_per_packet);
+                   "Tag needs %" PRIu64 " bytes, write overhead is %" PRIu64 ", and write data per packet is %" PRIu64 ".",
+                   (uint64_t)(variant->required_payload(tag)), (uint64_t)overhead, (uint64_t)data_per_packet);
             tag->write_in_progress = 0;
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
@@ -3026,8 +3030,8 @@ static int pccc_dhp_write_start(ab_tag_p tag, const pccc_dhp_write_variant_t *va
 
         /* debug: request full data length */
         ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "%s request full data length: %td bytes.", variant->name,
-               calculated_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "%s request full data length: %" PRId64 " bytes.", variant->name,
+               (int64_t)calculated_request_size);
 
         /* debug: dump request data */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "%s request data:", variant->name);
@@ -3035,8 +3039,8 @@ static int pccc_dhp_write_start(ab_tag_p tag, const pccc_dhp_write_variant_t *va
 
         /* debug: CIP data length */
         ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "%s request CIP data length: %td bytes.", variant->name,
-               cip_request_size);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "%s request CIP data length: %" PRId64 " bytes.", variant->name,
+               (int64_t)cip_request_size);
 
         /* fill in Common Packet Format fields */
         cip_req->cpf_item_count = h2le16(2);

@@ -166,8 +166,9 @@ extern int cip_check_cpf_unconnected(cip_tag_p tag, cip_request_p request) {
 
     if(data_item_start + data_item_length != (size_t)request->request_size) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id,
-               "Unconnected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, request->request_size, data_item_start);
+               "Unconnected data item claims %" PRIu64 " bytes but the response is %d bytes with the item starting at %" PRIu64
+               "!",
+               (uint64_t)data_item_length, request->request_size, (uint64_t)data_item_start);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -216,8 +217,8 @@ extern int cip_check_cpf_connected(cip_tag_p tag, cip_request_p request, uint32_
 
     if(data_item_start + data_item_length != (size_t)request->request_size) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id,
-               "Connected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, request->request_size, data_item_start);
+               "Connected data item claims %" PRIu64 " bytes but the response is %d bytes with the item starting at %" PRIu64 "!",
+               (uint64_t)data_item_length, request->request_size, (uint64_t)data_item_start);
         return PLCTAG_ERR_BAD_DATA;
     }
 
