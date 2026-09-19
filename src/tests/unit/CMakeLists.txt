@@ -155,6 +155,22 @@ if(NOT WIN32)
 endif()
 
 # Register the unit tests with CTest
+# test_poller: socket_fd and poller over real loopback socket pairs rather than mocks.
+# There is no meaningful way to mock a readiness answer -- the question these layers
+# exist to answer is what the kernel does. Each case pins a way an event loop wedges
+# when the layer is wrong: a phantom event on an idle wait, a wake redelivered forever
+# because it was never drained, an event carrying the wrong connection's context, a
+# removed socket resurfacing, a polite hangup read as an error.
+add_executable(test_poller test_poller.c)
+
+target_include_directories(test_poller PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+)
+
+target_link_libraries(test_poller PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
@@ -162,11 +178,12 @@ add_test(NAME unit_test_cip_path_encode COMMAND test_cip_path_encode)
 add_test(NAME unit_test_byte_buf COMMAND test_byte_buf)
 add_test(NAME unit_test_atomic_utils COMMAND test_atomic_utils)
 add_test(NAME unit_test_atomic_utils_no_c11 COMMAND test_atomic_utils_no_c11)
+add_test(NAME unit_test_poller COMMAND test_poller)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
     DEPENDS test_init test_platform_str test_tag_name_bounds test_cip_path_encode test_byte_buf test_atomic_utils
-            test_atomic_utils_no_c11
+            test_atomic_utils_no_c11 test_poller
             ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

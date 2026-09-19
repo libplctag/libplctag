@@ -672,7 +672,7 @@ wait path is therefore covered in the sandbox, not only on hardware.
 The three non-test `compat_utils.c` copies are still byte-identical to each other.
 (Superseded by 2.5: two of the three are deleted and only `src/examples/` keeps a copy.)
 
-### 2.4 Sockets — OPEN, design written up in `docs/socket_layering_design.md`
+### 2.4 Sockets — step 3 DONE 2026-09-19; steps 4-5 open
 
 Three mutually incompatible APIs, with `socket_read`/`socket_write`/`socket_close`/
 `socket_accept` colliding by name with different signatures and return conventions:
@@ -730,6 +730,59 @@ and `hashtable/` were dead and are deleted; `compat_utils` and `stats` are live 
 Then round 6 moves the library's sockets to `src/utils/socket.[ch]` as pure movement, which
 empties `platform.h`. The L0/poller work waits until the first state machine is about to be
 written, so the poller is shaped by a real caller.
+
+**Step 3 -- L0 and the poller, DONE 2026-09-19.**
+
+| file | lines | what |
+|---|---|---|
+| `src/utils/socket_fd.[ch]` | ~700 | L0: non-blocking calls on a bare handle, no timeouts, nothing sleeps |
+| `src/utils/poller.[ch]` | ~400 | L0b: one thread's readiness loop, `poll()`/`WSAPoll()` backed, one wake pair for the thread |
+| `src/tests/unit/test_poller.c` | ~340 | nine cases over real loopback pairs |
+| `src/poc/modbus_server_poller/` | ~900 | the first consumer, forked from `tools/modbus_server` |
+
+The design said to hold this until a real caller existed so the poller would be shaped by one.
+**The caller was written rather than waited for**, as a fork: `src/poc/modbus_server_poller` is
+`tools/modbus_server` with the coroutine event loop replaced by explicit per-connection state
+machines over `poller_wait()`. The original is untouched and is still the server the simulator
+suite runs. Only the loop is forked -- the Modbus framing, register storage, buffer, error, log
+and args code are the same files the original builds, not copies, so any behavioural difference
+between the two servers is a difference in the socket layer and nothing else.
+
+**What the fork proved about the interface**, which is the entire point of writing it:
+
+- `void *context` carrying the connection object is enough. The loop dispatches listeners and
+  clients off a `kind` tag in the first field of both context structs, with no second table and
+  no lookup.
+- Re-arming interest belongs in a pass after dispatch, not inside it. `poller_modify()` and the
+  reap of closing connections run together at the end of an iteration, backwards, so the
+  swap-with-last removal cannot skip an entry and nothing frees a context the event array still
+  points at.
+- `PLCTAG_STATUS_PENDING` as would-block reads well at the call site. Every transfer is `if
+  pending, return and wait`, which is the whole of the non-blocking discipline.
+- Two things worth keeping that only appear with a real caller: accept until the queue drains
+  rather than one per event, and attempt the write immediately after building a response rather
+  than waiting to be told the socket is writable. Both turn two readiness events into one for
+  the common case.
+
+**Deliberately not done:** the library's own `sock_p` is not moved onto L0, `ab_server` and
+`modbus_server` are not converted, and `socket_wait_event()` is untouched. Those are steps 4
+and 5, and they are still gated on someone wanting the many-sockets-per-thread model in the
+library. What exists now is the layer plus one worked example of using it.
+
+Verified: native Debug build 0 warnings, unit **9/9** including the new `test_poller`;
+**simulator 184/184** with `modbus_server_poller` swapped into the `modbus_server` slot, so the
+suite's whole Modbus section ran against the fork without knowing; MinGW **x86-64 and i686**
+both 0 errors and 0 warnings in the new files, `modbus_server_poller.exe` produced. One Windows
+warning was found and fixed in the process: `inet_ntop()` takes a `socklen_t` size on POSIX and
+a `size_t` on Windows.
+
+**Note on the wake pair.** L0's `socket_fd_pair()` is the Windows self-connected-TCP dance and
+the POSIX `socketpair()` in one place. The poller creates exactly one, for the thread. Compare
+`socket_create()` in `utils/socket.c:167`, which builds one per socket unconditionally -- and
+`wake_plc` is `NULL` in all 14 AB and Omron vtables, so every AB session and Omron connection
+in the library carries a wake channel nothing will ever signal. That is not fixed here; it is
+noted because it is the same insight in the same week, and it is a small self-contained change
+whenever someone wants it.
 
 ### 2.5 `compat_utils.*` — DONE 2026-09-16
 

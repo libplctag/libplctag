@@ -217,13 +217,18 @@ for `modbus.c` until it migrates.
    top-level `#ifdef _WIN32`; the real merge is step 3's job, below. This does **not** empty
    `platform.h` — `sleep_ms`/`time_ms` and the packing macros remain. Sockets now log under their own
    `PLCTAG_MODULE_SOCKET`.
-3. **L0 + poller**, with `modbus_server` as the first consumer, since it already fits.
+3. **L0 + poller — DONE 2026-09-19.** `src/utils/socket_fd.[ch]` and `src/utils/poller.[ch]`
+   are in, built into the library, and covered by `src/tests/unit/test_poller.c`. The first
+   consumer is `src/poc/modbus_server_poller`, a fork of `src/tools/modbus_server` rewritten
+   onto them; the original is untouched and is still what the test suite runs. Forking rather
+   than converting is what let the poller be shaped by a real caller without putting the
+   suite's only Modbus server at risk.
 4. **Adapters onto L0**, one program at a time, each keeping its own types.
 5. **Migrate readiness**: `modbus.c` first, then whichever server is to be multiplexed.
 
-Steps 1 and 2 are done. Steps 3–5 only pay off if the
-many-sockets-per-thread model actually happens; hold them until the first state machine is
-about to be written, so the poller is shaped by a real caller rather than by this document.
+Steps 1, 2 and 3 are done. Steps 4 and 5 only pay off if the many-sockets-per-thread model
+actually happens. The condition this document put on step 3 — hold until a real caller exists
+— was met by writing that caller as the fork rather than by waiting for one.
 
 ## 8. Expected result
 
