@@ -769,6 +769,28 @@ between the two servers is a difference in the socket layer and nothing else.
 and 5, and they are still gated on someone wanting the many-sockets-per-thread model in the
 library. What exists now is the layer plus one worked example of using it.
 
+**One defect the fork introduced, found by describing it and fixed 2026-09-19.** The frame
+handling in `client_on_readable()` was written as `while(have_complete_frame(...))` with a
+comment claiming it answered pipelined requests -- but every path out of the body returned, so
+it ran at most once. It was an `if` wearing a loop's clothes. The consequence is worse than the
+wrong comment: a client that puts two requests in one segment leaves the second sitting in
+`recv_buf` after the first is answered, and the socket then has no unread data, so `poll()`
+never reports it readable again and the connection stalls until the client sends something
+else. **Readiness is a fact about the kernel's buffer, not ours.**
+
+Confirmed both ways with a two-requests-in-one-`sendall()` client: the fork answered one of two
+and hung, and the original `tools/modbus_server` answered both -- so this was a regression
+against the server being forked, not a shared limitation. `socket_recv_frame()` returns
+immediately when a complete frame is already buffered, which is how the coroutine version gets
+this right without thinking about it.
+
+The fix is `client_pump()`: a loop that alternates draining the send buffer and answering the
+next buffered frame, and stops only on something that genuinely needs the kernel. It also now
+consumes exactly one frame per request regardless of how much of it the protocol handler chose
+to read -- a handler that stops short used to leave its own tail at the head of the buffer,
+which is invisible until more than one frame is in flight and then reads as corruption rather
+than as an off-by-some.
+
 Verified: native Debug build 0 warnings, unit **9/9** including the new `test_poller`;
 **simulator 184/184** with `modbus_server_poller` swapped into the `modbus_server` slot, so the
 suite's whole Modbus section ran against the fork without knowing; MinGW **x86-64 and i686**

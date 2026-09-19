@@ -265,9 +265,12 @@ static void print_statistics(server_ctx_t *server) {
  * original's modbus_frame_check(), which is the point: the framing is not
  * what this fork is changing.
  */
-static bool have_complete_frame(buf_t *buf) {
+static bool have_complete_frame(buf_t *buf, size_t *frame_length) {
     buf_t header_buf;
     uint16_t length = 0;
+    size_t total = 0;
+
+    if(frame_length) { *frame_length = 0; }
 
     if(buf_read_size(buf) < MBAP_HEADER_SIZE) { return false; }
 
@@ -278,7 +281,11 @@ static bool have_complete_frame(buf_t *buf) {
     if(!buf_read_u16_be(&header_buf, "length", &length)) { return false; }
 
     /* the length field counts the unit ID, which the header size already includes */
-    if(buf_read_size(buf) < (size_t)(MBAP_HEADER_SIZE + length - 1)) { return false; }
+    total = (size_t)(MBAP_HEADER_SIZE + length - 1);
+
+    if(buf_read_size(buf) < total) { return false; }
+
+    if(frame_length) { *frame_length = total; }
 
     return true;
 }
@@ -386,12 +393,12 @@ static void client_build_response(client_ctx_t *client) {
 }
 
 
+static void client_pump(client_ctx_t *client);
+
+
 /*
- * One readable event.  Reads whatever is there, and if that completes a
- * frame, answers it.  Note that it loops over frames: a client that
- * pipelines two requests into one segment gets both answered without
- * waiting for another readiness event, which a one-frame-per-event loop
- * would stall on until the client sent more.
+ * One readable event.  Reads whatever is there once, then hands off to the
+ * pump, which answers every frame that read completed.
  */
 static void client_on_readable(client_ctx_t *client) {
     int32_t count = 0;
@@ -426,26 +433,7 @@ static void client_on_readable(client_ctx_t *client) {
 
     buf_write_advance(&client->recv_buf, (size_t)count);
 
-    while(have_complete_frame(&client->recv_buf)) {
-        client->recv_complete_us = util_time_us();
-
-        pdlog(LOG_MODULE_MODBUS_POLLER_CLIENT, LOG_LEVEL_DETAIL, "Complete request of %" PRIu64 " bytes.",
-              (uint64_t)buf_read_size(&client->recv_buf));
-
-        client_build_response(client);
-
-        if(client->state == CLIENT_CLOSING) { return; }
-
-        client->state = CLIENT_SENDING_REPLY;
-
-        /*
-         * Try the write immediately rather than waiting to be told the
-         * socket is writable.  A socket with room in its send buffer -- the
-         * normal case for a small Modbus reply -- finishes here, and the
-         * request costs one readiness event instead of two.
-         */
-        return;
-    }
+    client_pump(client);
 }
 
 
@@ -491,6 +479,79 @@ static void client_on_writable(client_ctx_t *client) {
 
 
 /*
+ * Answers every frame that is already in the receive buffer, sending each
+ * reply as it goes, and stops on the first thing that needs the kernel: no
+ * complete frame left, a send that would block, or a connection to close.
+ *
+ * This loop is why a pipelined client works.  A client that puts two
+ * requests in one segment leaves the second one sitting in recv_buf after
+ * the first is answered -- and the socket then has no unread data, so poll()
+ * never reports it readable again and that connection stalls until the
+ * client happens to send something else.  Readiness is a fact about the
+ * kernel's buffer, not about ours, so anything already buffered has to be
+ * drained here rather than waited for.
+ */
+static void client_pump(client_ctx_t *client) {
+    while(client->state != CLIENT_CLOSING) {
+        size_t frame_length = 0;
+        size_t frame_start = 0;
+        size_t consumed = 0;
+
+        if(client->state == CLIENT_SENDING_REPLY) {
+            client_on_writable(client);
+
+            /* still sending means the socket is full; wait to be told there is room */
+            if(client->state == CLIENT_SENDING_REPLY) { return; }
+
+            continue;
+        }
+
+        if(!have_complete_frame(&client->recv_buf, &frame_length)) { return; }
+
+        client->recv_complete_us = util_time_us();
+
+        pdlog(LOG_MODULE_MODBUS_POLLER_CLIENT, LOG_LEVEL_DETAIL, "Complete request of %" PRIu64 " bytes.",
+              (uint64_t)frame_length);
+
+        frame_start = buf_read_pos(&client->recv_buf);
+
+        client_build_response(client);
+
+        if(client->state == CLIENT_CLOSING) { return; }
+
+        /*
+         * Consume exactly one frame regardless of how much of it the handler
+         * chose to read.  Without this, a handler that stops short leaves the
+         * tail of its own request at the head of the buffer, where it is read
+         * as the start of the next one -- which only shows up once more than
+         * one frame is in flight, and then looks like corruption rather than
+         * like an off-by-some.
+         */
+        consumed = buf_read_pos(&client->recv_buf) - frame_start;
+
+        if(consumed < frame_length) {
+            buf_read_advance(&client->recv_buf, frame_length - consumed);
+        } else if(consumed > frame_length) {
+            pdlog(LOG_MODULE_MODBUS_POLLER_CLIENT, LOG_LEVEL_WARN,
+                  "Handler read %" PRIu64 " bytes of a %" PRIu64 " byte frame; dropping the connection.",
+                  (uint64_t)consumed, (uint64_t)frame_length);
+            client->state = CLIENT_CLOSING;
+            return;
+        }
+
+        client->state = CLIENT_SENDING_REPLY;
+
+        /*
+         * Fall through to the send rather than waiting to be told the socket
+         * is writable.  A socket with room in its send buffer -- the normal
+         * case for a small Modbus reply -- finishes on the next pass of this
+         * loop, and the request costs one readiness event instead of two.
+         */
+    }
+}
+
+
+/*
  * The state machine proper.  Each call does as much as it can without
  * blocking and then says what it wants to hear about next.
  */
@@ -510,15 +571,16 @@ static void client_step(client_ctx_t *client, int32_t events) {
 
     switch(client->state) {
         case CLIENT_READING_REQUEST:
+            /* client_on_readable() pumps, so a completed frame is answered here too */
             if(events & POLLER_EVENT_CAN_READ) { client_on_readable(client); }
-
-            /* a completed frame moves straight into the write attempt */
-            if(client->state == CLIENT_SENDING_REPLY) { client_on_writable(client); }
-
             break;
 
         case CLIENT_SENDING_REPLY:
-            if(events & POLLER_EVENT_CAN_WRITE) { client_on_writable(client); }
+            /*
+             * Pump rather than just write: draining this reply may uncover
+             * another frame that was already buffered behind it.
+             */
+            if(events & POLLER_EVENT_CAN_WRITE) { client_pump(client); }
             break;
 
         case CLIENT_CLOSING: break;
