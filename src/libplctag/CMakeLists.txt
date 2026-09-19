@@ -99,8 +99,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/time.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/time.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.c"
-                     "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h"
-                     "${PLATFORM_SHIM_PATH}/platform.h" )
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h" )
 
 list(APPEND libplctag_SRCS "${EIP_PROTOCOL_SOURCES}")
 list(APPEND libplctag_SRCS "${CIP_PROTOCOL_SOURCES}")

@@ -139,7 +139,7 @@ endif()
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 # where to find include files.
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # build the libplctag library, shared and static
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/libplctag")

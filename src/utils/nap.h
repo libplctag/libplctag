@@ -41,8 +41,7 @@
  * nap so it wakes now instead.
  *
  * This replaces the "condition variable" section that used to live in the
- * platform shims (src/platform/posix/platform.h and
- * src/platform/windows/platform.h).  Only the names and the home of the
+ * platform shims.  Only the names and the home of the
  * declarations changed; the primitive behaves exactly as it always did.
  *
  * NOTE: this is not a condition variable, despite what it used to be called.

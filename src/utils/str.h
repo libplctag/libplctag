@@ -36,8 +36,7 @@
 /*
  * String helpers.
  *
- * This replaces the string section that used to live in the platform shims
- * (src/platform/posix/platform.[ch] and src/platform/windows/platform.[ch]).
+ * This replaces the string section that used to live in the platform shims.
  * The API is unchanged; only the home of the declarations moved.
  *
  * Every entry point tolerates a NULL pointer, treating it as an empty string.

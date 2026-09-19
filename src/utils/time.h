@@ -36,8 +36,7 @@
 /*
  * Clocks and sleeping.
  *
- * This replaces the time functions that used to live in the platform shims
- * (src/platform/posix/platform.[ch] and src/platform/windows/platform.[ch]),
+ * This replaces the time functions that used to live in the platform shims,
  * plus the two private microsecond clocks that had been hand-rolled inside
  * utils/debug.c and protocols/mb/modbus.c.
  *

@@ -9,9 +9,6 @@
 
 message("Building for Alpine Linux with musl C library.")
 
-# Set the platform shim path
-set(PLATFORM_SHIM_PATH "${CMAKE_CURRENT_LIST_DIR}/../src/platform/posix" )
-
 # Alpine/musl specific settings
 set(POSIX True)
 set(ALPINE_MUSL True)

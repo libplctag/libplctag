@@ -36,8 +36,7 @@
 /*
  * TCP client sockets.
  *
- * This replaces the socket section that used to live in the platform shims
- * (src/platform/posix/platform.[ch] and src/platform/windows/platform.[ch]).
+ * This replaces the socket section that used to live in the platform shims.
  * The API is unchanged; only the home of the declarations moved.
  *
  * A socket is an opaque handle carrying its file descriptor plus a private

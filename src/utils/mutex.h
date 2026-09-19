@@ -36,8 +36,7 @@
 /*
  * Portable recursive mutexes.
  *
- * This replaces the mutex section that used to live in the platform shims
- * (src/platform/posix/platform.h and src/platform/windows/platform.h).  The
+ * This replaces the mutex section that used to live in the platform shims.  The
  * API is unchanged; only the home of the declarations moved.
  *
  * Mutexes are recursive on both platforms: the owning thread may lock the

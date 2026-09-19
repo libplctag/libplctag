@@ -37,7 +37,6 @@ target_include_directories(test_init PRIVATE
 target_include_directories(test_init PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_init PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -52,7 +51,6 @@ target_include_directories(test_platform_str PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_platform_str PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -65,7 +63,6 @@ target_include_directories(test_tag_name_bounds PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_tag_name_bounds PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -89,7 +86,6 @@ target_include_directories(test_atomic_utils PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_atomic_utils PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -103,7 +99,6 @@ target_include_directories(test_atomic_utils_no_c11 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_compile_definitions(test_atomic_utils_no_c11 PRIVATE __STDC_NO_ATOMICS__)
@@ -120,7 +115,6 @@ target_include_directories(test_byte_buf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_byte_buf PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -135,7 +129,6 @@ target_include_directories(test_cip_path_encode PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_cip_path_encode PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -152,7 +145,6 @@ if(NOT WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
         ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-        ${PLATFORM_SHIM_PATH}
     )
 
     target_link_libraries(test_eip_response_validation PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
@@ -190,7 +182,6 @@ target_include_directories(test_pccc_type_encode PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${PLATFORM_SHIM_PATH}
 )
 
 target_link_libraries(test_pccc_type_encode PRIVATE plctag_static ${EXTRA_LINKER_LIBS})

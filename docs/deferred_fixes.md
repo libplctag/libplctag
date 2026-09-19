@@ -2466,6 +2466,43 @@ Verified: both configs clean, 0 warnings; simulator **184/184** (179s reported, 
 after 2.43 and again after 2.44. Neither path has simulator coverage of the failure cases,
 so the hardware suite is the real check — `@tags` and `@udt` listing in particular.
 
+### 2.45 `src/platform/` deleted — DONE 2026-09-19
+
+2.15 left the two shim headers in the tree with nothing including them; 2.14 had already
+dispersed the last macro out of them. Nothing referenced `platform.h` anywhere under `src/`,
+so both copies were dead weight that still had to be carried by every toolchain file.
+
+Deleted: `src/platform/posix/platform.h` (3,279 bytes) and `src/platform/windows/platform.h`
+(4,122 bytes), and the whole `src/platform/` tree with them.
+
+The build references went too:
+
+- `PLATFORM_SHIM_PATH` in `cmake_toolchains/{unix,windows,alpine,apple}.cmake` -- the variable
+  no longer exists anywhere. `mingw_x86_64_cross.cmake` never set it.
+- the second argument of `include_directories()` in the top-level `CMakeLists.txt`.
+- `"${PLATFORM_SHIM_PATH}/platform.h"` in the library's source list
+  (`src/libplctag/CMakeLists.txt`).
+- nine `${PLATFORM_SHIM_PATH}` lines in `src/tests/unit/CMakeLists.txt`, one per test target.
+
+An empty `PLATFORM_SHIM_PATH` expanded to an empty include path, so the stale references had
+been harmless -- but a toolchain file is exactly where a reader looks to learn what a build
+needs, and this one was lying about one.
+
+Seven `src/utils/*.h` header comments cited the shim paths as provenance
+(`mem.h`, `mutex.h`, `nap.h`, `socket.h`, `str.h`, `thread.h`, `time.h`). The paths no longer
+resolve, so the parentheticals are gone; the sentence naming the shims as the former home
+stays, since that is the part a reader can still use.
+
+Two references survive on purpose, both in design documents rather than code:
+`src/external_docs/design_recommendations.md:1119` describes the shim layout as it was, and
+`fcontext_integration_design.md` proposes a *new* `src/platform/fcontext/` for assembly
+stubs. Neither is a dangling pointer to deleted code.
+
+Net: -7,401 bytes of header, -17 build lines, two directories.
+
+Verified: fresh `cmake` configure plus `--clean-first` build, 0 warnings; unit **8/8**;
+simulator **184/184** (181s).
+
 ## 3. Verification gaps
 
 ### 3.1 No Windows build — STILL OPEN, but now one command away

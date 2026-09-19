@@ -36,8 +36,7 @@
 /*
  * Portable thread creation and joining.
  *
- * This replaces the thread section that used to live in the platform shims
- * (src/platform/posix/platform.h and src/platform/windows/platform.h).  The
+ * This replaces the thread section that used to live in the platform shims.  The
  * two shims had drifted apart: thread_create() named a different callback
  * type on each platform and thread_detach() was declared without a prototype
  * on Windows.  Both are spelled the same way here.

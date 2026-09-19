@@ -36,8 +36,7 @@
 /*
  * Memory allocation and block operations.
  *
- * This replaces the memory section that used to live in the platform shims
- * (src/platform/posix/platform.[ch] and src/platform/windows/platform.[ch]).
+ * This replaces the memory section that used to live in the platform shims.
  * The API is unchanged; only the home of the declarations moved.
  *
  * Nothing here is platform-specific -- the two shim copies were the same code
