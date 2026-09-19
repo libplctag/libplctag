@@ -819,9 +819,11 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     /* allocate the session struct and the buffer in the same allocation. */
     pdebug(
         DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-        "Allocating %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
-        total_allocation_size, (data_buffer_is_static ? data_buffer_capacity : 0), str_length(host) + 1,
-        (path_offset == 0 ? 0 : str_length(path) + 1), tmp_conn_path_size);
+        "Allocating %" PRIu64 " total bytes of memory with %" PRIu64
+        " bytes for data buffer static data, %" PRId32 " bytes for the host name, %" PRId32 " bytes for the path, %" PRId32
+        " bytes for the encoded path.",
+        (uint64_t)total_allocation_size, (uint64_t)(data_buffer_is_static ? data_buffer_capacity : 0),
+        (int32_t)(str_length(host) + 1), (int32_t)(path_offset == 0 ? 0 : str_length(path) + 1), (int32_t)tmp_conn_path_size);
 
     session = (ab_session_p)rc_alloc((int)total_allocation_size, session_destroy);
     if(!session) {
@@ -1107,7 +1109,8 @@ int session_register(ab_session_p session) {
 
     /* check the response status */
     if(le2h16(resp->encap_command) != EIP_REGISTER_SESSION) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", resp->encap_command);
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "EIP unexpected response packet type: %" PRIu16 "!",
+               le2h16(resp->encap_command));
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -1265,7 +1268,7 @@ void session_destroy(void *session_arg) {
 int session_add_request(ab_session_p session, ab_request_p req) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", session, req);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", (void *)session, (void *)req);
 
     /* this must be checked before the critical block below dereferences it. */
     if(!session) {
@@ -1388,7 +1391,7 @@ THREAD_FUNC(session_handler) {
     int auto_disconnect = 0;
 
 
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting thread for session %p", session);
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting thread for session %p", (void *)session);
 
     /* Increment the count of active session handlers */
     atomic_add_int32(&session_handlers_active, 1);
@@ -1775,7 +1778,7 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
 
             /* set the debug tag to the owning tag. */
 
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session thread releasing aborted request %p.", request);
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session thread releasing aborted request %p.", (void *)request);
 
             request->status = PLCTAG_ERR_ABORT;
             request->request_size = 0;
@@ -1967,8 +1970,9 @@ int process_requests(ab_session_p session) {
 
                     multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
 
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Received unconnected packet with session sequence ID %llx",
-                           resp->encap_sender_context);
+                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0,
+                           "Received unconnected packet with session sequence ID %" PRIx64 ".",
+                           le2h64(resp->encap_sender_context));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {

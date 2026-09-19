@@ -31,6 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <inttypes.h>
+
 #include <libplctag/lib/libplctag.h>
 #include <utils/mem.h>
 #include <utils/mutex.h>
@@ -123,7 +125,7 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
     /* return the original address if successful otherwise NULL. */
 
     /* DEBUG */
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Returning memory pointer %p", (char *)(rc + 1));
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Returning memory pointer %p", (void *)(char *)(rc + 1));
 
     return (char *)(rc + 1);
 }
@@ -232,8 +234,8 @@ void refcount_cleanup(refcount_p rc) {
         return;
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Deferred destruction of %p, allocated in function %s at line %d", (void *)(rc + 1),
-           rc->function_name, rc->line_num);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Deferred destruction of %p, allocated in function %s at line %" PRId32,
+           (void *)(rc + 1), rc->function_name, (int32_t)rc->line_num);
 
     /* call the clean up function */
     if(rc->cleanup_func) { rc->cleanup_func((void *)(rc + 1)); }

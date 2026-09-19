@@ -33,6 +33,7 @@
 
 #include <libplctag/protocols/cip/conn.h>
 
+#include <inttypes.h>
 #include <limits.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/cip/defs.h>
@@ -307,13 +308,14 @@ extern int cip_receive_forward_open_response(cip_conn_p conn, const cip_conn_io_
         }
 
         if(le2h16(fo_resp->encap_command) != EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unexpected EIP packet type received: %" PRIu16 "!",
+                   le2h16(fo_resp->encap_command));
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(fo_resp->encap_status) != EIP_OK) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "EIP command failed, response code: %" PRIu32, le2h32(fo_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -776,13 +778,14 @@ static int recv_forward_close_resp(cip_conn_p conn, const cip_conn_io_t *io) {
         }
 
         if(le2h16(fo_resp->encap_command) != EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unexpected EIP packet type received: %" PRIu16 "!",
+                   le2h16(fo_resp->encap_command));
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(fo_resp->encap_status) != EIP_OK) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "EIP command failed, response code: %" PRIu32, le2h32(fo_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1003,7 +1006,7 @@ extern int cip_pack_requests(cip_conn_p conn, cip_request_p *requests, int num_r
         /* set up the offset */
         multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
 
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "new_req=%p", requests[i]);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, (requests[i] ? requests[i]->tag_id : 0), "new_req=%p", (void *)requests[i]);
 
         /* get a pointer to the request. */
         new_req = (eip_cip_co_req *)(requests[i]->data);

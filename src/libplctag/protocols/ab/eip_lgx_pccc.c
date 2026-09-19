@@ -38,6 +38,7 @@ extern "C"
 */
 
 
+#include <inttypes.h>
 #include <stddef.h>
 
 #include <libplctag/lib/libplctag.h>
@@ -481,8 +482,8 @@ static int check_read_status(ab_tag_p tag) {
         data_end = tag->req->data + tag->req->request_size;
 
         if(le2h16(pccc->encap_command) != EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected EIP packet type received: %d!",
-                   pccc->encap_command);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected EIP packet type received: %" PRIu16 "!",
+                   le2h16(pccc->encap_command));
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }

@@ -58,8 +58,22 @@ extern void debug_set_all_modules(int level);
 
 extern bool debug_is_enabled(debug_module_t module, int level);
 
+/*
+ * Format checking for pdebug().
+ *
+ * pdebug_impl() takes a printf template and a variable argument list, so the
+ * compiler can check the conversions against the arguments -- but only if it is
+ * told which parameter is the template.  MSVC has no equivalent, so a Windows
+ * build stays unchecked.  See 3.4 in docs/deferred_fixes.md.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#    define PDEBUG_FORMAT_CHECK(templ_arg, first_var_arg) __attribute__((format(printf, templ_arg, first_var_arg)))
+#else
+#    define PDEBUG_FORMAT_CHECK(templ_arg, first_var_arg)
+#endif
+
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
-                        ...);
+                        ...) PDEBUG_FORMAT_CHECK(6, 7);
 
 #if defined(_WIN32) && defined(_MSC_VER)
 /* MinGW on Windows does not need this. */

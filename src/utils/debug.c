@@ -325,7 +325,7 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, deb
         row_buf[sizeof(row_buf) - 1] = 0; /* just in case */
 
         /* output it, finally */
-        pdebug_impl(func, line_num, debug_level, module, tag_id, row_buf);
+        pdebug_impl(func, line_num, debug_level, module, tag_id, "%s", row_buf);
     }
 }
 

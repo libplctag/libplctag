@@ -406,7 +406,7 @@ static int check_read_status(omron_tag_p tag, cip_header *cip_resp, uint8_t *dat
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
                    decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+                   "%s", decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
 
             rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
 
@@ -619,7 +619,7 @@ static int check_write_status(omron_tag_p tag, cip_header *cip_resp) {
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
                    decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
+                   "%s", decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
             rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
             break;
         }

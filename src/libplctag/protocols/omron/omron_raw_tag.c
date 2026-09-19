@@ -113,7 +113,7 @@ int omron_setup_raw_tag(omron_tag_p tag) {
 
     tag->byte_order = &omron_njnx_tag_byte_order;
 
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", &omron_raw_tag_vtable);
+    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", (void *)&omron_raw_tag_vtable);
 
     tag->vtable = &omron_raw_tag_vtable;
 

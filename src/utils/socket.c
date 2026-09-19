@@ -1663,7 +1663,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         tv.tv_sec = (time_t)(timeout_ms / 1000);
         tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
 
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
+        /* POSIX fixes the width of neither field, so widen both rather than guess. */
+        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "calling select with timeout tv_sec=%" PRId64 " tv_usec=%" PRId64,
+               (int64_t)tv.tv_sec, (int64_t)tv.tv_usec);
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
     } else {
         struct timeval tv = {0, 0};

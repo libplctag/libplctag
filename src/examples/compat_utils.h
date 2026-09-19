@@ -54,7 +54,6 @@ extern "C" {
 #    define compat_strcasecmp strcasecmp
 #    define compat_strdup strdup
 #    define compat_snprintf snprintf
-#    define compat_sscanf sscanf
 
 typedef pthread_mutex_t compat_mutex_t;
 
@@ -80,21 +79,6 @@ static inline int compat_snprintf(char *str, size_t size, const char *format, ..
 
     va_start(args, format);
     rc = vsnprintf_s(str, size, _TRUNCATE, format, args);
-    va_end(args);
-
-    return rc;
-}
-
-static inline int compat_sscanf(const char *str, const char *format, ...) {
-    va_list args;
-    int rc;
-
-    va_start(args, format);
-#    ifdef _MSC_VER
-    rc = vsscanf_s(str, format, args);
-#    else
-    rc = vsscanf(str, format, args);
-#    endif
     va_end(args);
 
     return rc;

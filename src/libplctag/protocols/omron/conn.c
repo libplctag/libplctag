@@ -874,7 +874,8 @@ int conn_register(omron_conn_p conn) {
 
     /* check the response status */
     if(le2h16(resp->encap_command) != EIP_REGISTER_SESSION) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", resp->encap_command);
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP unexpected response packet type: %" PRIu16 "!",
+               le2h16(resp->encap_command));
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -1068,7 +1069,7 @@ int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req) {
 int conn_add_request(omron_conn_p conn, omron_request_p req) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, req->tag_id, "Starting. conn=%p, req=%p", conn, req);
+    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, req->tag_id, "Starting. conn=%p, req=%p", (void *)conn, (void *)req);
 
     critical_block(conn->mutex) { rc = conn_add_request_unsafe(conn, req); }
 
@@ -1160,7 +1161,7 @@ THREAD_FUNC(conn_handler) {
     int auto_disconnect = 0;
 
 
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting thread for conn %p", conn);
+    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting thread for conn %p", (void *)conn);
 
     /* Increment the count of active handler threads */
     atomic_add_int32(&handler_threads_active, 1);
@@ -1515,7 +1516,7 @@ int purge_aborted_requests_unsafe(omron_conn_p conn) {
 
             /* set the debug tag to the owning tag. */
 
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Connection thread releasing aborted request %p.", request);
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Connection thread releasing aborted request %p.", (void *)request);
 
             request->status = PLCTAG_ERR_ABORT;
             request->request_size = 0;
@@ -1757,8 +1758,8 @@ int process_requests(omron_conn_p conn) {
 
                     multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
 
-                    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Received unconnected packet with conn sequence ID %llx",
-                           resp->encap_sender_context);
+                    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0,
+                           "Received unconnected packet with conn sequence ID %" PRIx64 ".", le2h64(resp->encap_sender_context));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {

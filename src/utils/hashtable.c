@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <inttypes.h>
 #include <stddef.h>
 
 #include <libplctag/lib/libplctag.h>
@@ -313,7 +314,7 @@ int find_empty(hashtable_p table, int64_t key) {
     for(iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
         index = ((int)initial_index + iteration) % table->total_entries;
 
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Trying index %d for key %ld.", index, key);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "Trying index %" PRId32 " for key %" PRId64 ".", (int32_t)index, key);
         if(table->entries[index].data == NULL) { break; }
     }
 

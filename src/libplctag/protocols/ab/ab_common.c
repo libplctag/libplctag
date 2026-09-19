@@ -226,7 +226,7 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
         return (plc_tag_p)NULL;
     }
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "tag=%p", tag);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "tag=%p", (void *)tag);
 
     /*
      * AB fragments with the CIP fragmented read and write services.  Only Omron's
@@ -390,7 +390,7 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
         }
     }
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->conn);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", (void *)tag->conn);
 
     /* get the tag data type, or try. */
     rc = get_tag_data_type(tag, attribs);
@@ -658,7 +658,7 @@ plc_tag_p ab_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
     }
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Using vtable %p.", tag->vtable);
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Using vtable %p.", (void *)tag->vtable);
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Done.");
 
@@ -988,7 +988,7 @@ void ab_tag_destroy(ab_tag_p tag) {
 
     /* tags should always have a session.  Release it. */
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag session %p",
-           tag ? tag->conn : NULL);
+           (void *)(tag ? tag->conn : NULL));
     if(session) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Removing tag from session.");
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing session reference of tag %" PRId32 ".",
@@ -1465,8 +1465,8 @@ int check_request_status(ab_tag_p tag) {
 
                 break;
             default:
-                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Request pointer %p, header pointer %p.", request,
-                       eip_header);
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Request pointer %p, header pointer %p.", (void *)request,
+                       (void *)eip_header);
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Received an unknown EIP packet type %04" PRIx16 ".",
                        le2h16(eip_header->encap_command));
                 pdebug_dump_bytes(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, request->data, request->request_size);

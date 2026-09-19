@@ -219,7 +219,7 @@ plc_tag_p omron_tag_create(attr attribs, tag_extended_callback_func_t tag_callba
         return (plc_tag_p)NULL;
     }
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "tag=%p", tag);
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "tag=%p", (void *)tag);
 
     /*
      * we got far enough to allocate memory, set the default vtable up
@@ -311,7 +311,7 @@ plc_tag_p omron_tag_create(attr attribs, tag_extended_callback_func_t tag_callba
         }
     }
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "using conn=%p", tag->conn);
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "using conn=%p", (void *)tag->conn);
 
     /* get the tag data type, or try. */
     rc = get_tag_data_type(tag, attribs);
@@ -408,7 +408,7 @@ plc_tag_p omron_tag_create(attr attribs, tag_extended_callback_func_t tag_callba
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
     }
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Using vtable %p.", tag->vtable);
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Using vtable %p.", (void *)tag->vtable);
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Done.");
 
@@ -703,7 +703,7 @@ void omron_tag_destroy(omron_tag_p tag) {
     conn = tag->conn;
 
     /* tags should always have a conn.  Release it. */
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag conn %p", tag->conn);
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag conn %p", (void *)tag->conn);
     if(conn) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to conn of tag %" PRId32 ".",
                tag->tag_id);
@@ -855,8 +855,8 @@ int omron_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint
                    buffer_length);
             rc = PLCTAG_ERR_TOO_SMALL;
         } else if(tag->encoded_type_info_size <= buffer_length) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Copying %d bytes of tag type information.",
-                   tag->encoded_type_info_size, buffer_length);
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Copying %" PRId32 " bytes of tag type information.",
+                   (int32_t)tag->encoded_type_info_size);
 
             /* copy the data */
             mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), tag->encoded_type_info_size);

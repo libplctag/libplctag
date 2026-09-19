@@ -379,6 +379,68 @@ fail on. Now that the expected answer is "both writes succeed", it could become 
 The suite's existing lgxpccc test (`run_hardware_tests.py:197`) cannot catch this: it runs
 `tag_rw2`, which reads before it writes.
 
+### 1.11 2,692 width-variable format specifiers — OPEN, a class of latent errors
+
+Filed 2026-09-19 after 3.4 put a `format(printf)` attribute on `pdebug_impl` and 117 warnings
+fell out of a tree that had looked clean for years. **`%d`, `%u`, `%x` and the `%l`/`%z`/`%t`
+family state no width.** They are right only for as long as the argument stays exactly the
+type the specifier implies, and nothing in the source says which type that is. The nine
+packed-struct bugs in 3.4 are what that looks like when it goes wrong: nine `%d`s that read a
+struct instead of an integer, on nine error paths, for years.
+
+Counted with a scan of every string literal under `src/`:
+
+| area | count | length modifiers |
+|---|---|---|
+| library -- `src/libplctag` | 805 | 754 bare, 38 `%z`, 10 `%t`, 2 `%ll`, 1 `%l` |
+| tests | 774 | 768 bare, 6 `%z` |
+| tools | 511 | 414 bare, 96 `%z`, 1 `%l` |
+| examples | 264 | 263 bare, 1 `%l` |
+| library -- `src/utils` | 217 | 214 bare, 3 `%l` |
+| `poc`, `vendor`, `contrib` | 121 | 114 bare, 7 modified |
+| **total** | **2,692** | across 128 files |
+
+By conversion: `%d` 2,110, `%u` 249, `%x` 146, `%zu` 139, `%X` 18, `%td` 10, `%ld` 8, `%lu` 3,
+`%llx` 2, and one each of `%lx`, `%zx`, `%zd`. 50 files already use the `PRI*` macros
+somewhere, so the tree is of two minds about this rather than uniformly old-style.
+
+**Three different problems are mixed together in that total, and they do not have the same
+urgency:**
+
+1. **`%ld`, `%lu`, `%lx`, `%llx` (14 sites) -- genuinely width-variable.** `long` is 64 bits
+   here and 32 bits on Windows and on every 32-bit target in `cmake_toolchains/`. These are
+   wrong somewhere no matter what the argument is. Highest priority, smallest count.
+2. **`%zu`, `%zd`, `%zx`, `%td` (150 sites) -- correct C99, unavailable on MinGW.** MinGW
+   linked against `msvcrt.dll` does not implement the `z` or `t` length modifiers; it wants
+   `%Iu`. Whether this bites depends on which CRT the toolchain picks, which is a thing the
+   first MinGW build (3.1) will answer and nobody can answer by reading. 96 of the 150 are in
+   `tools/`, which matters less than the library's 48.
+3. **Bare `%d`, `%u`, `%x` (2,528 sites) -- correct today, unguarded tomorrow.** The build is
+   warning-clean, so every one of these currently matches an `int` or `unsigned int`. They are
+   not bugs. They are the absence of a statement: nothing records that the argument is
+   supposed to be 32 bits, so widening a field from `int` to `int64_t` silently breaks every
+   log line that prints it, and narrowing one silently truncates. The format attribute now
+   catches the mismatch at compile time on GCC and Clang, which is a real change in the risk,
+   but not on MSVC -- and it cannot catch a specifier that is merely misleading to a reader.
+
+**The fix, when someone takes this on**, is the pattern established in 3.4: an exact-width
+macro from `<inttypes.h>` over an argument cast to exactly that type, so the pair is right by
+construction rather than by the host's type sizes. `PRIu16` for a `uint16_t`, `(int32_t)` plus
+`PRId32` for an `int`, and widening rather than narrowing where the type's own width varies by
+target -- `(uint64_t)` plus `PRIu64` for a `size_t`, `(int64_t)` plus `PRId64` for a `time_t`.
+Do not reach for `%zu` to fix a `size_t`; that is problem 2, not the fix for problem 3.
+
+**Suggested order:** the 14 sites in group 1 first, as a self-contained change. Then the
+library's 48 sites in group 2, once a MinGW build exists to say whether they are broken. Group
+3 is 2,528 sites across 128 files and should not be done as one commit; the honest approach is
+to convert a file whenever it is being edited anyway, and to require exact-width specifiers in
+new code. Note that any bulk pass over these must add `<inttypes.h>` where it is missing --
+four files needed it for the handful of conversions in 3.4 alone.
+
+**Do not treat this as cosmetic.** The count is large because the cost of each one is small
+and the cost of the class is not: the nine bugs 3.4 found had each been printing a wrong number
+on an error path, in a library whose users read those logs to find out what their PLC refused.
+
 ## 2. Consolidation still to do
 
 Original scope was threads, mutexes, condition variables, sockets out of `platform.h`
@@ -2406,37 +2468,72 @@ so the hardware suite is the real check — `@tags` and `@udt` listing in partic
 
 ## 3. Verification gaps
 
-### 3.1 No Windows build — OPEN
-Everything below compiles clean on POSIX and is unexercised on Windows:
-- `src/utils/thread.c` — every `#ifdef _WIN32` branch
-- 26 `THREAD_FUNC`/`THREAD_RETURN` conversions across 18 test files (wrong calling
-  convention compiles clean on POSIX, fails on MSVC)
-- the inlined `InterlockedCompareExchange` Winsock guard that replaced
-  `compat_thread_once`, now in `src/tests/utils/test_utils.c` (2.5)
+### 3.1 No Windows build — STILL OPEN, but now one command away
+
+No compiler on this machine can build for Windows, so everything below is unexercised there.
+Reviewed again 2026-09-18; four bullets came off the list by reading, and the build itself is
+now set up rather than merely wished for.
+
+**`cmake_toolchains/mingw_x86_64_cross.cmake` is new.** The tree already had
+`mingw.cmake` (for the "MinGW Makefiles" generator on Windows) and
+`mingw_i686_windows.cmake` (for MSYS2 on Windows), but nothing for cross-compiling from a
+POSIX host, which is the only way anyone here will ever run it. With `brew install mingw-w64`
+(or `apt install mingw-w64`):
+
+```
+cmake -S . -B build_mingw -DCMAKE_TOOLCHAIN_FILE=cmake_toolchains/mingw_x86_64_cross.cmake \
+      -DCMAKE_BUILD_TYPE=Release
+cmake --build build_mingw -j8
+```
+
+Release or MinSizeRel, not Debug: the Debug build turns on ASan/UBSan and MinGW-w64 ships no
+sanitizer runtime. This is a compile check, not a test run -- the binaries do not execute on
+the host. Confirmed here that the configure reaches the compiler check and stops only because
+`x86_64-w64-mingw32-gcc` is absent.
+
+**Retired by reading, 2026-09-18:**
+
+- ~~26 `THREAD_FUNC`/`THREAD_RETURN` conversions across 18 test files~~ -- not a risk. All 17
+  distinct thread bodies reached by a `thread_create()` call are declared through the
+  `THREAD_FUNC()` macro, and `thread_func_t` is a typed function pointer, so a body written
+  with the wrong signature is a compile error on POSIX too. Checked every call site.
+- ~~`ab/cip.c` uses `ssize_t` about 30 times~~ -- stale. The library no longer uses `ssize_t`
+  anywhere except inside the `__linux__` branch of `utils/random_utils.c`. The remaining uses
+  are in `tools/` and `tests/`, which carry their own declarations. **This was the stated
+  reason `src/platform/windows/platform.h` still exists**, and it is no longer true.
+- ~~`compat_sscanf`'s `vsscanf_s` branch in `src/examples/compat_utils.h`~~ -- **deleted**.
+  It had zero callers anywhere in the tree, so the question of whether MSVC's `vsscanf_s`
+  works there (it wants a size argument after every `%s`) never arises.
+- ~~`<tchar.h>` and `<strsafe.h>` in `windows/platform.h`~~ -- moot, see below.
+
+**`src/platform/` is now entirely dead and should be deleted.** Zero files include
+`<platform.h>`; the `ssize_t` typedef it was kept for has no users; and
+`tools/ab_server/utils.c`, the only other place in the tree wanting `<tchar.h>` and
+`<strsafe.h>`, includes them itself. It was kept as insulation "until there has been a Windows
+build", but nothing includes it, so a Windows build cannot exercise it and cannot be broken by
+it either -- the argument for keeping it is circular. Deleting it also touches the five
+`PLATFORM_SHIM_PATH` settings in `cmake_toolchains/`. **Not done -- proposed, awaiting a
+decision.**
+
+**Still genuinely unverified:**
+
+- `src/utils/socket.c`'s entire `#ifdef _WIN32` half (1,111 lines) -- moved verbatim from
+  `windows/platform.c`, so it is no more broken than it was, but the new file's include block
+  and the `socket_create()` leak fix inside that branch have never been through a compiler.
+  This is the largest unverified Windows surface in the tree.
+- `src/utils/thread.c` -- every `#ifdef _WIN32` branch.
+- the inlined `InterlockedCompareExchange` Winsock guard that replaced `compat_thread_once`,
+  now in `src/tests/utils/test_utils.c` (2.5).
 - the Windows halves of `test_set_interrupt_handler` and `test_cpu_count`, moved verbatim
-  in 2.5
-- **`compat_sscanf`'s `vsscanf_s` branch in `src/examples/compat_utils.h`** — its guard was
-  `_MSVC_VER`, so it has never once compiled; 2.5 corrected it to `_MSC_VER`, which means a
-  Windows build will reach that code for the first time
-- fixes 1.2 and 1.3 when made — both are MSVC-only paths
-- **`<tchar.h>` and `<strsafe.h>` in `windows/platform.h`** — unused since the serial
-  delete (2.9), but `platform.h` reaches every file in the library, so the removal wants a
-  real compiler behind it.
-- **`src/platform/*/platform.h` still exists and is still on the include path, though
-  nothing includes it (2.15).** It is deliberately kept as the insulation layer until there
-  has been a Windows build; the POSIX-side transitive breakage that the round-10 sweep
-  exposed had a Windows counterpart that no compiler here can see.
-- **The three Windows fixes in round 9 (2.12)** — the `GetSystemTimePreciseAsFileTime`
+  in 2.5.
+- fixes 1.2 and 1.3 -- both are MSVC-only paths.
+- **The three Windows fixes in round 9 (2.12)** -- the `GetSystemTimePreciseAsFileTime`
   switch in `modbus.c`'s timing path, the `sleep_ms` negative guard and return-code change,
   and `time_ms()` now deriving from `time_us()`. All three are corrections, but none has
   been through a Windows compiler.
-- **`ab/cip.c` uses `ssize_t` about 30 times, but `windows/platform.h` only typedefs it
-  under `_MSC_VER`.** A MinGW build of that file should fail outright. Pre-existing and
-  unrelated to any round; found while removing the last `ssize_t` use from the shims.
-- **`src/utils/socket.c`'s entire `#ifdef _WIN32` half (1,111 lines)** — moved verbatim from
-  `windows/platform.c`, so it is no more broken than it was, but the new file's include block
-  and the `socket_create()` leak fix inside that branch have never been through a compiler.
-  This is now the largest unverified Windows surface in the tree.
+- every wrong format specifier that 3.4 just fixed -- `%d` for a `size_t` and `%ld` for an
+  `int64_t` are harmless on LP64 and wrong on Windows, where `long` is 32 bits. They are
+  fixed, but fixed blind.
 
 ### 3.2 `test_emulator_performance` now reports real numbers — DONE, watch it
 Previously summed a local `int result` that was never assigned, so its iteration total
@@ -2462,6 +2559,12 @@ Two more sightings during round 6 verification, neither counted against the roun
 - `test 11` (AB/ControlLogix tag scheduling fairness) failed once under TSan at CV 20.64%
   against a 20.00% threshold, with zero race reports. A statistical margin, not a race.
   Passed on re-run. If this recurs, the threshold is the thing to look at, not the code.
+- The same test (numbered 12 on 2026-09-18) failed at CV 35.83% -- a much wider miss than the
+  one above -- while a `build_tsan` compile and a `ctest` run were deliberately started
+  alongside it to use the waiting time. It passed at 184/184 on an idle host with the same
+  binaries. **Do not run anything else while the suite runs.** The 113-second timing phase
+  measures scheduling fairness, so a parallel compile is not background noise to it; it is
+  the thing being measured.
 
 **Run the suites under `caffeinate -i`.** The host idle-slept through six runs on
 2026-09-10, one reporting 124s of work across 38 minutes of wall clock and failing four
@@ -2490,26 +2593,96 @@ of these as a host problem rather than a regression.
 
 ---
 
-### 3.4 `pdebug_impl` has no `format` attribute — OPEN
+### 3.4 `pdebug_impl` now has a `format` attribute — DONE 2026-09-18
 
-`pdebug_impl` takes a `printf` template and a `...`, and is declared without
-`__attribute__((format(printf, 6, 7)))`. Every `pdebug` call in the tree is therefore
-unchecked: `-Wall -Wextra -Wformat` cannot see a mismatched conversion.
+`pdebug_impl` takes a `printf` template and a `...` and was declared without
+`__attribute__((format(printf, 6, 7)))`, so `-Wall -Wextra -Wformat` could not see a single
+mismatched conversion in 2,972 `pdebug` call sites. Two live examples had already been found
+by reading rather than by the compiler (`%zu` applied to an `int` in both DH+ bit writes,
+2.42).
 
-Two live examples were found by reading, not by the compiler -- `%zu` applied to an `int` in
-both DH+ bit writes (§2.42). Both are gone, but they were found by accident.
+The attribute is now on the declaration in `src/utils/debug.h`, behind
+`PDEBUG_FORMAT_CHECK()`, which is empty for MSVC. A Windows build is still unchecked; see 3.1.
 
-Adding the attribute is one line. It is filed rather than done because nobody knows how many
-call sites it lights up, and a build that will not compile is a poor thing to hand over
-mid-refactor. Worth doing at a quiet point, with the count measured first:
+**It lit up 117 warnings at 62 sites.** Grouped, and all now fixed:
 
-```
-/* on the declaration in src/utils/debug.h */
-__attribute__((format(printf, 6, 7)))
-```
+| what | sites | verdict |
+|---|---|---|
+| `%p` given a typed pointer | 35 | pedantic, but `%p` takes `void *`; each site now casts |
+| a packed `uint16_le`/`uint32_le`/`uint64_le` struct passed to `%d`/`%llx` | 9 | **real** -- see below |
+| non-literal format string | 8 | **latent** -- see below |
+| `%d` given `size_t`, `%ld` given `int64_t`/`suseconds_t` | 4 | wrong specifier, benign on LP64, wrong elsewhere |
+| `%d` with no argument at all | 1 | **real** |
+| an argument the template never uses | 1 | harmless, removed |
 
-MSVC has no equivalent, so the attribute needs the usual GCC/Clang guard -- which means the
-Windows build (§3.1) would still be unchecked.
+**The nine packed-struct sites were a real bug, and all nine were the same mistake.** The
+`if` above each one correctly unwraps the wire value -- `if(le2h16(resp->encap_command) != ...)`
+-- and the `pdebug` on the next line passes the raw `uint16_le`, which is a packed *struct*,
+not an integer. Passing a struct through `...` to a `%d` is undefined behaviour; in practice
+the log printed a number unrelated to the packet. Every one of these is on an error path, so
+the field was misreported at exactly the moment someone was reading the log to find out what
+the PLC objected to. Sites: `ab/session.c` x2, `ab/eip_lgx_pccc.c`, `cip/conn.c` x4,
+`omron/conn.c` x2.
+
+**`lib.c:2616` had a `%d` and no argument**: `"Illegal new size %d bytes for tag is illegal."`
+on the `new_size < 0` path of `plc_tag_set_size()`. It read whatever the varargs register held.
+Reachable from any caller passing a negative size. (The doubled "is illegal" in the wording
+came along with it; both are fixed.)
+
+**The eight non-literal format strings were latent, not live.** Seven pass
+`decode_cip_error_long(...)` as the template; that table has no `%` in it today, so nothing
+misbehaves, but a table entry gaining one would turn every CIP error path into a varargs read.
+The eighth is `pdebug_dump_bytes_impl` passing `row_buf`, which is hex digits only and cannot
+contain a `%`. All eight now pass `"%s"` and the string as an argument, which costs nothing
+and closes the class.
+
+The build is warning-clean again. Two mechanical notes for anyone repeating this: the
+`(void *)` casts were applied from the compiler's own file:line:column, which needs a serial
+(`-j1`) build -- warnings from a parallel build interleave mid-line and two casts landed in
+the wrong place. And `utils/hashtable.c` needed `<inttypes.h>` for the `PRId64` it now uses.
+
+**Every specifier these fixes touch names an explicit width.** A `%d` that happens to match
+an `int` on this machine is not portable; the fix is the exact-width macro from
+`<inttypes.h>` over an argument cast to that exact type, so the pair is right by construction
+rather than by the host's type sizes:
+
+| argument | now printed as |
+|---|---|
+| `le2h16()` -> `uint16_t` | `%" PRIu16 "` |
+| `le2h32()` -> `uint32_t` | `%" PRIu32 "` |
+| `le2h64()` -> `uint64_t` | `%" PRIx64 "` |
+| `int` (`new_size`, `index`, `line_num`, `encoded_type_info_size`) | `(int32_t)` + `%" PRId32 "` |
+| `size_t` (`total_allocation_size`, `data_buffer_capacity`) | `(uint64_t)` + `%" PRIu64 "` |
+| `time_t`, `suseconds_t` | `(int64_t)` + `%" PRId64 "` |
+
+`size_t` and `time_t` are widened rather than narrowed: both are 32 bits on some targets and
+64 on others, so a cast down would truncate on exactly the platform nobody here can test.
+`%zu` would say it more directly but is not an option -- MinGW against `msvcrt.dll` does not
+implement it and wants `%Iu` instead. Four files needed `<inttypes.h>` added:
+`utils/hashtable.c`, `utils/rc.c`, `ab/eip_lgx_pccc.c` and `cip/conn.c`.
+
+That rule is applied here only to the lines these fixes touch. **The other 2,692
+width-variable specifiers in the tree are filed as 1.11** -- they are what this attribute is
+now standing guard over, not something it has cleaned up.
+
+One of those four deserves naming, because the obvious fix was also wrong. `socket.c:1666`
+printed a `struct timeval` with `%ld`. **POSIX fixes the width of neither field**: `time_t`
+carries no width guarantee at all, and `suseconds_t` need only hold [-1, 1000000] -- the
+"no wider than `long`" line applies to the programming environments an implementation offers,
+not unconditionally. So a `(long)` cast is wrong in both directions at once: on macOS
+`suseconds_t` is `int` (which is what the compiler complained about), while on the 32-bit
+targets in `cmake_toolchains/` and on MinGW `time_t` is 64 bits against a 32-bit `long`, so
+the cast truncates. Both fields are now widened to `int64_t` and printed with `PRId64`. The
+values here are small enough that nothing was ever misprinted, but the cast was portable by
+luck rather than by rule.
+
+A third note, worth recording on its own: **the tree is not `clang-format`-clean against its
+own `.clang-format`.** Running `clang-format -i` over the touched files to rewrap two long
+lines reflowed about 200 unrelated lines as well -- `src/utils/socket.c` alone is 79 lines away
+from the checked-in style at HEAD. That churn was backed out here, hunk by hunk, and only the
+lines these fixes actually touch are rewrapped. Anyone reformatting should do it as its own
+commit across the whole tree, not incidentally.
+
 
 ## 4. Dead code and cleanup (from the repo audit)
 

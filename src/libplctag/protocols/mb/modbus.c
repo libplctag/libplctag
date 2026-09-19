@@ -810,7 +810,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                 break;
             }
 
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Created thread %p.", (*plc)->handler_thread);
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Created thread %p.", (void *)(*plc)->handler_thread);
 
             /* Increment PLC count for lifecycle tracking */
             atomic_add_int32(&plc_count, 1);
@@ -869,7 +869,7 @@ void modbus_plc_destructor(void *plc_arg) {
 
     /* shut down the thread. */
     if(plc->handler_thread) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Terminating Modbus handler thread %p.", plc->handler_thread);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Terminating Modbus handler thread %p.", (void *)plc->handler_thread);
 
         /* set the flag to cause the thread to terminate. */
         atomic_set_bool(&plc->flags.terminate, true);
@@ -878,7 +878,7 @@ void modbus_plc_destructor(void *plc_arg) {
          * below, so the handler thread may still be running (e.g. inside connect_plc()
          * creating plc->sock for the first time) -- plc->mutex is required here, not
          * optional, despite this being the destructor. */
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waking Modbus handler thread %p.", plc->handler_thread);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waking Modbus handler thread %p.", (void *)plc->handler_thread);
         critical_block(plc->mutex) {
             if(plc->sock) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waking socket directly.");
@@ -889,7 +889,7 @@ void modbus_plc_destructor(void *plc_arg) {
         /* wait for the thread to terminate and destroy it. */
         thread_join(&plc->handler_thread);
 
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Modbus handler thread %p destroyed.", plc->handler_thread);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Modbus handler thread %p destroyed.", (void *)plc->handler_thread);
 
         plc->handler_thread = NULL;
     }
@@ -3080,7 +3080,7 @@ static void debug_vector(modbus_plc_p plc) {
             modbus_tag_p tag = vector_get(plc->active_tags, i);
             if(tag) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "  [%d] Tag ID %" PRId32 " op=%s op_time=%" PRId64 " %p.", i,
-                       tag->tag_id, op_to_str(tag->op), tag->op_time, tag);
+                       tag->tag_id, op_to_str(tag->op), tag->op_time, (void *)tag);
             } else {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "  [%d] NULL tag pointer!", i);
             }

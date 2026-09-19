@@ -106,7 +106,7 @@ extern int32_t mutex_create(mutex_p *m) {
 
     (*m)->initialized = true;
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Done creating mutex %p.", *m);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Done creating mutex %p.", (void *)*m);
 
     return PLCTAG_STATUS_OK;
 }
@@ -117,7 +117,7 @@ extern int32_t mutex_create(mutex_p *m) {
  */
 
 extern int32_t mutex_lock_impl(const char *func, int32_t line_num, mutex_p m) {
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", m, func, (int)line_num);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", (void *)m, func, (int)line_num);
 
     if(!m) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Null mutex pointer.");
@@ -141,7 +141,7 @@ extern int32_t mutex_lock_impl(const char *func, int32_t line_num, mutex_p m) {
  */
 
 extern int32_t mutex_try_lock_impl(const char *func, int32_t line_num, mutex_p m) {
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", m, func, (int)line_num);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", (void *)m, func, (int)line_num);
 
     if(!m) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Null mutex pointer.");
@@ -164,7 +164,7 @@ extern int32_t mutex_try_lock_impl(const char *func, int32_t line_num, mutex_p m
  */
 
 extern int32_t mutex_unlock_impl(const char *func, int32_t line_num, mutex_p m) {
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", m, func, (int)line_num);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", (void *)m, func, (int)line_num);
 
     if(!m) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Null mutex pointer.");
@@ -187,7 +187,7 @@ extern int32_t mutex_unlock_impl(const char *func, int32_t line_num, mutex_p m) 
  */
 
 extern int32_t mutex_destroy(mutex_p *m) {
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Starting to destroy mutex %p.", m);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Starting to destroy mutex %p.", (void *)m);
 
     if(!m || !*m) {
         pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Null mutex pointer.");

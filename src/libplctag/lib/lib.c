@@ -1301,7 +1301,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* if the mapping failed, then punt */
     if(id < 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", tag,
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", (void *)tag,
                plc_tag_decode_error(id));
         rc_dec(tag);
         return id;
@@ -2613,7 +2613,8 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
     }
 
     if(new_size < 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Illegal new size %d bytes for tag is illegal.  Tag size must be positive.");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Illegal new size %" PRId32 " bytes for tag.  Tag size must be positive.",
+               (int32_t)new_size);
         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
@@ -4830,7 +4831,7 @@ plc_tag_p lookup_tag(int32_t tag_id) {
         tag = hashtable_get(inst->tags, (int64_t)tag_id);
 
         if(tag && tag->tag_id == tag_id) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Found tag %p with id %d.", tag, tag->tag_id);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Found tag %p with id %d.", (void *)tag, tag->tag_id);
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_inc: Acquiring reference to tag %" PRId32 ".", tag->tag_id);
             tag = rc_inc(tag);
         } else {

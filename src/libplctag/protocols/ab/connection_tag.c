@@ -154,7 +154,7 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
         }
     }
 
-    pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "using session=%p", tag->session);
+    pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "using session=%p", (void *)tag->session);
 
     tag->first_tickler_run = true;
 
