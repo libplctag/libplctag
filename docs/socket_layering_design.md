@@ -223,10 +223,26 @@ for `modbus.c` until it migrates.
    onto them; the original is untouched and is still what the test suite runs. Forking rather
    than converting is what let the poller be shaped by a real caller without putting the
    suite's only Modbus server at risk.
-4. **Adapters onto L0**, one program at a time, each keeping its own types.
-5. **Migrate readiness**: `modbus.c` first, then whichever server is to be multiplexed.
+   The one thing step 3 changed about this document's design: nothing. The interface as
+   specified above survived its first real caller unaltered. The only defect found was in the
+   caller, which assumed a readiness event would come back for data it had already read into
+   its own buffer -- see 2.4 in `docs/deferred_fixes.md` for that and for the two poller-side
+   designs (an event-generating callback, a ready list) considered and declined in response.
+4. **Adapters onto L0** -- **the library DONE 2026-09-20**, the two standalone servers open.
+   AB and Omron were converted directly onto `socket_fd` + `poller` rather than given the L1
+   adapter this document proposed: seven call sites each, already looping on partial transfers
+   with the wait inside, so converting the callers deleted `utils/socket.[ch]` (1,511 lines)
+   instead of rewriting it. The shared half lives in `cip/conn.c` because `CIP_CONN_STRUCT`
+   already unified the two connection structs. `tools/utils/socket.c` and
+   `tools/ab_server/socket.c` still have their own. See 2.4 in `docs/deferred_fixes.md`.
+5. **Migrate readiness — DONE 2026-09-19.** `modbus.c` moved onto `socket_fd` + `poller`, and
+   `socket_wait_event()`, `socket_wake()` and the per-socket wake channel were then deleted
+   outright: with Modbus gone they had no callers. 911 lines out of `socket.c`, 39% of the file.
+   See 2.4 in `docs/deferred_fixes.md`. Done before step 4 rather than after, because step 5 was
+   what made the deletion possible and the deletion is what shrinks step 4's job.
 
-Steps 1, 2 and 3 are done. Steps 4 and 5 only pay off if the many-sockets-per-thread model
+Steps 1, 2, 3 and 5 are done, and step 4 is done for the library; only the two standalone
+servers are left. Steps 4 and 5 only pay off if the many-sockets-per-thread model
 actually happens. The condition this document put on step 3 — hold until a real caller exists
 — was met by writing that caller as the fork rather than by waiting for one.
 

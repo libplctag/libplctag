@@ -45,7 +45,7 @@
 #include <utils/mutex.h>
 #include <utils/nap.h>
 #include <utils/rc.h>
-#include <utils/socket.h>
+#include <utils/socket_fd.h>
 #include <utils/spinlock.h>
 #include <utils/str.h>
 #include <utils/thread.h>
@@ -612,6 +612,9 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
 
     /* fill in the interior pointers */
 
+    /* zero is a valid file descriptor, so the handle needs an explicit invalid value. */
+    conn->sock = SOCKET_FD_INVALID;
+
     /* fix up the data buffer. */
     conn->data_buffer_is_static = data_buffer_is_static;
     conn->data_capacity = (uint32_t)(unsigned int)max_payload_capacity;
@@ -764,14 +767,6 @@ int conn_open_socket(omron_conn_p conn) {
     conn->req_seq_id = 0;
     conn->req_sent = false;
 
-    /* Open a socket for communication with the gateway. */
-    rc = socket_create(&(conn->sock));
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create socket for conn!");
-        return rc;
-    }
-
     server_port = str_split(conn->host, ":");
     if(!server_port) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to split server and port string!");
@@ -800,7 +795,7 @@ int conn_open_socket(omron_conn_p conn) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
 
-    rc = socket_connect_tcp_start(conn->sock, server_port[0], port);
+    rc = cip_conn_socket_open((cip_conn_p)conn, server_port[0], (int32_t)port);
 
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to connect socket for conn!");
@@ -912,11 +907,7 @@ int conn_unregister(omron_conn_p conn) {
 int conn_close_socket(omron_conn_p conn) {
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting.");
 
-    if(conn->sock) {
-        socket_close(conn->sock);
-        socket_destroy(&(conn->sock));
-        conn->sock = NULL;
-    }
+    cip_conn_socket_close((cip_conn_p)conn);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
 
@@ -970,7 +961,7 @@ void conn_destroy(void *conn_arg) {
         /* try to be nice and un-register the conn */
         if(conn->conn_handle) { conn_unregister(conn); }
 
-        if(conn->sock) { conn_close_socket(conn); }
+        if(conn->sock != SOCKET_FD_INVALID) { conn_close_socket(conn); }
 
         /* release all the requests that are in the queue. */
         if(conn->requests) {
@@ -1220,7 +1211,7 @@ THREAD_FUNC(conn_handler) {
                 conn_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
 
                 /* we must connect to the gateway */
-                rc = socket_connect_tcp_check(conn->sock, 20); /* MAGIC */
+                rc = cip_conn_connect_check((cip_conn_p)conn, SOCKET_WAIT_TIMEOUT_MS);
                 if(rc == PLCTAG_STATUS_OK) {
                     /* connected! */
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Socket connection succeeded.");
@@ -2035,30 +2026,30 @@ int send_eip_request(omron_conn_p conn, int timeout) {
 
     /* send the packet */
     do {
-        rc = socket_write(conn->sock, conn->data + conn->data_offset, (int)conn->data_size - (int)conn->data_offset,
-                          SOCKET_WAIT_TIMEOUT_MS);
+        int32_t bytes_written = 0;
 
-        if(rc >= 0) {
-            conn->data_offset += (uint32_t)rc;
-        } else {
-            if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Socket not yet ready to write.");
-                rc = 0;
-            }
+        rc = cip_conn_send((cip_conn_p)conn, conn->data + conn->data_offset, (int32_t)(conn->data_size - conn->data_offset),
+                           &bytes_written, SOCKET_WAIT_TIMEOUT_MS);
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(bytes_written == 0) { pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Socket not yet ready to write."); }
+
+            conn->data_offset += (uint32_t)bytes_written;
         }
 
         /* give up the CPU if we still are looping */
         // if(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size) {
         //     sleep_ms(1);
         // }
-    } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size && timeout_time > time_ms());
+    } while(!atomic_get_int32(&conn->terminating) && rc == PLCTAG_STATUS_OK && conn->data_offset < conn->data_size
+            && timeout_time > time_ms());
 
     if(atomic_get_int32(&conn->terminating)) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Connection is terminating.");
         return PLCTAG_ERR_ABORT;
     }
 
-    if(rc < 0) {
+    if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error, %d, writing socket!", rc);
         return rc;
     }
@@ -2114,11 +2105,15 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
     mem_set(conn->data, 0, (int)conn->data_capacity);
 
     do {
-        rc = socket_read(conn->sock, conn->data + conn->data_offset, (int)(data_needed - conn->data_offset),
-                         SOCKET_WAIT_TIMEOUT_MS);
+        int32_t bytes_read = 0;
 
-        if(rc >= 0) {
-            conn->data_offset += (uint32_t)rc;
+        rc = cip_conn_recv((cip_conn_p)conn, conn->data + conn->data_offset, (int32_t)(data_needed - conn->data_offset),
+                           &bytes_read, SOCKET_WAIT_TIMEOUT_MS);
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(bytes_read == 0) { pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Socket not yet ready to read."); }
+
+            conn->data_offset += (uint32_t)bytes_read;
 
             /*pdebug_dump_bytes(conn->debug, conn->data, conn->data_offset);*/
 
@@ -2133,13 +2128,8 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
                 }
             }
         } else {
-            if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Socket not yet ready to read.");
-            } else {
-                /* error! */
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
-                return rc;
-            }
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
+            return rc;
         }
     } while(!atomic_get_int32(&conn->terminating) && conn->data_offset < data_needed && timeout_time > time_ms());
 

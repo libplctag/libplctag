@@ -45,7 +45,7 @@
 #include <utils/mutex.h>
 #include <utils/nap.h>
 #include <utils/rc.h>
-#include <utils/socket.h>
+#include <utils/socket_fd.h>
 #include <utils/spinlock.h>
 #include <utils/str.h>
 #include <utils/thread.h>
@@ -831,6 +831,9 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 
     /* fill in the interior pointers */
 
+    /* zero is a valid file descriptor, so the handle needs an explicit invalid value. */
+    session->sock = SOCKET_FD_INVALID;
+
     /* fix up the data buffer. */
     session->data_buffer_is_static = data_buffer_is_static;
     session->data_capacity = (uint32_t)data_buffer_capacity;
@@ -996,14 +999,6 @@ int session_open_socket(ab_session_p session) {
     session->req_seq_id = 0;
     session->req_sent = false;
 
-    /* Open a socket for communication with the gateway. */
-    rc = socket_create(&(session->sock));
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create socket for session!");
-        return rc;
-    }
-
     server_port = str_split(session->host, ":");
     if(!server_port) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to split server and port string!");
@@ -1032,7 +1027,7 @@ int session_open_socket(ab_session_p session) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
 
-    rc = socket_connect_tcp_start(session->sock, server_port[0], port);
+    rc = cip_conn_socket_open((cip_conn_p)session, server_port[0], (int32_t)port);
 
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to connect socket for session!");
@@ -1145,11 +1140,7 @@ int session_unregister(ab_session_p session) {
 int session_close_socket(ab_session_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
-    if(session->sock) {
-        socket_close(session->sock);
-        socket_destroy(&(session->sock));
-        session->sock = NULL;
-    }
+    cip_conn_socket_close((cip_conn_p)session);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
@@ -1204,7 +1195,7 @@ void session_destroy(void *session_arg) {
         /* try to be nice and un-register the session */
         if(session->conn_handle) { session_unregister(session); }
 
-        if(session->sock) { session_close_socket(session); }
+        if(session->sock != SOCKET_FD_INVALID) { session_close_socket(session); }
 
         /* release all the requests that are in the queue. */
         if(session->requests) {
@@ -1451,7 +1442,7 @@ THREAD_FUNC(session_handler) {
                 session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
 
                 /* we must connect to the gateway */
-                rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
+                rc = cip_conn_connect_check((cip_conn_p)session, SOCKET_WAIT_TIMEOUT_MS);
                 if(rc == PLCTAG_STATUS_OK) {
                     /* connected! */
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Socket connection succeeded.");
@@ -2263,23 +2254,22 @@ int send_eip_request(ab_session_p session, int timeout) {
 
     /* send the packet */
     do {
-        rc = socket_write(session->sock, session->data + session->data_offset,
-                          (int)session->data_size - (int)session->data_offset, SOCKET_WAIT_TIMEOUT_MS);
+        int32_t bytes_written = 0;
 
-        if(rc >= 0) {
-            session->data_offset += (uint32_t)rc;
-        } else {
-            if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Socket not yet ready to write.");
-                rc = 0;
-            }
+        rc = cip_conn_send((cip_conn_p)session, session->data + session->data_offset,
+                           (int32_t)(session->data_size - session->data_offset), &bytes_written, SOCKET_WAIT_TIMEOUT_MS);
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(bytes_written == 0) { pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Socket not yet ready to write."); }
+
+            session->data_offset += (uint32_t)bytes_written;
         }
 
         /* give up the CPU if we still are looping */
         // if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
         //     sleep_ms(1);
         // }
-    } while(!atomic_get_int32(&session->terminating) && rc >= 0 && session->data_offset < session->data_size
+    } while(!atomic_get_int32(&session->terminating) && rc == PLCTAG_STATUS_OK && session->data_offset < session->data_size
             && timeout_time > time_ms());
 
     if(atomic_get_int32(&session->terminating)) {
@@ -2289,7 +2279,7 @@ int send_eip_request(ab_session_p session, int timeout) {
         return final_rc;
     }
 
-    if(rc < 0) {
+    if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error, %d, writing socket!", rc);
         final_rc = rc;
         session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
@@ -2354,11 +2344,15 @@ int recv_eip_response(ab_session_p session, int timeout) {
     mem_set(session->data, 0, (int)session->data_capacity);
 
     do {
-        rc = socket_read(session->sock, session->data + session->data_offset, (int)(data_needed - session->data_offset),
-                         SOCKET_WAIT_TIMEOUT_MS);
+        int32_t bytes_read = 0;
 
-        if(rc >= 0) {
-            session->data_offset += (uint32_t)rc;
+        rc = cip_conn_recv((cip_conn_p)session, session->data + session->data_offset,
+                           (int32_t)(data_needed - session->data_offset), &bytes_read, SOCKET_WAIT_TIMEOUT_MS);
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(bytes_read == 0) { pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Socket not yet ready to read."); }
+
+            session->data_offset += (uint32_t)bytes_read;
 
             /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
 
@@ -2375,15 +2369,10 @@ int recv_eip_response(ab_session_p session, int timeout) {
                 }
             }
         } else {
-            if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Socket not yet ready to read.");
-            } else {
-                /* error! */
-                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
-                final_rc = rc;
-                session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
-                return final_rc;
-            }
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
+            final_rc = rc;
+            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            return final_rc;
         }
     } while(!atomic_get_int32(&session->terminating) && session->data_offset < data_needed && timeout_time > time_ms());
 

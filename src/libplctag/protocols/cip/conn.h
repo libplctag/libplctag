@@ -52,7 +52,8 @@
 #include <utils/atomic_utils.h>
 #include <utils/mutex.h>
 #include <utils/nap.h>
-#include <utils/socket.h>
+#include <utils/poller.h>
+#include <utils/socket_fd.h>
 #include <utils/spinlock.h>
 #include <utils/thread.h>
 #include <utils/vector.h>
@@ -66,7 +67,16 @@
     char *host;                                                                                  \
     int port;                                                                                    \
     char *path;                                                                                  \
-    sock_p sock;                                                                                 \
+                                                                                                 \
+    /*                                                                                           \
+     * One socket driven by one thread, so the connection carries a poller of                    \
+     * one.  The poller is what waits; the socket_fd calls never sleep.  Both                    \
+     * are created by cip_conn_socket_open() and torn down by                                    \
+     * cip_conn_socket_close(), so a reconnect gets a fresh pair.                                \
+     */                                                                                          \
+    socket_fd_t sock;                                                                            \
+    poller_p poller;                                                                             \
+    bool sock_registered;                                                                        \
                                                                                                  \
     /* connection variables. */                                                                  \
     bool use_connected_msg;                                                                       \
@@ -144,6 +154,33 @@ struct cip_conn_t {
  * skipped on rollover: a zero could collide with an unset sender context.
  */
 extern uint64_t cip_conn_get_new_seq_id(cip_conn_p conn);
+
+
+/*
+ * Socket I/O.
+ *
+ * Both modules open one socket per connection and drive it from that
+ * connection's own thread.  These calls are the whole of that: the poller of
+ * one, the non-blocking transfers, and the waiting that used to live inside
+ * socket_read() and socket_write().
+ *
+ * cip_conn_send() and cip_conn_recv() keep the shape of the calls they
+ * replace -- wait up to timeout_ms, then move what can be moved -- so the
+ * state machines above them did not have to change.  A wait that expires is
+ * PLCTAG_STATUS_OK with a count of zero, not an error.
+ */
+
+/* opens the socket, starts the connect and registers it.  OK or PENDING. */
+extern int32_t cip_conn_socket_open(cip_conn_p conn, const char *host, int32_t port);
+
+/* always safe to call, whether or not the socket was ever opened. */
+extern int32_t cip_conn_socket_close(cip_conn_p conn);
+
+/* OK when the connect finished, PLCTAG_ERR_TIMEOUT while it is still running. */
+extern int32_t cip_conn_connect_check(cip_conn_p conn, int32_t timeout_ms);
+
+extern int32_t cip_conn_send(cip_conn_p conn, const uint8_t *buf, int32_t len, int32_t *count, int32_t timeout_ms);
+extern int32_t cip_conn_recv(cip_conn_p conn, uint8_t *buf, int32_t len, int32_t *count, int32_t timeout_ms);
 
 
 /*

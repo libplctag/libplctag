@@ -45,6 +45,8 @@
 #include <utils/mem.h>
 #include <utils/debug.h>
 #include <utils/mutex.h>
+#include <utils/poller.h>
+#include <utils/socket_fd.h>
 
 
 extern uint64_t cip_conn_get_new_seq_id(cip_conn_p conn) {
@@ -59,6 +61,232 @@ extern uint64_t cip_conn_get_new_seq_id(cip_conn_p conn) {
 
     return res;
 }
+
+/*********************************************************************
+ ** Socket I/O
+ **
+ ** This was socket_read()/socket_write()/socket_connect_tcp_check() in
+ ** utils/socket.c, which hid a select() of the caller's timeout inside every
+ ** transfer.  That model gives each socket its own thread and its own wake
+ ** channel.  Here the waiting is a poller the connection owns and the
+ ** transfers never sleep, which is the L1 adapter step 4 of
+ ** docs/socket_layering_design.md asks for -- with one socket in the poller
+ ** today because there is one handler thread per connection.
+ *********************************************************************/
+
+/*
+ * Waits for any of `interest` on this connection's socket.  Returns the event
+ * mask, POLLER_EVENT_TIMEOUT if nothing happened, or POLLER_EVENT_ERROR if the
+ * poller itself failed.
+ */
+static int32_t conn_wait_events(cip_conn_p conn, int32_t interest, int32_t timeout_ms) {
+    poller_event_t events[2];
+    int32_t event_count = 0;
+    int32_t result = POLLER_EVENT_NONE;
+    int32_t index = 0;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    if(!conn->poller || !conn->sock_registered) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Socket is not registered with a poller!");
+        return POLLER_EVENT_ERROR;
+    }
+
+    rc = poller_modify(conn->poller, conn->sock, interest);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to set poller interest, error %s!", plc_tag_decode_error(rc));
+        return POLLER_EVENT_ERROR;
+    }
+
+    rc = poller_wait(conn->poller, events, 2, timeout_ms, &event_count);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Poller wait failed, error %s!", plc_tag_decode_error(rc));
+        return POLLER_EVENT_ERROR;
+    }
+
+    if(event_count == 0) { return POLLER_EVENT_TIMEOUT; }
+
+    for(index = 0; index < event_count; index++) { result |= events[index].events; }
+
+    return result;
+}
+
+
+extern int32_t cip_conn_socket_open(cip_conn_p conn, const char *host, int32_t port) {
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    /* a reconnect comes back through here, so start from a clean pair. */
+    cip_conn_socket_close(conn);
+
+    rc = poller_create(&(conn->poller), 1);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create poller, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    rc = socket_fd_open_tcp(&(conn->sock));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to open socket, error %s!", plc_tag_decode_error(rc));
+        cip_conn_socket_close(conn);
+        return rc;
+    }
+
+    rc = socket_fd_connect_start(conn->sock, host, port);
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to start connection to %s:%" PRId32 ", error %s!", host, port,
+               plc_tag_decode_error(rc));
+        cip_conn_socket_close(conn);
+        return rc;
+    }
+
+    /*
+     * Registered whether or not the connect completed immediately: the caller
+     * goes straight to reading and writing in that case, and both need the
+     * socket in the poller already.
+     */
+    {
+        int32_t add_rc = poller_add(conn->poller, conn->sock, POLLER_EVENT_CONNECT, conn);
+
+        if(add_rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to register the socket with the poller, error %s!",
+                   plc_tag_decode_error(add_rc));
+            cip_conn_socket_close(conn);
+            return add_rc;
+        }
+
+        conn->sock_registered = true;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
+
+    /* PLCTAG_STATUS_OK if the connect finished already, PENDING if it is still running. */
+    return rc;
+}
+
+
+extern int32_t cip_conn_socket_close(cip_conn_p conn) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
+
+    if(conn->sock_registered) {
+        poller_remove(conn->poller, conn->sock);
+        conn->sock_registered = false;
+    }
+
+    socket_fd_close(&(conn->sock));
+
+    if(conn->poller) { poller_destroy(&(conn->poller)); }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t cip_conn_connect_check(cip_conn_p conn, int32_t timeout_ms) {
+    int32_t events = conn_wait_events(conn, POLLER_EVENT_CONNECT, timeout_ms);
+
+    if(events == POLLER_EVENT_TIMEOUT) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Connection is not done yet.");
+        return PLCTAG_ERR_TIMEOUT;
+    }
+
+    if(events & POLLER_EVENT_ERROR) {
+        int32_t sock_rc = socket_fd_get_error(conn->sock);
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Connection failed, error %s!", plc_tag_decode_error(sock_rc));
+
+        return (sock_rc == PLCTAG_STATUS_OK) ? PLCTAG_ERR_OPEN : sock_rc;
+    }
+
+    /*
+     * A socket in a non-blocking connect goes writable when the attempt
+     * resolves, either way.  SO_ERROR is what says which, so a writable socket
+     * is not by itself good news.
+     */
+    if(events & (POLLER_EVENT_CONNECT | POLLER_EVENT_CAN_WRITE | POLLER_EVENT_DISCONNECT)) {
+        return socket_fd_connect_check(conn->sock);
+    }
+
+    return PLCTAG_ERR_TIMEOUT;
+}
+
+
+/*
+ * Wait for `interest`, then transfer.  Shared by send and recv because
+ * everything but the direction and the two calls at the end is the same.
+ */
+static int32_t conn_transfer(cip_conn_p conn, uint8_t *buf, int32_t len, int32_t *count, int32_t timeout_ms, bool sending) {
+    int32_t events = POLLER_EVENT_NONE;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    *count = 0;
+
+    events = conn_wait_events(conn, sending ? POLLER_EVENT_CAN_WRITE : POLLER_EVENT_CAN_READ, timeout_ms);
+
+    if(events == POLLER_EVENT_TIMEOUT) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Socket is not ready yet.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(events & POLLER_EVENT_ERROR) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Socket error while waiting!");
+        return sending ? PLCTAG_ERR_WRITE : PLCTAG_ERR_READ;
+    }
+
+    /*
+     * A disconnect is reported alongside whatever is still readable, so a read
+     * runs anyway and finds the peer's FIN as a zero-byte result below.  There
+     * is nothing to do with a half-closed socket on the write side.
+     */
+    if(sending && (events & POLLER_EVENT_DISCONNECT) && !(events & POLLER_EVENT_CAN_WRITE)) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "The PLC closed the connection!");
+        return PLCTAG_ERR_BAD_CONNECTION;
+    }
+
+    if(sending) {
+        rc = socket_fd_send(conn->sock, buf, len, count);
+    } else {
+        rc = socket_fd_recv(conn->sock, buf, len, count);
+    }
+
+    if(rc == PLCTAG_STATUS_PENDING) {
+        /* the readiness was stale.  Nothing moved; the caller tries again. */
+        *count = 0;
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error, %s, on socket %s!", plc_tag_decode_error(rc),
+               sending ? "write" : "read");
+        return rc;
+    }
+
+    /*
+     * Zero bytes read with no error is the peer's FIN.  The old socket_read()
+     * could not say this -- it returned zero both for would-block and for a
+     * closed connection -- so a PLC that hung up looked like a PLC that was
+     * merely quiet, and the caller polled it until its own timeout expired.
+     */
+    if(!sending && *count == 0) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "The PLC closed the connection!");
+        return PLCTAG_ERR_BAD_CONNECTION;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+extern int32_t cip_conn_send(cip_conn_p conn, const uint8_t *buf, int32_t len, int32_t *count, int32_t timeout_ms) {
+    /* the cast is safe: conn_transfer() only reads the buffer when sending. */
+    return conn_transfer(conn, (uint8_t *)(uintptr_t)buf, len, count, timeout_ms, true);
+}
+
+
+extern int32_t cip_conn_recv(cip_conn_p conn, uint8_t *buf, int32_t len, int32_t *count, int32_t timeout_ms) {
+    return conn_transfer(conn, buf, len, count, timeout_ms, false);
+}
+
 
 /*********************************************************************
  ** Forward Open

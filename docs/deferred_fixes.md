@@ -672,7 +672,7 @@ wait path is therefore covered in the sandbox, not only on hardware.
 The three non-test `compat_utils.c` copies are still byte-identical to each other.
 (Superseded by 2.5: two of the three are deleted and only `src/examples/` keeps a copy.)
 
-### 2.4 Sockets — step 3 DONE 2026-09-19; steps 4-5 open
+### 2.4 Sockets — steps 3, 4 and 5 DONE; the library is off the old API (2026-09-20)
 
 Three mutually incompatible APIs, with `socket_read`/`socket_write`/`socket_close`/
 `socket_accept` colliding by name with different signatures and return conventions:
@@ -791,6 +791,26 @@ to read -- a handler that stops short used to leave its own tail at the head of 
 which is invisible until more than one frame is in flight and then reads as corruption rather
 than as an off-by-some.
 
+**Two designs considered and declined for the buffered-work problem**, recorded so they are
+not re-derived:
+
+- **A callback the poller invokes to generate synthetic events** -- it would emit a
+  `PDU_READY` per buffered frame. Declined because the callback has to answer "is a complete
+  PDU buffered?", which is protocol framing knowledge, and that puts Modbus behind the
+  `poller.h` interface. The layer is worth having precisely because it does not know what is
+  on the wire; the same poller has to serve an EIP session and an `ab_server` connection
+  unchanged. `client_pump()` reaches the same outcome with no interface change and leaves the
+  framing knowledge in the one file that already has it.
+- **A ready list** (nginx calls them posted events) -- after dispatch, any connection with
+  buffered work re-queues itself, and while that list is non-empty the loop passes
+  `timeout_ms = 0` rather than the tick. This one needs **no** protocol knowledge: a connection
+  asserts "I have work" and the poller never asks what kind. It is the right answer if this
+  ever becomes a problem. It is not built because what it buys is fairness, not correctness:
+  `client_pump()` drains one connection fully before moving on, so a heavily pipelining client
+  delays the others. That is bounded here -- a 512 byte receive buffer against a 12 byte
+  minimum FC3 request is about 42 frames, or microseconds. Revisit if the buffer grows or the
+  per-request work does.
+
 Verified: native Debug build 0 warnings, unit **9/9** including the new `test_poller`;
 **simulator 184/184** with `modbus_server_poller` swapped into the `modbus_server` slot, so the
 suite's whole Modbus section ran against the fork without knowing; MinGW **x86-64 and i686**
@@ -805,6 +825,121 @@ the POSIX `socketpair()` in one place. The poller creates exactly one, for the t
 in the library carries a wake channel nothing will ever signal. That is not fixed here; it is
 noted because it is the same insight in the same week, and it is a small self-contained change
 whenever someone wants it.
+
+**Step 5 -- Modbus migrated, and the wake machinery deleted. DONE 2026-09-19.**
+
+`modbus.c` now drives its socket through `socket_fd` and `poller`. Twelve call sites. The PLC
+holds a bare `socket_fd_t` plus a `poller_p` created with the PLC, and one helper,
+`plc_wait_events()`, wraps `poller_wait()` into the event mask the state machine already spoke,
+so `PLC_READY` reads as it did. The helper synthesises `POLLER_EVENT_TIMEOUT` from an empty
+result because every caller wants to know and the alternative is an `event_count == 0` test at
+each one.
+
+**Three things the migration improved rather than merely ported:**
+
+- **`wake_plc_thread()` no longer takes `plc->mutex`.** It had to, because `connect_plc()` could
+  be assigning `plc->sock` concurrently -- the comment there said the lock was "required here,
+  not optional, despite this being the destructor". The poller is created with the PLC and never
+  replaced, so there is no write for that read to race. The destructor's pre-join wake likewise
+  now works even when no socket was ever created.
+- **EOF became visible.** `socket_read()` returned 0 both for would-block and for a peer that
+  closed, so a server that hung up looked exactly like one that was quiet, and the PLC thread
+  kept polling until some higher-level timeout noticed. `socket_fd_recv()` distinguishes them;
+  `receive_response()` returns `PLCTAG_ERR_BAD_CONNECTION` and the state machine reconnects.
+- **`PLC_IDLE_WAIT` and `PLC_ERR_WAIT` got simpler.** They wait with no socket registered at
+  all. The old code needed a wake channel that outlived `socket_close()`, which is why
+  `socket_wait_event()` carried a branch for "main socket is INVALID, using only wake_read_fd".
+
+**One bug the migration would have introduced, caught before it shipped.** Both
+`PLC_SEND_REQUEST` and `PLC_RECEIVE_RESPONSE` stayed in their own state on a partial transfer
+and cycled the loop immediately. That was safe **only** because `socket_read()`/`socket_write()`
+hid a 20 ms `select()` inside themselves and throttled the retry. `socket_fd_*` returns at once,
+so the old shape spins the thread at 100% CPU until the buffer drains. Both now return to
+`PLC_READY` and let the poller say when to try again; `request_ready` survives a partial write,
+so `PLC_READY` re-arms `CAN_WRITE` and comes straight back. Measured at 0.1% CPU through
+`test_idle_disconnect` afterwards. **This is the failure mode to expect in step 4:** a blocking
+call with a short timeout is a throttle as well as a wait, and removing it removes both.
+
+**Then the deletion, which is the point of the whole exercise.** With Modbus off the old API,
+`socket_wait_event()`, `socket_wake()` and `sock_create_event_wakeup_channel()` had no callers
+at all -- AB and Omron never called any of them.
+
+| file | before | after | removed |
+|---|---|---|---|
+| `src/utils/socket.c` | 2,354 | 1,443 | **911 lines, 39%** |
+| `src/utils/socket.h` | 84 | 68 | the `sock_event_t` enum and two declarations |
+
+Gone with them: the `wake_read_fd`/`wake_write_fd` fields, their initialisation in both
+`socket_create()`s, their teardown in both `socket_destroy()`s, and `log_event_bits()`, which
+existed only to pretty-print the deleted enum. **Every AB session and Omron connection now
+costs two fewer descriptors** -- and on Windows, one fewer listen/connect/accept handshake per
+connection -- not because they opted out but because the cost no longer exists.
+
+What is left of `socket.h` is seven functions: create, connect start/check, read, write, close,
+destroy. That is the L1 library adapter step 4 proposes to put onto `socket_fd`, and it is now
+small enough to read in one sitting.
+
+Verified: native Debug 0 warnings; unit **9/9**; **simulator 184/184** both after the migration
+and after the deletion; MinGW **x86-64 and i686** 0 errors and 0 warnings in either file.
+**Not verified on hardware** -- the migration changes connect, read, write, wake and teardown on
+the one protocol with real gear behind it, and a real PLC produces partial reads that loopback
+almost never does.
+
+**Step 4 -- AB and Omron converted; `utils/socket.[ch]` deleted. DONE 2026-09-20.**
+
+The plan was an L1 adapter: rewrite the seven functions of `socket.h` over `socket_fd`, leaving
+the callers alone. That was the wrong shape once the callers were read. AB and Omron have seven
+call sites each, the same seven, and both already loop on partial transfers with a 20 ms wait
+inside -- a poller of one with the poll hidden. Converting the two callers deletes the file
+instead of rewriting it.
+
+| file | before | after |
+|---|---|---|
+| `src/utils/socket.c` | 1,443 | **deleted** |
+| `src/utils/socket.h` | 68 | **deleted** |
+| `src/libplctag/protocols/cip/conn.c` | — | +215 shared |
+
+The library now has **zero** `#ifdef _WIN32` in its socket path outside `socket_fd.c`.
+
+**The new code is shared, not duplicated.** `sock_p sock` in `CIP_CONN_STRUCT` became
+`socket_fd_t sock` + `poller_p poller` + `bool sock_registered`, so one struct edit covers both
+protocols, and the five helpers live in `cip/conn.c`:
+
+- `cip_conn_socket_open()` / `cip_conn_socket_close()` -- poller, handle and registration as a
+  unit. Close is safe on a connection that never opened one, which is what let the two
+  `if(session->sock)` guards collapse.
+- `cip_conn_connect_check()` -- `poller_wait(CONNECT)` then `socket_fd_connect_check()`. A
+  writable socket is not by itself good news; SO_ERROR is what says which way the connect went.
+- `cip_conn_send()` / `cip_conn_recv()` -- wait, then transfer. These keep the shape of the
+  calls they replace, which is why the two state machines above them did not change: a wait that
+  expires is `PLCTAG_STATUS_OK` with a count of zero, exactly as `socket_read()` reported it.
+
+**The spin that step 5 warned about did not appear**, for a reason worth recording: the warning
+was about a state machine that returns immediately on a partial transfer. AB and Omron do not.
+They sit in a `do/while` that calls the wait itself, so keeping the wait inside the call kept
+the throttle with it. The same hazard, avoided by a different shape.
+
+**EOF became visible here too.** `socket_fd_recv()` returning zero bytes with no error is the
+peer's FIN, now reported as `PLCTAG_ERR_BAD_CONNECTION` instead of looking like a quiet PLC
+until the session timeout expired. This is a behaviour change on a path that only real hardware
+exercises much: a gateway that drops the connection mid-session now fails fast and reconnects.
+
+**Descriptor count is unchanged, not improved.** Each connection now carries a poller, and a
+poller carries one wake pair -- the same two descriptors the per-socket wake channel cost before
+step 5 deleted it. The difference is that the pair now belongs to the thread rather than the
+socket, so the day one thread drives several connections they collapse to one pair. Nothing in
+AB or Omron calls `poller_wake()` yet; their `wake_plc` vtable slots are still NULL.
+
+Verified: native Debug 0 warnings, 0 errors; **simulator 198/198** (183s reported against 184s
+of wall clock, so the host did not sleep under it). **Not verified on hardware, and this one
+needs it** -- connect, read, write and teardown all changed on both CIP protocols, and a real
+PLC produces partial reads and mid-session closes that the simulator almost never does. Windows
+is unverified as well; the platform surface did not move, but the code that calls it did.
+
+**What step 4 does not cover.** `src/tools/utils/socket.c` (1,011 lines, 23 `#ifdef _WIN32`) and
+`src/tools/ab_server/socket.c` (337 lines) are untouched. Neither is in the library. They are
+the remaining adapters, and `ab_server` is the one that would benefit -- `tools/utils` also
+holds the UDP half `scan_eip_network` needs, which `socket_fd` covers but nothing has moved.
 
 ### 2.5 `compat_utils.*` — DONE 2026-09-16
 
@@ -2654,6 +2789,91 @@ Also removed, both dead once the directory went:
 Net: -1.0 MB, one vendored project, 13 build lines.
 
 Verified: fresh `cmake` configure plus build, 0 warnings.
+
+### 2.47 `modbus_server` fault injection — DONE 2026-09-19
+
+`--corrupt=<kind>[:<count>]`, repeatable, the same shape `ab_server` uses so the two servers
+are driven the same way. `--corrupt=list` prints the kinds and exits. New files:
+`src/tools/modbus_server/modbus_fault.[ch]`, about 300 lines.
+
+| kind | what it does | observed on the wire |
+|---|---|---|
+| `txn_id` | a transaction ID the client never sent | `a5 a2` for `00 07` |
+| `proto_id` | non-zero protocol identifier | `00 01` |
+| `unit_id` | a unit ID other than the one asked for | `ff` |
+| `func_code` | a different function code than was sent | `04` answering `03` |
+| `length` | MBAP length disagreeing with the packet | declared `0b`; client times out |
+| `short_pdu` | PDU cut to the function code, length corrected | 8 bytes, self-consistent |
+| `exception` | ILLEGAL DATA ADDRESS for a valid request | `83 02` |
+| `byte_count` | PDU byte count larger than the data after it | `06` with 4 bytes following |
+| `close` | drop the connection instead of answering | peer closed |
+| `delay:N` | answer N ms late | unchanged bytes, 405ms |
+| `dribble:N` | answer in N-byte pieces | 7 reads of `[2,2,2,2,2,2,1]` |
+
+Every mutation keeps the packet coherent outside the layer it attacks, which is the rule
+`ab_server`'s `plc.h` states and the reason `short_pdu` repairs the MBAP length: a reply that
+merely stops early leaves the client waiting for bytes that never arrive, so it tests a timeout
+rather than a check. `length` is the one fault that deliberately does produce a timeout.
+
+Two differences from the AB version: the counters are plain `int32_t` rather than atomics,
+because this server is one coroutine thread rather than a thread per connection; and `close`,
+`delay` and `dribble` change delivery rather than content, so the caller acts on them instead
+of `modbus_fault_apply_response()`.
+
+**14 tests added to the simulator suite, 184 -> 198.** Each gets its own `modbus_server` armed
+with one fault. What the client does is not the same for every fault, and the differences are
+worth pinning:
+
+| fault | client behaviour | the test asserts |
+|---|---|---|
+| `proto_id`, `unit_id`, `short_pdu` | detected, response dropped, retry succeeds | exit 0 **plus a CheckSpec on the detection message** |
+| `close`, `delay:300`, `dribble:3`, `byte_count` | recovered from or tolerated | exit 0 |
+| `txn_id`, `length` | client timeout, about 5s each | `expect_failure` |
+| `func_code` | `PLCTAG_ERR_BAD_DATA` | `expect_failure` |
+| `exception` | `PLCTAG_ERR_NOT_FOUND`, the PLC's own error surfacing | `expect_failure` |
+
+The three detection cases carry a CheckSpec because **exit 0 cannot distinguish "rejected the
+corruption and retried" from "accepted it"** -- and one fault really is in the second category,
+see below. Verified after adding: **198/198**, and each server log confirms its fault fired.
+
+**`byte_count` is accepted with no complaint.** The client sizes its read from the MBAP length
+field and never looks at the PDU byte count, so a reply declaring six bytes while carrying four
+passes unremarked. Not dangerous as it stands -- the MBAP length keeps the read in bounds -- but
+it is an unvalidated field, and the test pins current behaviour rather than endorsing it.
+
+**`dribble` closes a real verification gap, and this is the evidence.** The
+`PLCTAG_STATUS_PENDING` partial-read paths in `modbus.c` -- added in 2.4 step 5 -- were
+unexercised, because loopback does not split a 13 byte reply. Counted over one read, in a build
+with `MAX_DEBUG_LEVEL=5`:
+
+| marker | baseline | `dribble:3` |
+|---|---|---|
+| "Nothing more to read yet" (`socket_fd_recv` returns PENDING) | 0 | **8** |
+| "Response not complete, waiting for more data" (back to `PLC_READY`) | 0 | **8** |
+
+Both messages are `DEBUG_SPEW`, so they are compiled out of the default build
+(`MAX_DEBUG_LEVEL` is 4) and the suite cannot assert on them without a rebuild. The test still
+drives the path; it just cannot check it from the log. Promoting either line to `DEBUG_DETAIL`
+would make it assertable, and is the obvious thing to do if that path ever misbehaves.
+
+**`close` does not exercise the zero-byte EOF branch**, contrary to what it looks like it
+should. The client detects the close through `POLLER_EVENT_DISCONNECT` in `PLC_READY`, because
+`poll()` reports `POLLHUP` before anything reads zero bytes. Reaching the EOF branch needs a
+half-close (`shutdown(SHUT_WR)`), which is not implemented. The branch is still correct and
+still unreached.
+
+**MinGW found a bug in this work that clang did not.** `int32_t dribble = ...` sat above a
+`coro_yield()`, and a coroutine resume jumps to the case label inside the loop, past the
+initialisation: `'dribble' may be used uninitialized`. Not cosmetic -- it broke the fault after
+the first piece, which is why the first measurement read `[2, 11]` instead of
+`[2,2,2,2,2,2,1]`. Anything that must survive a yield belongs in the client struct; everything
+else is re-read where it is used. This is the coroutine failure mode 2.4's fork notes complain
+about, caught by a compiler rather than by reading.
+
+Not done: `src/poc/modbus_server_poller` has no fault support. It shares the protocol and
+storage files but has its own send path.
+
+---
 
 ## 3. Verification gaps
 
