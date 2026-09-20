@@ -1175,6 +1175,77 @@ def build_manifest() -> Manifest:
               check=CheckSpec(log_file=reconnect_test.log_file,
                                pattern=r"Creating new PLC connection\.", expected=2))
 
+    # --- Modbus fault injection ----------------------------------------------
+    #
+    # modbus_server's --corrupt=<kind>[:<count>] deliberately breaks a response, the
+    # same way ab_server's --corrupt does. Each test below gets its own server armed
+    # with one fault, and asserts what the client actually does with it -- which is
+    # not the same answer for every fault, and is worth pinning precisely because the
+    # differences are not obvious:
+    #
+    #   - proto_id, unit_id and short_pdu are detected, the response is dropped, and
+    #     the retry succeeds. These three get a CheckSpec on the detection message, so
+    #     a pass means "the fault fired AND the client caught it" rather than "the
+    #     client exited zero", which a silently-accepted corruption would also do.
+    #   - txn_id and length end in a client timeout. A response whose transaction ID
+    #     matches no tag is discarded with no retry, and a length field that overstates
+    #     the packet leaves the client waiting for bytes that never arrive.
+    #   - func_code and exception fail fast: the first is rejected as bad data, the
+    #     second is the PLC's own error surfacing, which is correct behaviour.
+    #   - close, delay and dribble change delivery rather than content and are all
+    #     recovered from. dribble is the only thing in this suite that exercises the
+    #     partial-read path in modbus.c -- loopback does not otherwise split a 13 byte
+    #     reply -- so it is the one to keep if these are ever trimmed.
+    #   - byte_count is accepted with no complaint. That is this client's current
+    #     behaviour, not an endorsement: it sizes the read from the MBAP length field
+    #     and never looks at the PDU byte count. Recorded so a future change to that is
+    #     a deliberate one.
+
+    def mb_fault_server(spec: str) -> ServerSpec:
+        return ServerSpec(
+            exe_path=exe("modbus_server"),
+            args_template=["--listen=127.0.0.1:{PORT}", "--debug=DETAIL", f"--corrupt={spec}"],
+            startup_wait_s=3,
+        )
+
+    def mb_fault_tag(port_placeholder: str = "127.0.0.1:{PORT}") -> str:
+        return f"protocol=modbus-tcp&gateway={port_placeholder}&path=0&elem_count=2&name=hr10"
+
+    # detected, dropped, retried -- each paired with a check that the detection happened
+    for fault, detect_pattern, detect_desc in [
+        ("proto_id", r"Response protocol identifier is \d+, expected zero!", "non-zero protocol identifier"),
+        ("unit_id", r"Response is for unit \d+ but we are talking to unit \d+!", "wrong unit ID"),
+        ("short_pdu", r"Response of \d+ bytes is too short to be a valid Modbus reply!", "runt response"),
+    ]:
+        t = sec.test(f"Modbus fault: {detect_desc} is rejected and the retry succeeds",
+                  [exe("tag_rw2"), "--type=uint16", f"--tag={mb_fault_tag()}", "--debug=4"],
+                  F, server=mb_fault_server(f"{fault}:1"))
+        sec.test(f"check Modbus {detect_desc} was detected",
+                  None, F, depends_on=t.id, ports_needed=0,
+                  check=CheckSpec(log_file=t.log_file, pattern=detect_pattern, expected=1, at_least=True))
+
+    # recovered from, or simply tolerated
+    for fault, desc in [
+        ("close:1", "connection closed instead of answering"),
+        ("delay:300", "response delayed by 300ms"),
+        ("dribble:3", "response dribbled in 3 byte pieces"),
+        ("byte_count:1", "inflated PDU byte count"),
+    ]:
+        sec.test(f"Modbus fault: {desc}",
+                  [exe("tag_rw2"), "--type=uint16", f"--tag={mb_fault_tag()}", "--debug=4"],
+                  F, server=mb_fault_server(fault))
+
+    # the client is expected to fail, not to recover
+    for fault, desc in [
+        ("txn_id:1", "unmatched transaction ID times out"),
+        ("length:1", "overstated MBAP length times out"),
+        ("func_code:1", "wrong function code is rejected"),
+        ("exception:1", "Modbus exception reaches the caller"),
+    ]:
+        sec.test(f"Modbus fault: {desc}",
+                  [exe("tag_rw2"), "--type=uint16", f"--tag={mb_fault_tag()}", "--debug=4"],
+                  F, server=mb_fault_server(fault), expect_failure=True)
+
     return m
 
 
