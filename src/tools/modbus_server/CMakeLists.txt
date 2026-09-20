@@ -23,6 +23,7 @@ set(SOURCES
     modbus_server.c
     register_storage.c
     modbus_protocol.c
+    modbus_fault.c
     ../utils/buf.c
     ../utils/err.c
     ../utils/log.c

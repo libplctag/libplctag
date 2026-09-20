@@ -49,6 +49,7 @@
 #    include <arpa/inet.h>
 #endif
 
+#include "modbus_fault.h"
 #include "modbus_protocol.h"
 #include "register_storage.h"
 #include "coro_net.h"
@@ -65,6 +66,9 @@
 
 typedef struct server_ctx_s server_ctx_t;
 typedef struct modbus_client_s modbus_client_t;
+
+/* gap between the pieces of a dribbled response; see the dribble fault below. */
+#define MODBUS_FAULT_DRIBBLE_GAP_MS 5
 
 #define MODBUS_RECV_BUFFER_SIZE 512
 #define MODBUS_SEND_BUFFER_SIZE 512
@@ -441,10 +445,95 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
 
+        /*
+         * Fault injection, between building the response and sending it: the
+         * mutations rewrite the reply in place, and the three delivery faults
+         * are handled below.  With nothing armed this costs one call that
+         * looks at a counter array.
+         */
+        modbus_fault_apply_response(&client->send_buf, &client->mbap_header);
+
+        if(modbus_fault_fires(MODBUS_FAULT_CLOSE)) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Fault: closing the connection instead of answering.");
+            break;
+        }
+
+        if(modbus_fault_delay_ms() > 0) {
+            /*
+             * This blocks the whole server, not just this connection: one
+             * coroutine thread drives every client.  Acceptable in a test
+             * tool, and the alternative -- a per-connection timer -- would
+             * mean teaching coro_net about deadlines for one fault's sake.
+             */
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Fault: delaying the response by %dms.",
+                  modbus_fault_delay_ms());
+            util_sleep_ms(modbus_fault_delay_ms());
+        }
+
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %" PRIu64 " bytes",
               (uint64_t)(buf_write_pos(&client->send_buf)));
-        while((err = socket_send_buf(fd, &client->send_buf)) == UTIL_EAGAIN) { coro_yield(handle, CORO_EVENT_WRITE); }
+
+        {
+            /*
+             * Deliberately no local for the dribble size.  This loop yields,
+             * and a coroutine resume jumps straight to the case label inside
+             * it -- past any initialisation above -- so a local read after a
+             * yield holds whatever was on the stack.  MinGW's GCC caught
+             * exactly that here ("'dribble' may be used uninitialized") where
+             * clang did not.  Anything that has to survive a yield lives in
+             * client, and everything else is re-read where it is used.
+             */
+            if(modbus_fault_dribble_bytes() > 0) {
+                pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Fault: sending the response in %" PRId32 " byte pieces.",
+                      modbus_fault_dribble_bytes());
+            }
+
+            err = UTIL_OK;
+
+            while(buf_read_size(&client->send_buf) > 0) {
+                int32_t dribble = modbus_fault_dribble_bytes();
+
+                /*
+                 * A capped view over the head of the send buffer.  buf_t is a
+                 * value type and socket_send_buf() advances its read cursor,
+                 * so the piece is sent from a copy and the real cursor is
+                 * moved by however much went out.  Copying a buf_t this way is
+                 * already the idiom in modbus_frame_check() above.
+                 */
+                buf_t piece = client->send_buf;
+
+                if(dribble > 0 && buf_read_size(&piece) > (size_t)dribble) { piece.write = piece.read + (size_t)dribble; }
+
+                err = socket_send_buf(fd, &piece);
+
+                client->send_buf.read = piece.read;
+
+                if(err == UTIL_EAGAIN) {
+                    coro_yield(handle, CORO_EVENT_WRITE);
+                    err = UTIL_OK;
+                    continue;
+                }
+
+                if(err != UTIL_OK) { break; }
+
+                /*
+                 * Pause between pieces.  A yield alone is not enough: the
+                 * socket is writable again immediately, so the coroutine
+                 * resumes at once and the pieces leave close enough together
+                 * that the receiver's first recv() gets all of them -- which
+                 * was measured, not assumed.  A real gap is what makes the
+                 * client see a partial frame, which is the entire point of
+                 * the fault.  Blocks the server for the duration, like the
+                 * delay fault above and for the same reason.
+                 */
+                if(dribble > 0 && buf_read_size(&client->send_buf) > 0) {
+                    util_sleep_ms(MODBUS_FAULT_DRIBBLE_GAP_MS);
+                    coro_yield(handle, CORO_EVENT_WRITE);
+                }
+            }
+        }
+
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
             break;
@@ -630,6 +719,13 @@ int main(int argc, char *argv[]) {
          "modbus.input_registers",
          "Number of input registers",
          {.has_default = true, .value.int_val = 1000}},
+        {"corrupt",
+         ARGS_TYPE_STRING,
+         ARGS_OPTIONAL,
+         ARGS_MULTIPLE,
+         "server.corrupt",
+         "Inject a fault: <kind>[:<count>].  Repeatable.  Use --corrupt=list to see the kinds",
+         {.has_default = false}},
         {"help",
          ARGS_TYPE_BOOL,
          ARGS_OPTIONAL,
@@ -653,6 +749,40 @@ int main(int argc, char *argv[]) {
         args_free(&args_result);
         return EXIT_SUCCESS;
     }
+
+    /* arm any requested faults before anything can connect. */
+    {
+        size_t corrupt_count = args_get_count(&args_result, "corrupt");
+        size_t corrupt_index = 0;
+
+        for(corrupt_index = 0; corrupt_index < corrupt_count; corrupt_index++) {
+            args_value_t corrupt_val = args_get_at(&args_result, "corrupt", corrupt_index);
+
+            if(!corrupt_val.present || !corrupt_val.value.string_val) { continue; }
+
+            /* "list" is not a fault; it prints the kinds and exits. */
+            if(strcmp(corrupt_val.value.string_val, "list") == 0) {
+                const char **names = modbus_fault_kind_names();
+                size_t name_index = 0;
+
+                fprintf(stderr, "Fault kinds for --corrupt=<kind>[:<count>]:\n");
+                for(name_index = 0; names[name_index]; name_index++) { fprintf(stderr, "    %s\n", names[name_index]); }
+                fprintf(stderr, "\nThe count is a number of responses, except for \"delay\" where it is\n"
+                                "milliseconds and \"dribble\" where it is the piece size in bytes.\n");
+
+                args_free(&args_result);
+                return EXIT_SUCCESS;
+            }
+
+            if(!modbus_fault_parse(corrupt_val.value.string_val)) {
+                pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Unrecognized --corrupt value \"%s\".",
+                      corrupt_val.value.string_val);
+                args_free(&args_result);
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
 
     const char *debug_level_str = args_get_string(&args_result, "debug");
     log_level_t log_level = LOG_LEVEL_INFO;
