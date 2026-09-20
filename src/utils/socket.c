@@ -102,15 +102,12 @@
 
 struct sock_t {
     SOCKET fd;
-    SOCKET wake_read_fd;
-    SOCKET wake_write_fd;
     int port;
 };
 
 
 #define MAX_IPS (8)
 
-static int sock_create_event_wakeup_channel(sock_p sock);
 
 
 /*
@@ -138,8 +135,6 @@ static int socket_lib_init(void) {
 
 
 extern int socket_create(sock_p *s) {
-    int rc = PLCTAG_STATUS_OK;
-
     pdebug(DEBUG_MODULE_SOCKET, DEBUG_INFO, 0, "Starting.");
 
     if(!socket_lib_init()) {
@@ -160,24 +155,6 @@ extern int socket_create(sock_p *s) {
     }
 
     (*s)->fd = INVALID_SOCKET;
-    (*s)->wake_read_fd = INVALID_SOCKET;
-    (*s)->wake_write_fd = INVALID_SOCKET;
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Setting up wake pipe.");
-    rc = sock_create_event_wakeup_channel((*s));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to create wake channel, error %s!", plc_tag_decode_error(rc));
-
-        /*
-         * NOTE: this used to return leaving the allocation orphaned and *s
-         * pointing at it.  The caller has no socket to destroy on a failed
-         * create, so clean up here and hand back a NULL.
-         */
-        mem_free(*s);
-        *s = NULL;
-
-        return rc;
-    }
 
     pdebug(DEBUG_MODULE_SOCKET, DEBUG_INFO, 0, "Done.");
 
@@ -455,249 +432,8 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 }
 
 
-int socket_wait_event(sock_p sock, int events, int timeout_ms) {
-    int result = SOCK_EVENT_NONE;
-    fd_set read_set;
-    fd_set write_set;
-    fd_set err_set;
-    int num_sockets = 0;
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Null socket pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(timeout_ms < 0) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Timeout must be zero or positive!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* check if the mask is empty */
-    if(events == 0) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Passed event mask is empty!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* set up fd sets */
-    FD_ZERO(&read_set);
-    FD_ZERO(&write_set);
-    FD_ZERO(&err_set);
-
-    /* add the wake fd - defensive check for valid socket */
-    if(sock->wake_read_fd != INVALID_SOCKET) {
-        FD_SET(sock->wake_read_fd, &read_set);
-    } else {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Wake socket is invalid, cannot wait for events!");
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
-    if(sock->fd != INVALID_SOCKET) {
-        /* we always want to know about errors. */
-        FD_SET(sock->fd, &err_set);
-
-        /* add more depending on the mask. */
-        if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
-
-        if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
-    }
-    /* else: main socket invalid - only wake socket will be monitored, which is valid for reconnection */
-
-    /* calculate the timeout. */
-    if(timeout_ms > 0) {
-        struct timeval tv;
-
-        tv.tv_sec = (long)(timeout_ms / 1000);
-        tv.tv_usec = (long)(timeout_ms % 1000) * (long)(1000);
-
-        /* Note: On Windows, the first parameter (nfds) to select() is ignored.
-         * Windows select() determines which sockets to check from the fd_sets themselves.
-         * The value 0 is used here since it's ignored anyway. */
-        num_sockets = select(0, &read_set, &write_set, &err_set, &tv);
-    } else {
-        struct timeval tv = {0, 0};
-        num_sockets = select(0, &read_set, &write_set, &err_set, &tv);
-    }
-
-    if(num_sockets == 0) {
-        result |= (events & SOCK_EVENT_TIMEOUT);
-    } else if(num_sockets > 0) {
-        /* was there a wake up? */
-        if(FD_ISSET(sock->wake_read_fd, &read_set)) {
-            int bytes_read = 0;
-            char buf[32];
-
-            /* empty the socket. */
-            while((bytes_read = (int)recv(sock->wake_read_fd, (char *)&buf[0], sizeof(buf), 0)) > 0) {}
-
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket woken up.");
-
-            result |= (events & SOCK_EVENT_WAKE_UP);
-        }
-
-        /* is read ready for the main fd? Guard against INVALID_SOCKET */
-        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &read_set)) {
-            char buf;
-            int byte_read = 0;
-
-            byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
-
-            if(byte_read > 0) {
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket can read.");
-                result |= (events & SOCK_EVENT_CAN_READ);
-            } else if(byte_read == 0) {
-                /* recv() returned 0 - this means the connection was closed by the remote peer.
-                 * A healthy TCP socket that's just idle will not show as readable in select()
-                 * unless there's actual data waiting. If select() says readable but recv() gets 0,
-                 * the connection is truly closed. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Socket disconnected (recv returned 0).");
-                result |= (events & SOCK_EVENT_DISCONNECT);
-            } else {
-                /* recv() returned -1, check the specific error */
-                int recv_err = WSAGetLastError();
-                if(recv_err == WSAEWOULDBLOCK) {
-                    /* This is a spurious wakeup - socket showed as readable but no data.
-                     * Don't report an error, just return no events. */
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket readable but no data available (WSAEWOULDBLOCK).");
-                } else {
-                    /* Some other error occurred on the socket */
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "recv() with MSG_PEEK error %d on socket.", recv_err);
-                    result |= (events & SOCK_EVENT_ERROR);
-                }
-            }
-        }
-
-        /* is write ready for the main fd? Guard against INVALID_SOCKET */
-        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket can write or just connected.");
-            result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
-        }
-
-        /* is there an error? Guard against INVALID_SOCKET */
-        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &err_set)) {
-            /* On Windows, FD_ISSET on err_set can return true spuriously for idle sockets.
-             * We need to verify the error is real by checking the actual socket error state.
-             * Use getsockopt(SO_ERROR) to get the actual error code. */
-            int sock_error = 0;
-            socklen_t sock_error_len = sizeof(sock_error);
-
-            if(getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, (char *)&sock_error, &sock_error_len) == 0) {
-                if(sock_error != 0) {
-                    /* There's a real socket error */
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Socket has real error %d!", sock_error);
-                    result |= (events & SOCK_EVENT_ERROR);
-                } else {
-                    /* FD_ISSET was spurious - there's no actual error */
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0,
-                           "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
-                }
-            } else {
-                /* Failed to get socket error state, assume there's an error */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Failed to check socket error state, treating as error.");
-                result |= (events & SOCK_EVENT_ERROR);
-            }
-        }
-    } else {
-        int err = WSAGetLastError();
-
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "select() returned status %d!", num_sockets);
-
-        switch(err) {
-            case WSANOTINITIALISED: /* WSAStartup() not called first. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "WSAStartUp() not called before calling Winsock functions!");
-                return PLCTAG_ERR_BAD_CONFIG;
-                break;
-
-            case WSAEFAULT: /* No mem for internal tables. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Insufficient resources for select() to run!");
-                return PLCTAG_ERR_NO_MEM;
-                break;
-
-            case WSAENETDOWN: /* network subsystem is down. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "The network subsystem is down!");
-                return PLCTAG_ERR_BAD_DEVICE;
-                break;
-
-            case WSAEINVAL: /* timeout is invalid. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "The timeout is invalid!");
-                return PLCTAG_ERR_BAD_PARAM;
-                break;
-
-            case WSAEINTR: /* A blocking call wss cancelled. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "A blocking call was cancelled!");
-                return PLCTAG_ERR_BAD_CONFIG;
-                break;
-
-            case WSAEINPROGRESS: /* A blocking call is already in progress. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "A blocking call is already in progress!");
-                return PLCTAG_ERR_BAD_CONFIG;
-                break;
-
-            case WSAENOTSOCK: /* The descriptor set contains something other than a socket. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "The fd set contains something other than a socket!");
-                return PLCTAG_ERR_BAD_DATA;
-                break;
-
-            default:
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unexpected socket err %d!", err);
-                return PLCTAG_ERR_BAD_STATUS;
-                break;
-        }
-    }
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Done.");
-
-    return result;
-}
 
 
-int socket_wake(sock_p sock) {
-    int rc = PLCTAG_STATUS_OK;
-    const char dummy_data[] = "Dummy data.";
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Null socket pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* The wake pipe is independent of the TCP connection state.
-     * Write to the wake pipe to interrupt the handler thread's select() call.
-     * This works regardless of whether the TCP connection is open.
-     * Check that the wake pipe is valid before writing to it. */
-    if(sock->wake_write_fd == INVALID_SOCKET) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Wake pipe not yet initialized, skipping wake.");
-        return PLCTAG_STATUS_OK;
-    }
-
-    rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
-    if(rc < 0) {
-        int err = WSAGetLastError();
-
-        if(err == WSAEWOULDBLOCK) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Write wrote no data.");
-
-            rc = PLCTAG_STATUS_OK;
-        } else if(err == WSAEBADF) {
-            /* If the write failed with WSAEBADF (bad socket), the wake pipe
-             * has been closed. Mark it as invalid and return success so the system
-             * can proceed. The next wake attempt will skip due to INVALID_SOCKET check. */
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Wake pipe closed (WSAEBADF), marking as invalid.");
-            sock->wake_write_fd = INVALID_SOCKET;
-            rc = PLCTAG_STATUS_OK;
-        } else {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "socket write error rc=%d, errno=%d", rc, err);
-            return PLCTAG_ERR_WRITE;
-        }
-    }
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Done.");
-
-    return rc;
-}
 
 
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
@@ -1007,25 +743,7 @@ int socket_destroy(sock_p *s) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if((*s)->wake_read_fd != INVALID_SOCKET) {
-        if(closesocket((*s)->wake_read_fd)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error closing wake read socket!");
-            rc = PLCTAG_ERR_CLOSE;
-        }
-
-        (*s)->wake_read_fd = INVALID_SOCKET;
-    }
-
-    if((*s)->wake_write_fd != INVALID_SOCKET) {
-        if(closesocket((*s)->wake_write_fd)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error closing wake write socket!");
-            rc = PLCTAG_ERR_CLOSE;
-        }
-
-        (*s)->wake_write_fd = INVALID_SOCKET;
-    }
-
-    socket_close(*s);
+socket_close(*s);
 
     mem_free(*s);
 
@@ -1039,178 +757,6 @@ int socket_destroy(sock_p *s) {
 }
 
 
-static int sock_create_event_wakeup_channel(sock_p sock) {
-    int rc = PLCTAG_STATUS_OK;
-    SOCKET listener = INVALID_SOCKET;
-    struct sockaddr_in listener_addr_info;
-    socklen_t addr_info_size = sizeof(struct sockaddr_in);
-    u_long non_blocking = 1;
-    SOCKET wake_fds[2];
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Starting.");
-
-    wake_fds[0] = INVALID_SOCKET;
-    wake_fds[1] = INVALID_SOCKET;
-
-    /*
-     * This is a bit convoluted.
-     *
-     * First we open a listening socket on the loopback interface.
-     * We do not care what port so we let the OS decide.
-     *
-     * Then we connect to that socket.   The connection becomes
-     * the reader side of the wake up fds.
-     *
-     * Then we accept and that becomes the writer side of the
-     * wake up fds.
-     *
-     * Then we close the listener because we do not want to keep
-     * it open as it might be a problem.  Probably more for DOS
-     * purposes than any security, but you never know!
-     *
-     * And the reader and writer have to be set up as non-blocking!
-     *
-     * This was cobbled together from various sources including
-     * StackExchange and MSDN.   I did not take notes, so I am unable
-     * to properly credit the original sources :-(
-     */
-
-    do {
-        /*
-         * Set up our listening socket.
-         */
-
-        listener = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(listener == INVALID_SOCKET) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d creating the listener socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /* clear the listener address info */
-        mem_set(&listener_addr_info, 0, addr_info_size);
-
-        /* standard IPv4 for the win! */
-        listener_addr_info.sin_family = AF_INET;
-
-        /* we do not care what port. */
-        listener_addr_info.sin_port = 0;
-
-        /* we want to connect on the loopback address. */
-        listener_addr_info.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-        /* now comes the part where we could fail. */
-
-        /* first we bind the listener to the loopback and let the OS choose the port. */
-        if(bind(listener, (struct sockaddr *)&listener_addr_info, addr_info_size)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d binding the listener socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /*
-         * we need to get the address and port of the listener for later steps.
-         * Notice that this _sets_ the address size!.
-         */
-        if(getsockname(listener, (struct sockaddr *)&listener_addr_info, &addr_info_size)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d getting the listener socket address info!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /* Phwew.   We can actually listen now. Notice that this is blocking! */
-        if(listen(listener, 1)) { /* MAGIC constant - We do not want any real queue! */
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d listening on the listener socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /*
-         * Set up our wake read side socket.
-         */
-
-        wake_fds[0] = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(wake_fds[0] <= 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d creating the wake channel read side socket!",
-                   WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /*
-         * now we start the next phase.   We need to connect to our own listener.
-         * This will be the reader side of the wake up socket.
-         */
-
-        if(connect(wake_fds[0], (struct sockaddr *)&listener_addr_info, addr_info_size)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d connecting to the listener socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /* now we accept our own connection. This becomes the writer side. */
-        wake_fds[1] = accept(listener, 0, 0);
-        if(wake_fds[1] == INVALID_SOCKET) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d connecting to the listener socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /* now we need to set these to non-blocking. */
-
-        /* reader */
-        if(ioctlsocket(wake_fds[0], (long)FIONBIO, &non_blocking)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /* writer */
-        if(ioctlsocket(wake_fds[1], (long)FIONBIO, &non_blocking)) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d setting writer socket to non-blocking!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-
-        /* set TCP no delay on both sides to avoid delays */
-        int flag = 1;
-        if(setsockopt(wake_fds[0], IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(int)) < 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d setting TCP_NODELAY on wake read socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-        if(setsockopt(wake_fds[1], IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(int)) < 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error %d setting TCP_NODELAY on wake write socket!", WSAGetLastError());
-            rc = PLCTAG_ERR_WINSOCK;
-            break;
-        }
-    } while(0);
-
-    /* do some clean up */
-    if(listener != INVALID_SOCKET) { closesocket(listener); }
-
-    /* check the result */
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to set up wakeup socket!");
-
-        if(wake_fds[0] != INVALID_SOCKET) {
-            closesocket(wake_fds[0]);
-            wake_fds[0] = INVALID_SOCKET;
-        }
-
-        if(wake_fds[1] != INVALID_SOCKET) {
-            closesocket(wake_fds[1]);
-            wake_fds[1] = INVALID_SOCKET;
-        }
-    } else {
-        sock->wake_read_fd = wake_fds[0];
-        sock->wake_write_fd = wake_fds[1];
-
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Done.");
-    }
-
-    return rc;
-}
 
 #else
 
@@ -1220,19 +766,14 @@ static int sock_create_event_wakeup_channel(sock_p sock) {
 
 struct sock_t {
     int fd;
-    int wake_read_fd;
-    int wake_write_fd;
     int port;
 };
 
 
-static int sock_create_event_wakeup_channel(sock_p sock);
 
 #define MAX_IPS (8)
 
 extern int socket_create(sock_p *s) {
-    int32_t rc = PLCTAG_STATUS_OK;
-
     pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Starting.");
 
     if(!s) {
@@ -1248,24 +789,6 @@ extern int socket_create(sock_p *s) {
     }
 
     (*s)->fd = INVALID_SOCKET;
-    (*s)->wake_read_fd = INVALID_SOCKET;
-    (*s)->wake_write_fd = INVALID_SOCKET;
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Setting up wake pipe.");
-    rc = sock_create_event_wakeup_channel((*s));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
-
-        /*
-         * NOTE: this used to return leaving the allocation orphaned and *s
-         * pointing at it.  The caller has no socket to destroy on a failed
-         * create, so clean up here and hand back a NULL.
-         */
-        mem_free(*s);
-        *s = NULL;
-
-        return rc;
-    }
 
     pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Done.");
 
@@ -1321,7 +844,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
      * 1. We use non-blocking mode with select() for timeout handling
      * 2. SO_RCVTIMEO + non-blocking mode can cause select() to not report readability correctly
      * 3. select() provides finer control over timeout behavior than SO_RCVTIMEO/SO_SNDTIMEO
-     * Instead, timeout handling is done via select() in socket_wait_event() and socket_read()
+     * Instead, timeout handling is done via select() in socket_read()
      */
 
     /* make the socket non-blocking. */
@@ -1387,7 +910,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     }
 
     // pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Setting up wake pipe.");
-    // rc = sock_create_event_wakeup_channel(s);
     // if(rc != PLCTAG_STATUS_OK) {
     //     pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
     //     return rc;
@@ -1579,296 +1101,9 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 }
 
 
-static inline void log_event_bits(const char *prefix, int bits) {
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "%s events=0x%x: %s%s%s%s%s%s", prefix, bits,
-           (bits & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "", (bits & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "",
-           (bits & SOCK_EVENT_CONNECT) ? "CONNECT " : "", (bits & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "",
-           (bits & SOCK_EVENT_ERROR) ? "ERROR " : "", (bits & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
-}
-
-int socket_wait_event(sock_p sock, int events, int timeout_ms) {
-    int result = SOCK_EVENT_NONE;
-    fd_set read_set;
-    fd_set write_set;
-    fd_set err_set;
-    int max_fd = 0;
-    int num_sockets = 0;
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Null socket pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(timeout_ms < 0) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Timeout must be zero or positive!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* check if the mask is empty */
-    if(events == 0) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Passed event mask is empty!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* set up fd sets */
-    FD_ZERO(&read_set);
-    FD_ZERO(&write_set);
-    FD_ZERO(&err_set);
-
-    /* add the wake fd - defensive check for valid socket */
-    if(sock->wake_read_fd == INVALID_SOCKET) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Wake socket is invalid, cannot wait for events!");
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    FD_SET(sock->wake_read_fd, &read_set);
-
-    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
-    if(sock->fd != INVALID_SOCKET) {
-        /* calculate the maximum fd */
-        max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
-
-        /* we always want to know about errors. */
-        FD_SET(sock->fd, &err_set);
-
-        /* add more depending on the mask. */
-        if(events & SOCK_EVENT_CAN_READ) {
-            FD_SET(sock->fd, &read_set);
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
-        }
-
-        if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
-            FD_SET(sock->fd, &write_set);
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0,
-                   "Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
-        }
-
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Main socket fd=%d is valid, max_fd=%d, wake_read_fd=%d", sock->fd, max_fd,
-               sock->wake_read_fd);
-    } else {
-        /* Main socket invalid or closed - only wake socket will be monitored (valid for reconnection/idle) */
-        max_fd = sock->wake_read_fd;
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Main socket is INVALID, using only wake_read_fd=%d", sock->wake_read_fd);
-    }
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events,
-           max_fd, sock->fd, timeout_ms);
-
-    /* calculate the timeout. */
-    if(timeout_ms > 0) {
-        struct timeval tv;
-
-        tv.tv_sec = (time_t)(timeout_ms / 1000);
-        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
-
-        /* POSIX fixes the width of neither field, so widen both rather than guess. */
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "calling select with timeout tv_sec=%" PRId64 " tv_usec=%" PRId64,
-               (int64_t)tv.tv_sec, (int64_t)tv.tv_usec);
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
-    } else {
-        struct timeval tv = {0, 0};
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "calling select with zero timeout (poll)");
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
-    }
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "select() returned num_sockets=%d for sock->fd=%d", num_sockets, sock->fd);
-
-    if(num_sockets == 0) {
-        result |= (events & SOCK_EVENT_TIMEOUT);
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "select() timed out, returning TIMEOUT event");
-    } else if(num_sockets > 0) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "num_sockets (%d) > 0, checking ready fds. sock->fd=%d, wake_read_fd=%d",
-               num_sockets, sock->fd, sock->wake_read_fd);
-
-        /* was there a wake up? */
-        int wake_isset = FD_ISSET(sock->wake_read_fd, &read_set);
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "FD_ISSET(wake_read_fd=%d, read_set)=%d", sock->wake_read_fd, wake_isset);
-        if(wake_isset) {
-            char buf[32];
-
-            /* empty the socket. */
-            while((int)read(sock->wake_read_fd, &buf[0], sizeof(buf)) > 0) {}
-
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket woken up.");
-            result |= (events & SOCK_EVENT_WAKE_UP);
-        }
-
-        /* is read ready for the main fd? Guard against INVALID_SOCKET (-1) which causes undefined behavior in FD_ISSET */
-        int read_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &read_set) : 0;
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "FD_ISSET(sock->fd=%d, read_set)=%d", sock->fd, read_isset);
-
-        if(sock->fd != INVALID_SOCKET && read_isset) {
-            char buf;
-            int byte_read = 0;
-
-            byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
-
-            if(byte_read > 0) {
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket can read.");
-                result |= (events & SOCK_EVENT_CAN_READ);
-            } else if(byte_read == 0) {
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Socket disconnected (recv returned 0).");
-                result |= (events & SOCK_EVENT_DISCONNECT);
-            } else {
-                if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                    /* Don't report anything, will wait for next event */
-                } else {
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Socket recv error: %d", errno);
-                    result |= (events & SOCK_EVENT_DISCONNECT);
-                }
-            }
-        }
-
-        /* is write ready for the main fd? Guard against INVALID_SOCKET (-1) */
-        int write_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &write_set) : 0;
-
-        if(sock->fd != INVALID_SOCKET && write_isset) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Socket can write or just connected.");
-            result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
-        }
-
-        /* is there an error? Guard against INVALID_SOCKET (-1) */
-        int err_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &err_set) : 0;
-
-        if(sock->fd != INVALID_SOCKET && err_isset) {
-            /* On some platforms, FD_ISSET on err_set can return true spuriously.
-             * Verify the error is real by checking SO_ERROR. */
-            int sock_error = 0;
-            socklen_t sock_error_len = sizeof(sock_error);
-
-            if(getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_error, &sock_error_len) == 0) {
-                if(sock_error != 0) {
-                    /* There's a real socket error */
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Socket has real error %d!", sock_error);
-                    result |= (events & SOCK_EVENT_ERROR);
-                } else {
-                    /* FD_ISSET was spurious - there's no actual error */
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0,
-                           "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
-                }
-            } else {
-                /* Failed to get socket error state, assume there's an error */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Failed to check socket error state, treating as error.");
-                result |= (events & SOCK_EVENT_ERROR);
-            }
-        }
-
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "After all checks, result=0x%x", result);
-    } else {
-        /* error */
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "select() returned status %d!", num_sockets);
-
-        switch(errno) {
-            case EBADF: /* bad file descriptor */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Bad file descriptor used in select()!");
-                return PLCTAG_ERR_BAD_PARAM;
-                break;
-
-            case EINTR: /* signal was caught, this should not happen! */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "A signal was caught in select() and this should not happen!");
-                return PLCTAG_ERR_BAD_CONFIG;
-                break;
-
-            case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(
-                    DEBUG_MODULE_SOCKET, DEBUG_WARN, 0,
-                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
-                return PLCTAG_ERR_BAD_PARAM;
-                break;
-
-            case ENOMEM: /* No mem for internal tables. */
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Insufficient memory for select() to run!");
-                return PLCTAG_ERR_NO_MEM;
-                break;
-
-            default:
-                pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unexpected socket err %d!", errno);
-                return PLCTAG_ERR_BAD_STATUS;
-                break;
-        }
-    }
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_SPEW, 0, "Done.");
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0,
-           "socket_wait_event: Final result=0x%x before return, TIMEOUT bit=%d, events=0x%x", result,
-           (result & SOCK_EVENT_TIMEOUT) ? 1 : 0, events);
-    log_event_bits("socket_wait_event: result", result);
-    log_event_bits("socket_wait_event: requested_events", events);
-
-    /* Log result at INFO level for visibility */
-    if(result != SOCK_EVENT_NONE) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_INFO, 0, "fd=%d returning events=0x%x (requested=0x%x) %s%s%s%s%s%s", sock->fd,
-               result, events, (result & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "",
-               (result & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "", (result & SOCK_EVENT_CONNECT) ? "CONNECT " : "",
-               (result & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "", (result & SOCK_EVENT_ERROR) ? "ERROR " : "",
-               (result & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
-    }
-
-    return result;
-}
 
 
-int socket_wake(sock_p sock) {
-    int rc = PLCTAG_STATUS_OK;
-    const char dummy_data[] = "Dummy data.";
 
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Null socket pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* The wake pipe is independent of the TCP connection state.
-     * Write to the wake pipe to interrupt the handler thread's select() call.
-     * This works regardless of whether the TCP connection is open.
-     * Check that the wake pipe is valid before writing to it. */
-    if(sock->wake_write_fd == INVALID_SOCKET) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Wake pipe not yet initialized, skipping wake.");
-        return PLCTAG_STATUS_OK;
-    }
-
-    // rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
-#ifdef BSD_OS_TYPE
-    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
-    rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
-#else
-    /* on Linux, we use MSG_NOSIGNAL */
-    rc = (int)send(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data), MSG_NOSIGNAL);
-#endif
-    if(rc >= 0) {
-        rc = PLCTAG_STATUS_OK;
-    } else {
-        int err = errno;
-
-        /* If the write failed with EAGAIN/EWOULDBLOCK, the wake pipe is full.
-         * This means a wake is already pending, so return success. */
-        if(err == EAGAIN || err == EWOULDBLOCK) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Wake pipe full (EAGAIN/EWOULDBLOCK), wake already pending.");
-            return PLCTAG_STATUS_OK;
-        }
-
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Socket write error: rc=%d, errno=%d", rc, err);
-
-        /* If the write failed with EBADF (bad file descriptor), the wake pipe
-         * has been closed. Mark it as invalid and return success so the system
-         * can proceed. The next wake attempt will skip due to INVALID_SOCKET check. */
-        if(err == EBADF) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Wake pipe closed (EBADF), marking as invalid.");
-            sock->wake_write_fd = INVALID_SOCKET;
-            return PLCTAG_STATUS_OK;
-        }
-
-        return PLCTAG_ERR_WRITE;
-    }
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_DETAIL, 0, "Done.");
-
-    return rc;
-}
 
 
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
@@ -2192,19 +1427,7 @@ int socket_destroy(sock_p *s) {
     }
 
     /* close the wake sockets */
-    if((*s)->wake_read_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_read_fd)) { pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error closing read wake socket!"); }
-
-        (*s)->wake_read_fd = INVALID_SOCKET;
-    }
-
-    if((*s)->wake_write_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_write_fd)) { pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Error closing write wake socket!"); }
-
-        (*s)->wake_write_fd = INVALID_SOCKET;
-    }
-
-    socket_close(*s);
+socket_close(*s);
 
     mem_free(*s);
 
@@ -2216,139 +1439,5 @@ int socket_destroy(sock_p *s) {
 }
 
 
-static int sock_create_event_wakeup_channel(sock_p sock) {
-    int rc = PLCTAG_STATUS_OK;
-    int flags = 0;
-    int wake_fds[2] = {0};
-#ifdef BSD_OS_TYPE
-    int sock_opt = 1;
-#endif
-
-    pdebug(DEBUG_MODULE_SOCKET, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        /* open the pipe for waking the select wait. */
-        // if(pipe(wake_fds)) {
-        if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to open waker pipe!");
-            switch(errno) {
-                case EAFNOSUPPORT:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0,
-                           "The specified addresss family is not supported on this machine!");
-                    break;
-
-                case EFAULT:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0,
-                           "The address socket_vector does not specify a valid part of the process address space.");
-                    break;
-
-                case EMFILE:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "No more file descriptors are available for this process.");
-                    break;
-
-                case ENFILE:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "No more file descriptors are available for the system.");
-                    break;
-
-                case ENOBUFS:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0,
-                           "Insufficient resources were available in the system to perform the operation.");
-                    break;
-
-                case ENOMEM:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Insufficient memory was available to fulfill the request.");
-                    break;
-
-                case EOPNOTSUPP:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0,
-                           "The specified protocol does not support creation of socket pairs.");
-                    break;
-
-                case EPROTONOSUPPORT:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "The specified protocol is not supported on this machine.");
-                    break;
-
-                case EPROTOTYPE:
-                    pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "The socket type is not supported by the protocol.");
-                    break;
-
-                default: pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unexpected error %d!", errno); break;
-            }
-
-            rc = PLCTAG_ERR_BAD_REPLY;
-            break;
-        }
-
-#ifdef BSD_OS_TYPE
-        /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
-        if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_ERROR, 0,
-                   "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
-            rc = PLCTAG_ERR_OPEN;
-            break;
-        }
-
-        if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_ERROR, 0,
-                   "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
-            rc = PLCTAG_ERR_OPEN;
-            break;
-        }
-#endif
-
-        /* make the read pipe fd non-blocking. */
-        if((flags = fcntl(wake_fds[0], F_GETFL)) < 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to get flags of read socket fd!");
-            rc = PLCTAG_ERR_BAD_REPLY;
-            break;
-        }
-
-        /* set read fd non-blocking */
-        flags |= O_NONBLOCK;
-
-        if(fcntl(wake_fds[0], F_SETFL, flags) < 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to set flags of read socket fd!");
-            rc = PLCTAG_ERR_BAD_REPLY;
-            break;
-        }
-
-        /* make the write pipe fd non-blocking. */
-        if((flags = fcntl(wake_fds[1], F_GETFL)) < 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to get flags of write socket fd!");
-            rc = PLCTAG_ERR_BAD_REPLY;
-            break;
-        }
-
-        /* set write fd non-blocking */
-        flags |= O_NONBLOCK;
-
-        if(fcntl(wake_fds[1], F_SETFL, flags) < 0) {
-            pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to set flags of write socket fd!");
-            rc = PLCTAG_ERR_BAD_REPLY;
-            break;
-        }
-
-        sock->wake_read_fd = wake_fds[0];
-        sock->wake_write_fd = wake_fds[1];
-    } while(0);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_WARN, 0, "Unable to open waker socket!");
-
-        if(wake_fds[0] != INVALID_SOCKET) {
-            close(wake_fds[0]);
-            wake_fds[0] = INVALID_SOCKET;
-        }
-
-        if(wake_fds[1] != INVALID_SOCKET) {
-            close(wake_fds[1]);
-            wake_fds[1] = INVALID_SOCKET;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_SOCKET, DEBUG_INFO, 0, "Done.");
-    }
-
-    return rc;
-}
 
 #endif

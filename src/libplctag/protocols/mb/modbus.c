@@ -40,7 +40,8 @@
 #include <utils/mem.h>
 #include <utils/mutex.h>
 #include <utils/nap.h>
-#include <utils/socket.h>
+#include <utils/poller.h>
+#include <utils/socket_fd.h>
 #include <utils/str.h>
 #include <utils/thread.h>
 #include <stdlib.h>
@@ -107,7 +108,21 @@ struct modbus_plc_t {
 
     /* hostname/ip and possibly port of the server. */
     char *server;
-    sock_p sock;
+
+    /*
+     * The socket is a bare handle now; readiness and waking come from the
+     * poller.  The poller is created with the PLC and outlives every
+     * connection attempt, which is what lets wake_plc_thread() and the
+     * destructor wake this thread before the first socket exists -- the old
+     * code had to hold plc->mutex and test plc->sock for exactly that race.
+     *
+     * One socket per poller today, because there is one handler thread per
+     * PLC.  Nothing here assumes that.
+     */
+    socket_fd_t sock;
+    bool sock_registered;
+    poller_p poller;
+
     uint8_t server_id;
     int connection_group_id;
 
@@ -312,9 +327,8 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 
 
 /* device tag functions */
-static plc_tag_p mb_connection_tag_create(attr attribs,
-                                          tag_extended_callback_func_t tag_callback_func,
-                                          void *userdata, plc_tag_p src_tag);
+static plc_tag_p mb_connection_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func, void *userdata,
+                                          plc_tag_p src_tag);
 static int mb_connection_tag_abort(plc_tag_p tag);
 static int mb_connection_tag_status(plc_tag_p tag);
 static int mb_connection_tag_tickler(plc_tag_p tag);
@@ -394,8 +408,7 @@ struct tag_vtable_t modbus_vtable = {
 
 /****** main entry point *******/
 
-plc_tag_p mb_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func,
-                        void *userdata, plc_tag_p src_tag) {
+plc_tag_p mb_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func, void *userdata, plc_tag_p src_tag) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
 
@@ -750,35 +763,55 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
                     rc = PLCTAG_ERR_MUTEX_INIT;
                 } else {
-                    /* set up the maximum request depth. */
-                    (*plc)->max_requests_in_flight = max_requests_in_flight;
+                    /*
+                     * rc_alloc() zeroes the struct, and zero is a perfectly good
+                     * descriptor number on POSIX, so the handle has to be set
+                     * invalid explicitly.
+                     */
+                    (*plc)->sock = SOCKET_FD_INVALID;
+                    (*plc)->sock_registered = false;
 
-                    /* Initialize PLC state before making it visible to other threads */
-                    (*plc)->state = PLC_CONNECT_START;
-                    atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
-                    atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
+                    /*
+                     * The poller is created here rather than at connect time so
+                     * that it exists for the whole life of the PLC: the destructor
+                     * and wake_plc_thread() need something to wake even when no
+                     * socket has been made yet.
+                     */
+                    rc = poller_create(&((*plc)->poller), 1);
+                    if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create poller, error %s!",
+                               plc_tag_decode_error(rc));
+                    } else {
+                        /* set up the maximum request depth. */
+                        (*plc)->max_requests_in_flight = max_requests_in_flight;
 
-                    /* conn_event_ring_write_idx always points at the ring slot holding the
-                     * current state, not the next free slot: mb_plc_publish_event() dedups
-                     * a new event against ring[write_idx] before writing ring[write_idx+1],
-                     * and a connection tag seeds event_ring_read_idx to this same index to
-                     * mean "I've already seen this one." Both of those need ring[0] to hold
-                     * a real DOWN entry, not the zeroed garbage rc_alloc() leaves behind. */
-                    (*plc)->conn_event_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
-                    (*plc)->conn_event_ring[0].status = PLCTAG_STATUS_OK;
-                    atomic_init_int32(&(*plc)->conn_event_ring_write_idx, 0);
+                        /* Initialize PLC state before making it visible to other threads */
+                        (*plc)->state = PLC_CONNECT_START;
+                        atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
+                        atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
 
-                    /* Calculate initial disconnect deadline */
-                    (*plc)->cached_inactivity_timeout_ms = atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
-                    (*plc)->disconnect_at_time_ms = (*plc)->last_packet_time_ms + (*plc)->cached_inactivity_timeout_ms;
+                        /* conn_event_ring_write_idx always points at the ring slot holding the
+                         * current state, not the next free slot: mb_plc_publish_event() dedups
+                         * a new event against ring[write_idx] before writing ring[write_idx+1],
+                         * and a connection tag seeds event_ring_read_idx to this same index to
+                         * mean "I've already seen this one." Both of those need ring[0] to hold
+                         * a real DOWN entry, not the zeroed garbage rc_alloc() leaves behind. */
+                        (*plc)->conn_event_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
+                        (*plc)->conn_event_ring[0].status = PLCTAG_STATUS_OK;
+                        atomic_init_int32(&(*plc)->conn_event_ring_write_idx, 0);
 
-                    /* Add the new PLC to the global list. We already have the mutex,
-                     * so no duplicate can be created by another thread. The struct is
-                     * fully initialized and the mutex exists, so other threads can
-                     * safely find and use this PLC. */
-                    (*plc)->next = plcs;
-                    plcs = *plc;
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "New PLC added to the global PLC list.");
+                        /* Calculate initial disconnect deadline */
+                        (*plc)->cached_inactivity_timeout_ms = atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
+                        (*plc)->disconnect_at_time_ms = (*plc)->last_packet_time_ms + (*plc)->cached_inactivity_timeout_ms;
+
+                        /* Add the new PLC to the global list. We already have the mutex,
+                         * so no duplicate can be created by another thread. The struct is
+                         * fully initialized and the mutex exists, so other threads can
+                         * safely find and use this PLC. */
+                        (*plc)->next = plcs;
+                        plcs = *plc;
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "New PLC added to the global PLC list.");
+                    }
                 }
             }
         } else {
@@ -874,17 +907,12 @@ void modbus_plc_destructor(void *plc_arg) {
         /* set the flag to cause the thread to terminate. */
         atomic_set_bool(&plc->flags.terminate, true);
 
-        /* Signal the socket to free the thread. This happens before thread_join()
-         * below, so the handler thread may still be running (e.g. inside connect_plc()
-         * creating plc->sock for the first time) -- plc->mutex is required here, not
-         * optional, despite this being the destructor. */
+        /* Wake the thread so it notices the terminate flag.  This happens before
+         * thread_join() below, so the handler thread may still be running -- but the
+         * poller was created with the PLC and is not replaced, so unlike the old
+         * socket_wake() this needs no lock and works even if no socket exists yet. */
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waking Modbus handler thread %p.", (void *)plc->handler_thread);
-        critical_block(plc->mutex) {
-            if(plc->sock) {
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Waking socket directly.");
-                socket_wake(plc->sock);
-            }
-        }
+        poller_wake(plc->poller);
 
         /* wait for the thread to terminate and destroy it. */
         thread_join(&plc->handler_thread);
@@ -899,10 +927,17 @@ void modbus_plc_destructor(void *plc_arg) {
         plc->mutex = NULL;
     }
 
-    if(plc->sock) {
-        socket_destroy(&plc->sock);
-        plc->sock = NULL;
+    /* the thread is joined by now, so nothing else can touch either of these */
+    if(plc->sock != SOCKET_FD_INVALID) {
+        if(plc->sock_registered) {
+            poller_remove(plc->poller, plc->sock);
+            plc->sock_registered = false;
+        }
+
+        socket_fd_close(&(plc->sock));
     }
+
+    if(plc->poller) { poller_destroy(&(plc->poller)); }
 
     if(plc->server) {
         mem_free(plc->server);
@@ -1004,9 +1039,21 @@ static int reset_plc(modbus_plc_p plc) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "After reset, in-flight count is: %" PRId32,
                atomic_get_int32(&plc->pending_request_count));
 
-        if(plc->sock) {
+        if(plc->sock != SOCKET_FD_INVALID) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Closing socket due to error or disconnect.");
-            socket_close(plc->sock);
+
+            /*
+             * Unregister before closing.  A closed descriptor left in the poll
+             * set comes back as POLLNVAL on every wait, which the poller
+             * reports as an error -- a spin, not a stall, and so the kind of
+             * thing that shows up as CPU rather than as a failure.
+             */
+            if(plc->sock_registered) {
+                poller_remove(plc->poller, plc->sock);
+                plc->sock_registered = false;
+            }
+
+            socket_fd_close(&(plc->sock));
         } else {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Socket already closed.");
         }
@@ -1029,6 +1076,50 @@ static int reset_plc(modbus_plc_p plc) {
 }
 
 
+/*
+ * poller_wait() over this PLC's one socket, answered as an event mask so the
+ * state machine below reads the way it did against socket_wait_event().
+ *
+ * Two differences from the call it replaces, both deliberate:
+ *
+ *   - A timeout is an empty result from the poller, not an event.  It is
+ *     turned back into POLLER_EVENT_TIMEOUT here because every caller wants
+ *     to know, and the alternative is an event_count == 0 test at each one.
+ *   - The socket does not have to be registered.  With none registered the
+ *     poller still waits on its own wake end and still honours the timeout,
+ *     which is what PLC_IDLE_WAIT and PLC_ERR_WAIT need.  The old code got
+ *     that from a wake channel that outlived socket_close(); here it falls
+ *     out of the poller owning the channel.
+ */
+static int32_t plc_wait_events(modbus_plc_p plc, int32_t interest, int32_t timeout_ms) {
+    poller_event_t events[2];
+    int32_t event_count = 0;
+    int32_t result = POLLER_EVENT_NONE;
+    int32_t index = 0;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    if(plc->sock_registered) {
+        rc = poller_modify(plc->poller, plc->sock, interest);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to set poller interest, error %s!", plc_tag_decode_error(rc));
+            return POLLER_EVENT_ERROR;
+        }
+    }
+
+    rc = poller_wait(plc->poller, events, 2, timeout_ms, &event_count);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Poller wait failed, error %s!", plc_tag_decode_error(rc));
+        return POLLER_EVENT_ERROR;
+    }
+
+    if(event_count == 0) { return POLLER_EVENT_TIMEOUT; }
+
+    for(index = 0; index < event_count; index++) { result |= events[index].events; }
+
+    return result;
+}
+
+
 #define UPDATE_ERR_DELAY()                                                                 \
     do {                                                                                   \
         err_delay = err_delay * 2;                                                         \
@@ -1042,8 +1133,8 @@ THREAD_FUNC(modbus_plc_handler) {
     modbus_plc_p plc = (modbus_plc_p)arg;
     int64_t err_delay = PLC_SOCKET_ERR_START_DELAY;
     int64_t err_delay_until = 0;
-    int sock_events = SOCK_EVENT_NONE;
-    int waitable_events = SOCK_EVENT_NONE;
+    int32_t sock_events = POLLER_EVENT_NONE;
+    int32_t waitable_events = POLLER_EVENT_NONE;
     int32_t timeout_ms = 0;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
@@ -1142,7 +1233,25 @@ THREAD_FUNC(modbus_plc_handler) {
             case PLC_CONNECT_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "in PLC_CONNECT_WAIT state.");
                 mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_CONNECTING);
-                rc = socket_connect_tcp_check(plc->sock, SOCKET_CONNECT_TIMEOUT);
+                /*
+                 * Wait briefly for the socket to become writable, which is how a
+                 * non-blocking connect reports that it resolved -- either way.
+                 * socket_fd_connect_check() reads SO_ERROR to say which.
+                 */
+                sock_events = plc_wait_events(plc, POLLER_EVENT_CONNECT, SOCKET_CONNECT_TIMEOUT);
+
+                if(sock_events & (POLLER_EVENT_ERROR | POLLER_EVENT_DISCONNECT)) {
+                    rc = socket_fd_get_error(plc->sock);
+
+                    /* a reported error that SO_ERROR does not corroborate is still an error */
+                    if(rc == PLCTAG_STATUS_OK) { rc = PLCTAG_ERR_OPEN; }
+                } else if(sock_events & POLLER_EVENT_CONNECT) {
+                    rc = socket_fd_connect_check(plc->sock);
+                } else {
+                    /* nothing yet: the timeout is the retry interval, not a failure */
+                    rc = PLCTAG_ERR_TIMEOUT;
+                }
+
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Socket connected, going to state PLC_READY.");
 
@@ -1193,19 +1302,19 @@ THREAD_FUNC(modbus_plc_handler) {
                 }
 
                 /* calculate what events we should be waiting for. */
-                waitable_events = SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ;
+                waitable_events = POLLER_EVENT_CAN_READ;
 
                 /* if there is a request queued for sending, send it. */
-                if(atomic_get_bool(&plc->flags.request_ready)) { waitable_events |= SOCK_EVENT_CAN_WRITE; }
+                if(atomic_get_bool(&plc->flags.request_ready)) { waitable_events |= POLLER_EVENT_CAN_WRITE; }
 
                 /* wait using calculated time from tickle_all_tags */
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Waiting up to %" PRId64 "ms for socket events.", wait_time_ms);
                 {
                     int64_t wait_start_us = time_us();
-                    sock_events = socket_wait_event(plc->sock, waitable_events, (int)wait_time_ms);
+                    sock_events = plc_wait_events(plc, waitable_events, (int32_t)wait_time_ms);
                     plc->cycle_wait_time_sum_us += (time_us() - wait_start_us);
                 }
-                if(sock_events & SOCK_EVENT_TIMEOUT) {
+                if(sock_events & POLLER_EVENT_TIMEOUT) {
                     int64_t current_time = time_ms();
                     int64_t idle_time = current_time - plc->last_packet_time_ms;
                     int32_t inactivity_timeout_ms = plc->cached_inactivity_timeout_ms;
@@ -1241,8 +1350,8 @@ THREAD_FUNC(modbus_plc_handler) {
                 }
 
                 /* check for socket errors or disconnects. */
-                if((sock_events & SOCK_EVENT_ERROR) || (sock_events & SOCK_EVENT_DISCONNECT)) {
-                    if(sock_events & SOCK_EVENT_DISCONNECT) {
+                if((sock_events & POLLER_EVENT_ERROR) || (sock_events & POLLER_EVENT_DISCONNECT)) {
+                    if(sock_events & POLLER_EVENT_DISCONNECT) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unexepected socket disconnect!");
                     } else {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unexpected socket error!");
@@ -1256,7 +1365,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 }
 
                 /* preference pushing requests to the PLC */
-                if(sock_events & SOCK_EVENT_CAN_WRITE) {
+                if(sock_events & POLLER_EVENT_CAN_WRITE) {
                     if(atomic_get_bool(&plc->flags.request_ready)) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0,
                                "There is a request ready to send and we can send, going to state PLC_SEND_REQUEST.");
@@ -1270,17 +1379,17 @@ THREAD_FUNC(modbus_plc_handler) {
                     }
                 }
 
-                if(sock_events & SOCK_EVENT_CAN_READ) {
+                if(sock_events & POLLER_EVENT_CAN_READ) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "We can receive a response going to state PLC_RECEIVE_RESPONSE.");
                     plc->state = PLC_RECEIVE_RESPONSE;
                     break;
                 }
 
-                if(sock_events & SOCK_EVENT_TIMEOUT) {
+                if(sock_events & POLLER_EVENT_TIMEOUT) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Timed out waiting for something to happen.");
                 }
 
-                if(sock_events & SOCK_EVENT_WAKE_UP) { pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Someone woke us up."); }
+                if(sock_events & POLLER_EVENT_WAKE_UP) { pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Someone woke us up."); }
 
                 break;
 
@@ -1304,7 +1413,19 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_STATUS_PENDING) {
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Not all data written, will try again.");
+                    /*
+                     * Partial write.  Go back to PLC_READY and let the poller say
+                     * when there is room, rather than staying here and retrying.
+                     *
+                     * This used to stay in this state, which was fine only because
+                     * socket_write() hid a 20ms select() inside itself and so
+                     * throttled the retry.  socket_fd_send() returns at once, so
+                     * the old shape would spin the thread at 100% CPU until the
+                     * send buffer drained.  request_ready is still set, so
+                     * PLC_READY re-arms CAN_WRITE and comes straight back here.
+                     */
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Not all data written, waiting for room to write.");
+                    plc->state = PLC_READY;
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Resetting PLC due to write error %s.", plc_tag_decode_error(rc));
 
@@ -1312,7 +1433,6 @@ THREAD_FUNC(modbus_plc_handler) {
                     plc->state = PLC_CONNECT_START;
                 }
 
-                /* if we did not send all the packet, we stay in this state and keep trying. */
 
 
                 break;
@@ -1330,7 +1450,14 @@ THREAD_FUNC(modbus_plc_handler) {
                     atomic_set_bool(&plc->flags.response_ready, true);
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_STATUS_PENDING) {
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Response not complete, continue reading data.");
+                    /*
+                     * Partial packet.  Back to PLC_READY to wait for readability
+                     * rather than re-reading immediately; see the matching note in
+                     * PLC_SEND_REQUEST.  The accumulated bytes stay in
+                     * plc->read_data, so this resumes where it left off.
+                     */
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Response not complete, waiting for more data.");
+                    plc->state = PLC_READY;
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Reconnecting due to read error %s.", plc_tag_decode_error(rc));
 
@@ -1359,10 +1486,17 @@ THREAD_FUNC(modbus_plc_handler) {
                     break;
                 }
 
-                /* wait until something happens. */
-                sock_events = socket_wait_event(plc->sock, SOCK_EVENT_DEFAULT_MASK, MODBUS_IDLE_WAIT_TIMEOUT);
+                /*
+                 * Wait until something happens.  There is no socket registered in
+                 * this state -- reset_plc() closed it -- so this is a wait on the
+                 * poller's wake end and the timeout, which is exactly what is
+                 * wanted.
+                 */
+                sock_events = plc_wait_events(plc, POLLER_EVENT_NONE, MODBUS_IDLE_WAIT_TIMEOUT);
 
-                if(sock_events & SOCK_EVENT_TIMEOUT) { pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "PLC idle wait timed out."); }
+                if(sock_events & POLLER_EVENT_TIMEOUT) {
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "PLC idle wait timed out.");
+                }
 
                 break;
 
@@ -1374,7 +1508,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 if(err_delay_until > time_ms()) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Waiting for at least %" PRId64 "ms.",
                            (err_delay_until - time_ms()));
-                    socket_wait_event(plc->sock, SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT, (int)(err_delay_until - time_ms()));
+                    plc_wait_events(plc, POLLER_EVENT_NONE, (int32_t)(err_delay_until - time_ms()));
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Error wait is over, going to state PLC_CONNECT_START.");
                     plc->state = PLC_CONNECT_START;
@@ -1436,19 +1570,14 @@ void wake_plc_thread(modbus_plc_p plc) {
         }
 
         /*
-         * Holding a reference guarantees the destructor (and so socket_destroy()
-         * and mutex_destroy()) hasn't started, so plc_ref->mutex is still valid.
-         * It's still required here, though: the handler thread may be concurrently
-         * creating plc_ref->sock for the first time in connect_plc(), so reading it
-         * must be synchronized with that write.
+         * Holding a reference guarantees the destructor (and so poller_destroy())
+         * hasn't started, so plc_ref->poller is still valid.  No mutex is needed
+         * any more: the poller is created with the PLC and never replaced, so
+         * there is no write for this read to race.  The old code had to take
+         * plc->mutex because connect_plc() could be assigning plc->sock at the
+         * same moment.
          */
-        critical_block(plc_ref->mutex) {
-            if(plc_ref->sock) {
-                socket_wake(plc_ref->sock);
-            } else {
-                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "PLC socket pointer is NULL.");
-            }
-        }
+        poller_wake(plc_ref->poller);
 
         /* Release the reference */
         plc_ref = rc_dec(plc_ref);
@@ -1508,28 +1637,30 @@ int connect_plc(modbus_plc_p plc) {
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Using server \"%s\" and port %d.", server, port);
 
-    if(!plc->sock) {
+    /*
+     * A reconnect gets a fresh handle.  The old API reused one sock_p for the
+     * PLC's whole life and reopened the descriptor inside it, which is why it
+     * needed plc->mutex here -- other threads read plc->sock to decide whether
+     * they could wake this one.  They now wake the poller instead, which is
+     * always there, so the handle is this thread's private business.
+     */
+    if(plc->sock == SOCKET_FD_INVALID) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Creating new socket.");
 
-        /* plc->sock starts NULL and is only ever set here, once, for this PLC's whole
-         * lifetime (reconnects reuse the same socket object via socket_close/reconnect).
-         * wake_plc_thread() and the destructor's pre-join wake can read it from another
-         * thread while this handler thread is still running, so the write must be
-         * synchronized with those reads via plc->mutex. */
-        critical_block(plc->mutex) { rc = socket_create(&(plc->sock)); }
+        rc = socket_fd_open_tcp(&(plc->sock));
         if(rc != PLCTAG_STATUS_OK) {
             /* done with the split string. */
             mem_free(server_port);
             server_port = NULL;
 
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create socket object, error %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create socket, error %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
 
     /* connect to the socket */
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Connecting to %s on port %d...", server, port);
-    rc = socket_connect_tcp_start(plc->sock, server, port);
+    rc = socket_fd_connect_start(plc->sock, server, port);
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         /* done with the split string. */
         mem_free(server_port);
@@ -1537,6 +1668,25 @@ int connect_plc(modbus_plc_p plc) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to connect to the server \"%s\", got error %s!", plc->server,
                plc_tag_decode_error(rc));
         return rc;
+    }
+
+    /*
+     * Register for CONNECT even when the connect completed immediately: the
+     * caller goes straight to PLC_READY in that case and the first thing it
+     * does is ask for CAN_READ, which needs the socket in the poller already.
+     */
+    if(!plc->sock_registered) {
+        int32_t add_rc = poller_add(plc->poller, plc->sock, POLLER_EVENT_CONNECT, plc);
+
+        if(add_rc != PLCTAG_STATUS_OK) {
+            mem_free(server_port);
+
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to register the socket with the poller, error %s!",
+                   plc_tag_decode_error(add_rc));
+            return add_rc;
+        }
+
+        plc->sock_registered = true;
     }
 
     /* done with the split string. */
@@ -1615,7 +1765,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
          * Only one request is queued per tickle call because request_ready is a
          * single-entry buffer; pipelining happens across successive main-loop iterations.
          */
-        if(!atomic_get_bool(&plc->flags.request_ready) && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
+        if(!atomic_get_bool(&plc->flags.request_ready)
+           && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
             for(int i = 0; i < active_count; i++) {
                 modbus_tag_p candidate = vector_get(plc->active_tags, i);
                 if(!candidate) { continue; }
@@ -1773,7 +1924,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         } else {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0,
                    "Deferred response no longer valid for tag %" PRId32 " (response_ready=%d, pending_tid=%u); discarding.",
-                   deferred_response_tag->tag_id, atomic_get_bool(&plc->flags.response_ready), deferred_response_tag->pending_transaction_id);
+                   deferred_response_tag->tag_id, atomic_get_bool(&plc->flags.response_ready),
+                   deferred_response_tag->pending_transaction_id);
             if(atomic_get_bool(&plc->flags.response_ready)) {
                 atomic_set_bool(&plc->flags.response_ready, false);
                 plc->read_data_len = 0;
@@ -1793,8 +1945,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
      * to avoid spinning when all active tags have future op_times.
      */
     critical_block(plc->mutex) {
-        if(!atomic_get_bool(&plc->flags.response_ready) && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight
-           && has_due_request_pending) {
+        if(!atomic_get_bool(&plc->flags.response_ready)
+           && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight && has_due_request_pending) {
             min_wait_time = 0;
         }
     }
@@ -2301,18 +2453,38 @@ int receive_response(modbus_plc_p plc) {
         }
 
         /* read the socket. */
-        rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed, SOCKET_READ_TIMEOUT);
-        if(rc >= 0) {
-            /* got data! Or got nothing, but no error. */
-            plc->read_data_len += rc;
+        {
+            int32_t bytes_read = 0;
+
+            rc = socket_fd_recv(plc->sock, plc->read_data + plc->read_data_len, data_needed, &bytes_read);
+
+            if(rc == PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Done. Nothing more to read yet.");
+                return PLCTAG_STATUS_PENDING;
+            }
+
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error, %s, reading socket!", plc_tag_decode_error(rc));
+                return rc;
+            }
+
+            /*
+             * Zero bytes with no error is the peer's FIN.  The old socket_read()
+             * could not say this: it returned 0 both for would-block and for a
+             * closed connection, so a server that hung up looked exactly like a
+             * server that was merely quiet, and this loop kept polling it until
+             * some higher-level timeout noticed.  Now it is a disconnect, and the
+             * state machine reconnects.
+             */
+            if(bytes_read == 0) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "The PLC closed the connection!");
+                return PLCTAG_ERR_BAD_CONNECTION;
+            }
+
+            plc->read_data_len += bytes_read;
+            rc = bytes_read;
 
             pdebug_dump_bytes(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, plc->read_data, plc->read_data_len);
-        } else if(rc == PLCTAG_ERR_TIMEOUT) {
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Done. Socket read timed out.");
-            return PLCTAG_STATUS_PENDING;
-        } else {
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error, %s, reading socket!", plc_tag_decode_error(rc));
-            return rc;
         }
 
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "After reading the socket, total read=%d and data needed=%d.",
@@ -2406,15 +2578,20 @@ int send_request(modbus_plc_p plc) {
     }
 
     /* try to send some data. */
-    rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left, SOCKET_WRITE_TIMEOUT);
-    if(rc >= 0) {
-        plc->write_data_offset += rc;
-        data_left = plc->write_data_len - plc->write_data_offset;
-    } else if(rc == PLCTAG_ERR_TIMEOUT) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Done.  Timeout writing to socket.");
-    } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
-        return rc;
+    {
+        int32_t bytes_written = 0;
+
+        rc = socket_fd_send(plc->sock, plc->write_data + plc->write_data_offset, data_left, &bytes_written);
+
+        if(rc == PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Done.  No room to write yet.");
+        } else if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
+            return rc;
+        } else {
+            plc->write_data_offset += bytes_written;
+            data_left = plc->write_data_len - plc->write_data_offset;
+        }
     }
 
     /* clean up if full write was done. */
@@ -3773,7 +3950,9 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     critical_block(plc->mutex) {
         int32_t old_status = atomic_get_int32(&plc->connection_status);
         atomic_set_int32(&plc->connection_status, new_status);
-        if(old_status != new_status) { mb_plc_publish_event(plc, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+        if(old_status != new_status) {
+            mb_plc_publish_event(plc, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
+        }
     }
 }
 
@@ -3907,9 +4086,8 @@ static void mb_connection_tag_destructor(void *ptr) {
     pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, dt->tag_id, "Done.");
 }
 
-static plc_tag_p mb_connection_tag_create(attr attribs,
-                                          tag_extended_callback_func_t tag_callback_func,
-                                          void *userdata, plc_tag_p src_tag) {
+static plc_tag_p mb_connection_tag_create(attr attribs, tag_extended_callback_func_t tag_callback_func, void *userdata,
+                                          plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, 0, "Starting.");
 
     modbus_connection_tag_p dt = (modbus_connection_tag_p)rc_alloc(sizeof(modbus_connection_tag_t), mb_connection_tag_destructor);

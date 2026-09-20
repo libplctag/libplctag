@@ -39,15 +39,18 @@
  * This replaces the socket section that used to live in the platform shims.
  * The API is unchanged; only the home of the declarations moved.
  *
- * A socket is an opaque handle carrying its file descriptor plus a private
- * wake channel -- a self-connected TCP pair on Windows, a socketpair() on
- * POSIX -- that lets one thread break another out of socket_wait_event().
- * Only the Modbus protocol uses that channel today; see
- * docs/socket_layering_design.md for where this API is headed.
+ * A socket is an opaque handle carrying its file descriptor.  The transfer
+ * calls take a timeout in milliseconds and sleep inside themselves until the
+ * socket is ready or the timeout expires, which makes each socket the
+ * property of one thread.  AB and Omron are the remaining callers and that is
+ * the model they use.
  *
- * The transfer calls take a timeout in milliseconds and sleep inside
- * themselves until the socket is ready or the timeout expires.  That makes
- * each socket the property of one thread.
+ * There is no wake channel and no readiness query here any more.  Both used
+ * to exist for the Modbus protocol, which now drives its socket through
+ * utils/socket_fd.h and utils/poller.h -- where the wake channel belongs to
+ * the waiting thread rather than to each socket.  See 2.4 in
+ * docs/deferred_fixes.md and docs/socket_layering_design.md; this API is the
+ * L1 library adapter that step 4 puts onto socket_fd.
  */
 
 #include <stdint.h>
@@ -56,28 +59,9 @@
 
 typedef struct sock_t *sock_p;
 
-/*
- * Readiness and status bits.  Passed as a mask to socket_wait_event() and
- * returned by it as the set of things that actually happened.
- */
-typedef enum {
-    SOCK_EVENT_NONE = 0,
-    SOCK_EVENT_TIMEOUT = (1 << 0),
-    SOCK_EVENT_DISCONNECT = (1 << 1),
-    SOCK_EVENT_ERROR = (1 << 2),
-    SOCK_EVENT_CAN_READ = (1 << 3),
-    SOCK_EVENT_CAN_WRITE = (1 << 4),
-    SOCK_EVENT_WAKE_UP = (1 << 5),
-    SOCK_EVENT_CONNECT = (1 << 6),
-
-    SOCK_EVENT_DEFAULT_MASK = (SOCK_EVENT_TIMEOUT | SOCK_EVENT_DISCONNECT | SOCK_EVENT_ERROR | SOCK_EVENT_WAKE_UP)
-} sock_event_t;
-
 extern int socket_create(sock_p *s);
 extern int socket_connect_tcp_start(sock_p s, const char *host, int port);
 extern int socket_connect_tcp_check(sock_p s, int timeout_ms);
-extern int socket_wait_event(sock_p sock, int events, int timeout_ms);
-extern int socket_wake(sock_p sock);
 extern int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_close(sock_p s);
