@@ -127,6 +127,13 @@ typedef enum {
     FAULT_CONTEXT,    /* echo back a sender context other than the one that was sent. */
     FAULT_PCCC_REPLY, /* answer a PCCC request with an unexpected reply code. */
     FAULT_PCCC_TNS,   /* answer a PCCC request with a transaction number we never sent. */
+    /*
+     * Answer every read with a partial-transfer status and a full payload, however much the
+     * client has already taken.  Unlike the empty fragments behind empty_frag_count this makes
+     * apparent forward progress every time, so a client that only guards against fragments
+     * carrying no data will keep asking for the next chunk and growing its buffer forever.
+     */
+    FAULT_ENDLESS_FRAG,
     FAULT_MAX
 } fault_kind_t;
 
