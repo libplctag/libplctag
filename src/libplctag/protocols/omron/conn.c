@@ -80,7 +80,6 @@ static omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *
 
 static omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
                                        plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
-static int conn_init(omron_conn_p conn);
 // static int get_plc_type(attr attribs);
 static int add_conn_unsafe(omron_conn_p n);
 static int remove_conn_unsafe(omron_conn_p n);
@@ -329,12 +328,6 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
                connection_inactivity_timeout_ms);
     }
 
-    // if(plc_type == OMRON_PLC_PLC5 && str_length(conn_path) > 0) {
-    //     /* this means it is DH+ */
-    //     use_connected_msg = 1;
-    //     attr_set_int(attribs, "use_connected_msg", 1);
-    // }
-
     critical_block(conn_mutex) {
         /* if we are to share conns, then look for an existing one. */
         if(shared_conn) {
@@ -369,12 +362,16 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
     }
 
     /*
-     * do this OUTSIDE the mutex in order to let other threads not block if
-     * the conn creation process blocks.
+     * The mutex and condition variable are already made, so the connection is safe for another
+     * thread to use.  Start the handler thread outside the conn mutex so that a thread that
+     * blocks here does not block every other thread looking for a connection.
      */
 
     if(new_conn) {
-        rc = conn_init(conn);
+        if((rc = thread_create((thread_p *)&(conn->handler_thread), conn_handler, 32 * 1024, conn)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn thread!");
+        }
+
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "rc_dec: Releasing reference to the PLC connection.");
             rc_dec(conn);
@@ -460,9 +457,6 @@ int remove_conn(omron_conn_p s) {
 
 int conn_match_valid(const char *host, const char *path, omron_conn_p conn) {
     if(!conn) { return 0; }
-
-    /* don't use conns that failed immediately. */
-    if(conn->failed) { return 0; }
 
     if(!str_length(host)) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "New conn host is NULL or zero length!");
@@ -674,7 +668,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     /* fix up the rest of the fields */
     conn->plc_type = plc_type;
     conn->use_connected_msg = *use_connected_msg;
-    conn->failed = 0;
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     conn->conn_seq_id = (random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
@@ -706,49 +699,30 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
      */
     conn->orig_connection_id = ++connection_id;
 
+    /*
+     * Make the mutex and the condition variable before the connection goes into the list.  Once
+     * it is in the list another thread can find it and call conn_add_request(), which locks the
+     * one and signals the other.
+     */
+
+    /* create the conn mutex. */
+    if((rc = mutex_create(&(conn->mutex))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn mutex!");
+        return rc_dec(conn);
+    }
+
+    /* create the conn condition variable. */
+    if((rc = cond_create(&(conn->wait_cond))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn condition var!");
+        return rc_dec(conn);
+    }
+
     /* add the new conn to the list. */
     add_conn_unsafe(conn);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done");
 
     return conn;
-}
-
-
-/*
- * conn_init
- *
- * This calls several blocking methods and so must not keep the main mutex
- * locked during them.
- */
-int conn_init(omron_conn_p conn) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting.");
-
-    /* create the conn mutex. */
-    if((rc = mutex_create(&(conn->mutex))) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn mutex!");
-        conn->failed = 1;
-        return rc;
-    }
-
-    /* create the conn condition variable. */
-    if((rc = cond_create(&(conn->wait_cond))) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn condition var!");
-        conn->failed = 1;
-        return rc;
-    }
-
-    if((rc = thread_create((thread_p *)&(conn->handler_thread), conn_handler, 32 * 1024, conn)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to create conn thread!");
-        conn->failed = 1;
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
-
-    return rc;
 }
 
 
