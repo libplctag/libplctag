@@ -43,6 +43,7 @@
 static const char *fault_names[FAULT_MAX] = {
     "none",    "cpf_count", "cpf_type", "conn_id", "item_len",   "short_cpf",
     "short_cip", "eip_cmd", "session", "context", "pccc_reply", "pccc_tns",
+    "endless_frag",
 };
 
 

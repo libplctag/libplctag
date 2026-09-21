@@ -33,6 +33,7 @@
 
 #include "cip.h"
 #include "eip.h"
+#include "fault.h"
 #include "pccc.h"
 #include "plc.h"
 #include "slice.h"
@@ -755,6 +756,7 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     size_t copy_size = 0;
     uint8_t cip_err = CIP_OK;
     bool needs_fragmentation = false;
+    bool endless_fragmentation = false;
 
     /* what service are we handling? */
     if(cip_service == CIP_SRV_READ_NAMED_TAG) {
@@ -814,6 +816,19 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* bump the start offset by the amount we may have already read. */
     request_start_byte_offset += request_fragment_start_byte_offset;
+
+    /*
+     * Fault injection: answer every read with a partial-transfer status and a full payload, no
+     * matter how much the client has already taken.  See FAULT_ENDLESS_FRAG.
+     *
+     * A fragmenting client keeps raising its offset, which would run off the end of the tag and
+     * be rejected below, so fold the offset back to where the data is.  The content is not the
+     * point here; the endless stream is.  An Omron client never sends an offset at all, so for
+     * that one this only has to force the status.
+     */
+    endless_fragmentation = fault_fires(plc, FAULT_ENDLESS_FRAG);
+
+    if(endless_fragmentation) { request_start_byte_offset -= request_fragment_start_byte_offset; }
 
     /* check the byte offsets */
     if(request_start_byte_offset > request_end_byte_offset) {
@@ -892,7 +907,8 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     /* fill in the CIP response header. */
     slice_set_uint8(cip_response_header_slice, 0, cip_service | CIP_DONE);
     slice_set_uint8(cip_response_header_slice, 1, 0);                                             /* reserved */
-    slice_set_uint8(cip_response_header_slice, 2, (needs_fragmentation ? CIP_ERR_FRAG : CIP_OK)); /* status */
+    slice_set_uint8(cip_response_header_slice, 2,
+                    ((needs_fragmentation || endless_fragmentation) ? CIP_ERR_FRAG : CIP_OK)); /* status */
     slice_set_uint8(cip_response_header_slice, 3, 0);                                             /* no extended error */
 
     /* fill in the tag data type, as many bytes as this tag's encoding needs. */

@@ -305,7 +305,7 @@ REQUIRED_EXECUTABLES = [
     "test_callback_destroy",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect",
-    "test_modbus_multiple", "test_omron_destroy", "test_raw_cip", "test_reconnect_after_outage_async",
+    "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
     "test_reconnect_after_outage_sync", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
@@ -853,34 +853,10 @@ def build_manifest() -> Manifest:
                "--cycles=2",
                f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
                "--idle-timeout-ms=5000"], T)
-    # Omron carries its own copy of the fragment-progress guard, so it needs its own coverage;
-    # the AB tests above run entirely different code.  Both cases need a dedicated server since
-    # --empty_frag counts down across the whole process.
-    omron_empty_frag_transient_server = ServerSpec(
-        exe_path=exe("ab_server"),
-        args_template=["--debug", "--plc=Omron", "--port={PORT}",
-                        "--tag=TestBigArray:DINT[2000]", "--empty_frag=3"],
-        startup_wait_s=1,
-    )
-    sec.test("transient empty fragment responses recover (Omron)",
-              [exe("tag_rw2"), "--type=sint32",
-               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestBigArray",
-               "--debug=2"], T, server=omron_empty_frag_transient_server)
-
-    omron_empty_frag_stuck_server = ServerSpec(
-        exe_path=exe("ab_server"),
-        args_template=["--debug", "--plc=Omron", "--port={PORT}",
-                        "--tag=TestBigArray:DINT[2000]", "--empty_frag=1000"],
-        startup_wait_s=1,
-    )
-    omron_empty_frag_stuck_test = sec.test("endless empty fragment responses give up instead of looping (Omron)",
-              [exe("tag_rw2"), "--type=sint32",
-               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestBigArray",
-               "--debug=2"], F, server=omron_empty_frag_stuck_server, expect_failure=True)
-    sec.test("check the stuck transfer reported no forward progress (Omron)",
-              None, T, depends_on=omron_empty_frag_stuck_test.id, ports_needed=0,
-              check=CheckSpec(log_file=omron_empty_frag_stuck_test.log_file,
-                               pattern=r"not making progress", expected=1))
+    # Omron refuses any CIP status but zero, so the AB fragment-progress cases above have no
+    # Omron counterpart -- both shapes of partial status are an error here.  test_omron_frag,
+    # registered below, is where that is covered; it needs its own servers because --empty_frag
+    # and --corrupt count down across the whole process.
 
     sec.test("@connection tag late join (Omron)",
               [exe("test_connection_tag_late_join"),
@@ -906,6 +882,11 @@ def build_manifest() -> Manifest:
     # private server cannot collide with anyone else's.
     sec.test("plc_tag_destroy does not hang after Omron connection loss (issue #625)",
               [exe("test_omron_destroy"), exe("ab_server"), "{PORT}"], F, server=None, ports_needed=1)
+
+    # The AB partial-transfer cases above, replayed against Omron, where every one of them is
+    # refused.  Runs its own ab_server per case on the one allocated port.
+    sec.test("Omron refuses every partial transfer (AB partial cases, Omron)",
+              [exe("test_omron_frag"), exe("ab_server"), "{PORT}"], F, server=None, ports_needed=1)
 
     # --- Micrologix section ----------------------------------------------------
     micrologix_server = ServerSpec(

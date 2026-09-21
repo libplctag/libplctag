@@ -231,7 +231,14 @@ void usage(void) {
                     "\n"
                     "        <sizes> field is one or more (up to 3) numbers separated by commas.\n"
                     "\n"
-                    "    Fault injection, for testing client error handling:\n"
+                    "\n");
+
+    /*
+     * A second call rather than more of the same literal: C99 only guarantees 4095 characters
+     * in one string literal and the first half is already at that limit.
+     */
+    // NOLINTNEXTLINE
+    fprintf(stderr, "    Fault injection, for testing client error handling:\n"
                     "        --reject_fo=<n>        fail the next <n> ForwardOpen requests with a duplicate\n"
                     "                               connection error.\n"
                     "        --reject_size=<n>      fail the next <n> ForwardOpen requests with extended status\n"
@@ -258,6 +265,7 @@ void usage(void) {
                     "                                 context    - wrong sender context echoed back.\n"
                     "                                 pccc_reply - unexpected PCCC reply code.\n"
                     "                                 pccc_tns   - PCCC transaction number we never sent.\n"
+                    "                                 endless_frag - never-ending fragmented read.\n"
                     "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
                     "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n"

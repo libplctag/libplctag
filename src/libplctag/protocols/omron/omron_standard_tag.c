@@ -1267,7 +1267,6 @@ static int check_read_status_connected(omron_tag_p tag) {
     eip_cip_co_resp *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
-    int partial_data = 0;
 
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
 
@@ -1293,7 +1292,7 @@ static int check_read_status_connected(omron_tag_p tag) {
             break;
         }
 
-        if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
+        if(cip_resp->status != OMRON_CIP_STATUS_OK) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
@@ -1306,18 +1305,13 @@ static int check_read_status_connected(omron_tag_p tag) {
             break;
         }
 
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == OMRON_CIP_STATUS_FRAG);
-
         /*
          * check to see if there is any data to process.  If this is a packed
          * response, there might not be.
          */
         payload_size = (data_end - data);
-        if(payload_size > 0) {
-            /* we got data, so the transfer is moving again. */
-            tag->fragment_retry_count = 0;
 
+        if(payload_size > 0) {
             /* skip the copy if we already have type data */
             if(tag->encoded_type_info_size == 0) {
                 int type_length = 0;
@@ -1377,6 +1371,15 @@ static int check_read_status_connected(omron_tag_p tag) {
 
             /* copy the data into the tag and realloc if we need more space. */
             if(payload_size + tag->offset > tag->size) {
+                /* the buffer size comes off the wire, so bound it whatever the PLC claims. */
+                if((payload_size + tag->offset) > (ptrdiff_t)OMRON_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
+                           (int)(payload_size + tag->offset), OMRON_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
 
@@ -1404,9 +1407,6 @@ static int check_read_status_connected(omron_tag_p tag) {
             tag->offset += (int)(payload_size);
         } else {
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
-
-            /* no payload means no forward progress on a fragmented transfer. */
-            tag->fragment_retry_count++;
         }
 
         /* set the return code */
@@ -1421,29 +1421,19 @@ static int check_read_status_connected(omron_tag_p tag) {
         /* this particular read is done. */
         tag->read_in_progress = 0;
 
-        /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
-                   tag->fragment_retry_count);
-            rc = PLCTAG_ERR_PARTIAL;
-        } else if(!tag->pre_write_read && partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
-            /* FIXNE - the abort function above resets the offset. */
-            rc = tag_read_start(tag);
-        } else {
-            tag->offset = 0;
+        /*
+         * Every response that reaches here carried a status of zero, which on Omron means the
+         * whole transfer.  There is no continuation to run: Omron reports a transfer it could
+         * not finish as an error rather than with CIP's 0x06 partial status, and it implements
+         * no fragmented read service to ask for the rest with in any case.
+         */
+        tag->offset = 0;
 
-            /* the transfer is over one way or the other, so start the next one clean. */
-            tag->fragment_retry_count = 0;
-
-            /* if this is a pre-read for a write, then pass off to the write routine */
-            if(tag->pre_write_read) {
-                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-                tag->pre_write_read = 0;
-                rc = tag_write_start(tag);
-            }
+        /* if this is a pre-read for a write, then pass off to the write routine */
+        if(tag->pre_write_read) {
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
+            tag->pre_write_read = 0;
+            rc = tag_write_start(tag);
         }
     }
 
@@ -1467,7 +1457,6 @@ static int check_read_status_unconnected(omron_tag_p tag) {
     eip_cip_uc_resp *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
-    int partial_data = 0;
 
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
 
@@ -1514,7 +1503,7 @@ static int check_read_status_unconnected(omron_tag_p tag) {
             break;
         }
 
-        if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
+        if(cip_resp->status != OMRON_CIP_STATUS_OK) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
@@ -1527,18 +1516,13 @@ static int check_read_status_unconnected(omron_tag_p tag) {
             break;
         }
 
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == OMRON_CIP_STATUS_FRAG);
-
         /*
          * check to see if there is any data to process.  If this is a packed
          * response, there might not be.
          */
         payload_size = (data_end - data);
-        if(payload_size > 0) {
-            /* we got data, so the transfer is moving again. */
-            tag->fragment_retry_count = 0;
 
+        if(payload_size > 0) {
             /* skip the copy if we already have type data */
             if(tag->encoded_type_info_size == 0) {
                 int type_length = 0;
@@ -1598,6 +1582,15 @@ static int check_read_status_unconnected(omron_tag_p tag) {
 
             /* copy the data into the tag and realloc if we need more space. */
             if(payload_size + tag->offset > tag->size) {
+                /* the buffer size comes off the wire, so bound it whatever the PLC claims. */
+                if((payload_size + tag->offset) > (ptrdiff_t)OMRON_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
+                           (int)(payload_size + tag->offset), OMRON_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
 
@@ -1625,9 +1618,6 @@ static int check_read_status_unconnected(omron_tag_p tag) {
             tag->offset += (int)payload_size;
         } else {
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
-
-            /* no payload means no forward progress on a fragmented transfer. */
-            tag->fragment_retry_count++;
         }
 
         /* set the return code */
@@ -1643,29 +1633,19 @@ static int check_read_status_unconnected(omron_tag_p tag) {
         /* this read is done. */
         tag->read_in_progress = 0;
 
-        /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
-                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
-                   tag->fragment_retry_count);
-            rc = PLCTAG_ERR_PARTIAL;
-        } else if(!tag->pre_write_read && partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
-            /* FIXME - the abort function above resets the offset! */
-            rc = tag_read_start(tag);
-        } else {
-            tag->offset = 0;
+        /*
+         * Every response that reaches here carried a status of zero, which on Omron means the
+         * whole transfer.  There is no continuation to run: Omron reports a transfer it could
+         * not finish as an error rather than with CIP's 0x06 partial status, and it implements
+         * no fragmented read service to ask for the rest with in any case.
+         */
+        tag->offset = 0;
 
-            /* the transfer is over one way or the other, so start the next one clean. */
-            tag->fragment_retry_count = 0;
-
-            /* if this is a pre-read for a write, then pass off to the write routine */
-            if(tag->pre_write_read) {
-                pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-                tag->pre_write_read = 0;
-                rc = tag_write_start(tag);
-            }
+        /* if this is a pre-read for a write, then pass off to the write routine */
+        if(tag->pre_write_read) {
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
+            tag->pre_write_read = 0;
+            rc = tag_write_start(tag);
         }
     }
 
@@ -1721,7 +1701,7 @@ static int check_write_status_connected(omron_tag_p tag) {
             break;
         }
 
-        if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
+        if(cip_resp->status != OMRON_CIP_STATUS_OK) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
 
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
@@ -1782,7 +1762,7 @@ static int check_write_status_unconnected(omron_tag_p tag) {
         }
 
 
-        if(cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
+        if(cip_resp->status != OMRON_CIP_STATUS_OK) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
 
             pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
