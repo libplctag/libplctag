@@ -79,7 +79,6 @@ typedef struct session_conn_status_entry_s {
 
 struct ab_session_t {
     //    int status;
-    int failed;
     int on_list;
 
     /* gateway connection related info */

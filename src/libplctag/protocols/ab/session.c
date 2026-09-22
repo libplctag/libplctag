@@ -125,7 +125,6 @@ static ab_session_p create_micro800_session_unsafe(const char *host, const char 
 
 static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host,
                                           const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
-static int session_init(ab_session_p session);
 // static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
@@ -385,12 +384,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
                connection_inactivity_timeout_ms);
     }
 
-    // if(plc_type == AB_PLC_PLC5 && str_length(session_path) > 0) {
-    //     /* this means it is DH+ */
-    //     use_connected_msg = 1;
-    //     attr_set_int(attribs, "use_connected_msg", 1);
-    // }
-
     critical_block(session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if(shared_session) {
@@ -465,12 +458,15 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
     }
 
     /*
-     * do this OUTSIDE the mutex in order to let other threads not block if
-     * the session creation process blocks.
+     * Make sure that we have created the mutex and cond var first.
      */
 
     if(new_session) {
-        rc = session_init(session);
+        if((rc = thread_create((thread_p *)&(session->handler_thread), session_handler, 32 * 1024, session))
+           != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session thread!");
+        }
+
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
             rc_dec(session);
@@ -562,9 +558,6 @@ int remove_session(ab_session_p s) {
 
 int session_match_valid(const char *host, const char *path, ab_session_p session) {
     if(!session) { return 0; }
-
-    /* don't use sessions that failed immediately. */
-    if(session->failed) { return 0; }
 
     if(!str_length(host)) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "New session host is NULL or zero length!");
@@ -900,7 +893,6 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     /* fix up the rest of teh fields */
     session->plc_type = plc_type;
     session->use_connected_msg = *use_connected_msg;
-    session->failed = 0;
     session->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     session->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     session->is_dhp = is_dhp;
@@ -933,49 +925,24 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
      */
     session->orig_connection_id = ++connection_id;
 
+    /* create the session mutex. */
+    if((rc = mutex_create(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session mutex!");
+        return rc_dec(session);
+    }
+
+    /* create the session condition variable. */
+    if((rc = cond_create(&(session->session_wait_cond))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session condition var!");
+        return rc_dec(session);
+    }
+
     /* add the new session to the list. */
     add_session_unsafe(session);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done");
 
     return session;
-}
-
-
-/*
- * session_init
- *
- * This calls several blocking methods and so must not keep the main mutex
- * locked during them.
- */
-int session_init(ab_session_p session) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    /* create the session mutex. */
-    if((rc = mutex_create(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session mutex!");
-        session->failed = 1;
-        return rc;
-    }
-
-    /* create the session condition variable. */
-    if((rc = cond_create(&(session->session_wait_cond))) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session condition var!");
-        session->failed = 1;
-        return rc;
-    }
-
-    if((rc = thread_create((thread_p *)&(session->handler_thread), session_handler, 32 * 1024, session)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create session thread!");
-        session->failed = 1;
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return rc;
 }
 
 

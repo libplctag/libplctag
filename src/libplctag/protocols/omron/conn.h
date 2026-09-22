@@ -71,7 +71,6 @@
 
 struct omron_conn_t {
     //    int status;
-    int failed;
     int on_list;
 
     /* gateway connection related info */
