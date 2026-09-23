@@ -58,11 +58,17 @@ struct {
     const char *model;
     const tag_create_function tag_constructor;
 } tag_type_map[] = {
-    /* System tags */
+    /* System tags - DEPRECATED */
     {.protocol = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
+
+    /* System tags */
+    {.protocol = "system", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = system_tag_create},
+
     /* Allen-Bradley PLCs */
     {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
     {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+
+    /* Modbus TCP */
     {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
     {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
 

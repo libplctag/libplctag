@@ -482,7 +482,7 @@ static int test_two_clones_from_same_src(void) {
 /* Test 13: system tag (TAG_PROTOCOL_SYSTEM) as source -> ERR_NOT_ALLOWED.
  * Does not require a PLC — system tags work without a network connection. */
 static int test_system_tag_source(void) {
-    int32_t system_tag = plc_tag_create("make=system&family=library&name=version", 0);
+    int32_t system_tag = plc_tag_create("protocol=system&name=version", 0);
 
     fprintf(stderr, "  test_system_tag_source: system_tag=%d\n", (int)system_tag);
 
