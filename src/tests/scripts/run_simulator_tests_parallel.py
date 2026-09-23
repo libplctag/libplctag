@@ -309,7 +309,7 @@ REQUIRED_EXECUTABLES = [
     "test_reconnect_after_outage_sync", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
-    "test_lib_api_coverage",
+    "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
 ]
 
 
@@ -424,6 +424,12 @@ def build_manifest() -> Manifest:
               [exe("test_auto_sync"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=600&auto_sync_write_ms=20"], T)
     sec.test("indexed tags", [exe("test_indexed_tags")], F,
+              server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
+    sec.test("core attribute read/write permissions and round trips", [exe("test_attr_core")], F,
+              server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
+    sec.test("auto_sync_read_ms set at runtime changes the read rate", [exe("test_attr_auto_sync_read")], T,
+              server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
+    sec.test("auto_sync_write_ms set at runtime changes the write delay", [exe("test_attr_auto_sync_write")], T,
               server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("lib.c public API coverage (float32/64, int64, int8, raw_bytes, lock, byte_order)",
               [exe("test_lib_api_coverage"),

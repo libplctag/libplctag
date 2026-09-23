@@ -2388,34 +2388,30 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
         }
 
         critical_block(tag->api_mutex) {
-            /* match the generic ones first. */
-            if(str_cmp_i(attrib_name, "size") == 0) {
-                tag->status = PLCTAG_STATUS_OK;
-                res = (int)tag->size;
-            } else if(str_cmp_i(attrib_name, "read_cache_ms") == 0) {
-                /* FIXME - what happens if this overflows? */
-                tag->status = PLCTAG_STATUS_OK;
-                res = (int)tag->read_cache_ms;
-            } else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
-                tag->status = PLCTAG_STATUS_OK;
-                res = (int)tag->auto_sync_read_ms;
-            } else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
-                tag->status = PLCTAG_STATUS_OK;
-                res = (int)tag->auto_sync_write_ms;
-            } else if(str_cmp_i(attrib_name, "bit_num") == 0) {
-                tag->status = PLCTAG_STATUS_OK;
-                res = (int)(unsigned int)(tag->bit);
-            } else if(str_cmp_i(attrib_name, "connection_group_id") == 0) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Getting the connection_group_id for tag %" PRId32 ".", id);
-                tag->status = PLCTAG_STATUS_OK;
-                res = tag->connection_group_id;
-            } else {
-                if(tag->vtable && tag->vtable->get_int_attrib) {
-                    res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
-                } else {
+            const attr_def_t *def = attr_find(tag, attrib_name);
+
+            if(def) {
+                if(def->type != ATTR_TYPE_INT) {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold an integer value!", attrib_name);
+                    tag->status = PLCTAG_ERR_UNSUPPORTED;
                     res = default_value;
-                    tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+                } else if(def->get_int) {
+                    int32_t value = 0;
+                    int32_t rc = def->get_int(tag, &value);
+
+                    tag->status = (int8_t)rc;
+                    res = (rc == PLCTAG_STATUS_OK ? (int)value : default_value);
+                } else {
+                    /* the name exists but is write only, or the protocol suppressed it. */
+                    tag->status = PLCTAG_ERR_UNSUPPORTED;
+                    res = default_value;
                 }
+            } else if(tag->vtable && tag->vtable->get_int_attrib) {
+                /* migration fallback for a protocol that has no attribute table yet. */
+                res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
+            } else {
+                res = default_value;
+                tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
             }
         }
 
@@ -2470,49 +2466,26 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
         }
 
         critical_block(tag->api_mutex) {
-            /* match the generic ones first. */
-            if(str_cmp_i(attrib_name, "read_cache_ms") == 0) {
-                if(new_value >= 0) {
-                    /* expire the cache. */
-                    tag->read_cache_expire = (int64_t)0;
-                    tag->read_cache_ms = (int64_t)new_value;
-                    tag->status = PLCTAG_STATUS_OK;
-                    res = PLCTAG_STATUS_OK;
+            const attr_def_t *def = attr_find(tag, attrib_name);
+
+            if(def) {
+                if(def->type != ATTR_TYPE_INT) {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold an integer value!", attrib_name);
+                    res = PLCTAG_ERR_UNSUPPORTED;
+                } else if(def->set_int) {
+                    res = (int)def->set_int(tag, (int32_t)new_value);
                 } else {
-                    tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
+                    /* the name exists but is read only, or the protocol suppressed it. */
+                    res = PLCTAG_ERR_UNSUPPORTED;
                 }
-            } else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
-                if(new_value >= 0) {
-                    tag->auto_sync_read_ms = new_value;
-                    tag->status = PLCTAG_STATUS_OK;
-                    res = PLCTAG_STATUS_OK;
-                } else {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "auto_sync_read_ms must be greater than or equal to zero!");
-                    tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
-                }
-            } else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
-                if(new_value >= 0) {
-                    tag->auto_sync_write_ms = new_value;
-                    tag->status = PLCTAG_STATUS_OK;
-                    res = PLCTAG_STATUS_OK;
-                } else {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "auto_sync_write_ms must be greater than or equal to zero!");
-                    tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
-                }
-            } else if(str_cmp_i(attrib_name, "allow_field_resize") == 0) {
-                tag->allow_field_resize = (new_value > 0 ? 1 : 0);
-                tag->status = PLCTAG_STATUS_OK;
-                res = PLCTAG_STATUS_OK;
+
+                tag->status = (int8_t)res;
+            } else if(tag->vtable && tag->vtable->set_int_attrib) {
+                /* migration fallback for a protocol that has no attribute table yet. */
+                res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
+                tag->status = (int8_t)res;
             } else {
-                if(tag->vtable && tag->vtable->set_int_attrib) {
-                    res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
-                    tag->status = (int8_t)res;
-                } else {
-                    tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-                }
+                tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
             }
         }
     }
@@ -2555,11 +2528,74 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
     }
 
     critical_block(tag->api_mutex) {
-        if(tag->vtable && tag->vtable->get_byte_array_attrib) {
+        const attr_def_t *def = attr_find(tag, attrib_name);
+
+        if(def) {
+            if(def->type != ATTR_TYPE_BYTES) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold a byte array value!", attrib_name);
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            } else if(def->get_bytes) {
+                rc = (int)def->get_bytes(tag, buffer, (int32_t)buffer_length);
+            } else {
+                /* the name exists but is write only, or the protocol suppressed it. */
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            }
+        } else if(tag->vtable && tag->vtable->get_byte_array_attrib) {
+            /* migration fallback for a protocol that has no attribute table yet. */
             rc = tag->vtable->get_byte_array_attrib(tag, attrib_name, buffer, buffer_length);
         } else {
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
+
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    tag = lookup_tag(id);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        const attr_def_t *def = attr_find(tag, attrib_name);
+
+        if(!def) {
+            /*
+             * Until every protocol has an attribute table, a protocol attribute is invisible
+             * here.  Those still report their length through their own integer attribute.
+             */
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not known to the library!", attrib_name);
+            rc = PLCTAG_ERR_UNSUPPORTED;
+        } else if(def->type == ATTR_TYPE_BYTES) {
+            if(def->get_bytes_size) {
+                rc = (int)def->get_bytes_size(tag);
+            } else {
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            }
+        } else {
+            rc = (int)sizeof(int32_t);
+        }
+
+        tag->status = (int8_t)(rc < 0 ? rc : PLCTAG_STATUS_OK);
     }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);

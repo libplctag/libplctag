@@ -587,6 +587,13 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, i
 
 LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 
+/*
+ * Return the size in bytes of an attribute's value, or a negative error code.  An integer
+ * attribute reports the width of an integer.  A byte array attribute reports its current
+ * length, which is the buffer size to pass to plc_tag_get_byte_array_attribute().
+ */
+LIB_EXPORT int plc_tag_get_attribute_size(int32_t tag, const char *attrib_name);
+
 LIB_EXPORT int plc_tag_get_size(int32_t tag);
 /* return the old size or negative for errors. */
 LIB_EXPORT int plc_tag_set_size(int32_t tag, int new_size);

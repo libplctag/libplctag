@@ -54,6 +54,60 @@ typedef struct lib_instance_t *lib_instance_p;
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
+/*
+ * Runtime attribute descriptors.
+ *
+ * Each layer (the library core, each protocol) publishes a table of these.  A table is
+ * terminated by an entry whose name is NULL.  Lookup is keyed on the name alone; the entry
+ * declares the type, and that type selects which branch of each union is live, so a union
+ * can never be read on the wrong branch.  An access through the wrong public entry point
+ * for the declared type fails rather than guessing.
+ *
+ * A variable-length value is one ATTR_TYPE_BYTES entry.  Its length is not an attribute of
+ * its own: the application asks plc_tag_get_attribute_size(), which the core answers from
+ * get_bytes_size.
+ *
+ * There is no permission field.  A NULL accessor is the policy: a NULL setter is
+ * read-only, a NULL getter is write-only, and an entry with both NULL suppresses the
+ * core entry of the same name and type for that protocol.  Values that can only be set
+ * when the tag is created are absent from these tables entirely, since the protocol
+ * constructor reads them from the tag string and never routes through the public API.
+ *
+ * See docs/attribute_redesign.md.
+ */
+
+typedef enum {
+    ATTR_TYPE_INT,
+    ATTR_TYPE_BYTES
+} attr_val_type_t;
+
+typedef struct attr_def_t attr_def_t;
+
+struct attr_def_t {
+    const char *name;
+    attr_val_type_t type;
+    const char *description; /* source for the generated documentation table */
+
+    union {
+        int32_t (*get_int)(plc_tag_p tag, int32_t *result);
+        int32_t (*get_bytes)(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
+    };
+
+    union {
+        int32_t (*set_int)(plc_tag_p tag, int32_t value);
+        int32_t (*set_bytes)(plc_tag_p tag, const uint8_t *buffer, int32_t buffer_length);
+    };
+
+    /* ATTR_TYPE_BYTES only: the current length of the value in bytes.  An ATTR_TYPE_INT
+     * entry leaves this NULL and the core reports the width of an integer. */
+    int32_t (*get_bytes_size)(plc_tag_p tag);
+};
+
+/* Resolve a name against the tag's protocol table first, then the core table.
+ * Returns NULL when neither table carries it. */
+extern const attr_def_t *attr_find(plc_tag_p tag, const char *name);
+
+
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {
     tag_vtable_func abort;
@@ -88,6 +142,11 @@ struct tag_vtable_t {
     int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
 
     int (*get_byte_array_attrib)(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
+
+    /* Attribute table for this protocol, NULL-name-terminated.  Consulted before the core
+     * table.  The three accessors above are the migration fallback for a protocol that has
+     * not been converted yet and go away once every protocol has a table. */
+    const attr_def_t *attribs;
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
