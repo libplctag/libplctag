@@ -155,9 +155,21 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
 
     tag->name[MAX_SYSTEM_TAG_NAME - 1] = '\0';
 
-    /* point data at the backing store. */
+    /*
+     * Point data at the backing store.  The size is the size of the payload the named tag
+     * actually carries, not the size of the backing store, so that plc_tag_get_size() and the
+     * bounds checks in the data accessors both report the truth.  An unrecognized name gets the
+     * whole buffer since read and write will refuse it anyway.
+     */
     tag->data = &tag->backing_data[0];
-    tag->size = (int)sizeof(tag->backing_data);
+
+    if(str_cmp_i(&tag->name[0], "version") == 0) {
+        tag->size = (int)(str_length(VERSION) + 1);
+    } else if(str_cmp_i(&tag->name[0], "debug") == 0) {
+        tag->size = (int)sizeof(int32_t);
+    } else {
+        tag->size = (int)sizeof(tag->backing_data);
+    }
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done");
 
@@ -201,9 +213,9 @@ static int system_tag_read(plc_tag_p ptag) {
     system_tag_p tag = (system_tag_p)ptag;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Starting.");
-
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
+
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Starting.");
 
     if(str_cmp_i(&tag->name[0], "version") == 0) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, tag->tag_id, "Version is %s", VERSION);
@@ -224,7 +236,7 @@ static int system_tag_read(plc_tag_p ptag) {
 
     /* safe here because we are still within the API mutex. */
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
     plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done.");
@@ -263,7 +275,7 @@ static int system_tag_write(plc_tag_p ptag) {
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_STATUS_OK);
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
     plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done.");

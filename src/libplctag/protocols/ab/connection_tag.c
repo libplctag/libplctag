@@ -84,7 +84,7 @@ extern plc_tag_p ab_connection_tag_create(attr attribs,
     if(!tag) { return NULL; }
 
     tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
-    tag->io_events = attr_get_int(attribs, "io_events", 1); /* FIXME does not do anything yet. */
+    tag->io_events = attr_get_int(attribs, "io_events", 1);
     tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
 
     /* set the vtable to the device tag vtable. */
