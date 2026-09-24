@@ -1822,6 +1822,10 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "socket read error rc=%d, errno=%d", rc, err);
             return PLCTAG_ERR_READ;
         }
+    } else if(rc == 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer (recv returned 0) on socket %d", (int)s->fd);
+        /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
+        return PLCTAG_ERR_READ;
     }
 
     /* only wait if we have a timeout and no data and no error. */
@@ -1907,6 +1911,11 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "socket read error rc=%d, errno=%d", rc, err);
                 return PLCTAG_ERR_READ;
             }
+        } else if(rc == 0) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
+                    "Connection closed by peer after select (recv returned 0) on socket %d", (int)s->fd);
+            /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
+            return PLCTAG_ERR_READ;
         }
     }
 

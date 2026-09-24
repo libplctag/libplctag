@@ -3126,7 +3126,9 @@ int receive_forward_open_response(ab_session_p session) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting");
 
-    rc = recv_eip_response(session, 0);
+    /* Never wait unboundedly for the forward open response. A dropped session must surface as an */
+    /* error so the handler can log it and re-enter the connect/retry path instead of parking. */
+    rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to receive Forward Open response.");
         return rc;
