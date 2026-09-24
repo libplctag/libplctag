@@ -107,6 +107,10 @@ struct attr_def_t {
  * Returns NULL when neither table carries it. */
 extern const attr_def_t *attr_find(plc_tag_p tag, const char *name);
 
+/* Resolve a name against the library-scope table, used when the tag id is zero.  Those
+ * accessors take a NULL tag. */
+extern const attr_def_t *attr_find_lib(const char *name);
+
 
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {
@@ -137,15 +141,8 @@ struct tag_vtable_t {
      */
     tag_vtable_func tag_data_written;
 
-    /* attribute accessors. */
-    int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
-    int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
-
-    int (*get_byte_array_attrib)(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
-
-    /* Attribute table for this protocol, NULL-name-terminated.  Consulted before the core
-     * table.  The three accessors above are the migration fallback for a protocol that has
-     * not been converted yet and go away once every protocol has a table. */
+    /* Runtime attributes this protocol publishes, NULL-name-terminated.  Consulted before
+     * the core table, so a protocol can override or suppress a core attribute. */
     const attr_def_t *attribs;
 };
 

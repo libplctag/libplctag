@@ -114,9 +114,7 @@ struct tag_vtable_t default_vtable = {
     .tag_data_written = NULL,
 
     /* attribute accessors */
-    .get_int_attrib = ab_get_int_attrib,
-    .set_int_attrib = ab_set_int_attrib,
-    .get_byte_array_attrib = ab_get_byte_array_attrib,
+    .attribs = ab_attribs,
 };
 
 
@@ -1007,155 +1005,190 @@ void ab_tag_destroy(ab_tag_p tag) {
 }
 
 
-int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
-    int res = default_value;
+/*
+ * Attribute accessors.  The table below is what the library core consults; see
+ * docs/attribute_redesign.md.  An accessor returns a status, and for a byte array the
+ * number of bytes copied, and does not touch tag->status -- the core records the result.
+ */
+
+static int32_t ab_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, tag->tag_id, "Starting.");
+    *result = (int32_t)tag->elem_size;
 
-    /* assume we have a match. */
-    tag->status = PLCTAG_STATUS_OK;
-
-    /* match the attribute. */
-    if(str_cmp_i(attrib_name, "elem_size") == 0) {
-        res = tag->elem_size;
-    } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
-        res = tag->elem_count;
-    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
-        /* read connection status from session */
-        if(tag->session) {
-            res = atomic_get_int32(&tag->session->connection_status);
-        } else {
-            res = PLCTAG_CONN_STATUS_DOWN; /* no session = not connected */
-        }
-    } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* read connection inactivity timeout from session */
-        if(tag->session) {
-            res = atomic_get_int32(&tag->session->connection_inactivity_timeout_ms);
-        } else {
-            res = SESSION_DISCONNECT_TIMEOUT; /* no session = use default */
-        }
-    } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
-        switch(tag->plc_type) {
-            case AB_PLC_PLC5: /* fall through */
-            case AB_PLC_MLGX: /* fall through */
-            case AB_PLC_SLC:  /* fall through */
-            case AB_PLC_LGX_PCCC: res = (int)(tag->file_type); break;
-            case AB_PLC_LGX:      /* fall through */
-            case AB_PLC_MICRO800: /* fall through */
-                                  // case AB_PLC_OMRON_NJNX:
-                res = (int)(tag->elem_type);
-                break;
-            default: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type); break;
-        }
-    } else if(str_cmp_i(attrib_name, "raw_tag_type_bytes.length") == 0) {
-        switch(tag->plc_type) {
-            case AB_PLC_LGX:      /* fall through */
-            case AB_PLC_MICRO800: /* fall through */
-                                  // case AB_PLC_OMRON_NJNX:
-                res = (int)(tag->encoded_type_info_size);
-                break;
-            default: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type); break;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    return res;
+    return PLCTAG_STATUS_OK;
 }
 
 
-int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
+static int32_t ab_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
-    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, tag->tag_id, "Starting.");
+    *result = (int32_t)tag->elem_count;
 
-    tag->status = PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
+}
 
-    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
-        int clamped_value = new_value;
-        int out_of_bounds = 0;
 
-        if(clamped_value < 100) {
-            clamped_value = 100;
-            out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", new_value);
-        } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
-            clamped_value = SESSION_DISCONNECT_TIMEOUT;
-            out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, SESSION_DISCONNECT_TIMEOUT);
-        }
+static int32_t ab_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
 
-        if(tag->session) {
-            atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, clamped_value);
-            if(out_of_bounds) {
-                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            } else {
-                tag->status = PLCTAG_STATUS_OK;
-                rc = PLCTAG_STATUS_OK;
-            }
-        } else {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                   "Cannot set connection_inactivity_timeout_ms: no session exists.");
-            tag->status = PLCTAG_ERR_NOT_FOUND;
-            rc = PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported attribute \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        rc = PLCTAG_ERR_UNSUPPORTED;
+    /* no session means the tag is not connected, which is a state and not an error. */
+    *result = (tag->session ? atomic_get_int32(&tag->session->connection_status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t ab_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    /* no session means the session that will be created uses the default. */
+    *result = (tag->session ? atomic_get_int32(&tag->session->connection_inactivity_timeout_ms)
+                            : (int32_t)SESSION_DISCONNECT_TIMEOUT);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t ab_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+    int32_t clamped_value = value;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
+    if(clamped_value < 100) {
+        clamped_value = 100;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
+               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
+    } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
+        clamped_value = SESSION_DISCONNECT_TIMEOUT;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
+               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, SESSION_DISCONNECT_TIMEOUT);
     }
+
+    if(!tag->session) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no session exists.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, clamped_value);
 
     return rc;
 }
 
-int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
-    int rc = PLCTAG_STATUS_OK;
+
+static int32_t ab_get_elem_type(plc_tag_p raw_tag, int32_t *result) {
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, tag->tag_id, "Starting.");
+    switch(tag->plc_type) {
+        case AB_PLC_PLC5: /* fall through */
+        case AB_PLC_MLGX: /* fall through */
+        case AB_PLC_SLC:  /* fall through */
+        case AB_PLC_LGX_PCCC: *result = (int32_t)(tag->file_type); break;
 
-    /* assume we have a match. */
-    tag->status = PLCTAG_STATUS_OK;
+        case AB_PLC_LGX:      /* fall through */
+        case AB_PLC_MICRO800: *result = (int32_t)(tag->elem_type); break;
 
-    /* match the attribute. */
-    if(str_cmp_i(attrib_name, "raw_tag_type_bytes") == 0) {
-        switch(tag->plc_type) {
-            case AB_PLC_LGX:      /* fall through */
-            case AB_PLC_MICRO800: /* fall through */
-                                  // case AB_PLC_OMRON_NJNX:
-                if(tag->encoded_type_info_size > buffer_length) {
-                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                           "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size,
-                           buffer_length);
-                    rc = PLCTAG_ERR_TOO_SMALL;
-                } else if(tag->encoded_type_info_size <= buffer_length) {
-                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag->tag_id,
-                           "Tag type info is smaller, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size,
-                           buffer_length);
-
-                    /* copy the data */
-                    mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), tag->encoded_type_info_size);
-
-                    /* return the number of bytes copied */
-                    rc = tag->encoded_type_info_size;
-                }
-                break;
-            default: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type); break;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        default:
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type);
+            return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    return rc;
+    return PLCTAG_STATUS_OK;
 }
+
+
+/* Only the PLC types that encode CIP type information carry this. */
+static int32_t ab_get_raw_tag_type_bytes_size(plc_tag_p raw_tag) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    switch(tag->plc_type) {
+        case AB_PLC_LGX:      /* fall through */
+        case AB_PLC_MICRO800: return (int32_t)(tag->encoded_type_info_size);
+
+        default:
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported PLC type %d!", tag->plc_type);
+            return PLCTAG_ERR_UNSUPPORTED;
+    }
+}
+
+
+static int32_t ab_get_raw_tag_type_bytes_length(plc_tag_p raw_tag, int32_t *result) {
+    int32_t size = ab_get_raw_tag_type_bytes_size(raw_tag);
+
+    if(size < 0) { return size; }
+
+    *result = size;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t ab_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+    int32_t size = ab_get_raw_tag_type_bytes_size(raw_tag);
+
+    if(size < 0) { return size; }
+
+    if(size > buffer_length) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
+               "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", (int)size, (int)buffer_length);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), (int)size);
+
+    /* the caller gets the number of bytes copied. */
+    return size;
+}
+
+
+const attr_def_t ab_attribs[] = {
+    {.name = "elem_size",
+     .type = ATTR_TYPE_INT,
+     .description = "The size in bytes of a single element of this tag.",
+     .get_int = ab_get_elem_size},
+
+    {.name = "elem_count",
+     .type = ATTR_TYPE_INT,
+     .description = "The number of elements this tag holds.",
+     .get_int = ab_get_elem_count},
+
+    {.name = "elem_type",
+     .type = ATTR_TYPE_INT,
+     .description = "The PLC's type code for a single element of this tag.",
+     .get_int = ab_get_elem_type},
+
+    {.name = "connection_status",
+     .type = ATTR_TYPE_INT,
+     .description = "The state of the session or connection this tag uses, as a plc_tag_conn_status_t.",
+     .get_int = ab_get_connection_status},
+
+    {.name = "connection_inactivity_timeout_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "Disconnect the session after this many milliseconds without traffic.",
+     .get_int = ab_get_connection_inactivity_timeout_ms,
+     .set_int = ab_set_connection_inactivity_timeout_ms},
+
+    {.name = "raw_tag_type_bytes",
+     .type = ATTR_TYPE_BYTES,
+     .description = "The encoded CIP type information for this tag.",
+     .get_bytes = ab_get_raw_tag_type_bytes,
+     .get_bytes_size = ab_get_raw_tag_type_bytes_size},
+
+    /*
+     * Deprecated.  This predates plc_tag_get_attribute_size() and is the one byte array
+     * length carried as an attribute of its own.  New byte array attributes do not get one.
+     */
+    {.name = "raw_tag_type_bytes.length",
+     .type = ATTR_TYPE_INT,
+     .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
+     .get_int = ab_get_raw_tag_type_bytes_length},
+
+    {.name = NULL},
+};
 
 
 plc_type_t get_plc_type(attr attribs) {

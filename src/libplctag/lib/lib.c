@@ -2364,17 +2364,12 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
 
     /* get library attributes */
     if(id == 0) {
-        if(str_cmp_i(attrib_name, "version_major") == 0) {
-            res = (int)version_major;
-        } else if(str_cmp_i(attrib_name, "version_minor") == 0) {
-            res = (int)version_minor;
-        } else if(str_cmp_i(attrib_name, "version_patch") == 0) {
-            res = (int)version_patch;
-        } else if(str_cmp_i(attrib_name, "debug") == 0) {
-            res = (int)get_debug_level();
-        } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
-            res = (int)get_debug_level();
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(def && def->type == ATTR_TYPE_INT && def->get_int) {
+            int32_t value = 0;
+
+            res = (def->get_int(NULL, &value) == PLCTAG_STATUS_OK ? (int)value : default_value);
         } else {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
             res = default_value;
@@ -2406,12 +2401,10 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
                     tag->status = PLCTAG_ERR_UNSUPPORTED;
                     res = default_value;
                 }
-            } else if(tag->vtable && tag->vtable->get_int_attrib) {
-                /* migration fallback for a protocol that has no attribute table yet. */
-                res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
             } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
                 res = default_value;
-                tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+                tag->status = PLCTAG_ERR_UNSUPPORTED;
             }
         }
 
@@ -2436,27 +2429,17 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting for int attribute %s.", attrib_name);
 
-    /* get library attributes */
+    /* set library attributes */
     if(id == 0) {
-        if(str_cmp_i(attrib_name, "debug") == 0) {
-            if(new_value >= DEBUG_ERROR && new_value < DEBUG_SPEW) {
-                set_debug_level(new_value);
-                res = PLCTAG_STATUS_OK;
-            } else {
-                res = PLCTAG_ERR_OUT_OF_BOUNDS;
-            }
-        } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
-            if(new_value >= DEBUG_ERROR && new_value < DEBUG_SPEW) {
-                set_debug_level(new_value);
-                res = PLCTAG_STATUS_OK;
-            } else {
-                res = PLCTAG_ERR_OUT_OF_BOUNDS;
-            }
-        } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not support at the library level!", attrib_name);
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(!def || def->type != ATTR_TYPE_INT || !def->set_int) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
             return PLCTAG_ERR_UNSUPPORTED;
         }
+
+        /* there is no tag at library scope, so this must not fall through to the rc_dec() below. */
+        return (int)def->set_int(NULL, (int32_t)new_value);
     } else {
         tag = lookup_tag(id);
 
@@ -2480,12 +2463,10 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
                 }
 
                 tag->status = (int8_t)res;
-            } else if(tag->vtable && tag->vtable->set_int_attrib) {
-                /* migration fallback for a protocol that has no attribute table yet. */
-                res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
-                tag->status = (int8_t)res;
             } else {
-                tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
+                res = PLCTAG_ERR_UNSUPPORTED;
+                tag->status = (int8_t)res;
             }
         }
     }
@@ -2520,6 +2501,16 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(def && def->type == ATTR_TYPE_BYTES && def->get_bytes) { return (int)def->get_bytes(NULL, buffer, (int32_t)buffer_length); }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
+
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
     tag = lookup_tag(id);
 
     if(!tag) {
@@ -2540,11 +2531,9 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
                 /* the name exists but is write only, or the protocol suppressed it. */
                 rc = PLCTAG_ERR_UNSUPPORTED;
             }
-        } else if(tag->vtable && tag->vtable->get_byte_array_attrib) {
-            /* migration fallback for a protocol that has no attribute table yet. */
-            rc = tag->vtable->get_byte_array_attrib(tag, attrib_name, buffer, buffer_length);
         } else {
-            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
+            rc = PLCTAG_ERR_UNSUPPORTED;
         }
     }
 
@@ -2566,6 +2555,19 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
     if(!attrib_name || str_length(attrib_name) == 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
         return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(!def) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
+            return PLCTAG_ERR_UNSUPPORTED;
+        }
+
+        if(def->type != ATTR_TYPE_BYTES) { return (int)sizeof(int32_t); }
+
+        return (def->get_bytes_size ? (int)def->get_bytes_size(NULL) : PLCTAG_ERR_UNSUPPORTED);
     }
 
     tag = lookup_tag(id);

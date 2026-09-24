@@ -58,8 +58,18 @@ typedef omron_connection_tag_t *omron_connection_tag_p;
 static int omron_connection_tag_abort(plc_tag_p tag);
 static int omron_connection_tag_status(plc_tag_p tag);
 static int omron_connection_tag_tickler(plc_tag_p tag);
-static int omron_connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static int32_t omron_connection_get_connection_status(plc_tag_p tag, int32_t *result);
 static void omron_connection_tag_destructor(void *ptr);
+
+/* An Omron connection tag carries no PLC data, so its only runtime attribute is the link state. */
+static const attr_def_t omron_connection_tag_attribs[] = {
+    {.name = "connection_status",
+     .type = ATTR_TYPE_INT,
+     .description = "The state of the connection this connection tag monitors, as a plc_tag_conn_status_t.",
+     .get_int = omron_connection_get_connection_status},
+
+    {.name = NULL},
+};
 
 static struct tag_vtable_t omron_connection_tag_vtable = {
     .abort = omron_connection_tag_abort,
@@ -69,9 +79,7 @@ static struct tag_vtable_t omron_connection_tag_vtable = {
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
-    .get_int_attrib = omron_connection_get_int_attrib,
-    .set_int_attrib = NULL,
-    .get_byte_array_attrib = NULL,
+    .attribs = omron_connection_tag_attribs,
 };
 
 
@@ -231,12 +239,12 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
     return PLCTAG_STATUS_OK;
 }
 
-static int omron_connection_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
+static int32_t omron_connection_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     omron_connection_tag_p tag = (omron_connection_tag_p)raw_tag;
 
-    if(str_cmp_i(attrib_name, "connection_status") == 0) { return tag->last_conn_state; }
+    *result = (int32_t)tag->last_conn_state;
 
-    return default_value;
+    return PLCTAG_STATUS_OK;
 }
 
 static void omron_connection_tag_destructor(void *ptr) {

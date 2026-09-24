@@ -62,9 +62,8 @@ struct tag_vtable_t system_tag_vtable = {
     .tag_data_written = NULL,
 
     /* data accessors */
-    .get_int_attrib = NULL,
-    .set_int_attrib = NULL,
-    .get_byte_array_attrib = NULL,
+    /* no attributes of its own; the core table serves them all. */
+    .attribs = NULL,
 };
 
 tag_byte_order_t system_tag_byte_order = {.is_allocated = 0,

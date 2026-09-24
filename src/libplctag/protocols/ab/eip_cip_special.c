@@ -179,9 +179,7 @@ struct tag_vtable_t raw_tag_vtable = {
     .tag_data_written = NULL,
 
     /* attribute accessors */
-    .get_int_attrib = ab_get_int_attrib,
-    .set_int_attrib = ab_set_int_attrib,
-    .get_byte_array_attrib = ab_get_byte_array_attrib,
+    .attribs = ab_attribs,
 };
 
 /* define the vtable for listing tag type. */
@@ -195,9 +193,7 @@ struct tag_vtable_t listing_tag_vtable = {
     .tag_data_written = NULL,
 
     /* attribute accessors */
-    .get_int_attrib = ab_get_int_attrib,
-    .set_int_attrib = ab_set_int_attrib,
-    .get_byte_array_attrib = ab_get_byte_array_attrib,
+    .attribs = ab_attribs,
 };
 
 
@@ -212,9 +208,7 @@ struct tag_vtable_t udt_tag_vtable = {
     .tag_data_written = NULL,
 
     /* attribute accessors */
-    .get_int_attrib = ab_get_int_attrib,
-    .set_int_attrib = ab_set_int_attrib,
-    .get_byte_array_attrib = ab_get_byte_array_attrib,
+    .attribs = ab_attribs,
 };
 
 
@@ -737,9 +731,7 @@ struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)ab_tag_abor
                                            .wake_plc = (tag_vtable_func)NULL,
 
                                            /* attribute accessors */
-                                           .get_int_attrib = ab_get_int_attrib,
-                                           .set_int_attrib = ab_set_int_attrib,
-                                           .get_byte_array_attrib = ab_get_byte_array_attrib};
+                                           .attribs = ab_attribs};
 
 
 int setup_identity_tag(ab_tag_p tag) {

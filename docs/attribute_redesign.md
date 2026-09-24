@@ -1,6 +1,6 @@
 # Attribute Handling Redesign
 
-Status: design, not yet implemented.
+Status: implemented.
 
 ## 1. Problem
 
@@ -57,8 +57,6 @@ Non-goals:
   functions or their signatures.
 - Creation attributes are not unified with runtime attributes here. That is a separate
   project and nothing below depends on it.
-- Library scope (`id == 0`) is not converted here. It is two chains and five names with
-  nothing to override, so it is a later, independent commit.
 
 ## 3. Design
 
@@ -217,22 +215,43 @@ failed read from a successful read that returned the caller's default. The core 
 
 ## 5. Migration
 
-Three steps, each shippable on its own.
+Three steps, each shippable on its own. All three are done.
 
-1. Add `attr_def_t`, `attr_table_find()`, `attr_find()` and `core_attribs[]`. Keep the
-   existing vtable accessors as a four-line fallback for any name that is in no table. Move
-   the core attributes into `core_attribs[]`. No module changes. Behavior is identical apart
-   from the resolution order.
-
-   `plc_tag_get_attribute_size()` sees only what is in a table, so until a module is
-   converted its attributes return `PLCTAG_ERR_UNSUPPORTED` from it. `raw_tag_type_bytes`
-   keeps reporting its length through `raw_tag_type_bytes.length` until step 2 reaches the
-   AB and Omron modules.
-2. Convert one protocol module per commit, deleting that module's chains as its table lands.
-3. Remove the three vtable function pointers and the fallback once the last module is
-   converted.
+1. Added `attr_def_t`, `attr_table_find()`, `attr_find()` and `core_attribs[]` in
+   `lib/tag_attribs.c`, with the existing vtable accessors kept as a fallback for any name
+   that was in no table. The core attributes moved into `core_attribs[]`.
+2. Converted each protocol module, deleting its chains as its table landed: `ab_attribs[]`
+   (`ab_common.c`, shared by nine vtables), `connection_tag_attribs[]`, `omron_attribs[]`
+   (shared by three), `omron_connection_tag_attribs[]`, `omron_device_tag_attribs[]`,
+   `mb_attribs[]` and `mb_connection_tag_attribs[]`. The system tag publishes no attributes
+   of its own and sets `.attribs = NULL`, so the core table serves it.
+3. Removed `get_int_attrib`, `set_int_attrib` and `get_byte_array_attrib` from
+   `tag_vtable_t`, and the three fallback branches from `lib.c`. A name in no table is now
+   `PLCTAG_ERR_UNSUPPORTED` from one place.
+4. Converted library scope. `lib_attribs[]` holds `version_major`, `version_minor`,
+   `version_patch`, `debug` and the deprecated `debug_level`, reached through
+   `attr_find_lib()`. There is no tag at library scope, so those accessors are passed a NULL
+   tag and must not touch it. All four public entry points now take the `id == 0` path,
+   including `plc_tag_get_byte_array_attribute()` and `plc_tag_get_attribute_size()`, which
+   previously returned `PLCTAG_ERR_NOT_FOUND` there because they went straight to
+   `lookup_tag()`.
 
 ## 6. Risk
+
+Two behaviors were found and changed during the conversion rather than preserved.
+
+`plc_tag_set_int_attribute(0, "debug", n)` fell through to a `pdebug()` that dereferences a
+NULL tag, and then to `rc_dec(NULL)`. The `pdebug()` macro only evaluates its arguments when
+the module is logging at that level, so the crash needed `DEBUG_MODULE_LIB` at `DEBUG_DETAIL`
+or above to appear. The library-scope branch now returns before that code.
+
+An AB tag on a PLC type with no CIP type information reported `elem_type` and
+`raw_tag_type_bytes` as success -- the caller's default, and "zero bytes copied". Both now
+return `PLCTAG_ERR_UNSUPPORTED`.
+
+The `debug` attribute still rejects `PLCTAG_DEBUG_SPEW` and `PLCTAG_DEBUG_NONE`, which
+`plc_tag_set_debug_level()` accepts. That was preserved rather than fixed; it is a separate
+decision.
 
 Inverting the resolution order changes the meaning of any name that a module and the core
 both handle. Today they are disjoint: the core owns `size`, `read_cache_ms`,

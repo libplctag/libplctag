@@ -108,6 +108,61 @@ static int32_t open_tag(const char *tag_string) {
 }
 
 
+/*
+ * Library scope, reached with a tag id of zero.  This runs before any tag exists, and the
+ * setter path here used to fall through to a NULL tag dereference.
+ */
+static void test_library_scope(void) {
+    int32_t original_debug = plc_tag_get_int_attribute(0, "debug", INT_MIN);
+
+    printf("Library version reads back.\n");
+
+    if(plc_tag_get_int_attribute(0, "version_major", INT_MIN) < 0) {
+        printf("\tFAIL: version_major is not readable at library scope.\n");
+        failures++;
+    } else {
+        printf("\tOK: version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", INT_MIN),
+               plc_tag_get_int_attribute(0, "version_minor", INT_MIN), plc_tag_get_int_attribute(0, "version_patch", INT_MIN));
+    }
+
+    check_set(0, "version_major", 9, PLCTAG_ERR_UNSUPPORTED);
+
+    printf("The debug level round trips at library scope.\n");
+
+    if(original_debug == INT_MIN) {
+        printf("\tFAIL: debug is not readable at library scope.\n");
+        failures++;
+    }
+
+    check_set(0, "debug", PLCTAG_DEBUG_WARN, PLCTAG_STATUS_OK);
+    check_get(0, "debug", PLCTAG_DEBUG_WARN);
+
+    /* the deprecated spelling still works and still means the same thing. */
+    check_get(0, "debug_level", PLCTAG_DEBUG_WARN);
+    check_set(0, "debug_level", PLCTAG_DEBUG_INFO, PLCTAG_STATUS_OK);
+    check_get(0, "debug", PLCTAG_DEBUG_INFO);
+
+    check_set(0, "debug", -1, PLCTAG_ERR_OUT_OF_BOUNDS);
+    check_get(0, "debug", PLCTAG_DEBUG_INFO);
+
+    printf("Attribute sizes work at library scope.\n");
+
+    check_attr_size(0, "version_major", (int32_t)sizeof(int32_t));
+    check_attr_size(0, "boodleflokker", PLCTAG_ERR_UNSUPPORTED);
+
+    printf("A tag attribute is not a library attribute.\n");
+
+    check_get(0, "size", INT_MIN);
+    check_set(0, "read_cache_ms", 100, PLCTAG_ERR_UNSUPPORTED);
+
+    /*
+     * Restore through plc_tag_set_debug_level(), not the attribute: the attribute rejects
+     * PLCTAG_DEBUG_NONE, which is the level this test usually starts at.
+     */
+    if(original_debug != INT_MIN) { plc_tag_set_debug_level(original_debug); }
+}
+
+
 int main(void) {
     char group_tag_string[512] = {0};
     int32_t tag = 0;
@@ -118,6 +173,8 @@ int main(void) {
         printf("Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
         return 1;
     }
+
+    test_library_scope();
 
     tag = open_tag(DEFAULT_TAG);
 

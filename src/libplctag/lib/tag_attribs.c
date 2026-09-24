@@ -43,6 +43,7 @@
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdint.h>
 #include <utils/debug.h>
@@ -59,6 +60,14 @@ static int32_t core_get_bit_num(plc_tag_p tag, int32_t *result);
 static int32_t core_get_connection_group_id(plc_tag_p tag, int32_t *result);
 static int32_t core_get_allow_field_resize(plc_tag_p tag, int32_t *result);
 static int32_t core_set_allow_field_resize(plc_tag_p tag, int32_t value);
+
+static int32_t lib_get_version_major(plc_tag_p tag, int32_t *result);
+static int32_t lib_get_version_minor(plc_tag_p tag, int32_t *result);
+static int32_t lib_get_version_patch(plc_tag_p tag, int32_t *result);
+static int32_t lib_get_debug(plc_tag_p tag, int32_t *result);
+static int32_t lib_set_debug(plc_tag_p tag, int32_t value);
+static int32_t lib_get_debug_level(plc_tag_p tag, int32_t *result);
+static int32_t lib_set_debug_level(plc_tag_p tag, int32_t value);
 
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name);
 
@@ -110,6 +119,52 @@ static const attr_def_t core_attribs[] = {
 
     {.name = NULL},
 };
+
+
+/*
+ * Attributes of the library itself, reached with a tag id of zero.  There is no tag at
+ * library scope, so these accessors are passed a NULL tag and must not touch it.  The
+ * descriptor is shared with the tag tables so that one lookup and one set of public entry
+ * points serve both scopes.
+ */
+static const attr_def_t lib_attribs[] = {
+    {.name = "version_major",
+     .type = ATTR_TYPE_INT,
+     .description = "The major part of the library version.",
+     .get_int = lib_get_version_major},
+
+    {.name = "version_minor",
+     .type = ATTR_TYPE_INT,
+     .description = "The minor part of the library version.",
+     .get_int = lib_get_version_minor},
+
+    {.name = "version_patch",
+     .type = ATTR_TYPE_INT,
+     .description = "The patch part of the library version.",
+     .get_int = lib_get_version_patch},
+
+    {.name = "debug",
+     .type = ATTR_TYPE_INT,
+     .description = "The library-wide logging level, from DEBUG_ERROR to DEBUG_SPEW.",
+     .get_int = lib_get_debug,
+     .set_int = lib_set_debug},
+
+    /* Deprecated spelling of "debug".  A separate entry so that it can carry its own warning. */
+    {.name = "debug_level",
+     .type = ATTR_TYPE_INT,
+     .description = "Deprecated, use \"debug\". The library-wide logging level.",
+     .get_int = lib_get_debug_level,
+     .set_int = lib_set_debug_level},
+
+    {.name = NULL},
+};
+
+
+const attr_def_t *attr_find_lib(const char *name) {
+    if(!name) { return NULL; }
+
+    return attr_table_find(lib_attribs, name);
+}
 
 
 const attr_def_t *attr_find(plc_tag_p tag, const char *name) {
@@ -227,4 +282,69 @@ static int32_t core_set_allow_field_resize(plc_tag_p tag, int32_t value) {
     tag->allow_field_resize = (value > 0 ? 1 : 0);
 
     return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t lib_get_version_major(plc_tag_p tag, int32_t *result) {
+    (void)tag;
+
+    *result = (int32_t)version_major;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t lib_get_version_minor(plc_tag_p tag, int32_t *result) {
+    (void)tag;
+
+    *result = (int32_t)version_minor;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t lib_get_version_patch(plc_tag_p tag, int32_t *result) {
+    (void)tag;
+
+    *result = (int32_t)version_patch;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t lib_get_debug(plc_tag_p tag, int32_t *result) {
+    (void)tag;
+
+    *result = (int32_t)get_debug_level();
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t lib_set_debug(plc_tag_p tag, int32_t value) {
+    (void)tag;
+
+    /*
+     * DEBUG_SPEW is deliberately excluded: it is reachable from the tag creation string but
+     * not from this attribute, which is how the library has always behaved here.
+     */
+    if(value < DEBUG_ERROR || value >= DEBUG_SPEW) { return PLCTAG_ERR_OUT_OF_BOUNDS; }
+
+    set_debug_level((int)value);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t lib_get_debug_level(plc_tag_p tag, int32_t *result) {
+    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
+
+    return lib_get_debug(tag, result);
+}
+
+
+static int32_t lib_set_debug_level(plc_tag_p tag, int32_t value) {
+    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
+
+    return lib_set_debug(tag, value);
 }

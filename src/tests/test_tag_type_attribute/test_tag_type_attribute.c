@@ -49,11 +49,29 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
 
     printf("Testing tag %s.\n", tag_name);
 
-    /* get the type size */
-    printf("\tTest getting attribute \"raw_tag_type_bytes.length\": ");
-    type_size = plc_tag_get_int_attribute(tag, "raw_tag_type_bytes.length", -1);
+    /* get the type size the current way. */
+    printf("\tTest plc_tag_get_attribute_size() for \"raw_tag_type_bytes\": ");
+    type_size = plc_tag_get_attribute_size(tag, "raw_tag_type_bytes");
     if((type_size != 2) && (type_size != 4)) {
         printf("ERROR: expected type byte array reported length to be 2 or 4 bytes, but got %d!\n", type_size);
+        return PLCTAG_ERR_BAD_REPLY;
+    } else {
+        printf("PASSED\n");
+    }
+
+    /* the deprecated spelling must keep reporting the same number. */
+    printf("\tTest deprecated attribute \"raw_tag_type_bytes.length\": ");
+    if(plc_tag_get_int_attribute(tag, "raw_tag_type_bytes.length", -1) != type_size) {
+        printf("ERROR: \"raw_tag_type_bytes.length\" disagrees with plc_tag_get_attribute_size()!\n");
+        return PLCTAG_ERR_BAD_REPLY;
+    } else {
+        printf("PASSED\n");
+    }
+
+    /* an integer attribute reports the width of an integer. */
+    printf("\tTest plc_tag_get_attribute_size() for \"elem_size\": ");
+    if(plc_tag_get_attribute_size(tag, "elem_size") != (int)sizeof(int32_t)) {
+        printf("ERROR: expected an integer attribute to report %d bytes!\n", (int)sizeof(int32_t));
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");

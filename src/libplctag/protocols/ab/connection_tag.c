@@ -58,9 +58,19 @@ typedef ab_connection_tag_t *ab_connection_tag_p;
 static int connection_tag_abort(plc_tag_p tag);
 static int connection_tag_status(plc_tag_p tag);
 static int connection_tag_tickler(plc_tag_p tag);
-static int connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result);
 static void ab_connection_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
+
+/* A connection tag carries no PLC data, so its only runtime attribute is the link state. */
+static const attr_def_t connection_tag_attribs[] = {
+    {.name = "connection_status",
+     .type = ATTR_TYPE_INT,
+     .description = "The state of the session this connection tag monitors, as a plc_tag_conn_status_t.",
+     .get_int = connection_get_connection_status},
+
+    {.name = NULL},
+};
 
 static struct tag_vtable_t connection_tag_vtable = {
     .abort = connection_tag_abort,               /* Not used */
@@ -70,8 +80,7 @@ static struct tag_vtable_t connection_tag_vtable = {
     .write = NULL,                               /* Not used */
     .wake_plc = NULL,                            /* Not used */
     .tag_data_written = NULL,                    /* Not used */
-    .get_int_attrib = connection_get_int_attrib, /* get connection status attribute */
-    .set_int_attrib = NULL,                      /* Not used */
+    .attribs = connection_tag_attribs,
 };
 
 
@@ -269,12 +278,12 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
 }
 
 
-static int connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
+static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result) {
     ab_connection_tag_t *conn_tag = (ab_connection_tag_t *)tag;
 
-    if(str_cmp(attrib_name, "connection_status") == 0) { return conn_tag->last_conn_state; }
+    *result = (int32_t)conn_tag->last_conn_state;
 
-    return default_value;
+    return PLCTAG_STATUS_OK;
 }
 
 static void ab_connection_tag_destructor(void *ptr) {
