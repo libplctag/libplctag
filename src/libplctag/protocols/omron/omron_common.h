@@ -54,7 +54,7 @@ extern int omron_tag_status(omron_tag_p tag);
 extern int omron_tag_abort_request(omron_tag_p tag);
 extern int omron_tag_abort_request_only(omron_tag_p tag);
 
-/* Runtime attributes shared by every Omron tag type.  See docs/attribute_redesign.md. */
+/* Runtime attributes shared by every Omron tag type. */
 extern const attr_def_t omron_attribs[];
 
 

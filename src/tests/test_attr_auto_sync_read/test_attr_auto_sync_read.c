@@ -32,14 +32,10 @@
  ***************************************************************************/
 
 /*
- * Verify that auto_sync_read_ms actually takes effect when it is set at runtime through
- * plc_tag_set_int_attribute(), rather than only when it is set in the tag creation string.
+ * Verify auto_sync_read_ms takes effect when set at runtime, not just in the tag string.
  *
- * The tag is created with automatic reads off.  A callback counts read completions, so the
- * observed completion rate over a fixed window is the evidence that the new period reached
- * the tickler: at a period of PERIOD_MS over WINDOW_MS the tag should complete roughly
- * WINDOW_MS/PERIOD_MS reads.  The bounds are wide because the window includes network
- * round trips to the simulator and the tickler's own scan interval.
+ * Automatic reads start off; a callback counts completions over WINDOW_MS.  The bounds are
+ * wide: the window includes network round trips and the tickler's scan interval.
  */
 
 #include "compat_utils.h"

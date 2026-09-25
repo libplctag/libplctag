@@ -32,12 +32,8 @@
  ***************************************************************************/
 
 /*
- * Non-timing coverage of the attributes the library core owns: the values that can be read
- * at runtime, the one that can also be written at runtime, and the error returned when an
- * attribute is accessed in a direction it does not support.
- *
- * The timing-dependent core attributes, auto_sync_read_ms and auto_sync_write_ms, have
- * their own tests.
+ * Non-timing coverage of the core attributes: runtime reads, the one runtime write, and the
+ * error for an access in an unsupported direction.  auto_sync_*_ms have their own tests.
  */
 
 #include "compat_utils.h"
@@ -146,10 +142,8 @@ static int32_t open_tag(const char *tag_string) {
 }
 
 
-/*
- * Library scope, reached with a tag id of zero.  This runs before any tag exists, and the
- * setter path here used to fall through to a NULL tag dereference.
- */
+/* Library scope, tag id zero, before any tag exists.  The setter path here once
+ * dereferenced a NULL tag. */
 static void test_library_scope(void) {
     int32_t original_debug = plc_tag_get_int_attribute(0, "debug", INT_MIN);
 
@@ -193,10 +187,7 @@ static void test_library_scope(void) {
     check_get(0, "size", INT_MIN);
     check_set(0, "read_cache_ms", 100, PLCTAG_ERR_UNSUPPORTED);
 
-    /*
-     * Restore through plc_tag_set_debug_level(), not the attribute: the attribute rejects
-     * PLCTAG_DEBUG_NONE, which is the level this test usually starts at.
-     */
+    /* Restore through plc_tag_set_debug_level(); the attribute rejects PLCTAG_DEBUG_NONE. */
     if(original_debug != INT_MIN) { plc_tag_set_debug_level(original_debug); }
 }
 

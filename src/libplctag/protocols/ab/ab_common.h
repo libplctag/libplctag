@@ -53,7 +53,7 @@ extern int ab_tag_abort(ab_tag_p tag);
 extern int ab_tag_status(ab_tag_p tag);
 
 
-/* Runtime attributes shared by every AB tag type.  See docs/attribute_redesign.md. */
+/* Runtime attributes shared by every AB tag type. */
 extern const attr_def_t ab_attribs[];
 
 // extern int ab_get_bit(plc_tag_p tag, int offset_bit);

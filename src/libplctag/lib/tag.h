@@ -55,38 +55,19 @@ typedef struct lib_instance_t *lib_instance_p;
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
 /*
- * Runtime attribute descriptors.
+ * Runtime attribute descriptors.  The core and each protocol publish a NULL-name-terminated
+ * table.  Lookup is by name; the entry's type selects the live union branch.
  *
- * Each layer (the library core, each protocol) publishes a table of these.  A table is
- * terminated by an entry whose name is NULL.  Lookup is keyed on the name alone; the entry
- * declares the type, and that type selects which branch of each union is live, so a union
- * can never be read on the wrong branch.  An access through the wrong public entry point
- * for the declared type fails rather than guessing.
- *
- * A variable-length value is one ATTR_TYPE_BYTES entry.  Its length is not an attribute of
- * its own: the application asks plc_tag_get_attribute_size(), which the core answers from
- * get_bytes_size.
- *
- * There is no permission field.  A NULL accessor is the policy: a NULL setter is
- * read-only, a NULL getter is write-only, and an entry with both NULL suppresses the
- * core entry of the same name and type for that protocol.  Values that can only be set
- * when the tag is created are absent from these tables entirely, since the protocol
- * constructor reads them from the tag string and never routes through the public API.
- *
- * See docs/attribute_redesign.md.
+ * A NULL accessor is the permission: NULL setter is read-only, NULL getter is write-only,
+ * both NULL suppresses the core entry of that name for that protocol.  Create-time-only
+ * values are not in these tables.
  */
 
 typedef enum {
     ATTR_TYPE_INT,
     ATTR_TYPE_BYTES,
 
-    /*
-     * A byte array whose contents are NUL-terminated text.  It is carried by the same
-     * accessors and fetched through the same public functions as ATTR_TYPE_BYTES; the
-     * reported size includes the terminator, so a caller can allocate that many bytes and
-     * get a usable C string back.  The distinct type exists so that the value's meaning is
-     * discoverable rather than guessed from its contents.
-     */
+    /* ATTR_TYPE_BYTES holding NUL-terminated text.  The reported size includes the terminator. */
     ATTR_TYPE_STRING
 } attr_val_type_t;
 

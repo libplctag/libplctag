@@ -3680,11 +3680,8 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
 
 /****** Data Accessor Functions ******/
 
-/*
- * Attribute accessors.  The table below is what the library core consults; see
- * docs/attribute_redesign.md.  An accessor returns a status and does not touch tag->status
- * -- the core records the result.
- */
+/* Attribute accessors for the table below.  An accessor returns a status and never touches
+ * tag->status -- the core records it. */
 
 static int32_t mb_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
@@ -3754,10 +3751,8 @@ static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_
 }
 
 
-/*
- * Values set when the tag was created and read-only afterwards.  These live on the PLC the
- * tag shares, so they report PLCTAG_ERR_NOT_FOUND before one exists.
- */
+/* Read-only after creation.  These live on the shared PLC, so they report
+ * PLCTAG_ERR_NOT_FOUND until it exists. */
 static int32_t mb_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
 

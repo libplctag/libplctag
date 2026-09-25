@@ -31,14 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/*
- * Core runtime attribute table and the lookup used by the public attribute API.
- *
- * Step one of docs/attribute_redesign.md: the attributes the library core owns move out
- * of the if-else chains in lib.c and into core_attribs[] below.  No protocol module has a
- * table yet, so every protocol attribute still reaches its module through the migration
- * fallback in lib.c.
- */
+/* Core runtime attribute table and the lookup behind the public attribute API. */
 
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
@@ -93,11 +86,8 @@ static int32_t core_get_float64_byte_order_size(plc_tag_p tag);
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name);
 
 
-/*
- * Attributes handled by the library core for every tag, whatever its protocol.  A protocol
- * overrides one by listing the same name and type in its own table, and suppresses one by
- * listing it with both accessors NULL.
- */
+/* Attributes the core handles for every tag.  A protocol overrides one by listing the same
+ * name and type, and suppresses one by listing it with both accessors NULL. */
 static const attr_def_t core_attribs[] = {
     {.name = "size",
      .type = ATTR_TYPE_INT,
@@ -138,11 +128,7 @@ static const attr_def_t core_attribs[] = {
      .get_int = core_get_allow_field_resize,
      .set_int = core_set_allow_field_resize},
 
-    /*
-     * The string and byte order layout, set when the tag is created and read-only after.
-     * These live on tag->byte_order, which is a core field, so they belong here rather than
-     * in a protocol table.
-     */
+    /* String and byte order layout.  Read-only after creation; they live on tag->byte_order. */
     {.name = "str_is_counted",
      .type = ATTR_TYPE_INT,
      .description = "The string data starts with a count word.",
@@ -222,12 +208,8 @@ static const attr_def_t core_attribs[] = {
 };
 
 
-/*
- * Attributes of the library itself, reached with a tag id of zero.  There is no tag at
- * library scope, so these accessors are passed a NULL tag and must not touch it.  The
- * descriptor is shared with the tag tables so that one lookup and one set of public entry
- * points serve both scopes.
- */
+/* Attributes of the library itself, reached with a tag id of zero.  These accessors are
+ * passed a NULL tag and must not touch it. */
 static const attr_def_t lib_attribs[] = {
     {.name = "version_major",
      .type = ATTR_TYPE_INT,
@@ -425,10 +407,7 @@ static int32_t lib_get_debug(plc_tag_p tag, int32_t *result) {
 static int32_t lib_set_debug(plc_tag_p tag, int32_t value) {
     (void)tag;
 
-    /*
-     * DEBUG_SPEW is deliberately excluded: it is reachable from the tag creation string but
-     * not from this attribute, which is how the library has always behaved here.
-     */
+    /* DEBUG_SPEW is deliberately excluded here; only the tag creation string can reach it. */
     if(value < DEBUG_ERROR || value >= DEBUG_SPEW) { return PLCTAG_ERR_OUT_OF_BOUNDS; }
 
     set_debug_level((int)value);
@@ -472,12 +451,8 @@ int32_t attr_copy_string(const char *str, uint8_t *buffer, int32_t buffer_length
 }
 
 
-/*
- * A byte order is held as an array of positions, {0,1,2,3}, and written in the tag string as
- * "0,1,2,3".  Rendering it back into that text is what makes the value usable: it can be
- * pasted straight into another tag string.  Each position is a single digit because an order
- * array is never longer than eight entries.
- */
+/* Render a byte order array as the "0,1,2,3" text a tag string takes.  Each position is one
+ * digit; an order array is never longer than eight entries. */
 static int32_t attr_format_byte_order(const int *order, size_t order_len, char *out, size_t out_len) {
     size_t used = 0;
 

@@ -742,11 +742,8 @@ void omron_tag_destroy(omron_tag_p tag) {
 }
 
 
-/*
- * Attribute accessors.  The table below is what the library core consults; see
- * docs/attribute_redesign.md.  An accessor returns a status, and for a byte array the
- * number of bytes copied, and does not touch tag->status -- the core records the result.
- */
+/* Attribute accessors for the table below.  An accessor returns a status, or for a byte
+ * array the number of bytes copied, and never touches tag->status -- the core records it. */
 
 static int32_t omron_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
     omron_tag_p tag = (omron_tag_p)raw_tag;
@@ -859,11 +856,7 @@ static int32_t omron_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, 
 }
 
 
-/*
- * The PLC type as a canonical string rather than the internal plc_type_t.  The enum is
- * private configuration; a string keeps it that way and can be pasted straight back into a
- * tag string.
- */
+/* The PLC type as the tag string spells it, so plc_type_t stays private. */
 static const char *omron_plc_type_name(plc_type_t plc_type) {
     switch(plc_type) {
         case OMRON_PLC_OMRON_NJNX: return "omron-njnx";
@@ -1000,19 +993,15 @@ const attr_def_t omron_attribs[] = {
      .get_bytes = omron_get_raw_tag_type_bytes,
      .get_bytes_size = omron_get_raw_tag_type_bytes_size},
 
-    /*
-     * Deprecated.  This predates plc_tag_get_attribute_size() and is the one byte array
-     * length carried as an attribute of its own.  New byte array attributes do not get one.
-     */
+    /* Deprecated: it predates plc_tag_get_attribute_size().  No new byte array gets a length
+     * attribute of its own. */
     {.name = "raw_tag_type_bytes.length",
      .type = ATTR_TYPE_INT,
      .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
      .get_int = omron_get_raw_tag_type_bytes_length},
 
-    /*
-     * Values set when the tag was created and read-only afterwards.  Some live on the
-     * connection the tag shares, so they report PLCTAG_ERR_NOT_FOUND before one exists.
-     */
+    /* Read-only after creation.  Those on the shared connection report PLCTAG_ERR_NOT_FOUND
+     * until it exists. */
     {.name = "plc",
      .type = ATTR_TYPE_STRING,
      .description = "The PLC family this tag talks to, as a canonical name.",

@@ -32,13 +32,10 @@
  ***************************************************************************/
 
 /*
- * Verify that auto_sync_write_ms actually takes effect when it is set at runtime through
- * plc_tag_set_int_attribute(), rather than only when it is set in the tag creation string.
+ * Verify auto_sync_write_ms takes effect when set at runtime, not just in the tag string.
  *
- * With automatic writes enabled, changing the tag data marks the tag dirty and the write to
- * the PLC is deferred by the configured delay.  A callback timestamps the write completion,
- * so the measured delay between dirtying the data and the write landing is the evidence
- * that the new delay reached the tickler.
+ * A callback timestamps the write completion, so the delay between dirtying the data and
+ * the write landing is the measurement.
  */
 
 #include "compat_utils.h"
@@ -57,10 +54,8 @@
 
 #define DELAY_MS (800)
 
-/*
- * The write must not go out immediately and must not be later than the delay plus the
- * tickler scan interval and one network round trip to the simulator.
- */
+/* The write must not go out immediately, nor later than the delay plus the tickler scan
+ * interval and one network round trip. */
 #define MIN_DELAY_MS (DELAY_MS / 2)
 #define MAX_DELAY_MS (DELAY_MS * 3)
 

@@ -75,7 +75,7 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
  * tickler thread/condvar. Allocated with rc_alloc() so its lifetime can be shared
  * safely between "the library is running" (current_instance holds the genesis
  * reference) and "a tag that outlives shutdown still needs it"
- * (tag->instance holds one per tag). See docs/library_lifecycle_design.md. */
+ * (tag->instance holds one per tag). */
 struct lib_instance_t {
     hashtable_p tags;
     mutex_p tag_lookup_mutex;
@@ -253,18 +253,10 @@ void lib_instance_publish(void) {
     atomic_set_bool(&lib_active, true);
 
     /*
-     * The tickler thread is started last, only now that the instance is published
-     * and every protocol module has already initialized successfully (this is
-     * called from initialize_modules(), after ab_init()/mb_init()/omron_init()).
-     *
-     * It must not start any earlier: tag_tickler_func()'s "keep running" condition
-     * is "there are tags, or the library is RUNNING" (see docs/library_lifecycle_
-     * design.md section 10). At the moment the instance is first built there are no
-     * tags yet, and library_state does not reach RUNNING until after this function
-     * returns -- so a tickler thread started before this point would see neither
-     * condition hold and exit on its very first check, every single startup. This
-     * is the same ordering mistake fixed once already for lib_active (see the
-     * comment history on that flag); starting the thread last avoids repeating it.
+     * Start the tickler last.  Its "keep running" condition is "there are tags, or the
+     * library is RUNNING".  There are no tags yet here, and library_state does not reach
+     * RUNNING until this function returns, so a thread started earlier exits on its first
+     * check.
      */
     if(thread_create(&inst->tag_tickler_thread, tag_tickler_func, 32 * 1024, inst) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag tickler thread! Automatic tag operations will not run.");
@@ -2583,10 +2575,6 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
         const attr_def_t *def = attr_find(tag, attrib_name);
 
         if(!def) {
-            /*
-             * Until every protocol has an attribute table, a protocol attribute is invisible
-             * here.  Those still report their length through their own integer attribute.
-             */
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not known to the library!", attrib_name);
             rc = PLCTAG_ERR_UNSUPPORTED;
         } else if(def->type != ATTR_TYPE_INT) {
