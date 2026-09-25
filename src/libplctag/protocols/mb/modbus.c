@@ -335,7 +335,6 @@ static int mb_connection_tag_abort(plc_tag_p tag);
 static int mb_connection_tag_status(plc_tag_p tag);
 static int mb_connection_tag_tickler(plc_tag_p tag);
 static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result);
-static const attr_def_t mb_connection_tag_attribs[];
 static void mb_connection_tag_destructor(void *ptr);
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
@@ -389,21 +388,9 @@ static int mb_wake_plc(plc_tag_p p_tag);
 
 /* data accessors */
 static uint16_t next_seq_id(uint16_t current);
-static const attr_def_t mb_attribs[];
+static struct tag_vtable_t modbus_vtable;
+static struct tag_vtable_t mb_connection_tag_vtable;
 
-struct tag_vtable_t modbus_vtable = {
-    .abort = mb_abort,
-    .read = mb_read_start,
-    .status = mb_tag_status,
-    .tickler = mb_tickler,
-    .write = mb_write_start,
-    .wake_plc = mb_wake_plc,
-    .activate = mb_activate,
-    .tag_data_written = mb_tag_data_written,
-
-    /* data accessors */
-    .attribs = mb_attribs,
-};
 
 
 /****** main entry point *******/
@@ -1706,8 +1693,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
              * while we were outside the mutex.
              */
             if(atomic_get_bool(&plc->flags.response_ready) && response_tag->pending_transaction_id != 0) {
-                uint16_t resp_tid =
-                    (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
+                uint16_t resp_tid = (uint16_t)((plc->read_data_len >= 2)
+                                                  ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
+                                                  : 0);
 
                 /* Did the tag get aborted before we cause it here? */
                 if(resp_tid == response_tag->pending_transaction_id) {
@@ -1764,8 +1752,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         mutex_lock(deferred_response_tag->api_mutex);
 
         if(atomic_get_bool(&plc->flags.response_ready) && deferred_response_tag->pending_transaction_id != 0) {
-            uint16_t resp_tid =
-                (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
+            uint16_t resp_tid = (uint16_t)((plc->read_data_len >= 2)
+                                              ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
+                                              : 0);
 
             if(resp_tid == deferred_response_tag->pending_transaction_id) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Deferred: processing response TID %u for tag %" PRId32 ".",
@@ -3835,6 +3824,20 @@ static const attr_def_t mb_attribs[] = {
     {.name = NULL},
 };
 
+static struct tag_vtable_t modbus_vtable = {
+    .abort = mb_abort,
+    .read = mb_read_start,
+    .status = mb_tag_status,
+    .tickler = mb_tickler,
+    .write = mb_write_start,
+    .wake_plc = mb_wake_plc,
+    .activate = mb_activate,
+    .tag_data_written = mb_tag_data_written,
+
+    /* data accessors */
+    .attribs = mb_attribs,
+};
+
 
 /****** Modbus connection tag (@connection) implementation *******/
 
@@ -3863,16 +3866,6 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     }
 }
 
-static struct tag_vtable_t mb_connection_tag_vtable = {
-    .abort = mb_connection_tag_abort,
-    .read = NULL,
-    .status = mb_connection_tag_status,
-    .tickler = mb_connection_tag_tickler,
-    .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
-    .attribs = mb_connection_tag_attribs,
-};
 
 static int mb_connection_tag_abort(plc_tag_p tag) {
     (void)tag;
@@ -3956,6 +3949,17 @@ static const attr_def_t mb_connection_tag_attribs[] = {
      .get_int = mb_connection_get_connection_status},
 
     {.name = NULL},
+};
+
+static struct tag_vtable_t mb_connection_tag_vtable = {
+    .abort = mb_connection_tag_abort,
+    .read = NULL,
+    .status = mb_connection_tag_status,
+    .tickler = mb_connection_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .attribs = mb_connection_tag_attribs,
 };
 
 static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result) {

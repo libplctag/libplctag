@@ -2047,9 +2047,7 @@ int process_requests(ab_session_p session) {
                         (size_t)((uint8_t *)multi_resp - session->data) + offsetof(cip_multi_resp_header, request_offsets);
                     size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
 
-                    /* FIXME - session->data_size is uint32_t, so this test is always false.  Check carefully
-                     * before removing it: the guard that follows depends on data_size being sane. */
-                    if(session->data_size < 0 || offsets_start > (size_t)session->data_size
+                    if(offsets_start > (size_t)session->data_size
                        || offsets_size > (size_t)session->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                                "Response of %d bytes is too short to hold %d packed response offsets!", session->data_size,
@@ -2205,10 +2203,8 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
         size_t offsets_start = (size_t)((uint8_t *)multi - session->data) + offsetof(cip_multi_resp_header, request_offsets);
         size_t offsets_size = (size_t)total_responses * sizeof(uint16_le);
 
-        /* FIXME - session->data_size is uint32_t, so that test is always false.  Check carefully
-         * before removing it: the bounds below depend on data_size being sane. */
-        if(sub_packet < 0 || sub_packet >= (int)total_responses || session->data_size < 0
-           || offsets_start > (size_t)session->data_size || offsets_size > (size_t)session->data_size - offsets_start) {
+        if(sub_packet < 0 || sub_packet >= (int)total_responses || offsets_start > (size_t)session->data_size
+           || offsets_size > (size_t)session->data_size - offsets_start) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id,
                    "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
             return PLCTAG_ERR_OUT_OF_BOUNDS;

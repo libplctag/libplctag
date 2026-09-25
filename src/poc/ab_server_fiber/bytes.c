@@ -1142,18 +1142,18 @@ static size_t read_typed_args(const uint8_t *src, size_t len, int endian, va_lis
             }
             case BYTES_TYPE_U16: {
                 if(off + 2 > len) { return SIZE_MAX; }
-                uint16_t v = (endian == (int)BYTES_LE)
-                    ? (uint16_t)((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
-                    : (uint16_t)(((uint16_t)src[off] << 8) | (uint16_t)src[off+1]);
+                uint16_t v = (uint16_t)((endian == (int)BYTES_LE)
+                    ? ((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
+                    : (((uint16_t)src[off] << 8) | (uint16_t)src[off+1]));
                 *(uint16_t *)ptr = v;
                 off += 2;
                 break;
             }
             case BYTES_TYPE_I16: {
                 if(off + 2 > len) { return SIZE_MAX; }
-                uint16_t v = (endian == (int)BYTES_LE)
-                    ? (uint16_t)((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
-                    : (uint16_t)(((uint16_t)src[off] << 8) | (uint16_t)src[off+1]);
+                uint16_t v = (uint16_t)((endian == (int)BYTES_LE)
+                    ? ((uint16_t)src[off] | ((uint16_t)src[off+1] << 8))
+                    : (((uint16_t)src[off] << 8) | (uint16_t)src[off+1]));
                 *(int16_t *)ptr = (int16_t)v;
                 off += 2;
                 break;

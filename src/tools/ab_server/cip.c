@@ -181,7 +181,7 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
 
             log_info("Unconnected Send: embedded CIP service length %d", embedded_cip_service_length);
 
-            if(slice_len(cip_service_payload) < 2 + embedded_cip_service_length) {
+            if(slice_len(cip_service_payload) < (size_t)(2 + embedded_cip_service_length)) {
                 log_info("CIP service payload too short for embedded service length");
                 return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
             }
