@@ -90,6 +90,24 @@ if(NOT WIN32)
     add_test(NAME unit_test_eip_response_validation COMMAND test_eip_response_validation)
 
     set(EXTRA_UNIT_TESTS test_eip_response_validation)
+
+    # test_eip_forward_open_peer_close: checks that a peer close (FIN) at Forward Open
+    # errors the session instead of livelocking the session handler. Same POSIX-socket
+    # hostile-server pattern, so likewise skipped on Windows.
+    add_executable(test_eip_forward_open_peer_close test_eip_forward_open_peer_close.c)
+
+    target_include_directories(test_eip_forward_open_peer_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+        ${PLATFORM_SHIM_PATH}
+    )
+
+    target_link_libraries(test_eip_forward_open_peer_close PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+    add_test(NAME unit_test_eip_forward_open_peer_close COMMAND test_eip_forward_open_peer_close)
+
+    set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_eip_forward_open_peer_close)
 endif()
 
 # Register the unit tests with CTest

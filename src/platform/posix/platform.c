@@ -1872,6 +1872,8 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
     } else if(rc == 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer (read returned 0) on fd=%d", s->fd);
+        /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
+        return PLCTAG_ERR_READ;
     } else if(rc > 0 && rc < size) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "Partial read on fd=%d: read %d of %d bytes", s->fd, rc, size);
     } else if(rc == size) {
@@ -1945,6 +1947,10 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket read error: rc=%d, errno=%d", rc, errno);
                 return PLCTAG_ERR_READ;
             }
+        } else if(rc == 0) {
+            /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer after select (read returned 0) on fd=%d", s->fd);
+            return PLCTAG_ERR_READ;
         }
     }
 
