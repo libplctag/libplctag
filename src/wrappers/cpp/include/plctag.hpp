@@ -47,7 +47,6 @@ private:
 	bool debug;
 	boost::mutex mutex;
 	std::string plc_protocol = "ab_eip";
-	int share_session = 1; // 1: shares TCP connection with other tags at same IP address; 0: off
 	int str_data_size = 82;
 	std::vector<int32_t> tag;
 };
