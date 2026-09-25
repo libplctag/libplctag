@@ -124,7 +124,7 @@ static ab_session_p create_micro800_session_unsafe(const char *host, const char 
 // connection_group_id);
 
 static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host,
-                                          const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
+                                          const char *path, ab_plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
 // static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
@@ -362,7 +362,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
     // int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
-    plc_type_t plc_type = get_plc_type(attribs);
+    ab_plc_type_t plc_type = get_plc_type(attribs);
     ab_session_p session = AB_SESSION_NULL;
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
@@ -748,7 +748,7 @@ ab_session_p create_micro800_session_unsafe(const char *host, const char *path, 
 
 
 ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
-                                   plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
+                                   ab_plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
     static volatile uint32_t connection_id = 0;
 
     int rc = PLCTAG_STATUS_OK;

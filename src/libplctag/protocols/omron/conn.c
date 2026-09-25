@@ -79,7 +79,7 @@ static omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *
                                                   int connection_group_id);
 
 static omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
-                                       plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
+                                       omron_plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
 // static int get_plc_type(attr attribs);
 static int add_conn_unsafe(omron_conn_p n);
 static int remove_conn_unsafe(omron_conn_p n);
@@ -306,7 +306,7 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
     const char *conn_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
     // int conn_gw_port = attr_get_int(attribs, "gateway_port", OMRON_EIP_DEFAULT_PORT);
-    //  plc_type_t plc_type = get_plc_type(attribs);
+    //  omron_plc_type_t plc_type = get_plc_type(attribs);
     omron_conn_p conn = OMRON_CONN_NULL;
     int new_conn = 0;
     int shared_conn = attr_get_int(attribs, "share_conn", 1); /* share the conn by default. */
@@ -524,7 +524,7 @@ omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *path, i
 
 
 omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
-                                plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
+                                omron_plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
     static volatile uint32_t connection_id = 0;
 
     int rc = PLCTAG_STATUS_OK;

@@ -209,7 +209,7 @@ typedef enum {
     OMRON_PLC_NONE = 0,
     OMRON_PLC_OMRON_NJNX = 7,
     OMRON_PLC_TYPE_LAST,
-} plc_type_t;
+} omron_plc_type_t;
 
 
 /*********************************************************************

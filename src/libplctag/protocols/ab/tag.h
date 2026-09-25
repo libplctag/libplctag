@@ -31,19 +31,18 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLCTAG_AB_TAG_H__
-#    define __PLCTAG_AB_TAG_H__ 1
+#pragma once
 
 /* do these first */
-#    define MAX_TAG_NAME (260)
-#    define MAX_TAG_TYPE_INFO (64)
+#define MAX_TAG_NAME (260)
+#define MAX_TAG_TYPE_INFO (64)
 
 /* they are used in some of these includes */
-#    include <libplctag/lib/libplctag.h>
-#    include <libplctag/lib/tag.h>
-#    include <libplctag/protocols/ab/ab_common.h>
-#    include <libplctag/protocols/ab/pccc.h>
-#    include <libplctag/protocols/ab/session.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/pccc.h>
+#include <libplctag/protocols/ab/session.h>
 
 typedef enum {
     AB_TYPE_BOOL,
@@ -63,7 +62,7 @@ typedef enum {
     AB_TYPE_TAG_UDT,     /* as above, but for UDTs. */
     AB_TYPE_TAG_RAW,     /* raw CIP tag */
     AB_TYPE_TAG_IDENTITY /* CIP Identity Object data */
-} elem_type_t;
+} ab_elem_type_t;
 
 
 struct ab_tag_t {
@@ -71,7 +70,7 @@ struct ab_tag_t {
     TAG_BASE_STRUCT;
 
     /* how do we talk to this device? */
-    plc_type_t plc_type;
+    ab_plc_type_t plc_type;
 
     /* pointers back to session */
     ab_session_p session;
@@ -96,7 +95,7 @@ struct ab_tag_t {
 
     /* number of elements and size of each in the tag. */
     pccc_file_t file_type;
-    elem_type_t elem_type;
+    ab_elem_type_t elem_type;
 
     int elem_count;
     int elem_size;
@@ -138,6 +137,3 @@ struct ab_tag_t {
     int write_in_progress;
     /*int connect_in_progress;*/
 };
-
-
-#endif

@@ -95,7 +95,7 @@ extern const attr_def_t ab_attribs[];
 
 
 // int ab_tag_destroy(ab_tag_p p_tag);
-extern plc_type_t get_plc_type(attr attribs);
+extern ab_plc_type_t get_plc_type(attr attribs);
 extern int check_cpu(ab_tag_p tag, attr attribs);
 extern int check_tag_name(ab_tag_p tag, const char *name);
 extern int check_mutex(int debug);

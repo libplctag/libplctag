@@ -31,29 +31,28 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLCTAG_AB_SESSION_H__
-#    define __PLCTAG_AB_SESSION_H__ 1
+#pragma once
 
-#    include <stdbool.h>
+#include <stdbool.h>
 
-#    include <libplctag/protocols/ab/ab_common.h>
-#    include <libplctag/protocols/ab/defs.h>
-#    include <utils/atomic_utils.h>
-#    include <utils/rc.h>
-#    include <utils/vector.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/defs.h>
+#include <utils/atomic_utils.h>
+#include <utils/rc.h>
+#include <utils/vector.h>
 
 /* #define MAX_SESSION_HOST    (128) */
 
-#    define SESSION_DEFAULT_TIMEOUT (2000)
-#    define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
+#define SESSION_DEFAULT_TIMEOUT (2000)
+#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
 
-#    define MAX_PACKET_SIZE_EX (44 + 4002)
+#define MAX_PACKET_SIZE_EX (44 + 4002)
 
-#    define SESSION_MIN_REQUESTS (10)
-#    define SESSION_INC_REQUESTS (10)
+#define SESSION_MIN_REQUESTS (10)
+#define SESSION_INC_REQUESTS (10)
 
-#    define MAX_CONN_PATH (260) /* 256 plus padding. */
-#    define MAX_IP_ADDR_SEG_LEN (16)
+#define MAX_CONN_PATH (260) /* 256 plus padding. */
+#define MAX_IP_ADDR_SEG_LEN (16)
 
 /*
  * Longest gateway string we will copy into a session, NUL included.
@@ -64,10 +63,10 @@
  * terminating zero), so 253 + ":65535" + NUL is 260.  Rounded up to keep the following
  * fields aligned.
  */
-#    define MAX_SESSION_HOST_LEN (264)
+#define MAX_SESSION_HOST_LEN (264)
 
-#    define SESSION_CONN_STATUS_RING_SIZE (64)
-#    define SESSION_CONN_STATUS_RING_SIZE_MASK (SESSION_CONN_STATUS_RING_SIZE - 1)
+#define SESSION_CONN_STATUS_RING_SIZE (64)
+#define SESSION_CONN_STATUS_RING_SIZE_MASK (SESSION_CONN_STATUS_RING_SIZE - 1)
 
 
 typedef struct session_conn_status_entry_s {
@@ -100,7 +99,7 @@ struct ab_session_t {
     uint16_t conn_seq_num;
     uint16_t conn_serial_number;
 
-    plc_type_t plc_type;
+    ab_plc_type_t plc_type;
 
     uint8_t *conn_path;
     uint8_t conn_path_size;
@@ -197,5 +196,3 @@ extern int session_get_max_payload(ab_session_p session);
 extern int session_get_available_cip_payload_space(ab_session_p session);
 extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
-
-#endif

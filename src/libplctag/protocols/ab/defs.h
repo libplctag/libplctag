@@ -222,7 +222,7 @@ typedef enum {
     AB_PLC_OMRON_NJNX,
     AB_PLC_GENERIC, /* Generic CIP device access (no PLC-specific protocol) */
     AB_PLC_TYPE_LAST,
-} plc_type_t;
+} ab_plc_type_t;
 
 
 /*********************************************************************

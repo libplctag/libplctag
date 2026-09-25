@@ -223,8 +223,13 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: {
+            /*
+             * Only a real ab_tag_t may be cast to ab_tag_p here.  TAG_PROTOCOL_OMRON is
+             * routed to omron_tag_create() by the tag constructor lookup, and an Omron PLC
+             * type is short-circuited at the top of this function, so an omron_tag_t never
+             * reaches this switch.  It falls to the default arm if that ever changes.
+             */
+            case TAG_PROTOCOL_AB: {
                 ab_tag_p src = (ab_tag_p)src_tag;
                 tag->plc_type = src->plc_type;
                 break;
@@ -314,8 +319,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      */
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: {
+            /* see the note on the plc_type switch above. */
+            case TAG_PROTOCOL_AB: {
                 ab_tag_p src = (ab_tag_p)src_tag;
                 tag->session = rc_inc(src->session);
                 break;
@@ -1142,8 +1147,8 @@ static int32_t ab_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int
 }
 
 
-/* The PLC type as the tag string spells it, so plc_type_t stays private. */
-static const char *ab_plc_type_name(plc_type_t plc_type) {
+/* The PLC type as the tag string spells it, so ab_plc_type_t stays private. */
+static const char *ab_plc_type_name(ab_plc_type_t plc_type) {
     switch(plc_type) {
         case AB_PLC_PLC5: return "plc5";
         case AB_PLC_SLC: return "slc500";
@@ -1337,7 +1342,7 @@ const attr_def_t ab_attribs[] = {
 };
 
 
-plc_type_t get_plc_type(attr attribs) {
+ab_plc_type_t get_plc_type(attr attribs) {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
     if(!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
@@ -1377,7 +1382,7 @@ plc_type_t get_plc_type(attr attribs) {
 
 
 int check_cpu(ab_tag_p tag, attr attribs) {
-    plc_type_t result = get_plc_type(attribs);
+    ab_plc_type_t result = get_plc_type(attribs);
 
     if(result != AB_PLC_NONE) {
         tag->plc_type = result;

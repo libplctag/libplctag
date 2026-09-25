@@ -82,7 +82,7 @@ volatile int omron_protocol_terminating = 0;
 
 
 /* forward declarations*/
-static plc_type_t get_plc_type(attr attribs);
+static omron_plc_type_t get_plc_type(attr attribs);
 static int get_tag_data_type(omron_tag_p tag, attr attribs);
 static int check_cpu(omron_tag_p tag, attr attribs);
 static int check_tag_name(omron_tag_p tag, const char *name);
@@ -856,8 +856,8 @@ static int32_t omron_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, 
 }
 
 
-/* The PLC type as the tag string spells it, so plc_type_t stays private. */
-static const char *omron_plc_type_name(plc_type_t plc_type) {
+/* The PLC type as the tag string spells it, so omron_plc_type_t stays private. */
+static const char *omron_plc_type_name(omron_plc_type_t plc_type) {
     switch(plc_type) {
         case OMRON_PLC_OMRON_NJNX: return "omron-njnx";
         default: return NULL;
@@ -1044,7 +1044,7 @@ const attr_def_t omron_attribs[] = {
 };
 
 
-static plc_type_t get_plc_type(attr attribs) {
+static omron_plc_type_t get_plc_type(attr attribs) {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
     if(!str_cmp_i(cpu_type, "omron-njnx") || !str_cmp_i(cpu_type, "omron-nj") || !str_cmp_i(cpu_type, "omron-nx")
@@ -1060,7 +1060,7 @@ static plc_type_t get_plc_type(attr attribs) {
 
 
 int check_cpu(omron_tag_p tag, attr attribs) {
-    plc_type_t result = get_plc_type(attribs);
+    omron_plc_type_t result = get_plc_type(attribs);
 
     if(result == OMRON_PLC_OMRON_NJNX) {
         tag->plc_type = result;
