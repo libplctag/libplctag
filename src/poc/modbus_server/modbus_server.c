@@ -339,7 +339,7 @@ static util_err_t modbus_frame_check(buf_t *buf, void *context) {
     }
 
     /* Total required size is MBAP header + length field - 1 for the unit byte */
-    if(buf_read_size(buf) < (MBAP_HEADER_SIZE + length - 1)) {
+    if(buf_read_size(buf) < (size_t)(MBAP_HEADER_SIZE + length - 1)) {
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Not enough data for complete Modbus frame");
         return UTIL_EAGAIN;
     }

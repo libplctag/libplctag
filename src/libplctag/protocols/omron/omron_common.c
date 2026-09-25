@@ -111,9 +111,7 @@ static struct tag_vtable_t default_vtable = {
     .tag_data_written = NULL,
 
     /* attribute accessors */
-    .get_int_attrib = omron_get_int_attrib,
-    .set_int_attrib = omron_set_int_attrib,
-    .get_byte_array_attrib = omron_get_byte_array_attrib,
+    .attribs = omron_attribs,
 };
 
 
@@ -744,129 +742,306 @@ void omron_tag_destroy(omron_tag_p tag) {
 }
 
 
-int omron_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
-    int res = default_value;
+/* Attribute accessors for the table below.  An accessor returns a status, or for a byte
+ * array the number of bytes copied, and never touches tag->status -- the core records it. */
+
+static int32_t omron_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
     omron_tag_p tag = (omron_tag_p)raw_tag;
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_SPEW, tag->tag_id, "Starting.");
+    *result = (int32_t)tag->elem_size;
 
-    /* assume we have a match. */
-    tag->status = PLCTAG_STATUS_OK;
-
-    /* match the attribute. */
-    if(str_cmp_i(attrib_name, "elem_size") == 0) {
-        res = tag->elem_size;
-    } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
-        res = tag->elem_count;
-    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
-        /* read connection status from connection */
-        if(tag->conn) {
-            res = atomic_get_int32(&tag->conn->connection_status);
-        } else {
-            res = PLCTAG_CONN_STATUS_DOWN; /* no connection = not connected */
-        }
-    } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* read connection inactivity timeout from connection */
-        if(tag->conn) {
-            res = atomic_get_int32(&tag->conn->connection_inactivity_timeout_ms);
-        } else {
-            res = CONN_DISCONNECT_TIMEOUT; /* no connection = use default */
-        }
-    } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
-        res = (int)(tag->elem_type);
-    } else if(str_cmp_i(attrib_name, "raw_tag_type_bytes.length") == 0) {
-        res = (int)(tag->encoded_type_info_size);
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    return res;
+    return PLCTAG_STATUS_OK;
 }
 
 
-int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
+static int32_t omron_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
     omron_tag_p tag = (omron_tag_p)raw_tag;
-    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_SPEW, tag->tag_id, "Starting.");
+    *result = (int32_t)tag->elem_count;
 
-    tag->status = PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
+}
 
-    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* Clamp to valid range: 100ms minimum, CONN_DISCONNECT_TIMEOUT (31000ms) maximum */
-        int clamped_value = new_value;
-        int out_of_bounds = 0;
 
-        if(clamped_value < 100) {
-            clamped_value = 100;
-            out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", new_value);
-        } else if(clamped_value > CONN_DISCONNECT_TIMEOUT) {
-            clamped_value = CONN_DISCONNECT_TIMEOUT;
-            out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, CONN_DISCONNECT_TIMEOUT);
-        }
+static int32_t omron_get_elem_type(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
 
-        if(tag->conn) {
-            atomic_set_int32(&tag->conn->connection_inactivity_timeout_ms, clamped_value);
-            if(out_of_bounds) {
-                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            } else {
-                tag->status = PLCTAG_STATUS_OK;
-                rc = PLCTAG_STATUS_OK;
-            }
-        } else {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-                   "Cannot set connection_inactivity_timeout_ms: no connection exists.");
-            tag->status = PLCTAG_ERR_NOT_FOUND;
-            rc = PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported attribute \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        rc = PLCTAG_ERR_UNSUPPORTED;
+    *result = (int32_t)(tag->elem_type);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    /* no connection means the tag is not connected, which is a state and not an error. */
+    *result = (tag->conn ? atomic_get_int32(&tag->conn->connection_status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    /* no connection means the connection that will be created uses the default. */
+    *result =
+        (tag->conn ? atomic_get_int32(&tag->conn->connection_inactivity_timeout_ms) : (int32_t)CONN_DISCONNECT_TIMEOUT);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+    int32_t clamped_value = value;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    /* Clamp to valid range: 100ms minimum, CONN_DISCONNECT_TIMEOUT (31000ms) maximum */
+    if(clamped_value < 100) {
+        clamped_value = 100;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
+    } else if(clamped_value > CONN_DISCONNECT_TIMEOUT) {
+        clamped_value = CONN_DISCONNECT_TIMEOUT;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, CONN_DISCONNECT_TIMEOUT);
     }
+
+    if(!tag->conn) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Cannot set connection_inactivity_timeout_ms: no connection exists.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    atomic_set_int32(&tag->conn->connection_inactivity_timeout_ms, clamped_value);
 
     return rc;
 }
 
-int omron_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
-    int rc = PLCTAG_STATUS_OK;
+
+static int32_t omron_get_raw_tag_type_bytes_size(plc_tag_p raw_tag) {
     omron_tag_p tag = (omron_tag_p)raw_tag;
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_SPEW, tag->tag_id, "Starting.");
+    return (int32_t)(tag->encoded_type_info_size);
+}
 
-    /* assume we have a match. */
-    tag->status = PLCTAG_STATUS_OK;
 
-    /* match the attribute. */
-    if(str_cmp_i(attrib_name, "raw_tag_type_bytes") == 0) {
-        if(tag->encoded_type_info_size > buffer_length) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-                   "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size,
-                   buffer_length);
-            rc = PLCTAG_ERR_TOO_SMALL;
-        } else if(tag->encoded_type_info_size <= buffer_length) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Copying %d bytes of tag type information.",
-                   tag->encoded_type_info_size, buffer_length);
+static int32_t omron_get_raw_tag_type_bytes_length(plc_tag_p raw_tag, int32_t *result) {
+    *result = omron_get_raw_tag_type_bytes_size(raw_tag);
 
-            /* copy the data */
-            mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), tag->encoded_type_info_size);
+    return PLCTAG_STATUS_OK;
+}
 
-            /* return the number of bytes copied */
-            rc = tag->encoded_type_info_size;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
+
+static int32_t omron_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+    int32_t size = (int32_t)(tag->encoded_type_info_size);
+
+    if(size > buffer_length) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", (int)size, (int)buffer_length);
+        return PLCTAG_ERR_TOO_SMALL;
     }
 
-    return rc;
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Copying %d bytes of tag type information.", (int)size);
+
+    mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), (int)size);
+
+    /* the caller gets the number of bytes copied. */
+    return size;
 }
+
+
+/* The PLC type as the tag string spells it, so plc_type_t stays private. */
+static const char *omron_plc_type_name(plc_type_t plc_type) {
+    switch(plc_type) {
+        case OMRON_PLC_OMRON_NJNX: return "omron-njnx";
+        default: return NULL;
+    }
+}
+
+
+static int32_t omron_get_plc(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    return attr_copy_string(omron_plc_type_name(tag->plc_type), buffer, buffer_length);
+}
+
+
+static int32_t omron_get_plc_size(plc_tag_p raw_tag) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    return attr_string_size(omron_plc_type_name(tag->plc_type));
+}
+
+
+static int32_t omron_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    *result = (int32_t)tag->use_connected_msg;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    *result = (int32_t)tag->allow_packing;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_copy_string(tag->conn->host, buffer, buffer_length);
+}
+
+
+static int32_t omron_get_gateway_size(plc_tag_p raw_tag) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_string_size(tag->conn->host);
+}
+
+
+static int32_t omron_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->conn->port;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* The encoded CIP path, not the "18,127.0.0.1" text it was built from. */
+static int32_t omron_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    if((int32_t)tag->conn->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    mem_copy((void *)buffer, (void *)tag->conn->conn_path, (int)tag->conn->conn_path_size);
+
+    return (int32_t)tag->conn->conn_path_size;
+}
+
+
+static int32_t omron_get_path_size(plc_tag_p raw_tag) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return (int32_t)tag->conn->conn_path_size;
+}
+
+
+static int32_t omron_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->conn->only_use_old_forward_open;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+const attr_def_t omron_attribs[] = {
+    {.name = "elem_size",
+     .type = ATTR_TYPE_INT,
+     .description = "The size in bytes of a single element of this tag.",
+     .get_int = omron_get_elem_size},
+
+    {.name = "elem_count",
+     .type = ATTR_TYPE_INT,
+     .description = "The number of elements this tag holds.",
+     .get_int = omron_get_elem_count},
+
+    {.name = "elem_type",
+     .type = ATTR_TYPE_INT,
+     .description = "The PLC's type code for a single element of this tag.",
+     .get_int = omron_get_elem_type},
+
+    {.name = "connection_status",
+     .type = ATTR_TYPE_INT,
+     .description = "The state of the connection this tag uses, as a plc_tag_conn_status_t.",
+     .get_int = omron_get_connection_status},
+
+    {.name = "connection_inactivity_timeout_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "Disconnect the connection after this many milliseconds without traffic.",
+     .get_int = omron_get_connection_inactivity_timeout_ms,
+     .set_int = omron_set_connection_inactivity_timeout_ms},
+
+    {.name = "raw_tag_type_bytes",
+     .type = ATTR_TYPE_BYTES,
+     .description = "The encoded CIP type information for this tag.",
+     .get_bytes = omron_get_raw_tag_type_bytes,
+     .get_bytes_size = omron_get_raw_tag_type_bytes_size},
+
+    /* Deprecated: it predates plc_tag_get_attribute_size().  No new byte array gets a length
+     * attribute of its own. */
+    {.name = "raw_tag_type_bytes.length",
+     .type = ATTR_TYPE_INT,
+     .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
+     .get_int = omron_get_raw_tag_type_bytes_length},
+
+    /* Read-only after creation.  Those on the shared connection report PLCTAG_ERR_NOT_FOUND
+     * until it exists. */
+    {.name = "plc",
+     .type = ATTR_TYPE_STRING,
+     .description = "The PLC family this tag talks to, as a canonical name.",
+     .get_bytes = omron_get_plc,
+     .get_bytes_size = omron_get_plc_size},
+
+    {.name = "use_connected_msg",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag uses CIP connected messaging.",
+     .get_int = omron_get_use_connected_msg},
+
+    {.name = "allow_packing",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag's requests may be packed with others into one CIP request.",
+     .get_int = omron_get_allow_packing},
+
+    {.name = "gateway",
+     .type = ATTR_TYPE_STRING,
+     .description = "The host name or address of the gateway this tag's connection uses.",
+     .get_bytes = omron_get_gateway,
+     .get_bytes_size = omron_get_gateway_size},
+
+    {.name = "gateway_port",
+     .type = ATTR_TYPE_INT,
+     .description = "The TCP port this tag's connection uses.",
+     .get_int = omron_get_gateway_port},
+
+    {.name = "path",
+     .type = ATTR_TYPE_BYTES,
+     .description = "The encoded CIP path from the gateway to the PLC.",
+     .get_bytes = omron_get_path,
+     .get_bytes_size = omron_get_path_size},
+
+    {.name = "conn_only_use_old_forward_open",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag's connection uses the original Forward Open only, never the large one.",
+     .get_int = omron_get_conn_only_use_old_forward_open},
+
+    {.name = NULL},
+};
 
 
 static plc_type_t get_plc_type(attr attribs) {

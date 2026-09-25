@@ -51,7 +51,7 @@ int test_version(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Testing version tag.\n");
 
-    tag = plc_tag_create("make=system&family=library&name=version&debug=4", TAG_CREATE_TIMEOUT);
+    tag = plc_tag_create("protocol=system&name=version&debug=4", TAG_CREATE_TIMEOUT);
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
@@ -85,7 +85,7 @@ int test_debug(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Testing debug tag.\n");
 
-    tag = plc_tag_create("make=system&family=library&name=debug&debug=4", TAG_CREATE_TIMEOUT);
+    tag = plc_tag_create("protocol=system&name=debug&debug=4", TAG_CREATE_TIMEOUT);
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));

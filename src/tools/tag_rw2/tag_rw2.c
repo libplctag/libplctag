@@ -852,19 +852,40 @@ void dump_values(struct run_args *args) {
                 case TYPE_META: {
                     int element_size = plc_tag_get_int_attribute(tag, "elem_size", 0);
                     int element_count = plc_tag_get_int_attribute(tag, "elem_count", 0);
-                    uint8_t tag_type_data[32];
-                    int type_data_size = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &tag_type_data[0],
-                                                                          (int)(unsigned int)sizeof(tag_type_data));
+                    uint8_t *tag_type_data = NULL;
+                    int copied = 0;
+
+                    /* ask how large the value is, allocate that, then fetch it. */
+                    int type_data_size = plc_tag_get_attribute_size(tag, "raw_tag_type_bytes");
 
                     if(type_data_size < 0) {
-                        printf("ERROR: error %s getting tag type information!\n", plc_tag_decode_error(type_data_size));
+                        printf("ERROR: error %s getting the size of the tag type information!\n",
+                               plc_tag_decode_error(type_data_size));
+                        cleanup(args);
+                        exit(1);
+                    }
+
+                    tag_type_data = malloc((size_t)(unsigned int)type_data_size);
+                    if(!tag_type_data) {
+                        printf("ERROR: unable to allocate %d bytes for the tag type information!\n", type_data_size);
+                        cleanup(args);
+                        exit(1);
+                    }
+
+                    copied = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", tag_type_data, type_data_size);
+
+                    if(copied < 0) {
+                        printf("ERROR: error %s getting tag type information!\n", plc_tag_decode_error(copied));
+                        free(tag_type_data);
                         cleanup(args);
                         exit(1);
                     }
 
                     printf("Tag raw type data: ");
-                    for(int i = 0; i < type_data_size; i++) { printf(" 0x%02x", tag_type_data[i]); }
+                    for(int i = 0; i < copied; i++) { printf(" 0x%02x", tag_type_data[i]); }
                     printf("\nTag element size: %d\nTag element count: %d\n", element_size, element_count);
+
+                    free(tag_type_data);
                 }
 
                     /* skip the whole tag. */

@@ -457,7 +457,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "║ Total requests: %d                                              \n", total_requests);
     // NOLINTNEXTLINE
     fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n",
-            (total_requests * 1000.0) / (total_run_time > 0 ? total_run_time : 1));
+            (total_requests * 1000.0) / (double)(total_run_time > 0 ? total_run_time : 1));
     // NOLINTNEXTLINE
     fprintf(stderr, "╠════════════════════════════════════════════════════════════════╣\n");
     // NOLINTNEXTLINE

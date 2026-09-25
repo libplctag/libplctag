@@ -64,3 +64,4 @@ src/tests/log.txt
 external_docs/
 build_perf/*
 build_*/*
+ephemeral_docs/*

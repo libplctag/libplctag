@@ -128,8 +128,7 @@ void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_a
 				   "&cpu=" + cpu +
 				   "&elem_size=" + std::to_string(element_size) +
 				   "&elem_count=" + std::to_string(element_count) +
-				   "&name=" + element_name +
-				   "&share_session=" + std::to_string(share_session);
+				   "&name=" + element_name;
 		if (debug)
 		{
 			tag_path += "&debug=3"; // enables low level stderr output

@@ -68,9 +68,7 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
     .tag_data_written = NULL,
 
     /* attribute accessors */
-    .get_int_attrib = omron_get_int_attrib,
-    .set_int_attrib = omron_set_int_attrib,
-    .get_byte_array_attrib = omron_get_byte_array_attrib,
+    .attribs = omron_attribs,
 };
 
 // tag_byte_order_t omron_tag_listing_byte_order = {

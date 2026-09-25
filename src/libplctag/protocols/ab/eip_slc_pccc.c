@@ -42,9 +42,7 @@ struct tag_vtable_t slc_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request
                                   .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
 
                                   /* data accessors */
-                                  .get_int_attrib = ab_get_int_attrib,
-                                  .set_int_attrib = ab_set_int_attrib,
-                                  .get_byte_array_attrib = ab_get_byte_array_attrib};
+                                  .attribs = ab_attribs};
 
 
 /* default string types used for PLC-5 PLCs. */

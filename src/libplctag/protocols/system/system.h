@@ -31,15 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PROTOCOL_SYSTEM_H__
-#    define __PROTOCOL_SYSTEM_H__ 1
+#pragma once
 
-#    include <utils/attr.h>
-#    include <utils/debug.h>
-#    include <platform.h>
-#    include <libplctag/lib/tag.h>
+#include <stdint.h>
+
+#include <libplctag/lib/tag.h>
+#include <utils/attr.h>
 
 extern plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                    void *userdata, plc_tag_p src_tag);
-
-#endif

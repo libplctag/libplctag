@@ -334,7 +334,7 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
 static int mb_connection_tag_abort(plc_tag_p tag);
 static int mb_connection_tag_status(plc_tag_p tag);
 static int mb_connection_tag_tickler(plc_tag_p tag);
-static int mb_connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result);
 static void mb_connection_tag_destructor(void *ptr);
 static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
@@ -388,24 +388,9 @@ static int mb_wake_plc(plc_tag_p p_tag);
 
 /* data accessors */
 static uint16_t next_seq_id(uint16_t current);
-static int mb_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
-static int mb_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
+static struct tag_vtable_t modbus_vtable;
+static struct tag_vtable_t mb_connection_tag_vtable;
 
-struct tag_vtable_t modbus_vtable = {
-    .abort = mb_abort,
-    .read = mb_read_start,
-    .status = mb_tag_status,
-    .tickler = mb_tickler,
-    .write = mb_write_start,
-    .wake_plc = mb_wake_plc,
-    .activate = mb_activate,
-    .tag_data_written = mb_tag_data_written,
-
-    /* data accessors */
-    .get_int_attrib = mb_get_int_attrib,
-    .set_int_attrib = mb_set_int_attrib,
-    .get_byte_array_attrib = NULL,
-};
 
 
 /****** main entry point *******/
@@ -1708,8 +1693,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
              * while we were outside the mutex.
              */
             if(atomic_get_bool(&plc->flags.response_ready) && response_tag->pending_transaction_id != 0) {
-                uint16_t resp_tid =
-                    (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
+                uint16_t resp_tid = (uint16_t)((plc->read_data_len >= 2)
+                                                  ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
+                                                  : 0);
 
                 /* Did the tag get aborted before we cause it here? */
                 if(resp_tid == response_tag->pending_transaction_id) {
@@ -1766,8 +1752,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         mutex_lock(deferred_response_tag->api_mutex);
 
         if(atomic_get_bool(&plc->flags.response_ready) && deferred_response_tag->pending_transaction_id != 0) {
-            uint16_t resp_tid =
-                (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
+            uint16_t resp_tid = (uint16_t)((plc->read_data_len >= 2)
+                                              ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
+                                              : 0);
 
             if(resp_tid == deferred_response_tag->pending_transaction_id) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Deferred: processing response TID %u for tag %" PRId32 ".",
@@ -3682,89 +3669,174 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
 
 /****** Data Accessor Functions ******/
 
-int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
-    int res = default_value;
+/* Attribute accessors for the table below.  An accessor returns a status and never touches
+ * tag->status -- the core records it. */
+
+static int32_t mb_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, tag->tag_id, "Starting.");
+    /* the element size is held in bits, but the attribute reports bytes. */
+    *result = (int32_t)((tag->elem_size + 7) / 8);
 
-    tag->status = PLCTAG_STATUS_OK;
-
-    /* match the attribute. */
-    if(str_cmp_i(attrib_name, "elem_size") == 0) {
-        res = (tag->elem_size + 7) / 8; /* return size in bytes! */
-    } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
-        res = tag->elem_count;
-    } else if(str_cmp_i(attrib_name, "connection_status") == 0) {
-        /* read connection status from PLC */
-        if(tag->plc) {
-            res = atomic_get_int32(&tag->plc->connection_status);
-        } else {
-            res = PLCTAG_CONN_STATUS_DOWN; /* no PLC = not connected */
-        }
-    } else if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* read connection inactivity timeout from PLC */
-        if(tag->plc) {
-            res = atomic_get_int32(&tag->plc->connection_inactivity_timeout_ms);
-        } else {
-            res = MODBUS_INACTIVITY_TIMEOUT; /* no PLC = use default */
-        }
-    } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Attribute \"%s\" is not supported.", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    return res;
+    return PLCTAG_STATUS_OK;
 }
 
 
-int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
+static int32_t mb_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
-    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, tag->tag_id, "Starting.");
+    *result = (int32_t)tag->elem_count;
 
-    tag->status = PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
+}
 
-    if(str_cmp_i(attrib_name, "connection_inactivity_timeout_ms") == 0) {
-        /* Clamp to valid range: 100ms minimum, MODBUS_INACTIVITY_TIMEOUT (30000ms) maximum */
-        int clamped_value = new_value;
-        int out_of_bounds = 0;
 
-        if(clamped_value < 100) {
-            clamped_value = 100;
-            out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", new_value);
-        } else if(clamped_value > MODBUS_INACTIVITY_TIMEOUT) {
-            clamped_value = MODBUS_INACTIVITY_TIMEOUT;
-            out_of_bounds = 1;
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-                   "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", new_value, MODBUS_INACTIVITY_TIMEOUT);
-        }
+static int32_t mb_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
 
-        if(tag->plc) {
-            atomic_set_int32(&tag->plc->connection_inactivity_timeout_ms, clamped_value);
-            if(out_of_bounds) {
-                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            } else {
-                tag->status = PLCTAG_STATUS_OK;
-                rc = PLCTAG_STATUS_OK;
-            }
-        } else {
-            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
-            tag->status = PLCTAG_ERR_NOT_FOUND;
-            rc = PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Attribute \"%s\" is unsupported!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        rc = PLCTAG_ERR_UNSUPPORTED;
+    /* no PLC means the tag is not connected, which is a state and not an error. */
+    *result = (tag->plc ? atomic_get_int32(&tag->plc->connection_status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t mb_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    /* no PLC means the PLC that will be created uses the default. */
+    *result = (tag->plc ? atomic_get_int32(&tag->plc->connection_inactivity_timeout_ms) : (int32_t)MODBUS_INACTIVITY_TIMEOUT);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+    int32_t clamped_value = value;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    /* Clamp to valid range: 100ms minimum, MODBUS_INACTIVITY_TIMEOUT (30000ms) maximum */
+    if(clamped_value < 100) {
+        clamped_value = 100;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
+               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
+    } else if(clamped_value > MODBUS_INACTIVITY_TIMEOUT) {
+        clamped_value = MODBUS_INACTIVITY_TIMEOUT;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
+               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, MODBUS_INACTIVITY_TIMEOUT);
     }
+
+    if(!tag->plc) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    atomic_set_int32(&tag->plc->connection_inactivity_timeout_ms, clamped_value);
 
     return rc;
 }
+
+
+/* Read-only after creation.  These live on the shared PLC, so they report
+ * PLCTAG_ERR_NOT_FOUND until it exists. */
+static int32_t mb_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_copy_string(tag->plc->server, buffer, buffer_length);
+}
+
+
+static int32_t mb_get_gateway_size(plc_tag_p raw_tag) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_string_size(tag->plc->server);
+}
+
+
+/* Modbus has no CIP path; "path" is the unit id of the server. */
+static int32_t mb_get_path(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->plc->server_id;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t mb_get_max_requests_in_flight(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->plc->max_requests_in_flight;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static const attr_def_t mb_attribs[] = {
+    {.name = "elem_size",
+     .type = ATTR_TYPE_INT,
+     .description = "The size in bytes of a single element of this tag.",
+     .get_int = mb_get_elem_size},
+
+    {.name = "elem_count",
+     .type = ATTR_TYPE_INT,
+     .description = "The number of elements this tag holds.",
+     .get_int = mb_get_elem_count},
+
+    {.name = "connection_status",
+     .type = ATTR_TYPE_INT,
+     .description = "The state of the connection this tag uses, as a plc_tag_conn_status_t.",
+     .get_int = mb_get_connection_status},
+
+    {.name = "connection_inactivity_timeout_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "Disconnect from the PLC after this many milliseconds without traffic.",
+     .get_int = mb_get_connection_inactivity_timeout_ms,
+     .set_int = mb_set_connection_inactivity_timeout_ms},
+
+    {.name = "gateway",
+     .type = ATTR_TYPE_STRING,
+     .description = "The host name or address of the Modbus server this tag uses.",
+     .get_bytes = mb_get_gateway,
+     .get_bytes_size = mb_get_gateway_size},
+
+    {.name = "path",
+     .type = ATTR_TYPE_INT,
+     .description = "The unit id of the Modbus server this tag uses.",
+     .get_int = mb_get_path},
+
+    {.name = "max_requests_in_flight",
+     .type = ATTR_TYPE_INT,
+     .description = "How many requests this tag's PLC will have outstanding at once.",
+     .get_int = mb_get_max_requests_in_flight},
+
+    {.name = NULL},
+};
+
+static struct tag_vtable_t modbus_vtable = {
+    .abort = mb_abort,
+    .read = mb_read_start,
+    .status = mb_tag_status,
+    .tickler = mb_tickler,
+    .write = mb_write_start,
+    .wake_plc = mb_wake_plc,
+    .activate = mb_activate,
+    .tag_data_written = mb_tag_data_written,
+
+    /* data accessors */
+    .attribs = mb_attribs,
+};
 
 
 /****** Modbus connection tag (@connection) implementation *******/
@@ -3794,17 +3866,6 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     }
 }
 
-static struct tag_vtable_t mb_connection_tag_vtable = {
-    .abort = mb_connection_tag_abort,
-    .read = NULL,
-    .status = mb_connection_tag_status,
-    .tickler = mb_connection_tag_tickler,
-    .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
-    .get_int_attrib = mb_connection_get_int_attrib,
-    .set_int_attrib = NULL,
-};
 
 static int mb_connection_tag_abort(plc_tag_p tag) {
     (void)tag;
@@ -3880,10 +3941,33 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
     return PLCTAG_STATUS_OK;
 }
 
-static int mb_connection_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value) {
+/* A Modbus connection tag carries no PLC data, so its only runtime attribute is the link state. */
+static const attr_def_t mb_connection_tag_attribs[] = {
+    {.name = "connection_status",
+     .type = ATTR_TYPE_INT,
+     .description = "The state of the connection this connection tag monitors, as a plc_tag_conn_status_t.",
+     .get_int = mb_connection_get_connection_status},
+
+    {.name = NULL},
+};
+
+static struct tag_vtable_t mb_connection_tag_vtable = {
+    .abort = mb_connection_tag_abort,
+    .read = NULL,
+    .status = mb_connection_tag_status,
+    .tickler = mb_connection_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .attribs = mb_connection_tag_attribs,
+};
+
+static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result) {
     modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
-    if(str_cmp_i(attrib_name, "connection_status") == 0) { return dt->last_conn_state; }
-    return default_value;
+
+    *result = (int32_t)dt->last_conn_state;
+
+    return PLCTAG_STATUS_OK;
 }
 
 static void mb_connection_tag_destructor(void *ptr) {

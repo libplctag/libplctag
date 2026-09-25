@@ -373,6 +373,12 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
+    /* share_session is subsumed by connection_group_id.  Warn only if the tag string actually set it. */
+    if(attr_get_str(attribs, "share_session", NULL)) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+               "The attribute \"share_session\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
+    }
+
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
     if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
@@ -1005,6 +1011,9 @@ int session_open_socket(ab_session_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
+
+    /* record the effective port, default included, so it can be read back as an attribute. */
+    session->port = port;
 
     rc = socket_connect_tcp_start(session->sock, server_port[0], port);
 
@@ -2038,9 +2047,7 @@ int process_requests(ab_session_p session) {
                         (size_t)((uint8_t *)multi_resp - session->data) + offsetof(cip_multi_resp_header, request_offsets);
                     size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
 
-                    /* FIXME - session->data_size is uint32_t, so this test is always false.  Check carefully
-                     * before removing it: the guard that follows depends on data_size being sane. */
-                    if(session->data_size < 0 || offsets_start > (size_t)session->data_size
+                    if(offsets_start > (size_t)session->data_size
                        || offsets_size > (size_t)session->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                                "Response of %d bytes is too short to hold %d packed response offsets!", session->data_size,
@@ -2196,10 +2203,8 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
         size_t offsets_start = (size_t)((uint8_t *)multi - session->data) + offsetof(cip_multi_resp_header, request_offsets);
         size_t offsets_size = (size_t)total_responses * sizeof(uint16_le);
 
-        /* FIXME - session->data_size is uint32_t, so that test is always false.  Check carefully
-         * before removing it: the bounds below depend on data_size being sane. */
-        if(sub_packet < 0 || sub_packet >= (int)total_responses || session->data_size < 0
-           || offsets_start > (size_t)session->data_size || offsets_size > (size_t)session->data_size - offsets_start) {
+        if(sub_packet < 0 || sub_packet >= (int)total_responses || offsets_start > (size_t)session->data_size
+           || offsets_size > (size_t)session->data_size - offsets_start) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id,
                    "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
             return PLCTAG_ERR_OUT_OF_BOUNDS;
