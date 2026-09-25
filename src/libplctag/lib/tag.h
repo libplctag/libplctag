@@ -78,7 +78,16 @@ typedef int (*tag_vtable_func)(plc_tag_p tag);
 
 typedef enum {
     ATTR_TYPE_INT,
-    ATTR_TYPE_BYTES
+    ATTR_TYPE_BYTES,
+
+    /*
+     * A byte array whose contents are NUL-terminated text.  It is carried by the same
+     * accessors and fetched through the same public functions as ATTR_TYPE_BYTES; the
+     * reported size includes the terminator, so a caller can allocate that many bytes and
+     * get a usable C string back.  The distinct type exists so that the value's meaning is
+     * discoverable rather than guessed from its contents.
+     */
+    ATTR_TYPE_STRING
 } attr_val_type_t;
 
 typedef struct attr_def_t attr_def_t;
@@ -110,6 +119,16 @@ extern const attr_def_t *attr_find(plc_tag_p tag, const char *name);
 /* Resolve a name against the library-scope table, used when the tag id is zero.  Those
  * accessors take a NULL tag. */
 extern const attr_def_t *attr_find_lib(const char *name);
+
+/* Helpers for an ATTR_TYPE_STRING accessor.  attr_copy_string() copies str and its
+ * terminator into buffer and returns the number of bytes copied, or PLCTAG_ERR_TOO_SMALL.
+ * attr_string_size() returns what plc_tag_get_attribute_size() should report for str. */
+extern int32_t attr_copy_string(const char *str, uint8_t *buffer, int32_t buffer_length);
+extern int32_t attr_string_size(const char *str);
+
+/* Render a byte order array, e.g. {0,1,2,3}, as the "0,1,2,3" text the tag string uses. */
+extern int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length);
+extern int32_t attr_byte_order_size(const int *order, size_t order_len);
 
 
 /* we'll need to set these per protocol type. */

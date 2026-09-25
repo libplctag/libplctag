@@ -96,6 +96,44 @@ static void check_attr_size(int32_t tag, const char *attrib, int32_t expected) {
 }
 
 
+/* Fetch an ATTR_TYPE_STRING attribute the way an application would: size, allocate, fetch. */
+static void check_string(int32_t tag, const char *attrib, const char *expected) {
+    int32_t size = plc_tag_get_attribute_size(tag, attrib);
+    char *buffer = NULL;
+    int32_t copied = 0;
+
+    if(size < 0) {
+        printf("\tFAIL: size of \"%s\" returned %s.\n", attrib, plc_tag_decode_error(size));
+        failures++;
+        return;
+    }
+
+    buffer = calloc(1, (size_t)(unsigned int)size);
+    if(!buffer) {
+        printf("\tFAIL: unable to allocate %d bytes for \"%s\".\n", (int)size, attrib);
+        failures++;
+        return;
+    }
+
+    copied = plc_tag_get_byte_array_attribute(tag, attrib, (uint8_t *)buffer, size);
+
+    if(copied != size) {
+        printf("\tFAIL: \"%s\" copied %d bytes, expected %d.\n", attrib, (int)copied, (int)size);
+        failures++;
+    } else if(buffer[size - 1] != (char)0) {
+        printf("\tFAIL: \"%s\" is not NUL terminated within its reported size.\n", attrib);
+        failures++;
+    } else if(expected && strcmp(buffer, expected) != 0) {
+        printf("\tFAIL: \"%s\" = \"%s\", expected \"%s\".\n", attrib, buffer, expected);
+        failures++;
+    } else {
+        printf("\tOK: \"%s\" = \"%s\" in %d bytes.\n", attrib, buffer, (int)size);
+    }
+
+    free(buffer);
+}
+
+
 static int32_t open_tag(const char *tag_string) {
     int32_t tag = plc_tag_create(tag_string, DATA_TIMEOUT);
 
@@ -227,6 +265,62 @@ int main(void) {
     /* an unknown name has no size, and a bad argument is rejected before the lookup. */
     check_attr_size(tag, "boodleflokker", PLCTAG_ERR_UNSUPPORTED);
     check_attr_size(tag, "", PLCTAG_ERR_BAD_PARAM);
+
+    printf("Creation-time values are readable and read-only.\n");
+
+    /* the layout the tag was created with, held on the core byte order struct. */
+    check_get(tag, "str_is_counted", 1);
+    check_get(tag, "str_is_zero_terminated", 0);
+    check_get(tag, "str_count_word_bytes", 4);
+    check_set(tag, "str_is_counted", 0, PLCTAG_ERR_UNSUPPORTED);
+
+    /* a byte order comes back as the text a tag string would carry. */
+    check_string(tag, "int32_byte_order", "0,1,2,3");
+    check_string(tag, "int16_byte_order", "0,1");
+    check_attr_size(tag, "int32_byte_order", 8);
+
+    /* the PLC family is a canonical name, not the internal enum value. */
+    check_string(tag, "plc", "ControlLogix");
+
+    /* values that live on the session the tag shares. */
+    check_string(tag, "gateway", "127.0.0.1");
+    check_get(tag, "gateway_port", 44818);
+    check_get(tag, "use_connected_msg", 1);
+    check_set(tag, "gateway_port", 1, PLCTAG_ERR_UNSUPPORTED);
+
+    /* the path is encoded bytes, so it is not a string and has no terminator. */
+    {
+        int32_t path_size = plc_tag_get_attribute_size(tag, "path");
+        uint8_t path_buffer[64];
+
+        if(path_size <= 0 || path_size > (int32_t)sizeof(path_buffer)) {
+            printf("\tFAIL: size of \"path\" returned %d.\n", (int)path_size);
+            failures++;
+        } else if(plc_tag_get_byte_array_attribute(tag, "path", &path_buffer[0], path_size) != path_size) {
+            printf("\tFAIL: fetching \"path\" did not copy the %d bytes it reported.\n", (int)path_size);
+            failures++;
+        } else {
+            printf("\tOK: \"path\" is %d encoded bytes.\n", (int)path_size);
+        }
+    }
+
+    check_get(tag, "path", INT_MIN);
+
+    printf("A byte array and a string are not integers, and the reverse.\n");
+
+    check_get(tag, "plc", INT_MIN);
+    check_attr_size(tag, "elem_count", (int32_t)sizeof(int32_t));
+
+    {
+        uint8_t scratch[8];
+
+        if(plc_tag_get_byte_array_attribute(tag, "elem_count", &scratch[0], (int)sizeof(scratch)) != PLCTAG_ERR_UNSUPPORTED) {
+            printf("\tFAIL: reading an integer attribute as a byte array did not fail.\n");
+            failures++;
+        } else {
+            printf("\tOK: reading an integer attribute as a byte array returns PLCTAG_ERR_UNSUPPORTED.\n");
+        }
+    }
 
     printf("An unknown attribute is reported, not silently defaulted.\n");
 

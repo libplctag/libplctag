@@ -317,6 +317,12 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Starting");
 
+    /* share_conn is subsumed by connection_group_id.  Warn only if the tag string actually set it. */
+    if(attr_get_str(attribs, "share_conn", NULL)) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
+               "The attribute \"share_conn\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
+    }
+
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_DISCONNECT_TIMEOUT);
     if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_DISCONNECT_TIMEOUT) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
@@ -785,6 +791,9 @@ int conn_open_socket(omron_conn_p conn) {
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
+
+    /* record the effective port, default included, so it can be read back as an attribute. */
+    conn->port = port;
 
     rc = socket_connect_tcp_start(conn->sock, server_port[0], port);
 

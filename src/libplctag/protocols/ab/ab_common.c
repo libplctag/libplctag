@@ -1145,6 +1145,121 @@ static int32_t ab_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int
 }
 
 
+/*
+ * The PLC type as a canonical string rather than the internal plc_type_t.  The enum is
+ * private configuration that changes as PLC support is added; a string keeps it that way and
+ * can be pasted straight back into a tag string.
+ */
+static const char *ab_plc_type_name(plc_type_t plc_type) {
+    switch(plc_type) {
+        case AB_PLC_PLC5: return "plc5";
+        case AB_PLC_SLC: return "slc500";
+        case AB_PLC_MLGX: return "micrologix";
+        case AB_PLC_LGX: return "ControlLogix";
+        case AB_PLC_LGX_PCCC: return "logix-pccc";
+        case AB_PLC_MICRO800: return "micro800";
+        case AB_PLC_OMRON_NJNX: return "omron-njnx";
+        case AB_PLC_GENERIC: return "generic";
+        default: return NULL;
+    }
+}
+
+
+static int32_t ab_get_plc(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    return attr_copy_string(ab_plc_type_name(tag->plc_type), buffer, buffer_length);
+}
+
+
+static int32_t ab_get_plc_size(plc_tag_p raw_tag) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    return attr_string_size(ab_plc_type_name(tag->plc_type));
+}
+
+
+static int32_t ab_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    *result = (int32_t)tag->use_connected_msg;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t ab_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    *result = (int32_t)tag->allow_packing;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t ab_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_copy_string(tag->session->host, buffer, buffer_length);
+}
+
+
+static int32_t ab_get_gateway_size(plc_tag_p raw_tag) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_string_size(tag->session->host);
+}
+
+
+static int32_t ab_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->session->port;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* The encoded CIP path, not the "1,0" text it was built from. */
+static int32_t ab_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    if((int32_t)tag->session->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    mem_copy((void *)buffer, (void *)tag->session->conn_path, (int)tag->session->conn_path_size);
+
+    return (int32_t)tag->session->conn_path_size;
+}
+
+
+static int32_t ab_get_path_size(plc_tag_p raw_tag) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return (int32_t)tag->session->conn_path_size;
+}
+
+
+static int32_t ab_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->session->only_use_old_forward_open;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 const attr_def_t ab_attribs[] = {
     {.name = "elem_size",
      .type = ATTR_TYPE_INT,
@@ -1186,6 +1301,48 @@ const attr_def_t ab_attribs[] = {
      .type = ATTR_TYPE_INT,
      .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
      .get_int = ab_get_raw_tag_type_bytes_length},
+
+    /*
+     * Values set when the tag was created and read-only afterwards.  Some live on the
+     * session the tag shares, so they report PLCTAG_ERR_NOT_FOUND before one exists.
+     */
+    {.name = "plc",
+     .type = ATTR_TYPE_STRING,
+     .description = "The PLC family this tag talks to, as a canonical name.",
+     .get_bytes = ab_get_plc,
+     .get_bytes_size = ab_get_plc_size},
+
+    {.name = "use_connected_msg",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag uses CIP connected messaging.",
+     .get_int = ab_get_use_connected_msg},
+
+    {.name = "allow_packing",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag's requests may be packed with others into one CIP request.",
+     .get_int = ab_get_allow_packing},
+
+    {.name = "gateway",
+     .type = ATTR_TYPE_STRING,
+     .description = "The host name or address of the gateway this tag's session connects to.",
+     .get_bytes = ab_get_gateway,
+     .get_bytes_size = ab_get_gateway_size},
+
+    {.name = "gateway_port",
+     .type = ATTR_TYPE_INT,
+     .description = "The TCP port this tag's session connects to.",
+     .get_int = ab_get_gateway_port},
+
+    {.name = "path",
+     .type = ATTR_TYPE_BYTES,
+     .description = "The encoded CIP path from the gateway to the PLC.",
+     .get_bytes = ab_get_path,
+     .get_bytes_size = ab_get_path_size},
+
+    {.name = "conn_only_use_old_forward_open",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag's session uses the original Forward Open only, never the large one.",
+     .get_int = ab_get_conn_only_use_old_forward_open},
 
     {.name = NULL},
 };

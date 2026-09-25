@@ -373,6 +373,12 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
 
+    /* share_session is subsumed by connection_group_id.  Warn only if the tag string actually set it. */
+    if(attr_get_str(attribs, "share_session", NULL)) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
+               "The attribute \"share_session\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
+    }
+
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
     if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
@@ -1005,6 +1011,9 @@ int session_open_socket(ab_session_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Using default port %d.", port);
     }
+
+    /* record the effective port, default included, so it can be read back as an attribute. */
+    session->port = port;
 
     rc = socket_connect_tcp_start(session->sock, server_port[0], port);
 

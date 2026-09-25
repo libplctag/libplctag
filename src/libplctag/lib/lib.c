@@ -2504,7 +2504,9 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
     if(id == 0) {
         const attr_def_t *def = attr_find_lib(attrib_name);
 
-        if(def && def->type == ATTR_TYPE_BYTES && def->get_bytes) { return (int)def->get_bytes(NULL, buffer, (int32_t)buffer_length); }
+        if(def && (def->type == ATTR_TYPE_BYTES || def->type == ATTR_TYPE_STRING) && def->get_bytes) {
+            return (int)def->get_bytes(NULL, buffer, (int32_t)buffer_length);
+        }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
 
@@ -2522,7 +2524,7 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
         const attr_def_t *def = attr_find(tag, attrib_name);
 
         if(def) {
-            if(def->type != ATTR_TYPE_BYTES) {
+            if(def->type != ATTR_TYPE_BYTES && def->type != ATTR_TYPE_STRING) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold a byte array value!", attrib_name);
                 rc = PLCTAG_ERR_UNSUPPORTED;
             } else if(def->get_bytes) {
@@ -2565,7 +2567,7 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
             return PLCTAG_ERR_UNSUPPORTED;
         }
 
-        if(def->type != ATTR_TYPE_BYTES) { return (int)sizeof(int32_t); }
+        if(def->type == ATTR_TYPE_INT) { return (int)sizeof(int32_t); }
 
         return (def->get_bytes_size ? (int)def->get_bytes_size(NULL) : PLCTAG_ERR_UNSUPPORTED);
     }
@@ -2587,7 +2589,7 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
              */
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not known to the library!", attrib_name);
             rc = PLCTAG_ERR_UNSUPPORTED;
-        } else if(def->type == ATTR_TYPE_BYTES) {
+        } else if(def->type != ATTR_TYPE_INT) {
             if(def->get_bytes_size) {
                 rc = (int)def->get_bytes_size(tag);
             } else {

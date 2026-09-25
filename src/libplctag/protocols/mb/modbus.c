@@ -3754,6 +3754,51 @@ static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_
 }
 
 
+/*
+ * Values set when the tag was created and read-only afterwards.  These live on the PLC the
+ * tag shares, so they report PLCTAG_ERR_NOT_FOUND before one exists.
+ */
+static int32_t mb_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_copy_string(tag->plc->server, buffer, buffer_length);
+}
+
+
+static int32_t mb_get_gateway_size(plc_tag_p raw_tag) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_string_size(tag->plc->server);
+}
+
+
+/* Modbus has no CIP path; "path" is the unit id of the server. */
+static int32_t mb_get_path(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->plc->server_id;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t mb_get_max_requests_in_flight(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    if(!tag->plc) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->plc->max_requests_in_flight;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 static const attr_def_t mb_attribs[] = {
     {.name = "elem_size",
      .type = ATTR_TYPE_INT,
@@ -3775,6 +3820,22 @@ static const attr_def_t mb_attribs[] = {
      .description = "Disconnect from the PLC after this many milliseconds without traffic.",
      .get_int = mb_get_connection_inactivity_timeout_ms,
      .set_int = mb_set_connection_inactivity_timeout_ms},
+
+    {.name = "gateway",
+     .type = ATTR_TYPE_STRING,
+     .description = "The host name or address of the Modbus server this tag uses.",
+     .get_bytes = mb_get_gateway,
+     .get_bytes_size = mb_get_gateway_size},
+
+    {.name = "path",
+     .type = ATTR_TYPE_INT,
+     .description = "The unit id of the Modbus server this tag uses.",
+     .get_int = mb_get_path},
+
+    {.name = "max_requests_in_flight",
+     .type = ATTR_TYPE_INT,
+     .description = "How many requests this tag's PLC will have outstanding at once.",
+     .get_int = mb_get_max_requests_in_flight},
 
     {.name = NULL},
 };

@@ -69,6 +69,27 @@ static int32_t lib_set_debug(plc_tag_p tag, int32_t value);
 static int32_t lib_get_debug_level(plc_tag_p tag, int32_t *result);
 static int32_t lib_set_debug_level(plc_tag_p tag, int32_t value);
 
+static int32_t core_get_str_is_counted(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_is_fixed_length(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_is_zero_terminated(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_is_byte_swapped(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_count_word_bytes(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_max_capacity(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_total_length(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result);
+static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result);
+
+static int32_t core_get_int16_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
+static int32_t core_get_int16_byte_order_size(plc_tag_p tag);
+static int32_t core_get_int32_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
+static int32_t core_get_int32_byte_order_size(plc_tag_p tag);
+static int32_t core_get_int64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
+static int32_t core_get_int64_byte_order_size(plc_tag_p tag);
+static int32_t core_get_float32_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
+static int32_t core_get_float32_byte_order_size(plc_tag_p tag);
+static int32_t core_get_float64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
+static int32_t core_get_float64_byte_order_size(plc_tag_p tag);
+
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name);
 
 
@@ -116,6 +137,86 @@ static const attr_def_t core_attribs[] = {
      .description = "Allow the tag data buffer to be resized when the PLC reports a different size.",
      .get_int = core_get_allow_field_resize,
      .set_int = core_set_allow_field_resize},
+
+    /*
+     * The string and byte order layout, set when the tag is created and read-only after.
+     * These live on tag->byte_order, which is a core field, so they belong here rather than
+     * in a protocol table.
+     */
+    {.name = "str_is_counted",
+     .type = ATTR_TYPE_INT,
+     .description = "The string data starts with a count word.",
+     .get_int = core_get_str_is_counted},
+
+    {.name = "str_is_fixed_length",
+     .type = ATTR_TYPE_INT,
+     .description = "The string data occupies a fixed number of bytes.",
+     .get_int = core_get_str_is_fixed_length},
+
+    {.name = "str_is_zero_terminated",
+     .type = ATTR_TYPE_INT,
+     .description = "The string data ends with a zero byte.",
+     .get_int = core_get_str_is_zero_terminated},
+
+    {.name = "str_is_byte_swapped",
+     .type = ATTR_TYPE_INT,
+     .description = "The string characters are swapped in pairs.",
+     .get_int = core_get_str_is_byte_swapped},
+
+    {.name = "str_count_word_bytes",
+     .type = ATTR_TYPE_INT,
+     .description = "The size in bytes of the string's count word.",
+     .get_int = core_get_str_count_word_bytes},
+
+    {.name = "str_max_capacity",
+     .type = ATTR_TYPE_INT,
+     .description = "The most characters the string can hold.",
+     .get_int = core_get_str_max_capacity},
+
+    {.name = "str_total_length",
+     .type = ATTR_TYPE_INT,
+     .description = "The total size in bytes a string occupies, including its count word and padding.",
+     .get_int = core_get_str_total_length},
+
+    {.name = "str_pad_bytes",
+     .type = ATTR_TYPE_INT,
+     .description = "The number of padding bytes after the string data.",
+     .get_int = core_get_str_pad_bytes},
+
+    {.name = "str_pad_to_multiple_bytes",
+     .type = ATTR_TYPE_INT,
+     .description = "Pad the string data out to a multiple of this many bytes.",
+     .get_int = core_get_str_pad_to_multiple_bytes},
+
+    {.name = "int16_byte_order",
+     .type = ATTR_TYPE_STRING,
+     .description = "The byte order of a 16-bit integer, as the comma-separated list the tag string uses.",
+     .get_bytes = core_get_int16_byte_order,
+     .get_bytes_size = core_get_int16_byte_order_size},
+
+    {.name = "int32_byte_order",
+     .type = ATTR_TYPE_STRING,
+     .description = "The byte order of a 32-bit integer, as the comma-separated list the tag string uses.",
+     .get_bytes = core_get_int32_byte_order,
+     .get_bytes_size = core_get_int32_byte_order_size},
+
+    {.name = "int64_byte_order",
+     .type = ATTR_TYPE_STRING,
+     .description = "The byte order of a 64-bit integer, as the comma-separated list the tag string uses.",
+     .get_bytes = core_get_int64_byte_order,
+     .get_bytes_size = core_get_int64_byte_order_size},
+
+    {.name = "float32_byte_order",
+     .type = ATTR_TYPE_STRING,
+     .description = "The byte order of a 32-bit float, as the comma-separated list the tag string uses.",
+     .get_bytes = core_get_float32_byte_order,
+     .get_bytes_size = core_get_float32_byte_order_size},
+
+    {.name = "float64_byte_order",
+     .type = ATTR_TYPE_STRING,
+     .description = "The byte order of a 64-bit float, as the comma-separated list the tag string uses.",
+     .get_bytes = core_get_float64_byte_order,
+     .get_bytes_size = core_get_float64_byte_order_size},
 
     {.name = NULL},
 };
@@ -347,4 +448,182 @@ static int32_t lib_set_debug_level(plc_tag_p tag, int32_t value) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
 
     return lib_set_debug(tag, value);
+}
+
+
+int32_t attr_string_size(const char *str) {
+    if(!str) { return PLCTAG_ERR_NO_DATA; }
+
+    /* the terminator is part of the value. */
+    return (int32_t)(str_length(str) + 1);
+}
+
+
+int32_t attr_copy_string(const char *str, uint8_t *buffer, int32_t buffer_length) {
+    int32_t size = attr_string_size(str);
+
+    if(size < 0) { return size; }
+
+    if(size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    mem_copy((void *)buffer, (void *)str, (int)size);
+
+    return size;
+}
+
+
+/*
+ * A byte order is held as an array of positions, {0,1,2,3}, and written in the tag string as
+ * "0,1,2,3".  Rendering it back into that text is what makes the value usable: it can be
+ * pasted straight into another tag string.  Each position is a single digit because an order
+ * array is never longer than eight entries.
+ */
+static int32_t attr_format_byte_order(const int *order, size_t order_len, char *out, size_t out_len) {
+    size_t used = 0;
+
+    if(!order || order_len == 0 || out_len < ((order_len * 2))) { return PLCTAG_ERR_TOO_SMALL; }
+
+    for(size_t index = 0; index < order_len; index++) {
+        if(index > 0) { out[used++] = ','; }
+
+        out[used++] = (char)('0' + (order[index] % 10));
+    }
+
+    out[used] = (char)0;
+
+    return (int32_t)(used + 1);
+}
+
+
+int32_t attr_byte_order_size(const int *order, size_t order_len) {
+    char scratch[32] = {0};
+
+    return attr_format_byte_order(order, order_len, &scratch[0], sizeof(scratch));
+}
+
+
+int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length) {
+    char scratch[32] = {0};
+    int32_t size = attr_format_byte_order(order, order_len, &scratch[0], sizeof(scratch));
+
+    if(size < 0) { return size; }
+
+    if(size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    mem_copy((void *)buffer, (void *)&scratch[0], (int)size);
+
+    return size;
+}
+
+
+static int32_t core_get_str_is_counted(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_is_counted;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_is_fixed_length(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_is_fixed_length;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_is_zero_terminated(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_is_zero_terminated;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_is_byte_swapped(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_is_byte_swapped;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_count_word_bytes(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_count_word_bytes;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_max_capacity(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_max_capacity;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_total_length(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_total_length;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_pad_bytes;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->str_pad_to_multiple_bytes;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_int16_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    return attr_copy_byte_order(&tag->byte_order->int16_order[0], 2, buffer, buffer_length);
+}
+
+
+static int32_t core_get_int16_byte_order_size(plc_tag_p tag) {
+    return attr_byte_order_size(&tag->byte_order->int16_order[0], 2);
+}
+
+
+static int32_t core_get_int32_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    return attr_copy_byte_order(&tag->byte_order->int32_order[0], 4, buffer, buffer_length);
+}
+
+
+static int32_t core_get_int32_byte_order_size(plc_tag_p tag) {
+    return attr_byte_order_size(&tag->byte_order->int32_order[0], 4);
+}
+
+
+static int32_t core_get_int64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    return attr_copy_byte_order(&tag->byte_order->int64_order[0], 8, buffer, buffer_length);
+}
+
+
+static int32_t core_get_int64_byte_order_size(plc_tag_p tag) {
+    return attr_byte_order_size(&tag->byte_order->int64_order[0], 8);
+}
+
+
+static int32_t core_get_float32_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    return attr_copy_byte_order(&tag->byte_order->float32_order[0], 4, buffer, buffer_length);
+}
+
+
+static int32_t core_get_float32_byte_order_size(plc_tag_p tag) {
+    return attr_byte_order_size(&tag->byte_order->float32_order[0], 4);
+}
+
+
+static int32_t core_get_float64_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length) {
+    return attr_copy_byte_order(&tag->byte_order->float64_order[0], 8, buffer, buffer_length);
+}
+
+
+static int32_t core_get_float64_byte_order_size(plc_tag_p tag) {
+    return attr_byte_order_size(&tag->byte_order->float64_order[0], 8);
 }

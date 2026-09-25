@@ -859,6 +859,114 @@ static int32_t omron_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, 
 }
 
 
+/*
+ * The PLC type as a canonical string rather than the internal plc_type_t.  The enum is
+ * private configuration; a string keeps it that way and can be pasted straight back into a
+ * tag string.
+ */
+static const char *omron_plc_type_name(plc_type_t plc_type) {
+    switch(plc_type) {
+        case OMRON_PLC_OMRON_NJNX: return "omron-njnx";
+        default: return NULL;
+    }
+}
+
+
+static int32_t omron_get_plc(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    return attr_copy_string(omron_plc_type_name(tag->plc_type), buffer, buffer_length);
+}
+
+
+static int32_t omron_get_plc_size(plc_tag_p raw_tag) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    return attr_string_size(omron_plc_type_name(tag->plc_type));
+}
+
+
+static int32_t omron_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    *result = (int32_t)tag->use_connected_msg;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    *result = (int32_t)tag->allow_packing;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t omron_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_copy_string(tag->conn->host, buffer, buffer_length);
+}
+
+
+static int32_t omron_get_gateway_size(plc_tag_p raw_tag) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_string_size(tag->conn->host);
+}
+
+
+static int32_t omron_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->conn->port;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* The encoded CIP path, not the "18,127.0.0.1" text it was built from. */
+static int32_t omron_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    if((int32_t)tag->conn->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    mem_copy((void *)buffer, (void *)tag->conn->conn_path, (int)tag->conn->conn_path_size);
+
+    return (int32_t)tag->conn->conn_path_size;
+}
+
+
+static int32_t omron_get_path_size(plc_tag_p raw_tag) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return (int32_t)tag->conn->conn_path_size;
+}
+
+
+static int32_t omron_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
+    omron_tag_p tag = (omron_tag_p)raw_tag;
+
+    if(!tag->conn) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->conn->only_use_old_forward_open;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 const attr_def_t omron_attribs[] = {
     {.name = "elem_size",
      .type = ATTR_TYPE_INT,
@@ -900,6 +1008,48 @@ const attr_def_t omron_attribs[] = {
      .type = ATTR_TYPE_INT,
      .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",
      .get_int = omron_get_raw_tag_type_bytes_length},
+
+    /*
+     * Values set when the tag was created and read-only afterwards.  Some live on the
+     * connection the tag shares, so they report PLCTAG_ERR_NOT_FOUND before one exists.
+     */
+    {.name = "plc",
+     .type = ATTR_TYPE_STRING,
+     .description = "The PLC family this tag talks to, as a canonical name.",
+     .get_bytes = omron_get_plc,
+     .get_bytes_size = omron_get_plc_size},
+
+    {.name = "use_connected_msg",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag uses CIP connected messaging.",
+     .get_int = omron_get_use_connected_msg},
+
+    {.name = "allow_packing",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag's requests may be packed with others into one CIP request.",
+     .get_int = omron_get_allow_packing},
+
+    {.name = "gateway",
+     .type = ATTR_TYPE_STRING,
+     .description = "The host name or address of the gateway this tag's connection uses.",
+     .get_bytes = omron_get_gateway,
+     .get_bytes_size = omron_get_gateway_size},
+
+    {.name = "gateway_port",
+     .type = ATTR_TYPE_INT,
+     .description = "The TCP port this tag's connection uses.",
+     .get_int = omron_get_gateway_port},
+
+    {.name = "path",
+     .type = ATTR_TYPE_BYTES,
+     .description = "The encoded CIP path from the gateway to the PLC.",
+     .get_bytes = omron_get_path,
+     .get_bytes_size = omron_get_path_size},
+
+    {.name = "conn_only_use_old_forward_open",
+     .type = ATTR_TYPE_INT,
+     .description = "This tag's connection uses the original Forward Open only, never the large one.",
+     .get_int = omron_get_conn_only_use_old_forward_open},
 
     {.name = NULL},
 };

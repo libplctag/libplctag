@@ -65,7 +65,8 @@ Non-goals:
 ```c
 typedef enum {
     ATTR_TYPE_INT,
-    ATTR_TYPE_BYTES
+    ATTR_TYPE_BYTES,
+    ATTR_TYPE_STRING
 } attr_val_type_t;
 
 struct attr_def_t {
@@ -199,16 +200,36 @@ later is a new public function and nothing else.
 failed read from a successful read that returned the caller's default. The core substitutes
 `default_value` when the status is bad, so the public signature does not change.
 
+### 3.10 Strings
+
+`ATTR_TYPE_STRING` is a byte array whose contents are NUL-terminated text. It uses the same
+`get_bytes` and `get_bytes_size` accessors and the same two public functions as
+`ATTR_TYPE_BYTES`, so it costs one enum value and no new public symbol.
+
+The reported size **includes** the terminator. A caller allocates exactly that many bytes,
+fetches, and has a usable C string with no arithmetic. `attr_copy_string()` and
+`attr_string_size()` in `lib/tag_attribs.c` do this for an accessor, so a string entry is
+usually two three-line functions.
+
+The distinct type is not decoration. It says the value is text rather than an encoded blob,
+which the caller otherwise has to guess. `path` is the case that makes the difference
+concrete: it is `ATTR_TYPE_BYTES`, because the value is the encoded CIP path, not the
+`"1,0"` the tag string carried. `gateway` next to it is `ATTR_TYPE_STRING`, because a host
+name is text.
+
+**Enums are canonical strings, never enum values.** `plc` returns `"ControlLogix"`, not an
+`AB_PLC_LGX`. Exporting the enum would move `plc_type_t` into `libplctag.h` and freeze
+internal configuration that changes whenever PLC support is added. The string is stable,
+self-describing, and can be pasted straight back into a tag string.
+
+The byte order attributes follow the same reasoning: `int32_byte_order` returns `"0,1,2,3"`,
+the text the tag string uses, not four integers the caller would have to reassemble.
+
 ## 4. What this enables
 
-- **A string attribute type** is one enum value, one pair of union branches and one public
-  function, with no change to any module. Strings are a thin wrapper over byte arrays.
-  Convention, fixed here so the first string attribute does not set it by accident: the
-  stored bytes are raw and unterminated, `plc_tag_get_attribute_size()` reports the byte
-  count *without* a terminator -- the same number `strlen()` would give -- and the string
-  wrapper appends the NUL itself.
-  This removes the only remaining reason for the `name=version` system tag, which exists
-  because three integer attributes cannot return a version string.
+- **String attributes** arrived as `ATTR_TYPE_STRING` with no new public function; see
+  section 3.10. This removes the only remaining reason for the `name=version` system tag,
+  which exists because three integer attributes cannot return a version string.
 - **Generated documentation** for the runtime half of the wiki `All-Attributes` page, from
   `name`, `type`, `description` and which accessors are NULL. The create-only half stays
   hand-written until the creation-attribute project lands.
@@ -235,6 +256,14 @@ Three steps, each shippable on its own. All three are done.
    including `plc_tag_get_byte_array_attribute()` and `plc_tag_get_attribute_size()`, which
    previously returned `PLCTAG_ERR_NOT_FOUND` there because they went straight to
    `lookup_tag()`.
+5. Added `ATTR_TYPE_STRING` and exposed the creation-time values that were previously
+   write-only-at-create and unreadable afterwards. Core gained the nine `str_*` layout
+   values and the five byte orders. AB and Omron gained `plc`, `use_connected_msg`,
+   `allow_packing`, `gateway`, `gateway_port`, `path` and
+   `conn_only_use_old_forward_open`. Modbus gained `gateway`, `path` (its unit id) and
+   `max_requests_in_flight`. All are read-only: a getter and no setter, which is how the
+   table already expresses create-only. The parsed attribute list is still destroyed at the
+   end of `plc_tag_create_impl()`; nothing echoes the creation string back.
 
 ## 6. Risk
 
