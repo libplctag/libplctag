@@ -34,6 +34,7 @@
 #include <libplctag/lib/init.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/lib/tag_registry.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/mb/modbus.h>
 #include <libplctag/protocols/omron/omron.h>
@@ -71,6 +72,27 @@ struct {
     /* Modbus TCP */
     {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
     {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
+
+
+/*
+ * Startup order.  Each entry must succeed before the next is tried.
+ *
+ * refcount comes first because tag_registry_init() allocates the registry with
+ * rc_alloc().  The registry comes before the device modules because their tags live
+ * in it.
+ *
+ * Teardown is NOT the reverse of this list and so is not driven from it -- see
+ * destroy_modules().
+ */
+static const struct {
+    const char *name;
+    int (*init)(void);
+} lib_components[] = {
+    {"refcount", refcount_startup}, {"tag registry", tag_registry_init}, {"AB", ab_init}, {"Modbus", mb_init},
+    {"Omron", omron_init},
+};
+
+#define LIB_COMPONENT_COUNT ((int)(sizeof(lib_components) / sizeof(lib_components[0])))
 
 /* Library state machine */
 #define LIB_STATE_UNINITIALIZED ((int32_t)0)
@@ -166,24 +188,30 @@ void destroy_modules(void) {
         return;
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
-    ab_teardown();
+    /*
+     * Teardown is deliberately NOT the reverse of lib_components[], so it is written out
+     * rather than driven from that table.
+     *
+     * The device modules do unwind in reverse.  refcount and the tag registry do not:
+     * refcount starts BEFORE the registry and must also stop BEFORE it, because draining
+     * the deferred destructors runs tag teardown that touches the tag table, lookup mutex
+     * and tickler condvar that tag_registry_teardown() then destroys.  That pair is not a
+     * stack, and pretending otherwise in a table would be wrong rather than tidy.
+     */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
+    omron_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
-    omron_teardown();
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
+    ab_teardown();
 
-    /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
-     * module: those destructors run tag teardown that touches the tag table, lookup
-     * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
-     * thread must be stopped and its queue drained while those are still alive. */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
     refcount_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
-    lib_teardown();
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down tag registry.");
+    tag_registry_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
@@ -263,55 +291,33 @@ int initialize_modules(void) {
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
-    rc = refcount_startup();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start refcount cleanup infrastructure!");
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
+    for(int i = 0; i < LIB_COMPONENT_COUNT; i++) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting %s.", lib_components[i].name);
+
+        rc = lib_components[i].init();
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start %s!", lib_components[i].name);
+
+            /*
+             * The registry was built but never published, so nothing can have found it.
+             * Discard it rather than leaving a live tickler behind.  Harmless before the
+             * registry itself has started.
+             */
+            tag_registry_discard_pending();
+            atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+            return rc;
+        }
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing library modules.");
-    rc = lib_init();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize library module!");
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing AB module.");
-    rc = ab_init();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize AB module!");
-        lib_instance_discard_pending();
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Modbus module.");
-    rc = mb_init();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
-        lib_instance_discard_pending();
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Omron module.");
-    rc = omron_init();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
-        lib_instance_discard_pending();
-        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-        return rc;
-    }
-
-    /* Publish the instance lib_init() built above -- making it visible to
-     * lib_instance_acquire() -- and start its tag tickler thread, now that every
-     * module has initialized successfully. Must happen before library_state is set
-     * to RUNNING below: see the comment on lib_instance_publish() in lib.c for why
-     * the tickler is started last. */
-    lib_instance_publish();
+    /*
+     * Publish the registry tag_registry_init() built above -- making it visible to
+     * tag_registry_acquire() -- and start its tag tickler thread, now that every
+     * component has started successfully.  This stays outside lib_components[] on
+     * purpose: only the registry has a visibility gate, and a hook for one
+     * implementation would be an abstraction with a single user.  Must happen before
+     * library_state is set to RUNNING below.
+     */
+    tag_registry_publish();
 
     /* hook the destructor */
 #if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)

@@ -40,7 +40,7 @@
 #include <inttypes.h>
 #include <libplctag/lib/byte_order.h>
 #include <libplctag/lib/init.h>
-#include <libplctag/lib/lib_internal.h>
+#include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag_string.h>
@@ -61,53 +61,13 @@
 #include <utils/vector.h>
 
 
-#define INITIAL_TAG_TABLE_SIZE (201)
-
-
 /* these are only internal to the file */
 
-
-/* The library-scoped instance: the tag hashtable, its lookup mutex, and the tag
- * tickler thread/condvar. Allocated with rc_alloc() so its lifetime can be shared
- * safely between "the library is running" (current_instance holds the genesis
- * reference) and "a tag that outlives shutdown still needs it"
- * (tag->instance holds one per tag). */
-
-/* Guards current_instance and building_instance/shutting_down_instance below. Must
- * be a spinlock, not a real mutex: it needs no runtime construction, so it is valid
- * before any other library state exists and after all of it is gone. */
-static lock_t instance_lock = LOCK_INIT;
-
-/* The single published instance. NULL means "not running" -- this is the entire
- * gate lib_instance_acquire() checks. Set by lib_instance_publish(), cleared by
- * plc_tag_shutdown(). */
-static lib_instance_p current_instance = NULL;
-
-/* Staging for an instance between lib_init() building it and initialize_modules()
- * either publishing it (lib_instance_publish(), once ab_init()/mb_init()/omron_init()
- * have also succeeded) or discarding it (lib_instance_discard_pending(), if one of
- * those fails). Not protected by instance_lock: only initialize_modules() touches
- * it, and only while it is the sole thread inside the library's startup CAS. */
-static lib_instance_p building_instance = NULL;
-
-/* Staging for the instance between plc_tag_shutdown() clearing current_instance
- * and lib_teardown() (called later, via destroy_modules()) dropping the last
- * ("genesis") reference. Not protected by instance_lock for the same reason as
- * building_instance: only the single thread running shutdown ever touches it. */
-static lib_instance_p shutting_down_instance = NULL;
-
-atomic_bool lib_active = false;
-
-#define TAG_TICKLER_TIMEOUT_MS (100)
-#define TAG_TICKLER_TIMEOUT_MIN_MS (10)
-static int64_t tag_tickler_wait_timeout_end = 0;
 
 // static mutex_p global_library_mutex = NULL;
 
 
 /* helper functions. */
-static void destroy_tag_common(plc_tag_p tag);
-static THREAD_FUNC(tag_tickler_func);
 static int plc_tag_abort_impl(plc_tag_p tag);
 static int32_t plc_tag_create_impl(const char *attrib_str,
                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
@@ -155,82 +115,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 #    endif
 #endif
 
-/* rc_alloc() destructor for lib_instance_t. By the time this runs, tag_tickler_thread
- * is already NULL: plc_tag_shutdown() joins and destroys it itself, before protocol
- * modules are torn down (the tickler calls into their vtables), which is well
- * before this destructor's reference (the last one) is ever dropped. */
-static void lib_instance_destructor(void *arg) {
-    lib_instance_p inst = (lib_instance_p)arg;
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
-
-    if(inst->tag_tickler_wait) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag tickler condition var.");
-        cond_destroy(&inst->tag_tickler_wait);
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag tickler condition var destroyed.");
-    }
-
-    if(inst->tag_lookup_mutex) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag lookup mutex.");
-        mutex_destroy(&inst->tag_lookup_mutex);
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag lookup mutex destroyed.");
-    }
-
-    if(inst->tags) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag hashtable.");
-        hashtable_destroy(inst->tags);
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag hashtable destroyed.");
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Done.");
-}
-
-
-lib_instance_p lib_instance_acquire(void) {
-    lib_instance_p inst = NULL;
-
-    spin_block(&instance_lock) {
-        if(current_instance) { inst = rc_inc(current_instance); }
-    }
-
-    return inst;
-}
-
-
-void lib_instance_discard_pending(void) {
-    if(building_instance) {
-        rc_dec(building_instance);
-        building_instance = NULL;
-    }
-}
-
-
-void lib_instance_publish(void) {
-    lib_instance_p inst = building_instance;
-
-    building_instance = NULL;
-
-    if(!inst) {
-        /* Only reachable if lib_init() never actually built an instance -- e.g. a
-         * unit test that mocks lib_init() itself out. Nothing to publish. */
-        return;
-    }
-
-    spin_block(&instance_lock) { current_instance = inst; }
-
-    atomic_set_bool(&lib_active, true);
-
-    /*
-     * Start the tickler last.  Its "keep running" condition is "there are tags, or the
-     * library is RUNNING".  There are no tags yet here, and library_state does not reach
-     * RUNNING until this function returns, so a thread started earlier exits on its first
-     * check.
-     */
-    if(thread_create(&inst->tag_tickler_thread, tag_tickler_func, 32 * 1024, inst) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag tickler thread! Automatic tag operations will not run.");
-    }
-}
-
 
 /*
  * Initialize the library.  This is called in a threadsafe manner and
@@ -243,100 +127,6 @@ void lib_instance_publish(void) {
  * fails). Deliberately does not start the tickler thread -- see the comment on
  * lib_instance_publish() above.
  */
-
-int lib_init(void) {
-    int rc = PLCTAG_STATUS_OK;
-    lib_instance_p inst = NULL;
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Setting up global library data.");
-
-    inst = rc_alloc(sizeof(struct lib_instance_t), lib_instance_destructor);
-    if(!inst) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to allocate library instance!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable.");
-    if((inst->tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag hashtable!");
-        rc_dec(inst);
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable mutex.");
-    rc = mutex_create(&(inst->tag_lookup_mutex));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag hashtable mutex!");
-        rc_dec(inst);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag condition variable.");
-    rc = cond_create(&(inst->tag_tickler_wait));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag condition var!");
-        rc_dec(inst);
-        return rc;
-    }
-
-    building_instance = inst;
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/* Drops the last ("genesis") reference to the instance plc_tag_shutdown() staged
- * here after clearing current_instance and joining the tickler thread. By this
- * point (called from destroy_modules(), after refcount_teardown() has already
- * drained the cleanup queue and stopped the RC thread) every tag's own reference
- * is already gone, so this rc_dec() is the last one: it runs
- * lib_instance_destructor() synchronously, inline, on the calling thread. */
-void lib_teardown(void) {
-    lib_instance_p inst = shutting_down_instance;
-
-    shutting_down_instance = NULL;
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tearing down library.");
-
-    if(inst) { rc_dec(inst); }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Library teardown complete.");
-}
-
-
-int plc_tag_tickler_wake_impl(const char *func, int line_num) {
-    int rc = PLCTAG_STATUS_OK;
-    lib_instance_p inst = lib_instance_acquire();
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Starting. Called from %s:%d.", func, line_num);
-
-    if(!inst) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Called from %s:%d when library is not running!", func, line_num);
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!inst->tag_tickler_wait) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Called from %s:%d when tag tickler condition var is NULL!", func, line_num);
-        rc_dec(inst);
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    rc = cond_signal(inst->tag_tickler_wait);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Error %s trying to signal condition variable in call from %s:%d",
-               plc_tag_decode_error(rc), func, line_num);
-    }
-
-    rc_dec(inst);
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Done. Called from %s:%d.", func, line_num);
-
-    return rc;
-}
 
 
 int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag) {
@@ -624,137 +414,6 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
 
     return rc;
-}
-
-
-static THREAD_LOCAL vector_p active_tags = NULL;
-
-
-THREAD_FUNC(tag_tickler_func) {
-    lib_instance_p inst = (lib_instance_p)arg;
-
-    if(!active_tags) { active_tags = vector_create(100, 100); }
-
-    if(!active_tags) {
-        /* ERROR! This is terminal.*/
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create active tags vector for tag tickler thread!");
-
-        /* shut down the app, can't call plc_tag_shutdown() */
-        exit(1);
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
-
-    while(atomic_get_bool(&lib_active)) {
-        int max_index = 0;
-        int64_t timeout_wait_ms = TAG_TICKLER_TIMEOUT_MS;
-
-        /* what is the maximum time we will wait until */
-        tag_tickler_wait_timeout_end = time_ms() + timeout_wait_ms;
-
-        critical_block(inst->tag_lookup_mutex) {
-            max_index = hashtable_capacity(inst->tags);
-
-            for(int i = 0; i < max_index; i++) {
-                plc_tag_p tag = hashtable_get_index(inst->tags, i);
-
-                if(tag && !atomic_get_bool(&tag->skip_tickler) && rc_inc(tag) != NULL) {
-                    vector_insert(active_tags, vector_length(active_tags), tag);
-                }
-            }
-        }
-
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Tickling %d active tags.", vector_length(active_tags));
-
-        int num_active_tags = vector_length(active_tags);
-
-        for(int tag_index = 0; tag_index < num_active_tags; tag_index++) {
-            plc_tag_p tag = vector_get(active_tags, tag_index);
-
-            /* try to hold the tag API mutex while all this goes on. */
-            if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "calling generic tag tickler.");
-
-                plc_tag_generic_tickler(tag);
-
-                /* call the tickler function if we can. */
-                if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
-
-                if(tag->read_complete) {
-                    tag->read_complete = 0;
-                    tag->read_in_flight = 0;
-
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
-
-                    // tag->event_read_complete = 1;
-                    tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
-
-                    /* wake immediately */
-                    // plc_tag_tickler_wake();
-                    cond_signal(tag->tag_cond_wait);
-                }
-
-                if(tag->write_complete) {
-                    tag->write_complete = 0;
-                    tag->write_in_flight = 0;
-                    tag->auto_sync_next_write = 0;
-
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
-
-                    // tag->event_write_complete = 1;
-                    tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
-
-                    /* wake immediately */
-                    //  plc_tag_tickler_wake();
-                    cond_signal(tag->tag_cond_wait);
-                }
-
-                /* wake up earlier if the time until the next write wake up is sooner. */
-                if(tag->auto_sync_next_write && tag->auto_sync_next_write < tag_tickler_wait_timeout_end) {
-                    tag_tickler_wait_timeout_end = tag->auto_sync_next_write;
-                }
-
-                /* wake up earlier if the time until the next read wake up is sooner. */
-                if(tag->auto_sync_next_read && tag->auto_sync_next_read < tag_tickler_wait_timeout_end) {
-                    tag_tickler_wait_timeout_end = tag->auto_sync_next_read;
-                }
-
-                /* we are done with the tag API mutex now. */
-                mutex_unlock(tag->api_mutex);
-
-                /* call callbacks */
-                plc_tag_generic_handle_event_callbacks(tag);
-            } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Skipping tag as it is already locked.");
-            }
-
-            if(tag) { rc_dec(tag); }
-        }
-
-        /* clear the active tags vector */
-        vector_reset(active_tags);
-
-        if(inst->tag_tickler_wait) {
-            int64_t time_to_wait = tag_tickler_wait_timeout_end - time_ms();
-            int wait_rc = PLCTAG_STATUS_OK;
-
-            if(time_to_wait < TAG_TICKLER_TIMEOUT_MIN_MS) { time_to_wait = TAG_TICKLER_TIMEOUT_MIN_MS; }
-
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Waiting for %" PRId64 "ms until next tickler wake up.", time_to_wait);
-
-            wait_rc = cond_wait(inst->tag_tickler_wait, (int)time_to_wait);
-            if(wait_rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Tag tickler thread timed out waiting for something to do.");
-            }
-        }
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Terminating.");
-
-    vector_destroy(active_tags);
-    active_tags = NULL;
-
-    THREAD_RETURN(0);
 }
 
 
@@ -1082,7 +741,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     int read_cache_ms = 0;
     tag_create_function tag_constructor;
     int debug_level = -1;
-    lib_instance_p inst = NULL;
+    tag_registry_p inst = NULL;
 
     /* we are creating a tag, there is no ID yet. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting");
@@ -1128,9 +787,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* Acquire a reference to the running instance and transfer it into tag->instance
      * below once the tag exists. initialize_modules() above guarantees one was
-     * published, but a shutdown can race in between -- lib_instance_acquire()
+     * published, but a shutdown can race in between -- tag_registry_acquire()
      * returning NULL here means exactly that. */
-    inst = lib_instance_acquire();
+    inst = tag_registry_acquire();
     if(!inst) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, cannot create tag.");
         attr_destroy(attribs);
@@ -1295,7 +954,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         }
 
         /* remove the tag from the hashtable. */
-        critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+        remove_tag_lookup(tag);
 
         rc_dec(tag);
         return rc;
@@ -1339,7 +998,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 }
 
                 /* remove the tag from the hashtable. */
-                critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+                remove_tag_lookup(tag);
 
                 rc_dec(tag);
                 return rc;
@@ -1366,7 +1025,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             }
 
             /* remove the tag from the hashtable. */
-            critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+            remove_tag_lookup(tag);
 
             rc_dec(tag);
             return rc;
@@ -1402,8 +1061,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
  */
 
 LIB_EXPORT void plc_tag_shutdown(void) {
-    int tag_table_entries = 0;
-    lib_instance_p inst = NULL;
+    tag_registry_p inst = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
 
@@ -1412,10 +1070,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
      * sees NULL and returns immediately. This replaces the old two-load
      * "if(!tags || !lib_active)" guard, which could let concurrent or repeated
      * plc_tag_shutdown() calls both proceed. */
-    spin_block(&instance_lock) {
-        inst = current_instance;
-        current_instance = NULL;
-    }
+    inst = tag_registry_close();
 
     if(!inst) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0,
@@ -1427,64 +1082,20 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     atomic_set_bool(&lib_active, false);
 
     /* close all tags. */
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Closing all tags.");
+    tag_registry_destroy_all_tags(inst);
 
-    critical_block(inst->tag_lookup_mutex) { tag_table_entries = hashtable_capacity(inst->tags); }
+    /*
+     * Join the tag tickler thread now, before the protocol modules are torn down: the
+     * tickler calls into protocol vtable functions for every active tag, so it must not
+     * still be running once ab_teardown()/mb_teardown()/omron_teardown() (called from
+     * destroy_modules() below) start freeing protocol-level globals.
+     */
+    tag_registry_stop_tickler(inst);
 
-    for(int i = 0; i < tag_table_entries; i++) {
-        plc_tag_p tag = NULL;
-
-        critical_block(inst->tag_lookup_mutex) {
-            tag_table_entries = hashtable_capacity(inst->tags);
-
-            if(i < tag_table_entries && tag_table_entries >= 0) {
-                tag = hashtable_get_index(inst->tags, i);
-
-                /* make sure the tag does not go away while we are using the pointer. */
-                if(tag) {
-                    /* this returns NULL if the existing ref-count is zero. */
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "rc_inc: Acquiring reference to tag %" PRId32 ".",
-                           tag->tag_id);
-                    tag = rc_inc(tag);
-                }
-            }
-        }
-
-        /* do this outside the mutex. */
-        if(tag) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Destroying tag %" PRId32 ".", tag->tag_id);
-
-            /* Remove from the hashtable and run the common destroy tail ourselves,
-             * using the instance we already hold, rather than going through the
-             * public plc_tag_destroy(): its lib_instance_acquire() would correctly
-             * (and unhelpfully) fail here, since the gate is deliberately already
-             * closed by this point to stop any *new* tag creation. */
-            critical_block(inst->tag_lookup_mutex) { hashtable_remove(inst->tags, (int64_t)tag->tag_id); }
-            destroy_tag_common(tag);
-
-            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-            rc_dec(tag);
-        }
-    }
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "All tags closed.");
-
-    /* Join the tag tickler thread now, before the protocol modules are torn down:
-     * the tickler calls into protocol vtable functions for every active tag, so it
-     * must not still be running once ab_teardown()/mb_teardown()/omron_teardown()
-     * (called from destroy_modules() below) start freeing protocol-level globals. */
-    if(inst->tag_tickler_thread) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Waiting for tag tickler thread to exit.");
-        cond_signal(inst->tag_tickler_wait);
-        thread_join(inst->tag_tickler_thread);
-        thread_destroy(&inst->tag_tickler_thread);
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag tickler thread exited.");
-    }
-
-    /* Stage the instance for lib_teardown() (called via destroy_modules() below) to
+    /* Stage the registry for tag_registry_teardown() (called via destroy_modules() below) to
      * drop the last ("genesis") reference, once refcount_teardown() has drained
      * every tag's own reference too. */
-    shutting_down_instance = inst;
+    tag_registry_stage_shutdown(inst);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Cleaning up library resources.");
 
@@ -1854,11 +1465,11 @@ LIB_EXPORT int plc_tag_abort(int32_t id) {
 /* Common tail of tag destruction, given a tag already found and already removed
  * from the tag hashtable. Factored out so plc_tag_shutdown()'s own tag-destroy
  * loop -- which already holds the instance and does its own hashtable_remove --
- * does not have to go through plc_tag_destroy()'s fresh lib_instance_acquire(),
+ * does not have to go through plc_tag_destroy()'s fresh tag_registry_acquire(),
  * which by that point in shutdown correctly (and unhelpfully) returns NULL: the
  * gate is deliberately closed before that loop runs, to stop new tags being
  * created, but tags already found by the loop are not "new". */
-static void destroy_tag_common(plc_tag_p tag) {
+void destroy_tag_common(plc_tag_p tag) {
     int32_t tag_id = tag->tag_id;
 
     /* abort anything in flight */
@@ -1893,7 +1504,7 @@ static void destroy_tag_common(plc_tag_p tag) {
 
 LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
     plc_tag_p tag = NULL;
-    lib_instance_p inst = NULL;
+    tag_registry_p inst = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
 
@@ -1904,13 +1515,13 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
 
     /* No tag in hand yet to borrow tag->instance from, so this is a per-call
      * acquire/release, same as lookup_tag(). */
-    inst = lib_instance_acquire();
+    inst = tag_registry_acquire();
     if(!inst) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Library not running, cannot destroy tag.");
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(inst->tag_lookup_mutex) { tag = hashtable_remove(inst->tags, tag_id); }
+    tag = remove_tag_lookup_by_id(inst, tag_id);
     rc_dec(inst);
 
     if(!tag) {
