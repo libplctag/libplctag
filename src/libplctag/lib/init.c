@@ -35,9 +35,9 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_registry.h>
-#include <libplctag/protocols/ab/ab.h>
-#include <libplctag/protocols/mb/modbus.h>
-#include <libplctag/protocols/omron/omron.h>
+#include <libplctag/modules/ab/ab.h>
+#include <libplctag/modules/modbus/modbus.h>
+#include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/system/system.h>
 #include <utils/rc.h>
 #include <platform.h>
