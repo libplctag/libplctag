@@ -91,6 +91,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/rc.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/vector.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/../platform/platform_common.c"
                      "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
