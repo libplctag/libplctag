@@ -8,7 +8,7 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_S
 # The .c file is included in libplctag_SRCS below, so CMake tracks the dependency automatically
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ParseLibplctagHeader.cmake")
 parse_libplctag_header(
-    "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_generated.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
 )
@@ -36,8 +36,8 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/lib.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/api/lib.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/error_codes.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/error_codes.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/tag.h"
@@ -50,7 +50,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_string.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_string.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_attribs.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/api/tag_attribs.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/omron.h"
@@ -70,9 +70,9 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/omron/tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/protocols/mb/modbus.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/system.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/system.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/system/tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/system.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/system.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/tag.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/atomic_utils.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/atomic_utils.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/attr.c"
@@ -188,13 +188,13 @@ if(LIBPLCTAG_ENABLE_COVERAGE)
 endif()
 
 # make sure the .h file is in the output directory
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
 
 install(TARGETS plctag_static
     ARCHIVE DESTINATION lib${LIB_SUFFIX}
     COMPONENT devel)
 
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/api/libplctag.h"
     DESTINATION include
     COMPONENT devel)
 

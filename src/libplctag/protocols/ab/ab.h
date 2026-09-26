@@ -35,7 +35,7 @@
 #    define __LIBPLCTAG_AB_H__ 1
 
 
-#    include <libplctag/lib/libplctag.h>
+#    include <libplctag/api/libplctag.h>
 #    include <libplctag/lib/tag.h>
 #    include <utils/attr.h>
 

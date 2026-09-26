@@ -32,12 +32,12 @@
  ***************************************************************************/
 
 #include <libplctag/lib/init.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab.h>
 #include <libplctag/protocols/mb/modbus.h>
 #include <libplctag/protocols/omron/omron.h>
-#include <libplctag/protocols/system/system.h>
+#include <libplctag/modules/system/system.h>
 #include <utils/rc.h>
 #include <platform.h>
 #include <stdlib.h>

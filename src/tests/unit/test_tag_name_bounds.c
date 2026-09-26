@@ -46,7 +46,7 @@
 
 #include "mini_mock.h"
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <stdio.h>
 #include <string.h>
 

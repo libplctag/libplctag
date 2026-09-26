@@ -33,7 +33,7 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/protocols/omron/cip.h>

@@ -33,7 +33,7 @@
 
 #define LIBPLCTAGDLL_EXPORTS (1)
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 
 #include <ctype.h>
 #include <float.h>

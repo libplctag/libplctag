@@ -34,7 +34,7 @@
 /* Core runtime attribute table and the lookup behind the public attribute API. */
 
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
 #include <platform.h>

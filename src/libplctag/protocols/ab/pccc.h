@@ -35,7 +35,7 @@
 #define __LIBPLCTAG_AB_PCCC_H__
 
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <platform.h>
 #include <stdbool.h>

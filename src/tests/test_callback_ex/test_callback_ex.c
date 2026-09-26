@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include "compat_utils.h"
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

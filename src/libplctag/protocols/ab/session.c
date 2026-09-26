@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>

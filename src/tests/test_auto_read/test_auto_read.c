@@ -59,7 +59,7 @@
 
 #include "compat_utils.h"
 #include "stats.h"
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 
 #ifdef POSIX_PLATFORM
 #    include <sys/resource.h>

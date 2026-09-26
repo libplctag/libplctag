@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/omron/conn.h>
 #include <libplctag/protocols/omron/omron_common.h>

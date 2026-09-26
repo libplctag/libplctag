@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 

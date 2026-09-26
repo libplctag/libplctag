@@ -64,7 +64,7 @@
 #include "compat_utils.h"
 #include "stats.h"
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

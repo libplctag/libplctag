@@ -33,7 +33,7 @@
 
 #include <ctype.h>
 #include <libplctag/lib/byte_order.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <platform.h>
 #include <utils/attr.h>

@@ -57,7 +57,7 @@
 #include <time.h>
 #include <timeapi.h>
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <utils/debug.h>
 
 

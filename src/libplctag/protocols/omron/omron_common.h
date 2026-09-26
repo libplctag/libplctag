@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/omron/defs.h>
 #include <utils/vector.h>

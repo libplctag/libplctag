@@ -33,7 +33,7 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/path.h>
 #include <platform.h>
 #include <stdbool.h>

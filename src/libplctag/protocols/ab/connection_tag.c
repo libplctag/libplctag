@@ -33,7 +33,7 @@
 
 #include "connection_tag.h"
 #include <libplctag/lib/tag.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/protocols/ab/tag.h>
 #include "session.h"
 #include <utils/atomic_utils.h>

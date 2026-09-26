@@ -33,11 +33,11 @@
 
 #include <inttypes.h>
 #include <libplctag/lib/init.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
-#include <libplctag/protocols/system/system.h>
-#include <libplctag/protocols/system/tag.h>
+#include <libplctag/modules/system/system.h>
+#include <libplctag/modules/system/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>

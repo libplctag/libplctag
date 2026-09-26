@@ -40,7 +40,7 @@ extern "C"
 
 #include <stddef.h>
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <libplctag/protocols/ab/eip_lgx_pccc.h>

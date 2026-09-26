@@ -39,7 +39,7 @@
  */
 
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <platform.h>
 #include <utils/debug.h>
 

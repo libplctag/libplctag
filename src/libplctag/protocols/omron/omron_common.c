@@ -34,7 +34,7 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/omron/cip.h>
 #include <libplctag/protocols/omron/conn.h>

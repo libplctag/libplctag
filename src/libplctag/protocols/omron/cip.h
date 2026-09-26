@@ -37,7 +37,7 @@
 #include <libplctag/modules/cip/path.h>
 
 #include <stddef.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/protocols/omron/defs.h>
 #include <libplctag/protocols/omron/omron_common.h>
 

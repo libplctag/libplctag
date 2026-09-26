@@ -34,7 +34,7 @@
 #ifndef __LIBPLCTAG_AB_CIP_H__
 #define __LIBPLCTAG_AB_CIP_H__
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/defs.h>
