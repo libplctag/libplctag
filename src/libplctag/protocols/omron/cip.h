@@ -33,6 +33,9 @@
 
 #pragma once
 
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/path.h>
+
 #include <stddef.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/protocols/omron/defs.h>
@@ -61,11 +64,11 @@ typedef struct {
 
     } services;
 
-    int32_t (*encode_path)(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp,
-                           uint16_t *dhp_dest);
+    int (*encode_path)(const char *path, int *needs_connection, int plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size,
+                       int *is_dhp, uint16_t *dhp_dest);
     int32_t (*encode_tag_name)(omron_tag_p tag, const char *name);
-    int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
-    int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
+    int (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
+    int (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
 
     const char *(*decode_cip_error_short)(uint8_t *data, size_t data_size);
     const char *(*decode_cip_error_long)(uint8_t *data, size_t data_size);
@@ -76,13 +79,3 @@ typedef struct {
 } cip_generic_t;
 
 extern cip_generic_t CIP;
-
-/*
- * Bytes remaining in a received buffer starting at data, given the buffer's end pointer.
- * data and buf_end must point into (or one past) the same buffer.  Returns 0 if data is at
- * or past buf_end -- e.g. a truncated response that did not even reach this field -- rather
- * than letting a negative pointer difference wrap around to a huge size_t.
- */
-static inline size_t cip_error_data_size(uint8_t *data, uint8_t *buf_end) {
-    return (data < buf_end) ? (size_t)(buf_end - data) : 0;
-}

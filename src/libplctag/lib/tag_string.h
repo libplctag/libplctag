@@ -33,36 +33,15 @@
 
 #pragma once
 
-/* do these first */
-
-/* they are used in some of these includes */
-#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
 
+/*
+ * String and tag-buffer helpers.  Every function here assumes the caller already
+ * holds tag->api_mutex -- that is what the _unsafe suffix means.
+ */
 
-struct ab_tag_t {
-    CIP_TAG_BASE_STRUCT;
-
-    /* how do we talk to this device? */
-    ab_plc_type_t plc_type;
-
-    /* pointer back to the session */
-    ab_session_p session;
-
-    /* the in-flight request object */
-    ab_request_p req;
-
-    /* PCCC only: the data file this tag addresses. */
-    pccc_file_t file_type;
-
-    /*
-     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
-     * the same one, otherwise a late reply to a request that already timed out gets
-     * applied to whatever operation is in flight now.
-     */
-    uint16_t req_pccc_seq_num;
-};
+extern int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset);
+extern int get_string_length_unsafe(plc_tag_p tag, int offset);
+extern int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val);
+extern int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size);
+extern int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int new_split_index);

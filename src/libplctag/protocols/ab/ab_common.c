@@ -651,43 +651,43 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                 if(str_cmp_i(elem_type, "lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 64-bit integer.");
                     tag->elem_size = 8;
-                    tag->elem_type = AB_TYPE_INT64;
+                    tag->elem_type = CIP_TYPE_INT64;
                 } else if(str_cmp_i(elem_type, "dint") == 0 || str_cmp_i(elem_type, "udint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 32-bit integer.");
                     tag->elem_size = 4;
-                    tag->elem_type = AB_TYPE_INT32;
+                    tag->elem_type = CIP_TYPE_INT32;
                 } else if(str_cmp_i(elem_type, "int") == 0 || str_cmp_i(elem_type, "uint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 16-bit integer.");
                     tag->elem_size = 2;
-                    tag->elem_type = AB_TYPE_INT16;
+                    tag->elem_type = CIP_TYPE_INT16;
                 } else if(str_cmp_i(elem_type, "sint") == 0 || str_cmp_i(elem_type, "usint") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 8-bit integer.");
                     tag->elem_size = 1;
-                    tag->elem_type = AB_TYPE_INT8;
+                    tag->elem_type = CIP_TYPE_INT8;
                 } else if(str_cmp_i(elem_type, "bool") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of bit.");
                     tag->elem_size = 1;
-                    tag->elem_type = AB_TYPE_BOOL;
+                    tag->elem_type = CIP_TYPE_BOOL;
                 } else if(str_cmp_i(elem_type, "bool array") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of bool array.");
                     tag->elem_size = 4;
-                    tag->elem_type = AB_TYPE_BOOL_ARRAY;
+                    tag->elem_type = CIP_TYPE_BOOL_ARRAY;
                 } else if(str_cmp_i(elem_type, "real") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 32-bit float.");
                     tag->elem_size = 4;
-                    tag->elem_type = AB_TYPE_FLOAT32;
+                    tag->elem_type = CIP_TYPE_FLOAT32;
                 } else if(str_cmp_i(elem_type, "lreal") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of 64-bit float.");
                     tag->elem_size = 8;
-                    tag->elem_type = AB_TYPE_FLOAT64;
+                    tag->elem_type = CIP_TYPE_FLOAT64;
                 } else if(str_cmp_i(elem_type, "string") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of string.");
                     tag->elem_size = 88;
-                    tag->elem_type = AB_TYPE_STRING;
+                    tag->elem_type = CIP_TYPE_STRING;
                 } else if(str_cmp_i(elem_type, "short string") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of short string.");
                     tag->elem_size = 256; /* TODO - find the real length */
-                    tag->elem_type = AB_TYPE_SHORT_STRING;
+                    tag->elem_type = CIP_TYPE_SHORT_STRING;
                 } else {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Unknown tag type %s", elem_type);
                     return PLCTAG_ERR_UNSUPPORTED;

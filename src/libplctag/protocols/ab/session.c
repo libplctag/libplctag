@@ -36,7 +36,7 @@
 #include <libplctag/protocols/ab/ab_common.h>
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
-#include <libplctag/protocols/ab/error_codes.h>
+#include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
@@ -124,7 +124,8 @@ static ab_session_p create_micro800_session_unsafe(const char *host, const char 
 // connection_group_id);
 
 static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host,
-                                          const char *path, ab_plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
+                                          const char *path, ab_plc_type_t plc_type, int *use_connected_msg,
+                                          int connection_group_id);
 // static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
@@ -821,7 +822,15 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     }
 
     /* encode the path */
-    rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    /*
+     * The shared encoder knows only whether the family can bridge DH+, not which AB
+     * family this is.  PLC-5, SLC and MicroLogix can; everything else rejects a DH+
+     * segment rather than ignoring it.
+     */
+    int dhp_kind = (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX) ? CIP_PLC_KIND_DHP_CAPABLE :
+                                                                                                    CIP_PLC_KIND_OTHER;
+
+    rc = cip_encode_path(path, use_connected_msg, dhp_kind, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
                plc_tag_decode_error(rc));
@@ -2047,8 +2056,7 @@ int process_requests(ab_session_p session) {
                         (size_t)((uint8_t *)multi_resp - session->data) + offsetof(cip_multi_resp_header, request_offsets);
                     size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
 
-                    if(offsets_start > (size_t)session->data_size
-                       || offsets_size > (size_t)session->data_size - offsets_start) {
+                    if(offsets_start > (size_t)session->data_size || offsets_size > (size_t)session->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                                "Response of %d bytes is too short to hold %d packed response offsets!", session->data_size,
                                num_bundled_requests);

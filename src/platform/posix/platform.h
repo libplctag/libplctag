@@ -36,6 +36,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h> /* ssize_t; the Windows platform.h typedefs it instead. */
 #include <math.h>
 #include <stdarg.h>
 

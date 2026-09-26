@@ -103,7 +103,7 @@ int omron_setup_raw_tag(omron_tag_p tag) {
 
     /* set up raw tag. */
     tag->special_tag = 1;
-    tag->elem_type = OMRON_TYPE_TAG_RAW;
+    tag->elem_type = CIP_TYPE_TAG_RAW;
     tag->elem_count = 1;
     tag->elem_size = 1;
 
@@ -334,15 +334,15 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->conn, tag->tag_id, &req);
+    rc = conn_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
-    if(tag->size > conn_get_max_payload(tag->conn)) {
+    if(tag->size > conn_get_max_payload(tag->session)) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Amount to write exceeds negotiated conn size %d!",
-               conn_get_max_payload(tag->conn));
+               conn_get_max_payload(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -386,7 +386,7 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     tag->size = 0;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->conn, req);
+    rc = conn_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to conn! rc=%d", rc);
@@ -416,7 +416,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->conn, tag->tag_id, &req);
+    rc = conn_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -460,7 +460,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
      */
 
     /* Now copy in the routing information for the embedded message */
-    *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
+    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
     data++;
     *data = 0;
     data++; /* copy the tag name into the request */
@@ -506,7 +506,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     tag->size = 0;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->conn, req);
+    rc = conn_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to conn! rc=%d", rc);

@@ -36,8 +36,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/ab_common.h>
 
-extern struct tag_vtable_t eip_cip_raw_tag_vtable;
-extern tag_byte_order_t listing_tag_logix_byte_order;
 
 /* tag creation helpers */
 // extern int setup_special_cip_tag(ab_tag_p tag, const char *name);

@@ -46,7 +46,7 @@
 
 typedef struct omron_connection_tag_s {
     TAG_BASE_STRUCT;
-    omron_conn_p conn;
+    omron_conn_p session;
     int32_t last_conn_state;
     int32_t io_events;
     int32_t event_ring_read_idx;
@@ -84,11 +84,12 @@ static struct tag_vtable_t omron_connection_tag_vtable = {
 
 
 extern plc_tag_p omron_connection_tag_create(attr attribs,
-                                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                         void *userdata, plc_tag_p src_tag) {
+                                             void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                             void *userdata, plc_tag_p src_tag) {
     pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_INFO, 0, "Starting.");
 
-    omron_connection_tag_p tag = (omron_connection_tag_p)rc_alloc(sizeof(omron_connection_tag_t), omron_connection_tag_destructor);
+    omron_connection_tag_p tag =
+        (omron_connection_tag_p)rc_alloc(sizeof(omron_connection_tag_t), omron_connection_tag_destructor);
     if(!tag) { return NULL; }
 
     tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
@@ -108,20 +109,21 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
 
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_OMRON: tag->conn = rc_inc(((omron_tag_p)src_tag)->conn); break;
+            case TAG_PROTOCOL_OMRON: tag->session = rc_inc(((omron_tag_p)src_tag)->session); break;
 
-            case TAG_PROTOCOL_OMRON_CONNECTION: tag->conn = rc_inc(((omron_connection_tag_p)src_tag)->conn); break;
+            case TAG_PROTOCOL_OMRON_CONNECTION: tag->session = rc_inc(((omron_connection_tag_p)src_tag)->session); break;
 
-            default: tag->conn = NULL; break;
+            default: tag->session = NULL; break;
         }
 
-        rc = tag->conn ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
+        rc = tag->session ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
     } else {
-        rc = conn_find_or_create(&tag->conn, attribs, &new_conn);
+        rc = conn_find_or_create(&tag->session, attribs, &new_conn);
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, 0, "Unable to find or create conn, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, 0, "Unable to find or create conn, error %s!",
+               plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
         return (plc_tag_p)tag;
@@ -146,9 +148,9 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
          * conn->mutex so we get a real, consistent point-in-time state rather than
          * a read_idx from before a transition paired with a status from after it --
          * see the comment in conn_set_connection_status(). */
-        critical_block(tag->conn->mutex) {
-            tag->event_ring_read_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
-            tag->last_conn_state = atomic_get_int32(&tag->conn->connection_status);
+        critical_block(tag->session->mutex) {
+            tag->event_ring_read_idx = atomic_get_int32(&tag->session->conn_event_ring_write_idx);
+            tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
         }
     }
 
@@ -183,11 +185,11 @@ static int omron_connection_tag_status(plc_tag_p raw_tag) {
 static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
     omron_connection_tag_p tag = (omron_connection_tag_p)raw_tag;
 
-    if(!tag->conn) { return PLCTAG_STATUS_OK; }
+    if(!tag->session) { return PLCTAG_STATUS_OK; }
 
     if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
 
-    int32_t write_idx = atomic_get_int32(&tag->conn->conn_event_ring_write_idx);
+    int32_t write_idx = atomic_get_int32(&tag->session->conn_event_ring_write_idx);
     int32_t read_idx = tag->event_ring_read_idx;
 
     /* First tickler after CREATED: if the session was already active at creation (late join),
@@ -195,15 +197,14 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
     if(tag->first_tickler_run) {
         tag->first_tickler_run = false;
         if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && tag->callback) {
-            tag->callback(tag->tag_id, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
-                          tag->userdata);
+            tag->callback(tag->tag_id, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, tag->userdata);
         }
     }
 
     while(read_idx != write_idx) {
         read_idx = (read_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-        int32_t event_type = tag->conn->conn_event_ring[read_idx].event_type;
-        int32_t status = tag->conn->conn_event_ring[read_idx].status;
+        int32_t event_type = tag->session->conn_event_ring[read_idx].event_type;
+        int32_t status = tag->session->conn_event_ring[read_idx].status;
 
         if(tag->callback) {
             switch(event_type) {
@@ -228,7 +229,8 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
                         tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
                         tag->callback(tag->tag_id, event_type, PLCTAG_STATUS_OK, tag->userdata);
                     } else {
-                        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.", (int)event_type);
+                        pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_WARN, tag->tag_id, "Unknown ring event type %d.",
+                               (int)event_type);
                     }
                     break;
             }
@@ -250,9 +252,9 @@ static int32_t omron_connection_get_connection_status(plc_tag_p raw_tag, int32_t
 static void omron_connection_tag_destructor(void *ptr) {
     omron_connection_tag_p tag = (omron_connection_tag_p)ptr;
 
-    if(tag->conn) {
-        rc_dec(tag->conn);
-        tag->conn = NULL;
+    if(tag->session) {
+        rc_dec(tag->session);
+        tag->session = NULL;
     }
 
     if(tag->ext_mutex) {

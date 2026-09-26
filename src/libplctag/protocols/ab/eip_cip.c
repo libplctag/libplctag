@@ -38,7 +38,7 @@
 #include <libplctag/protocols/ab/cip.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <libplctag/protocols/ab/eip_cip.h>
-#include <libplctag/protocols/ab/error_codes.h>
+#include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
 #include <platform.h>

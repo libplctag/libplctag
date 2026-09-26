@@ -33,36 +33,21 @@
 
 #pragma once
 
-/* do these first */
-
-/* they are used in some of these includes */
-#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
+#include <platform.h>
+#include <utils/hashtable.h>
 
+/*
+ * Internal to the lib/ directory.  Nothing outside it may include this header:
+ * the instance layout is private to the library core.
+ */
 
-struct ab_tag_t {
-    CIP_TAG_BASE_STRUCT;
+/* Tag ids are 28 bits so that they never collide with a pointer-looking value. */
+#define TAG_ID_MASK (0xFFFFFFF)
 
-    /* how do we talk to this device? */
-    ab_plc_type_t plc_type;
-
-    /* pointer back to the session */
-    ab_session_p session;
-
-    /* the in-flight request object */
-    ab_request_p req;
-
-    /* PCCC only: the data file this tag addresses. */
-    pccc_file_t file_type;
-
-    /*
-     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
-     * the same one, otherwise a late reply to a request that already timed out gets
-     * applied to whatever operation is in flight now.
-     */
-    uint16_t req_pccc_seq_num;
+struct lib_instance_t {
+    hashtable_p tags;
+    mutex_p tag_lookup_mutex;
+    cond_p tag_tickler_wait;
+    thread_p tag_tickler_thread;
 };

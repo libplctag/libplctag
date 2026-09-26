@@ -33,36 +33,15 @@
 
 #pragma once
 
-/* do these first */
-
-/* they are used in some of these includes */
-#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
 
+/*
+ * The global tag-handle registry: the map from the int32_t handle the application
+ * holds to the plc_tag_p behind it.
+ */
 
-struct ab_tag_t {
-    CIP_TAG_BASE_STRUCT;
+/* Look up a tag by id, returning a NEW reference, or NULL if there is none. */
+extern plc_tag_p lookup_tag(int32_t tag_id);
 
-    /* how do we talk to this device? */
-    ab_plc_type_t plc_type;
-
-    /* pointer back to the session */
-    ab_session_p session;
-
-    /* the in-flight request object */
-    ab_request_p req;
-
-    /* PCCC only: the data file this tag addresses. */
-    pccc_file_t file_type;
-
-    /*
-     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
-     * the same one, otherwise a late reply to a request that already timed out gets
-     * applied to whatever operation is in flight now.
-     */
-    uint16_t req_pccc_seq_num;
-};
+/* Assign the tag a fresh id and publish it in the registry. */
+extern int add_tag_lookup(plc_tag_p tag);

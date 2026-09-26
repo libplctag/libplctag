@@ -33,36 +33,23 @@
 
 #pragma once
 
-/* do these first */
-
-/* they are used in some of these includes */
-#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
+#include <utils/attr.h>
 
+/*
+ * Upper bound on the string size attributes (str_max_capacity, str_total_length,
+ * str_pad_bytes).
+ *
+ * These come from the application's attribute string and used to accept anything up to
+ * INT_MAX.  They are stored as unsigned int and then summed to validate str_total_length,
+ * so two large values wrapped that sum and let a nonsensical string definition through.
+ * Real string formats are tiny -- a Logix STRING is 82 characters plus a 4-byte count --
+ * so this cap is far above anything legitimate while keeping the sum from overflowing.
+ */
+#define MAX_STR_SIZE_PARAM (65536)
 
-struct ab_tag_t {
-    CIP_TAG_BASE_STRUCT;
-
-    /* how do we talk to this device? */
-    ab_plc_type_t plc_type;
-
-    /* pointer back to the session */
-    ab_session_p session;
-
-    /* the in-flight request object */
-    ab_request_p req;
-
-    /* PCCC only: the data file this tag addresses. */
-    pccc_file_t file_type;
-
-    /*
-     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
-     * the same one, otherwise a late reply to a request that already timed out gets
-     * applied to whatever operation is in flight now.
-     */
-    uint16_t req_pccc_seq_num;
-};
+/*
+ * Apply the byte-order and string-format attributes from the attribute string to the
+ * tag.  Allocates tag->byte_order when the tag needs one of its own.
+ */
+extern int set_tag_byte_order(plc_tag_p tag, attr attribs);

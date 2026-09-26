@@ -218,57 +218,57 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
 
 /* NB: sorted by decreasing size and then alphabetically */
 
-#define TAG_BASE_STRUCT                      \
-    int64_t auto_sync_next_read;             \
-    int64_t auto_sync_next_write;            \
-    int64_t read_cache_expire;               \
-    int64_t read_cache_ms;                   \
-    uint8_t *data;                           \
-    tag_byte_order_t *byte_order;            \
-    cond_p tag_cond_wait;                    \
-    mutex_p api_mutex;                       \
-    mutex_p ext_mutex;                       \
-    tag_extended_callback_func callback;     \
-    tag_vtable_p vtable;                     \
-    lib_instance_p instance;                 \
-    void *userdata;                          \
-    int32_t auto_sync_read_ms;               \
-    int32_t auto_sync_write_ms;              \
-    int32_t size;                            \
-    int32_t tag_id;                          \
-    int connection_group_id;                 \
-    int bit;                                 \
-    int protocol_type;                       \
-    atomic_bool abort_requested;             \
+#define TAG_BASE_STRUCT                                                                 \
+    int64_t auto_sync_next_read;                                                        \
+    int64_t auto_sync_next_write;                                                       \
+    int64_t read_cache_expire;                                                          \
+    int64_t read_cache_ms;                                                              \
+    uint8_t *data;                                                                      \
+    tag_byte_order_t *byte_order;                                                       \
+    cond_p tag_cond_wait;                                                               \
+    mutex_p api_mutex;                                                                  \
+    mutex_p ext_mutex;                                                                  \
+    tag_extended_callback_func callback;                                                \
+    tag_vtable_p vtable;                                                                \
+    lib_instance_p instance;                                                            \
+    void *userdata;                                                                     \
+    int32_t auto_sync_read_ms;                                                          \
+    int32_t auto_sync_write_ms;                                                         \
+    int32_t size;                                                                       \
+    int32_t tag_id;                                                                     \
+    int connection_group_id;                                                            \
+    int bit;                                                                            \
+    int protocol_type;                                                                  \
+    atomic_bool abort_requested;                                                        \
     /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
      * field below is written under this tag's own per-tag api_mutex -- a different     \
      * lock domain. Packing it into the bitfield run below would race with writes to    \
-     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */  \
-    atomic_bool skip_tickler;                \
-    int8_t event_creation_complete_status;   \
-    int8_t event_deletion_started_status;    \
-    int8_t event_operation_aborted_status;   \
-    int8_t event_read_complete_status;       \
-    int8_t event_read_started_status;        \
-    int8_t event_write_complete_status;      \
-    int8_t event_write_started_status;       \
-    int8_t status;                           \
-    uint8_t allow_field_resize : 1;          \
-    uint8_t event_creation_complete : 1;     \
-    uint8_t event_deletion_started : 1;      \
-    uint8_t event_operation_aborted : 1;     \
-    uint8_t event_read_complete : 1;         \
-    uint8_t event_read_complete_enable : 1;  \
-    uint8_t event_read_started : 1;          \
-    uint8_t event_write_complete : 1;        \
-    uint8_t event_write_complete_enable : 1; \
-    uint8_t event_write_started : 1;         \
-    uint8_t had_created_event : 1;           \
-    uint8_t is_bit : 1;                      \
-    uint8_t read_complete : 1;               \
-    uint8_t read_in_flight : 1;              \
-    uint8_t tag_is_dirty : 1;                \
-    uint8_t write_complete : 1;              \
+     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */ \
+    atomic_bool skip_tickler;                                                           \
+    int8_t event_creation_complete_status;                                              \
+    int8_t event_deletion_started_status;                                               \
+    int8_t event_operation_aborted_status;                                              \
+    int8_t event_read_complete_status;                                                  \
+    int8_t event_read_started_status;                                                   \
+    int8_t event_write_complete_status;                                                 \
+    int8_t event_write_started_status;                                                  \
+    int8_t status;                                                                      \
+    uint8_t allow_field_resize : 1;                                                     \
+    uint8_t event_creation_complete : 1;                                                \
+    uint8_t event_deletion_started : 1;                                                 \
+    uint8_t event_operation_aborted : 1;                                                \
+    uint8_t event_read_complete : 1;                                                    \
+    uint8_t event_read_complete_enable : 1;                                             \
+    uint8_t event_read_started : 1;                                                     \
+    uint8_t event_write_complete : 1;                                                   \
+    uint8_t event_write_complete_enable : 1;                                            \
+    uint8_t event_write_started : 1;                                                    \
+    uint8_t had_created_event : 1;                                                      \
+    uint8_t is_bit : 1;                                                                 \
+    uint8_t read_complete : 1;                                                          \
+    uint8_t read_in_flight : 1;                                                         \
+    uint8_t tag_is_dirty : 1;                                                           \
+    uint8_t write_complete : 1;                                                         \
     uint8_t write_in_flight : 1
 
 
@@ -291,6 +291,27 @@ extern void lib_teardown(void);
  * from any thread at any time; the caller must rc_dec() the result when done,
  * unless it is being transferred into a tag's tag->instance field (in which case
  * the tag's own destructor is the release). */
+/*
+ * tag_range_is_valid
+ *
+ * Is a field of count bytes starting at offset entirely inside the tag buffer?
+ *
+ * The offset and the count both come from the calling application, so they are
+ * assumed hostile.  Note what this deliberately does NOT do: it never computes
+ * offset + count.  That sum can exceed INT_MAX, and signed overflow is undefined
+ * behavior -- a bounds check that overflows to a negative value happily reports
+ * that a wildly out-of-range access is fine.  Instead every operand is forced
+ * non-negative first, which makes tag->size - offset provably in range, and the
+ * comparison is done against the space remaining.
+ */
+static inline bool tag_range_is_valid(plc_tag_p tag, int offset, int count) {
+    if(offset < 0 || count < 0 || tag->size < 0) { return false; }
+
+    /* both operands are now in [0, INT32_MAX], so this subtraction cannot overflow. */
+    return count <= tag->size - offset;
+}
+
+
 extern lib_instance_p lib_instance_acquire(void);
 
 /* Used only by initialize_modules() (init.c): publishes the instance lib_init()

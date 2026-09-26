@@ -597,7 +597,8 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     }
 
     /* encode the path */
-    rc = CIP.encode_path(path, use_connected_msg, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    /* an NJ/NX cannot bridge DH+, so a DH+ segment in the path is rejected. */
+    rc = CIP.encode_path(path, use_connected_msg, CIP_PLC_KIND_OTHER, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
                plc_tag_decode_error(rc));
@@ -812,7 +813,7 @@ int conn_open_socket(omron_conn_p conn) {
 
 
 int conn_register(omron_conn_p conn) {
-    eip_conn_reg_req *req;
+    eip_session_reg_req *req;
     eip_encap *resp;
     int rc = PLCTAG_STATUS_OK;
 
@@ -824,14 +825,14 @@ int conn_register(omron_conn_p conn) {
      * We use the receiving buffer because we do not have a request and nothing can
      * be coming in (we hope) on the socket yet.
      */
-    mem_set(conn->data, 0, sizeof(eip_conn_reg_req));
+    mem_set(conn->data, 0, sizeof(eip_session_reg_req));
 
-    req = (eip_conn_reg_req *)(conn->data);
+    req = (eip_session_reg_req *)(conn->data);
 
     /* fill in the fields of the request */
     req->encap_command = h2le16(OMRON_EIP_REGISTER_CONN);
-    req->encap_length = h2le16(sizeof(eip_conn_reg_req) - sizeof(eip_encap));
-    req->encap_conn_handle = h2le32(/*conn->conn_handle*/ 0);
+    req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap));
+    req->encap_session_handle = h2le32(/*conn->conn_handle*/ 0);
     req->encap_status = h2le32(0);
     req->encap_sender_context = h2le64((uint64_t)0);
     req->encap_options = h2le32(0);
@@ -847,7 +848,7 @@ int conn_register(omron_conn_p conn) {
      */
 
     /* send registration to the gateway */
-    conn->data_size = sizeof(eip_conn_reg_req);
+    conn->data_size = sizeof(eip_session_reg_req);
     conn->data_offset = 0;
 
     rc = send_eip_request(conn, CONN_DEFAULT_TIMEOUT);
@@ -882,7 +883,7 @@ int conn_register(omron_conn_p conn) {
      * after all that, save the conn handle, we will
      * use it in future packets.
      */
-    conn->conn_handle = le2h32(resp->encap_conn_handle);
+    conn->conn_handle = le2h32(resp->encap_session_handle);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
 
@@ -1640,7 +1641,7 @@ int process_requests(omron_conn_p conn) {
 
                     /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must have
                      * been read before, so that its response size is known */
-                    allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
+                    allow_packing = request->allow_packing && !request->first_read;
 
                     /* If the first request is packable, try to pack more requests */
                     if(allow_packing && vector_length(conn->requests) > 0) {
@@ -1659,7 +1660,7 @@ int process_requests(omron_conn_p conn) {
 
                             /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must
                              * have been read before, so that its response size is known */
-                            allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
+                            allow_packing = request->allow_packing && !request->first_read;
                             if(!allow_packing) { break; }
 
                             int next_request_size = get_payload_size(request) + multi_request_overhead;
@@ -1673,7 +1674,7 @@ int process_requests(omron_conn_p conn) {
                             int next_response_space = remaining_response_space - request->response_size - 8 - 2;
 
                             /* Check response space only if fragmented reads are not supported */
-                            if(!request->supports_fragmented_read && next_response_space < 0) { break; }
+                            if(next_response_space < 0) { break; }
 
                             bundled_requests[num_bundled_requests] = request;
                             num_bundled_requests++;
@@ -1848,8 +1849,7 @@ int process_requests(omron_conn_p conn) {
                         (size_t)((uint8_t *)multi_resp - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
                     size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
 
-                    if(offsets_start > (size_t)conn->data_size
-                       || offsets_size > (size_t)conn->data_size - offsets_start) {
+                    if(offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
                                "Response of %d bytes is too short to hold %d packed response offsets!", conn->data_size,
                                num_bundled_requests);
@@ -2307,7 +2307,7 @@ int prepare_request(omron_conn_p conn) {
     /* fill in the fields of the request. */
 
     encap->encap_length = h2le16((uint16_t)payload_size);
-    encap->encap_conn_handle = h2le32(conn->conn_handle);
+    encap->encap_session_handle = h2le32(conn->conn_handle);
     encap->encap_status = h2le32(0);
     encap->encap_options = h2le32(0);
 
@@ -2523,7 +2523,7 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
     {
         eip_encap *resp_header = (eip_encap *)(conn->data);
         uint16_t resp_command = le2h16(resp_header->encap_command);
-        uint32_t resp_handle = le2h32(resp_header->encap_conn_handle);
+        uint32_t resp_handle = le2h32(resp_header->encap_session_handle);
 
         if(conn->req_sent && resp_command != conn->req_encap_command) {
             pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0,
@@ -2673,7 +2673,7 @@ int send_old_forward_open_request(omron_conn_p conn) {
     fo->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
-    fo->encap_conn_handle = h2le32(conn->conn_handle);
+    fo->encap_session_handle = h2le32(conn->conn_handle);
     fo->encap_sender_context = h2le64(++conn->conn_seq_id);
     fo->router_timeout = h2le16(1); /* one second is enough ? */
 
@@ -2754,7 +2754,7 @@ int send_extended_forward_open_request(omron_conn_p conn) {
     fo->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length =
         h2le16((uint16_t)(data - (uint8_t *)(&fo->interface_handle))); /* total length of packet except for encap header */
-    fo->encap_conn_handle = h2le32(conn->conn_handle);
+    fo->encap_session_handle = h2le32(conn->conn_handle);
     fo->encap_sender_context = h2le64(++conn->conn_seq_id);
     fo->router_timeout = h2le16(1); /* one second is enough ? */
 

@@ -196,7 +196,8 @@ typedef enum {
     PLCTAG_MODULE_PLATFORM = 23,
     PLCTAG_MODULE_AB_CONNECTION = 24,
     PLCTAG_MODULE_MB_CONNECTION = 25,
-    PLCTAG_MODULE_OMRON_CONNECTION = 26
+    PLCTAG_MODULE_OMRON_CONNECTION = 26,
+    PLCTAG_MODULE_CIP = 27 /* CIP code shared by every CIP family */
 } plctag_debug_module_t;
 
 

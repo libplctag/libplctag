@@ -33,36 +33,55 @@
 
 #pragma once
 
-/* do these first */
-
-/* they are used in some of these includes */
 #include <libplctag/lib/libplctag.h>
-#include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
+#include <stdbool.h>
+#include <stdint.h>
 
+/*
+ * CIP connection-path and data-type helpers shared by every CIP family.
+ *
+ * Nothing here touches a tag: these operate on caller-owned buffers so that the
+ * same code serves Rockwell, OMRON and anything else speaking CIP.
+ */
 
-struct ab_tag_t {
-    CIP_TAG_BASE_STRUCT;
+/*
+ * Parse a textual connection path into CIP path segments.
+ *
+ * plc_type selects DH+ bridging, which only the PLC-5/SLC/MicroLogix families
+ * support: a DH+ segment against any other family is rejected with
+ * PLCTAG_ERR_BAD_PARAM rather than silently ignored.
+ */
+extern int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size,
+                           int *is_dhp, uint16_t *dhp_dest);
 
-    /* how do we talk to this device? */
-    ab_plc_type_t plc_type;
+/* PLC families that support DH+ bridging, for cip_encode_path()'s plc_type. */
+#define CIP_PLC_KIND_OTHER (0)
+#define CIP_PLC_KIND_DHP_CAPABLE (1)
 
-    /* pointer back to the session */
-    ab_session_p session;
+/* look up the type size in bytes based on the first byte */
+extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
 
-    /* the in-flight request object */
-    ab_request_p req;
+/* look up the element size in bytes based on the first byte */
+extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);
 
-    /* PCCC only: the data file this tag addresses. */
-    pccc_file_t file_type;
+/*
+ * Everything the symbolic-name encoder needs from a tag, so that the encoder
+ * itself does not depend on any family's tag structure.
+ *
+ * The caller owns encoded_name and states its capacity; the encoder never writes
+ * past it.  bit, is_bit and encoded_name_size are outputs, copied back by the
+ * caller because is_bit is a bitfield in the tag and cannot be written through a
+ * pointer.
+ */
+typedef struct {
+    int32_t tag_id;            /* in: for logging only */
+    int elem_count;            /* in */
+    uint8_t *encoded_name;     /* in: caller-owned destination buffer */
+    int encoded_name_capacity; /* in */
+    int encoded_name_size;     /* out */
+    int bit;                   /* out */
+    bool is_bit;               /* out */
+} cip_name_t;
 
-    /*
-     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
-     * the same one, otherwise a late reply to a request that already timed out gets
-     * applied to whatever operation is in flight now.
-     */
-    uint16_t req_pccc_seq_num;
-};
+/* Encode a symbolic tag name into ctx->encoded_name. */
+extern int cip_encode_name(cip_name_t *ctx, const char *name);
