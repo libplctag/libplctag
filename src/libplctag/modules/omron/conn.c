@@ -1065,7 +1065,7 @@ typedef enum {
 
 
 /* watch.status and the ring publish must change together under conn->mutex:
- * omron_connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
+ * connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
  * and watch.status) to seed a freshly created connection tag, and needs the same
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */

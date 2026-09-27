@@ -1272,7 +1272,7 @@ typedef enum {
  * Must only be called from the session handler thread (single writer).
  *
  * watch.status and the ring publish must change together under session_mutex:
- * ab_connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
+ * connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
  * and watch.status) to seed a freshly created connection tag, and needs the same
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */

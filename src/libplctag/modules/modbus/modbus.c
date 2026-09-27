@@ -36,6 +36,7 @@
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/conn_watch.h>
+#include <libplctag/lib/connection_tag.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <limits.h>
 #include <platform.h>
@@ -277,15 +278,6 @@ struct modbus_tag_t {
 
 
 /* Connection tag (@connection) — monitors Modbus TCP connection state */
-typedef struct modbus_connection_tag_s {
-    TAG_BASE_STRUCT;
-    modbus_plc_p plc;
-    int32_t last_conn_state;
-    int32_t event_ring_read_idx;
-    int32_t io_events;
-    bool first_tickler_run;
-} modbus_connection_tag_t;
-typedef modbus_connection_tag_t *modbus_connection_tag_p;
 
 
 /* default string types used for Modbus PLCs. */
@@ -326,11 +318,6 @@ static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
 static plc_tag_p mb_connection_tag_create(attr attribs,
                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                           void *userdata, plc_tag_p src_tag);
-static int mb_connection_tag_abort(plc_tag_p tag);
-static int mb_connection_tag_status(plc_tag_p tag);
-static int mb_connection_tag_tickler(plc_tag_p tag);
-static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result);
-static void mb_connection_tag_destructor(void *ptr);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
 
 /* helper functions */
@@ -383,7 +370,6 @@ static int mb_wake_plc(plc_tag_p p_tag);
 /* data accessors */
 static uint16_t next_seq_id(uint16_t current);
 static struct tag_vtable_t modbus_vtable;
-static struct tag_vtable_t mb_connection_tag_vtable;
 
 
 
@@ -427,8 +413,7 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             }
 
             case TAG_PROTOCOL_MB_CONNECTION: {
-                modbus_connection_tag_p src_device = (modbus_connection_tag_p)src_tag;
-                tag->plc = rc_inc(src_device->plc);
+                tag->plc = rc_inc(((connection_tag_p)src_tag)->conn);
                 break;
             }
 
@@ -3828,7 +3813,7 @@ static struct tag_vtable_t modbus_vtable = {
 
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     /* watch.status and the ring publish must change together under plc->mutex:
-     * mb_connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
+     * connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
      * and watch.status) to seed a freshly created connection tag, and needs the
      * same mutex to avoid reading one from before this transition and the other from
      * after it -- see the comment there. */
@@ -3840,216 +3825,46 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
 }
 
 
-static int mb_connection_tag_abort(plc_tag_p tag) {
-    (void)tag;
-    return PLCTAG_STATUS_OK;
-}
-
-static int mb_connection_tag_status(plc_tag_p tag) {
-    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
-    /* Do NOT tickle here. mb_connection_tag_tickler() must have exactly one caller --
-     * the generic tag_tickler_func() loop -- since it advances dt->event_ring_read_idx
-     * past whatever is currently in the ring on every call. plc_tag_create_impl() calls
-     * ->status() synchronously, in a tight loop, on the creating thread while waiting
-     * for tag creation to finish; if that also ticked, it could drain and mark ring
-     * entries as seen before the real tickler thread ever got a chance to deliver them,
-     * silently dropping the earliest connection-status events (e.g. CONNECTING). */
-    return dt->status;
-}
-
-static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
-    modbus_connection_tag_p dt = (modbus_connection_tag_p)raw_tag;
-
-    if(!dt->plc) { return PLCTAG_STATUS_OK; }
-
-    /* Skip the single tickler cycle where CREATED is queued to prevent
-     * connection events firing before the CREATED callback. */
-    if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
-
-    int32_t read_idx = dt->event_ring_read_idx;
-
-    /* First tickler after CREATED: if the session was already active at creation (late join),
-     * synthesise the creation-time state so the tag is not silently stuck. */
-    if(dt->first_tickler_run) {
-        dt->first_tickler_run = false;
-        if(dt->last_conn_state != PLCTAG_CONN_STATUS_DOWN && dt->callback) {
-            dt->callback(dt->tag_id, dt->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, dt->userdata);
-        }
-    }
-
-    int32_t event_type = 0;
-    int32_t status = 0;
-    while(conn_watch_next(&dt->plc->watch, &read_idx, &event_type, &status)) {
-
-        if(dt->callback) {
-            switch(event_type) {
-                case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
-                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_STARTED, status, dt->userdata); }
-                    break;
-                case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
-                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, status, dt->userdata); }
-                    break;
-                case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
-                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_READ_STARTED, status, dt->userdata); }
-                    break;
-                case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
-                    if(dt->io_events) { dt->callback(dt->tag_id, PLCTAG_EVENT_READ_COMPLETED, status, dt->userdata); }
-                    break;
-                default:
-                    if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
-                        dt->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
-                        dt->callback(dt->tag_id, event_type, PLCTAG_STATUS_OK, dt->userdata);
-                    } else {
-                        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, dt->tag_id, "Unknown ring event type %d.",
-                               (int)event_type);
-                    }
-                    break;
-            }
-        }
-    }
-
-    dt->event_ring_read_idx = read_idx;
-    return PLCTAG_STATUS_OK;
-}
-
-/* A Modbus connection tag carries no PLC data, so its only runtime attribute is the link state. */
-static const attr_def_t mb_connection_tag_attribs[] = {
-    {.name = "connection_status",
-     .type = ATTR_TYPE_INT,
-     .description = "The state of the connection this connection tag monitors, as a plc_tag_conn_status_t.",
-     .get_int = mb_connection_get_connection_status},
-
-    {.name = NULL},
-};
-
-static struct tag_vtable_t mb_connection_tag_vtable = {
-    .abort = mb_connection_tag_abort,
-    .read = NULL,
-    .status = mb_connection_tag_status,
-    .tickler = mb_connection_tag_tickler,
-    .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
-    .attribs = mb_connection_tag_attribs,
-};
-
-static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result) {
-    modbus_connection_tag_p dt = (modbus_connection_tag_p)tag;
-
-    *result = (int32_t)dt->last_conn_state;
-
-    return PLCTAG_STATUS_OK;
-}
-
-static void mb_connection_tag_destructor(void *ptr) {
-    modbus_connection_tag_p dt = (modbus_connection_tag_p)ptr;
-
-    if(dt->plc) {
-        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_DETAIL, dt->tag_id, "Releasing PLC reference.");
-        rc_dec(dt->plc);
-        dt->plc = NULL;
-    }
-
-    if(dt->ext_mutex) {
-        mutex_destroy(&dt->ext_mutex);
-        dt->ext_mutex = NULL;
-    }
-    if(dt->api_mutex) {
-        mutex_destroy(&dt->api_mutex);
-        dt->api_mutex = NULL;
-    }
-    if(dt->tag_cond_wait) {
-        cond_destroy(&dt->tag_cond_wait);
-        dt->tag_cond_wait = NULL;
-    }
-    if(dt->byte_order && dt->byte_order->is_allocated) {
-        mem_free(dt->byte_order);
-        dt->byte_order = NULL;
-    }
-    if(dt->data) {
-        mem_free(dt->data);
-        dt->data = NULL;
-    }
-
-    if(dt->instance) {
-        rc_dec(dt->instance);
-        dt->instance = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, dt->tag_id, "Done.");
-}
-
 static plc_tag_p mb_connection_tag_create(attr attribs,
                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                           void *userdata, plc_tag_p src_tag) {
-    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, 0, "Starting.");
+    connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_MB_CONNECTION,
+                                  .debug_module = DEBUG_MODULE_MB_CONNECTION,
+                                  .conn_rc = PLCTAG_STATUS_OK};
+    modbus_plc_p plc = NULL;
 
-    modbus_connection_tag_p dt = (modbus_connection_tag_p)rc_alloc(sizeof(modbus_connection_tag_t), mb_connection_tag_destructor);
-    if(!dt) { return NULL; }
-
-    dt->vtable = &mb_connection_tag_vtable;
-    dt->protocol_type = TAG_PROTOCOL_MB_CONNECTION;
-    dt->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
-    dt->io_events = attr_get_int(attribs, "io_events", 1);
-
-    int32_t rc = plc_tag_generic_init_tag((plc_tag_p)dt, attribs, tag_callback_func, userdata);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
-        rc_dec(dt);
-        return NULL;
-    }
-
-    bool plc_is_new = false;
+    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
 
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_MODBUS: dt->plc = rc_inc(((modbus_tag_p)src_tag)->plc); break;
+            case TAG_PROTOCOL_MODBUS: plc = rc_inc(((modbus_tag_p)src_tag)->plc); break;
 
-            case TAG_PROTOCOL_MB_CONNECTION: dt->plc = rc_inc(((modbus_connection_tag_p)src_tag)->plc); break;
+            case TAG_PROTOCOL_MB_CONNECTION: plc = rc_inc(((connection_tag_p)src_tag)->conn); break;
 
-            default: dt->plc = NULL; break;
+            default: plc = NULL; break;
         }
 
-        rc = dt->plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED;
+        args.conn_rc = (plc ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED);
     } else {
-        rc = find_or_create_plc(attribs, &dt->plc, &plc_is_new);
+        bool plc_is_new = false;
+
+        args.conn_rc = find_or_create_plc(attribs, &plc, &plc_is_new);
+        if(args.conn_rc != PLCTAG_STATUS_OK) { plc = NULL; }
+
+        args.conn_is_new = plc_is_new;
     }
 
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_WARN, 0, "Unable to find or create PLC, error %s!", plc_tag_decode_error(rc));
-        dt->status = (int8_t)rc;
-        tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, (int8_t)rc);
-        return (plc_tag_p)dt;
+    if(plc) {
+        args.conn = plc;
+        args.watch = &plc->watch;
+        args.conn_mutex = plc->mutex;
     }
 
-    if(plc_is_new) {
-        /* We just created this PLC (find_or_create_plc() initializes connection_status to
-         * DOWN and the ring write index to 0 before ever starting its handler thread), so
-         * we know its exact birth state without racing that thread for a snapshot: it may
-         * already have raced through CONNECTING -> UP by the time we get here (a fast local
-         * connection can do that before this thread is even scheduled again), and reading
-         * "current" values at that point would silently skip every transition that already
-         * happened, exactly like the late-join case below -- except this tag was never
-         * really a late joiner, it just lost a scheduling race with the thread it started. */
-        dt->event_ring_read_idx = 0;
-        dt->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
-    } else {
-        /* Joining a PLC that already existed (found by find_or_create_plc(), or shared via
-         * src_tag): take both values as one atomic snapshot under plc->mutex (see the comment
-         * in mb_plc_set_conn_status()) so we get a real, consistent point-in-time state rather
-         * than a read_idx from before a transition paired with a status from after it. */
-        critical_block(dt->plc->mutex) {
-            dt->event_ring_read_idx = conn_watch_read_idx(&dt->plc->watch);
-            dt->last_conn_state = atomic_get_int32(&dt->plc->watch.status);
-        }
-    }
-    dt->first_tickler_run = true;
+    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_DETAIL, 0, "Done.");
 
-    tag_raise_event((plc_tag_p)dt, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
-
-    pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_INFO, 0, "Done. Initial connection status: %d.", dt->last_conn_state);
-    return (plc_tag_p)dt;
+    return connection_tag_create(attribs, &args, tag_callback_func, userdata);
 }
+
 
 
 /****** Library level functions. *******/

@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,55 +33,53 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/* Omron's wrapper around the shared connection tag.  See lib/connection_tag.c. */
+/*
+ * One connection-status tag, shared by every protocol.
+ *
+ * A connection tag carries no PLC data.  It exposes one attribute,
+ * "connection_status", and turns the events its connection publishes into tag
+ * callbacks.  Nothing in here is protocol-specific: the protocol finds or
+ * creates its own connection object and hands over the three things this code
+ * reads from it.
+ */
 
-#include "omron_connection_tag.h"
-#include <libplctag/api/libplctag.h>
-#include <libplctag/lib/connection_tag.h>
+#include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/tag.h>
+#include <platform.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
-#include <utils/rc.h>
 
 
-plc_tag_p omron_connection_tag_create(attr attribs,
-                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata, plc_tag_p src_tag) {
-    connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_OMRON_CONNECTION,
-                                  .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
-                                  .conn_rc = PLCTAG_STATUS_OK};
-    omron_conn_p conn = NULL;
+typedef struct {
+    TAG_BASE_STRUCT;
 
-    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
+    void *conn;                 /* the connection object, held by refcount; NULL if creation failed */
+    conn_watch_t *watch;        /* &conn->watch */
+    int32_t last_conn_state;    /* last state delivered to the callback */
+    int32_t ring_read_idx;      /* last ring entry this tag has processed */
+    int32_t io_events;          /* 1 = report connection reads and writes, 0 = suppress */
+    bool first_tickler_run;     /* true until the first post-CREATED tickler */
+    debug_module_t debug_module;
+} connection_tag_t;
 
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_OMRON: conn = rc_inc(((omron_tag_p)src_tag)->session); break;
+typedef connection_tag_t *connection_tag_p;
 
-            case TAG_PROTOCOL_OMRON_CONNECTION: conn = rc_inc(((connection_tag_p)src_tag)->conn); break;
 
-            default: conn = NULL; break;
-        }
+/* what the protocol hands over about the connection it found or created */
+typedef struct {
+    tag_protocol_t protocol_type;
+    debug_module_t debug_module;
 
-        args.conn_rc = (conn ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED);
-    } else {
-        int new_conn = 0;
+    void *conn;          /* rc-held connection object, or NULL if it could not be obtained */
+    conn_watch_t *watch; /* &conn->watch; unused when conn is NULL */
+    mutex_p conn_mutex;  /* the connection's own mutex; unused when conn is NULL */
+    bool conn_is_new;    /* true when this call created the connection rather than joining one */
+    int32_t conn_rc;     /* the failure that left conn NULL */
+} connection_tag_args_t;
 
-        args.conn_rc = conn_find_or_create(&conn, attribs, &new_conn);
-        if(args.conn_rc != PLCTAG_STATUS_OK) { conn = NULL; }
 
-        args.conn_is_new = (new_conn != 0);
-    }
-
-    if(conn) {
-        args.conn = conn;
-        args.watch = &conn->watch;
-        args.conn_mutex = conn->mutex;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_DETAIL, 0, "Done.");
-
-    return connection_tag_create(attribs, &args, tag_callback_func, userdata);
-}
+extern plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
+                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                       void *userdata);
