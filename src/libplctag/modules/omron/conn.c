@@ -665,17 +665,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     conn->conn_seq_id = (random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
     conn->dhp_dest = dhp_dest;
-    atomic_init_int32(&conn->connection_status, PLCTAG_CONN_STATUS_DOWN);
-
-    /* conn_event_ring_write_idx always points at the ring slot holding the current
-     * state, not the next free slot: conn_set_connection_status() dedups a new
-     * event against ring[write_idx] before writing ring[write_idx+1], and a
-     * connection tag seeds event_ring_read_idx to this same index to mean "I've
-     * already seen this one." Both of those need ring[0] to hold a real DOWN
-     * entry, not the zeroed garbage rc_alloc() leaves behind. */
-    conn->conn_event_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
-    conn->conn_event_ring[0].status = PLCTAG_STATUS_OK;
-    atomic_init_int32(&conn->conn_event_ring_write_idx, 0);
+    conn_watch_init(&conn->watch, PLCTAG_CONN_STATUS_DOWN);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
     conn->connection_group_id = connection_group_id;
@@ -1074,43 +1064,23 @@ typedef enum {
 } conn_state_t;
 
 
-/* connection_status and the ring publish must change together under conn->mutex:
- * omron_connection_tag_create() takes a paired snapshot of both (conn_event_ring_write_idx
- * and connection_status) to seed a freshly created connection tag, and needs the same
+/* watch.status and the ring publish must change together under conn->mutex:
+ * omron_connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
+ * and watch.status) to seed a freshly created connection tag, and needs the same
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */
 static inline void conn_set_connection_status(omron_conn_p conn, int32_t new_status) {
     critical_block(conn->mutex) {
-        int32_t old_status = atomic_get_int32(&conn->connection_status);
+        int32_t old_status = atomic_get_int32(&conn->watch.status);
 
         if(old_status != new_status) {
-            atomic_set_int32(&conn->connection_status, new_status);
-            int32_t cur_idx = atomic_get_int32(&conn->conn_event_ring_write_idx);
-            int32_t event_type = new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET;
-
-            if(conn->conn_event_ring[cur_idx].event_type == event_type
-               && conn->conn_event_ring[cur_idx].status == PLCTAG_STATUS_OK) {
-                break;
-            }
-
-            cur_idx = (cur_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-            conn->conn_event_ring[cur_idx].event_type = event_type;
-            conn->conn_event_ring[cur_idx].status = PLCTAG_STATUS_OK;
-            atomic_set_int32(&conn->conn_event_ring_write_idx, cur_idx);
-            plc_tag_tickler_wake();
+            atomic_set_int32(&conn->watch.status, new_status);
+            conn_watch_publish(&conn->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
         }
     }
 }
 
 
-static inline void conn_publish_event(omron_conn_p conn, int32_t event_type, int32_t status) {
-    int32_t cur_idx = atomic_get_int32(&conn->conn_event_ring_write_idx);
-    cur_idx = (cur_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-    conn->conn_event_ring[cur_idx].event_type = event_type;
-    conn->conn_event_ring[cur_idx].status = status;
-    atomic_set_int32(&conn->conn_event_ring_write_idx, cur_idx);
-    plc_tag_tickler_wake();
-}
 
 
 int64_t calc_retry_time(unsigned int retry_count) {
@@ -1686,22 +1656,22 @@ int process_requests(omron_conn_p conn) {
             }
 
             /* send the request */
-            conn_publish_event(conn, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK);
+            conn_watch_publish(&conn->watch, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK);
             if((rc = send_eip_request(conn, CONN_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                conn_publish_event(conn, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, rc);
+                conn_watch_publish(&conn->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, rc);
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error sending packet %s!", plc_tag_decode_error(rc));
                 break;
             }
-            conn_publish_event(conn, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
+            conn_watch_publish(&conn->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
 
             /* wait for the response */
-            conn_publish_event(conn, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK);
+            conn_watch_publish(&conn->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK);
             if((rc = recv_eip_response(conn, CONN_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                conn_publish_event(conn, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc);
+                conn_watch_publish(&conn->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc);
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error receiving packet response %s!", plc_tag_decode_error(rc));
                 break;
             }
-            conn_publish_event(conn, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, PLCTAG_STATUS_OK);
+            conn_watch_publish(&conn->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, PLCTAG_STATUS_OK);
 
             /*
              * check the CIP status, but only if this is a bundled

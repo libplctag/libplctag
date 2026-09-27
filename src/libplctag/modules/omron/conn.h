@@ -35,6 +35,7 @@
 
 #include <stdbool.h>
 
+#include <libplctag/lib/conn_watch.h>
 #include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <utils/atomic_utils.h>
@@ -64,8 +65,6 @@
  * fields aligned.
  */
 #define MAX_CONN_HOST_LEN (264)
-#define OMRON_CONN_EVENT_RING_SIZE (64)
-#define OMRON_CONN_EVENT_RING_MASK (OMRON_CONN_EVENT_RING_SIZE - 1)
 
 
 struct omron_conn_t {
@@ -135,12 +134,8 @@ struct omron_conn_t {
     mutex_p mutex;
     cond_p wait_cond;
 
-    /* connection status - readable by tags via atomics */
-    atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
-
-    /* event ring for device tags (single writer: connection handler thread) */
-    tag_conn_event_t conn_event_ring[OMRON_CONN_EVENT_RING_SIZE];
-    atomic_int32_t conn_event_ring_write_idx;
+    /* connection status and event ring - what connection tags observe */
+    conn_watch_t watch;
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */

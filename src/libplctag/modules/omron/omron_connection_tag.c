@@ -33,6 +33,7 @@
 
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/omron/conn.h>
 #include <libplctag/modules/omron/omron_common.h>
@@ -149,8 +150,8 @@ extern plc_tag_p omron_connection_tag_create(attr attribs,
          * a read_idx from before a transition paired with a status from after it --
          * see the comment in conn_set_connection_status(). */
         critical_block(tag->session->mutex) {
-            tag->event_ring_read_idx = atomic_get_int32(&tag->session->conn_event_ring_write_idx);
-            tag->last_conn_state = atomic_get_int32(&tag->session->connection_status);
+            tag->event_ring_read_idx = conn_watch_read_idx(&tag->session->watch);
+            tag->last_conn_state = atomic_get_int32(&tag->session->watch.status);
         }
     }
 
@@ -189,7 +190,6 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
 
     if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
 
-    int32_t write_idx = atomic_get_int32(&tag->session->conn_event_ring_write_idx);
     int32_t read_idx = tag->event_ring_read_idx;
 
     /* First tickler after CREATED: if the session was already active at creation (late join),
@@ -201,10 +201,9 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
         }
     }
 
-    while(read_idx != write_idx) {
-        read_idx = (read_idx + 1) & OMRON_CONN_EVENT_RING_MASK;
-        int32_t event_type = tag->session->conn_event_ring[read_idx].event_type;
-        int32_t status = tag->session->conn_event_ring[read_idx].status;
+    int32_t event_type = 0;
+    int32_t status = 0;
+    while(conn_watch_next(&tag->session->watch, &read_idx, &event_type, &status)) {
 
         if(tag->callback) {
             switch(event_type) {
@@ -237,7 +236,7 @@ static int omron_connection_tag_tickler(plc_tag_p raw_tag) {
         }
     }
 
-    tag->event_ring_read_idx = write_idx;
+    tag->event_ring_read_idx = read_idx;
     return PLCTAG_STATUS_OK;
 }
 

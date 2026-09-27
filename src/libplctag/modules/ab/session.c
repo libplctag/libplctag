@@ -37,6 +37,7 @@
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/lib/conn_watch.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/ab/tag.h>
 #include <limits.h>
@@ -150,7 +151,6 @@ static int send_extended_forward_open_request(ab_session_p session);
 static int receive_forward_open_response(ab_session_p session);
 static void request_destroy(void *req_arg);
 static int session_request_increase_buffer(ab_request_p request, int new_capacity);
-static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason);
 
 
 static volatile mutex_p session_mutex = NULL;
@@ -875,18 +875,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     session->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     session->is_dhp = is_dhp;
     session->dhp_dest = dhp_dest;
-    atomic_init_int32(&session->connection_status, PLCTAG_CONN_STATUS_DOWN);
+    conn_watch_init(&session->watch, PLCTAG_CONN_STATUS_DOWN);
     atomic_init_int32(&session->connection_status_reason, PLCTAG_STATUS_OK);
-
-    /* conn_status_ring_write_idx always points at the ring slot holding the
-     * current state, not the next free slot: session_publish_event() dedups a new
-     * event against ring[write_idx] before writing ring[write_idx+1], and a
-     * connection tag seeds status_ring_read_idx to this same index to mean "I've
-     * already seen this one." Both of those need ring[0] to hold a real DOWN
-     * entry, not the zeroed garbage rc_alloc() leaves behind. */
-    session->conn_status_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
-    session->conn_status_ring[0].status = PLCTAG_STATUS_OK;
-    atomic_init_int32(&session->conn_status_ring_write_idx, 0);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
     session->connection_group_id = connection_group_id;
@@ -1276,41 +1266,23 @@ typedef enum {
 } session_state_t;
 
 
-static inline void session_publish_event(ab_session_p session, int32_t event_type, int32_t status, int32_t reason) {
-    int32_t write_idx = atomic_get_int32(&session->conn_status_ring_write_idx);
-
-    if(session->conn_status_ring[write_idx].event_type == event_type && session->conn_status_ring[write_idx].status == status) {
-        return;
-    }
-
-    write_idx = (write_idx + 1) & SESSION_CONN_STATUS_RING_SIZE_MASK;
-
-    /* write data to the slot before publishing the new index */
-    session->conn_status_ring[write_idx].event_type = event_type;
-    session->conn_status_ring[write_idx].status = status;
-    session->conn_status_ring[write_idx].reason = reason;
-
-    /* atomic store acts as the release point; readers will not see this slot until after this */
-    atomic_set_int32(&session->conn_status_ring_write_idx, write_idx);
-    plc_tag_tickler_wake();
-}
 
 
 /* Set connection status and reason atomics, and push a ring buffer entry if the status changed.
  * Must only be called from the session handler thread (single writer).
  *
- * connection_status and the ring publish must change together under session_mutex:
- * ab_connection_tag_create() takes a paired snapshot of both (conn_status_ring_write_idx
- * and connection_status) to seed a freshly created connection tag, and needs the same
+ * watch.status and the ring publish must change together under session_mutex:
+ * ab_connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
+ * and watch.status) to seed a freshly created connection tag, and needs the same
  * mutex to avoid reading one from before this transition and the other from after it --
  * see the comment there. */
 static inline void session_set_connection_status(ab_session_p session, int32_t new_status, int32_t new_reason) {
     critical_block(session->session_mutex) {
-        int32_t old_status = atomic_get_int32(&session->connection_status);
+        int32_t old_status = atomic_get_int32(&session->watch.status);
         atomic_set_int32(&session->connection_status_reason, new_reason);
-        atomic_set_int32(&session->connection_status, new_status);
+        atomic_set_int32(&session->watch.status, new_status);
         if(old_status != new_status) {
-            session_publish_event(session, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK, new_reason);
+            conn_watch_publish(&session->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
         }
     }
 }
@@ -2555,7 +2527,7 @@ int send_eip_request(ab_session_p session, int timeout) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
+    conn_watch_publish(&session->watch, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK);
 
     if(timeout > 0) {
         timeout_time = time_ms() + timeout;
@@ -2583,7 +2555,7 @@ int send_eip_request(ab_session_p session, int timeout) {
     } else {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Packet of %u bytes is too small to hold an EIP header!",
                session->data_size);
-        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_ERR_TOO_SMALL, PLCTAG_ERR_TOO_SMALL);
+        conn_watch_publish(&session->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_ERR_TOO_SMALL);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -2608,25 +2580,25 @@ int send_eip_request(ab_session_p session, int timeout) {
     if(atomic_get_int32(&session->terminating)) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session is terminating.");
         final_rc = PLCTAG_ERR_ABORT;
-        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
+        conn_watch_publish(&session->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc);
         return final_rc;
     }
 
     if(rc < 0) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error, %d, writing socket!", rc);
         final_rc = rc;
-        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
+        conn_watch_publish(&session->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc);
         return final_rc;
     }
 
     if(timeout_time <= time_ms()) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting to send data!");
         final_rc = PLCTAG_ERR_TIMEOUT;
-        session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc, final_rc);
+        conn_watch_publish(&session->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, final_rc);
         return final_rc;
     }
 
-    session_publish_event(session, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
+    conn_watch_publish(&session->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
@@ -2654,7 +2626,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK, PLCTAG_STATUS_OK);
+    conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK);
 
 
     if(timeout > 0) {
@@ -2693,7 +2665,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                            "Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
                     final_rc = PLCTAG_ERR_TOO_LARGE;
-                    session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+                    conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
                     return final_rc;
                 }
             }
@@ -2704,7 +2676,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                 /* error! */
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Error reading socket! rc=%d", rc);
                 final_rc = rc;
-                session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+                conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
                 return final_rc;
             }
         }
@@ -2713,14 +2685,14 @@ int recv_eip_response(ab_session_p session, int timeout) {
     if(atomic_get_int32(&session->terminating)) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session is terminating, returning...");
         final_rc = PLCTAG_ERR_ABORT;
-        session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+        conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
         return final_rc;
     }
 
     if(timeout_time <= time_ms()) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Timed out waiting for data to read!");
         final_rc = PLCTAG_ERR_TIMEOUT;
-        session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+        conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
         return final_rc;
     }
 
@@ -2746,7 +2718,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                    "Received EIP command %04" PRIx16 " in response to command %04" PRIx16 "!", resp_command,
                    session->req_encap_command);
             final_rc = PLCTAG_ERR_BAD_DATA;
-            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
             return final_rc;
         }
 
@@ -2759,7 +2731,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                    "Received a response for session handle %" PRIx32 " but this session is %" PRIx32 "!", resp_handle,
                    session->session_handle);
             final_rc = PLCTAG_ERR_BAD_DATA;
-            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
             return final_rc;
         }
 
@@ -2777,7 +2749,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
                    "Received a response with sender context %" PRIx64 " but we sent %" PRIx64 "!", session->resp_seq_id,
                    session->req_seq_id);
             final_rc = PLCTAG_ERR_BAD_DATA;
-            session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc, final_rc);
+            conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, final_rc);
             return final_rc;
         }
     }
@@ -2792,7 +2764,7 @@ int recv_eip_response(ab_session_p session, int timeout) {
     /* check status. */
     if(le2h32(((eip_encap *)(session->data))->encap_status) != AB_EIP_OK) { rc = PLCTAG_ERR_BAD_STATUS; }
 
-    session_publish_event(session, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc, rc);
+    conn_watch_publish(&session->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, rc);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 

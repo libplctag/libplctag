@@ -35,6 +35,7 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_watch.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <limits.h>
 #include <platform.h>
@@ -96,8 +97,6 @@ static inline int64_t time_us(void) {
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
 
-#define MB_CONN_EVENT_RING_SIZE 64
-#define MB_CONN_EVENT_RING_MASK (MB_CONN_EVENT_RING_SIZE - 1)
 
 struct modbus_plc_t {
     struct modbus_plc_t *next;
@@ -109,12 +108,8 @@ struct modbus_plc_t {
     /* Count of tags currently attached to this PLC */
     atomic_int32_t tag_count;
 
-    /* connection status - readable by tags via atomics */
-    atomic_int32_t connection_status; /* plc_tag_conn_status_t values */
-
-    /* event ring for device tags (single writer: PLC handler thread) */
-    tag_conn_event_t conn_event_ring[MB_CONN_EVENT_RING_SIZE];
-    atomic_int32_t conn_event_ring_write_idx;
+    /* connection status and event ring - what connection tags observe */
+    conn_watch_t watch;
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
     int64_t disconnect_at_time_ms; /* Calculated deadline for disconnection based on inactivity timeout */
@@ -336,7 +331,6 @@ static int mb_connection_tag_status(plc_tag_p tag);
 static int mb_connection_tag_tickler(plc_tag_p tag);
 static int32_t mb_connection_get_connection_status(plc_tag_p tag, int32_t *result);
 static void mb_connection_tag_destructor(void *ptr);
-static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status);
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status);
 
 /* helper functions */
@@ -757,17 +751,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
                     atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
-                    atomic_init_int32(&(*plc)->connection_status, PLCTAG_CONN_STATUS_DOWN);
-
-                    /* conn_event_ring_write_idx always points at the ring slot holding the
-                     * current state, not the next free slot: mb_plc_publish_event() dedups
-                     * a new event against ring[write_idx] before writing ring[write_idx+1],
-                     * and a connection tag seeds event_ring_read_idx to this same index to
-                     * mean "I've already seen this one." Both of those need ring[0] to hold
-                     * a real DOWN entry, not the zeroed garbage rc_alloc() leaves behind. */
-                    (*plc)->conn_event_ring[0].event_type = PLCTAG_CONN_STATUS_DOWN + PLCTAG_EVENT_CONN_STATUS_OFFSET;
-                    (*plc)->conn_event_ring[0].status = PLCTAG_STATUS_OK;
-                    atomic_init_int32(&(*plc)->conn_event_ring_write_idx, 0);
+                    conn_watch_init(&(*plc)->watch, PLCTAG_CONN_STATUS_DOWN);
 
                     /* Calculate initial disconnect deadline */
                     (*plc)->cached_inactivity_timeout_ms = atomic_get_int32(&(*plc)->connection_inactivity_timeout_ms);
@@ -1289,14 +1273,14 @@ THREAD_FUNC(modbus_plc_handler) {
             case PLC_SEND_REQUEST:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_SEND_REQUEST state.");
 
-                mb_plc_publish_event(plc, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK);
+                conn_watch_publish(&plc->watch, TAG_CONN_EVENT_SEND_REQUEST_STARTED, PLCTAG_STATUS_OK);
                 {
                     int64_t send_start_us = time_us();
                     rc = send_request(plc);
                     plc->cycle_send_time_sum_us += (time_us() - send_start_us);
                 }
                 if(rc == PLCTAG_STATUS_OK) {
-                    mb_plc_publish_event(plc, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
+                    conn_watch_publish(&plc->watch, TAG_CONN_EVENT_SEND_REQUEST_COMPLETED, PLCTAG_STATUS_OK);
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Request sent, going to back to state PLC_READY.");
                     plc->cycle_count++;
 
@@ -1324,11 +1308,11 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_RECEIVE_RESPONSE state.");
 
                 /* get a packet */
-                mb_plc_publish_event(plc, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK);
+                conn_watch_publish(&plc->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED, PLCTAG_STATUS_OK);
                 rc = receive_response(plc);
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Response ready, going back to PLC_READY state.");
-                    mb_plc_publish_event(plc, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, PLCTAG_STATUS_OK);
+                    conn_watch_publish(&plc->watch, TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED, PLCTAG_STATUS_OK);
                     atomic_set_bool(&plc->flags.response_ready, true);
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_STATUS_PENDING) {
@@ -3695,7 +3679,7 @@ static int32_t mb_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
 
     /* no PLC means the tag is not connected, which is a state and not an error. */
-    *result = (tag->plc ? atomic_get_int32(&tag->plc->connection_status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
+    *result = (tag->plc ? atomic_get_int32(&tag->plc->watch.status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
 
     return PLCTAG_STATUS_OK;
 }
@@ -3841,28 +3825,17 @@ static struct tag_vtable_t modbus_vtable = {
 
 /****** Modbus connection tag (@connection) implementation *******/
 
-static void mb_plc_publish_event(modbus_plc_p plc, int32_t event_type, int32_t status) {
-    int32_t cur_idx = atomic_get_int32(&plc->conn_event_ring_write_idx);
-
-    if(plc->conn_event_ring[cur_idx].event_type == event_type && plc->conn_event_ring[cur_idx].status == status) { return; }
-
-    int32_t idx = (cur_idx + 1) & MB_CONN_EVENT_RING_MASK;
-    plc->conn_event_ring[idx].event_type = event_type;
-    plc->conn_event_ring[idx].status = status;
-    atomic_set_int32(&plc->conn_event_ring_write_idx, idx);
-    plc_tag_tickler_wake();
-}
 
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
-    /* connection_status and the ring publish must change together under plc->mutex:
-     * mb_connection_tag_create() takes a paired snapshot of both (event_ring_write_idx
-     * and connection_status) to seed a freshly created connection tag, and needs the
+    /* watch.status and the ring publish must change together under plc->mutex:
+     * mb_connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
+     * and watch.status) to seed a freshly created connection tag, and needs the
      * same mutex to avoid reading one from before this transition and the other from
      * after it -- see the comment there. */
     critical_block(plc->mutex) {
-        int32_t old_status = atomic_get_int32(&plc->connection_status);
-        atomic_set_int32(&plc->connection_status, new_status);
-        if(old_status != new_status) { mb_plc_publish_event(plc, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+        int32_t old_status = atomic_get_int32(&plc->watch.status);
+        atomic_set_int32(&plc->watch.status, new_status);
+        if(old_status != new_status) { conn_watch_publish(&plc->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
     }
 }
 
@@ -3893,7 +3866,6 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
      * connection events firing before the CREATED callback. */
     if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
 
-    int32_t write_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
     int32_t read_idx = dt->event_ring_read_idx;
 
     /* First tickler after CREATED: if the session was already active at creation (late join),
@@ -3905,10 +3877,9 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
         }
     }
 
-    while(read_idx != write_idx) {
-        read_idx = (read_idx + 1) & MB_CONN_EVENT_RING_MASK;
-        int32_t event_type = dt->plc->conn_event_ring[read_idx].event_type;
-        int32_t status = dt->plc->conn_event_ring[read_idx].status;
+    int32_t event_type = 0;
+    int32_t status = 0;
+    while(conn_watch_next(&dt->plc->watch, &read_idx, &event_type, &status)) {
 
         if(dt->callback) {
             switch(event_type) {
@@ -3937,7 +3908,7 @@ static int mb_connection_tag_tickler(plc_tag_p raw_tag) {
         }
     }
 
-    dt->event_ring_read_idx = write_idx;
+    dt->event_ring_read_idx = read_idx;
     return PLCTAG_STATUS_OK;
 }
 
@@ -4068,8 +4039,8 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
          * in mb_plc_set_conn_status()) so we get a real, consistent point-in-time state rather
          * than a read_idx from before a transition paired with a status from after it. */
         critical_block(dt->plc->mutex) {
-            dt->event_ring_read_idx = atomic_get_int32(&dt->plc->conn_event_ring_write_idx);
-            dt->last_conn_state = atomic_get_int32(&dt->plc->connection_status);
+            dt->event_ring_read_idx = conn_watch_read_idx(&dt->plc->watch);
+            dt->last_conn_state = atomic_get_int32(&dt->plc->watch.status);
         }
     }
     dt->first_tickler_run = true;

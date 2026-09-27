@@ -781,7 +781,7 @@ static int32_t omron_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     omron_tag_p tag = (omron_tag_p)raw_tag;
 
     /* no connection means the tag is not connected, which is a state and not an error. */
-    *result = (tag->session ? atomic_get_int32(&tag->session->connection_status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
+    *result = (tag->session ? atomic_get_int32(&tag->session->watch.status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
 
     return PLCTAG_STATUS_OK;
 }
