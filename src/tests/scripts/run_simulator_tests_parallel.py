@@ -845,8 +845,8 @@ def build_manifest() -> Manifest:
                  r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong EIP command in reply", "eip_cmd", ogw, omron_corrupt_tag,
                  r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=omron_corrupt_args)
-    corrupt_test(sec, "Omron wrong EIP connection handle", "session", ogw, omron_corrupt_tag,
-                 r"Received a response for connection handle [0-9a-f]+ but this connection is", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron wrong EIP session handle", "session", ogw, omron_corrupt_tag,
+                 r"Received a response for session handle [0-9a-f]+ but this session is", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong sender context echoed", "context", ogw, omron_corrupt_tag,
                  r"Received a response with sender context [0-9a-f]+ but we sent", plc_args=omron_corrupt_args)
 

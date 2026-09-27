@@ -56,6 +56,35 @@
 #include <utils/vector.h>
 
 
+/* how long to block in one socket read or write before checking for shutdown */
+#define SOCKET_WAIT_TIMEOUT_MS (20)
+
+/* default timeout for a connection-level exchange such as Register or Forward Open */
+#define SESSION_DEFAULT_TIMEOUT (2000)
+
+
+/* EtherNet/IP encapsulation and Forward Open constants, common to every CIP dialect. */
+#define CIP_EIP_DEFAULT_PORT (44818)
+#define CIP_EIP_OK (0)
+#define CIP_EIP_CONNECTED_SEND ((uint16_t)0x0070)
+#define CIP_EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
+#define CIP_EIP_ITEM_NAI ((uint16_t)0x0000) /* NULL address item */
+#define CIP_EIP_ITEM_UDI ((uint16_t)0x00B2) /* unconnected data item */
+#define CIP_EIP_CMD_FORWARD_CLOSE ((uint8_t)0x4E)
+#define CIP_EIP_CMD_FORWARD_OPEN ((uint8_t)0x54)
+#define CIP_EIP_CMD_FORWARD_OPEN_EX ((uint8_t)0x5B)
+#define CIP_EIP_CONN_PARAM ((uint16_t)0x4200)
+#define CIP_EIP_CONN_PARAM_EX ((uint32_t)0x42000000)
+#define CIP_EIP_PLC5_PARAM ((uint16_t)0x4302)
+#define CIP_EIP_RPI (1000000) /* in microseconds */
+#define CIP_EIP_SECS_PER_TICK (0x0A)
+#define CIP_EIP_TIMEOUT_TICKS (0x0E)
+#define CIP_EIP_TIMEOUT_MULTIPLIER (0x03)
+#define CIP_EIP_TRANSPORT_CLASS_T3 ((uint8_t)0xA3)
+#define CIP_EIP_VENDOR_ID (0xF33D)      /* tres 1337 */
+#define CIP_EIP_VENDOR_SN (0x21504345)  /* the string !PCE */
+
+
 /*
  * The smallest payload a plain CIP connection can still issue a request in.
  * Every family has a fixed per-request overhead; below this there is no room
@@ -239,3 +268,17 @@ extern int session_close_socket(cip_conn_p conn);
 extern void cip_request_destroy(void *req_arg);
 extern int session_request_increase_buffer(cip_request_p request, int new_capacity);
 extern int session_get_available_cip_payload_space(cip_conn_p conn);
+
+extern int send_eip_request(cip_conn_p conn, int timeout);
+extern int recv_eip_response(cip_conn_p conn, int timeout);
+extern int send_extended_forward_open_request(cip_conn_p conn);
+extern int send_old_forward_open_request(cip_conn_p conn);
+extern int send_forward_open_request(cip_conn_p conn);
+extern int send_forward_close_req(cip_conn_p conn);
+extern int recv_forward_close_resp(cip_conn_p conn);
+extern int perform_forward_close(cip_conn_p conn);
+extern int session_open_socket(cip_conn_p conn);
+extern int prepare_request(cip_conn_p conn);
+extern int session_unregister(cip_conn_p conn);
+extern int get_payload_size(cip_request_p request);
+extern int purge_aborted_requests_unsafe(cip_conn_p conn);

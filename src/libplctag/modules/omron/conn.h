@@ -44,7 +44,6 @@
 
 /* #define MAX_CONN_HOST    (128) */
 
-#define SESSION_DEFAULT_TIMEOUT (2000)
 #define SESSION_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
 
 #define MAX_PACKET_SIZE_EX (44 + 4002)
@@ -58,7 +57,7 @@
 /*
  * Longest gateway string we will copy into a conn, NUL included.
  *
- * The attribute is "host[:port]" and is stored whole -- conn_open_socket() splits it at
+ * The attribute is "host[:port]" and is stored whole -- session_open_socket() splits it at
  * connect time rather than at create time.  A DNS name is at most 253 characters in dotted
  * form (the familiar 255 is the wire encoding, which adds a length byte per label and a
  * terminating zero), so 253 + ":65535" + NUL is 260.  Rounded up to keep the following
