@@ -56,6 +56,14 @@
 #include <utils/vector.h>
 
 
+/* bytes of encap header and CPF connected header ahead of the CIP payload */
+#define EIP_CIP_PREFIX_SIZE (44)
+
+/* connection retry backoff */
+#define RETRY_WAIT_INITIAL_MS (100)
+#define RETRY_WAIT_MAX_MS (10000)
+
+
 /* how long to block in one socket read or write before checking for shutdown */
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 
@@ -70,6 +78,11 @@
 #define CIP_EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
 #define CIP_EIP_ITEM_NAI ((uint16_t)0x0000) /* NULL address item */
 #define CIP_EIP_ITEM_UDI ((uint16_t)0x00B2) /* unconnected data item */
+#define CIP_EIP_VERSION ((uint16_t)0x0001)
+#define CIP_EIP_CMD_CIP_MULTI ((uint8_t)0x0A)
+#define CIP_EIP_CMD_CIP_OK ((uint8_t)0x80)
+#define CIP_EIP_REGISTER_SESSION ((uint16_t)0x0065)
+#define CIP_EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
 #define CIP_EIP_CMD_FORWARD_CLOSE ((uint8_t)0x4E)
 #define CIP_EIP_CMD_FORWARD_OPEN ((uint8_t)0x54)
 #define CIP_EIP_CMD_FORWARD_OPEN_EX ((uint8_t)0x5B)
@@ -282,3 +295,10 @@ extern int prepare_request(cip_conn_p conn);
 extern int session_unregister(cip_conn_p conn);
 extern int get_payload_size(cip_request_p request);
 extern int purge_aborted_requests_unsafe(cip_conn_p conn);
+extern int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests);
+extern int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet);
+extern int session_add_request_unsafe(cip_conn_p conn, cip_request_p req);
+extern int session_add_request(cip_conn_p conn, cip_request_p req);
+extern int64_t calc_retry_time(unsigned int retry_count);
+extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
+extern int session_register(cip_conn_p conn);

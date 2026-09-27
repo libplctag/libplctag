@@ -335,7 +335,7 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -402,7 +402,7 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     tag->size = 0;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to conn! rc=%d", rc);
@@ -433,7 +433,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -544,7 +544,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     tag->size = 0;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to conn! rc=%d", rc);

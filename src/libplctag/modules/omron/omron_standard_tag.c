@@ -281,7 +281,7 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
                plc_tag_decode_error(rc));
@@ -352,7 +352,7 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
     req->first_read = tag->first_read;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unable to add request to conn! Error %s!",
@@ -386,7 +386,7 @@ int build_read_request_unconnected(omron_tag_p tag, int byte_offset) {
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
@@ -495,7 +495,7 @@ int build_read_request_unconnected(omron_tag_p tag, int byte_offset) {
     req->first_read = tag->first_read;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unable to add request to conn! Error %s!",
@@ -525,7 +525,7 @@ int build_write_bit_request_connected(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -651,7 +651,7 @@ int build_write_bit_request_connected(omron_tag_p tag) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -680,7 +680,7 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -840,7 +840,7 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
@@ -871,7 +871,7 @@ int build_write_request_connected(omron_tag_p tag, int byte_offset) {
     if(tag->is_bit) { return build_write_bit_request_connected(tag); }
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
                plc_tag_decode_error(rc));
@@ -990,7 +990,7 @@ int build_write_request_connected(omron_tag_p tag, int byte_offset) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unable to add request to conn! Error %s!",
@@ -1026,7 +1026,7 @@ int build_write_request_unconnected(omron_tag_p tag, int byte_offset) {
     if(tag->is_bit) { return build_write_bit_request_unconnected(tag); }
 
     /* get a request buffer */
-    rc = conn_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
                plc_tag_decode_error(rc));
@@ -1180,7 +1180,7 @@ int build_write_request_unconnected(omron_tag_p tag, int byte_offset) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the conn's list. */
-    rc = conn_add_request(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Unable to add request to conn! Error %s!",

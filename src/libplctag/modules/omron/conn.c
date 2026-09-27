@@ -48,7 +48,6 @@
 
 #define MAX_REQUESTS (400)
 
-#define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
 /* Omron is special */
 #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
@@ -59,8 +58,6 @@
  * Number of milliseconds to wait to try to set up the conn again
  * after a failure.
  */
-#define RETRY_WAIT_INITIAL_MS (100)
-#define RETRY_WAIT_MAX_MS (10000)
 
 /* Idle time to wait before disconnecting.  Set it to one second less than we negotiate with the PLC. */
 #define SESSION_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
@@ -76,14 +73,9 @@ static omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *
 
 static omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
                                        omron_plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
-static int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req);
 static void conn_destroy(void *conn);
-static int conn_register(omron_conn_p conn);
 static THREAD_FUNC(conn_handler);
-static int64_t calc_retry_time(unsigned int retry_count);
 static int process_requests(omron_conn_p conn);
-static int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests);
-static int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet);
 static int receive_forward_open_response(omron_conn_p conn);
 
 
@@ -463,7 +455,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
 
     /*
      * Make the mutex and the condition variable before the connection goes into the list.  Once
-     * it is in the list another thread can find it and call conn_add_request(), which locks the
+     * it is in the list another thread can find it and call session_add_request(), which locks the
      * one and signals the other.
      */
 
@@ -485,83 +477,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done");
 
     return conn;
-}
-int conn_register(omron_conn_p conn) {
-    eip_session_reg_req *req;
-    eip_encap *resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Starting.");
-
-    /*
-     * clear the conn data.
-     *
-     * We use the receiving buffer because we do not have a request and nothing can
-     * be coming in (we hope) on the socket yet.
-     */
-    mem_set(conn->data, 0, sizeof(eip_session_reg_req));
-
-    req = (eip_session_reg_req *)(conn->data);
-
-    /* fill in the fields of the request */
-    req->encap_command = h2le16(OMRON_EIP_REGISTER_CONN);
-    req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap));
-    req->encap_session_handle = h2le32(/*conn->session_handle*/ 0);
-    req->encap_status = h2le32(0);
-    req->encap_sender_context = h2le64((uint64_t)0);
-    req->encap_options = h2le32(0);
-
-    req->eip_version = h2le16(OMRON_EIP_VERSION);
-    req->option_flags = h2le16(0);
-
-    /*
-     * socket ops here are _ASYNCHRONOUS_!
-     *
-     * This is done this way because we do not have everything
-     * set up for a request to be handled by the thread.  I think.
-     */
-
-    /* send registration to the gateway */
-    conn->data_size = sizeof(eip_session_reg_req);
-    conn->data_offset = 0;
-
-    rc = send_eip_request(conn, SESSION_DEFAULT_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error sending conn registration request %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* get the response from the gateway */
-    rc = recv_eip_response(conn, SESSION_DEFAULT_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Error receiving conn registration response %s!",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* encap header is at the start of the buffer */
-    resp = (eip_encap *)(conn->data);
-
-    /* check the response status */
-    if(le2h16(resp->encap_command) != OMRON_EIP_REGISTER_CONN) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP unexpected response packet type: %d!", resp->encap_command);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h32(resp->encap_status) != OMRON_EIP_OK) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "EIP command failed, response code: %d", le2h32(resp->encap_status));
-        return PLCTAG_ERR_REMOTE_ERR;
-    }
-
-    /*
-     * after all that, save the conn handle, we will
-     * use it in future packets.
-     */
-    conn->session_handle = le2h32(resp->encap_session_handle);
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
 }
 void conn_destroy(void *conn_arg) {
     omron_conn_p conn = conn_arg;
@@ -654,63 +569,6 @@ void conn_destroy(void *conn_arg) {
 
     return;
 }
-
-
-/*
- * conn_add_request_unsafe
- *
- * You must hold the mutex before calling this!
- */
-int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, req->tag_id, "Starting.");
-
-    if(!conn) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, req->tag_id, "Connection is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, req->tag_id, "rc_inc: Acquiring reference to the request.");
-    req = rc_inc(req);
-
-    if(!req) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Request is either null or in the process of being deleted.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* make sure the request points to the conn */
-
-    /* insert into the requests vector */
-    vector_set(conn->requests, vector_length(conn->requests), req);
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, req->tag_id, "Total requests in the queue: %d", vector_length(conn->requests));
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, req->tag_id, "Done.");
-
-    return rc;
-}
-
-/*
- * conn_add_request
- *
- * This is a thread-safe version of the above routine.
- */
-int conn_add_request(omron_conn_p conn, omron_request_p req) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, req->tag_id, "Starting. conn=%p, req=%p", conn, req);
-
-    critical_block(conn->session_mutex) { rc = conn_add_request_unsafe(conn, req); }
-
-    cond_signal(conn->session_wait_cond);
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, req->tag_id, "Done.");
-
-    return rc;
-}
-
-
 /*****************************************************************
  **************** Connection handling functions *********************
  ****************************************************************/
@@ -747,16 +605,6 @@ static inline void conn_set_connection_status(omron_conn_p conn, int32_t new_sta
         }
     }
 }
-
-
-int64_t calc_retry_time(unsigned int retry_count) {
-    int64_t result = RETRY_WAIT_INITIAL_MS * (int64_t)(1 << retry_count);
-    if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
-    result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
-    return result;
-}
-
-
 THREAD_FUNC(conn_handler) {
     omron_conn_p conn = arg;
     int rc = PLCTAG_STATUS_OK;
@@ -856,7 +704,7 @@ THREAD_FUNC(conn_handler) {
                 pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
                 conn_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
 
-                if((rc = conn_register(conn)) != PLCTAG_STATUS_OK) {
+                if((rc = session_register(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "conn registration failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_CLOSE_SOCKET;
                 } else {
@@ -1481,339 +1329,6 @@ int process_requests(omron_conn_p conn) {
 
     return rc;
 }
-
-
-int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *packed_resp = (eip_cip_co_resp *)(conn->data);
-    eip_cip_co_resp *unpacked_resp = NULL;
-    uint8_t *pkt_start = NULL;
-    uint8_t *pkt_end = NULL;
-    int new_eip_len = 0;
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Starting.");
-
-    /* clear out the request data. */
-    mem_set(request->data, 0, request->request_capacity);
-
-    /* change what we do depending on the type. */
-    if(packed_resp->reply_service != (OMRON_EIP_CMD_CIP_MULTI | OMRON_EIP_CMD_CIP_OK)) {
-        /* copy the data back into the request buffer. */
-        new_eip_len = (int)conn->data_size;
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Got single response packet.  Copying %d bytes unchanged.",
-               new_eip_len);
-
-        if(new_eip_len > request->request_capacity) {
-            int request_capacity = 0;
-
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Request buffer too small, allocating larger buffer.");
-
-            critical_block(conn->session_mutex) {
-                int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
-
-                // FIXME - no logging in a mutex!
-                // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "FIXME: max payload size %d", max_payload_size);
-
-                request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
-            }
-
-            /* make sure it will fit. */
-            if(new_eip_len > request_capacity) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                       "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len,
-                       request_capacity);
-                return PLCTAG_ERR_TOO_LARGE;
-            }
-
-            rc = session_request_increase_buffer(request, request_capacity);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                       "Unable to increase request buffer size to %d bytes!", request_capacity);
-                return rc;
-            }
-        }
-
-        mem_copy(request->data, conn->data, new_eip_len);
-    } else {
-        cip_multi_resp_header *multi = (cip_multi_resp_header *)(&packed_resp->reply_service);
-        uint16_t total_responses = le2h16(multi->request_count);
-        int pkt_len = 0;
-
-        /* this is a packed response. */
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Got multiple response packet, subpacket %d", sub_packet);
-
-        uint8_t *buf_end = conn->data + conn->data_size;
-
-        /*
-         * The response count, the offsets and encap_length all come from the wire.  Check
-         * that the offset array itself is inside the data we received BEFORE reading any
-         * offset out of it -- otherwise the read that decides whether the array is in bounds
-         * is itself out of bounds.
-         */
-        size_t offsets_start = (size_t)((uint8_t *)multi - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
-        size_t offsets_size = (size_t)total_responses * sizeof(uint16_le);
-
-        if(sub_packet < 0 || sub_packet >= (int)total_responses || offsets_start > (size_t)conn->data_size
-           || offsets_size > (size_t)conn->data_size - offsets_start) {
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                   "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
-            return PLCTAG_ERR_OUT_OF_BOUNDS;
-        }
-
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Our result offset is %d bytes.",
-               (int)le2h16(multi->request_offsets[sub_packet]));
-
-        pkt_start = ((uint8_t *)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet]));
-
-        /* calculate the end of the data. */
-        if((sub_packet + 1) < total_responses) {
-            /* not the last response */
-            pkt_end = (uint8_t *)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet + 1]);
-        } else {
-            pkt_end = (conn->data + le2h16(packed_resp->encap_length) + sizeof(eip_encap));
-        }
-
-        /*
-         * Now bound pkt_start/pkt_end against the bytes we actually received before trusting
-         * them as a memcpy source range.  Comparing pointers directly is UB, so compare the
-         * integer values instead.
-         */
-        if((intptr_t)pkt_start < (intptr_t)(&multi->request_count) || (intptr_t)pkt_start > (intptr_t)buf_end
-           || (intptr_t)pkt_end < (intptr_t)pkt_start || (intptr_t)pkt_end > (intptr_t)buf_end) {
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                   "Packed response sub-packet %d has an out of bounds data range!", sub_packet);
-            return PLCTAG_ERR_OUT_OF_BOUNDS;
-        }
-
-        pkt_len = (int)(pkt_end - pkt_start);
-
-        /* replace the request buffer if it is not big enough. */
-        new_eip_len = pkt_len + (int)sizeof(eip_cip_co_generic_response);
-        if(new_eip_len > request->request_capacity) {
-            int request_capacity = 0;
-
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Request buffer too small, allocating larger buffer.");
-
-            critical_block(conn->session_mutex) {
-                int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
-
-                // FIXME: no logging in a mutex!
-                // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "max payload size %d", max_payload_size);
-
-                request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
-            }
-
-            /* make sure it will fit. */
-            if(new_eip_len > request_capacity) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                       "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len,
-                       request_capacity);
-                return PLCTAG_ERR_TOO_LARGE;
-            }
-
-            rc = session_request_increase_buffer(request, request_capacity);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, request->tag_id,
-                       "Unable to increase request buffer size to %d bytes!", request_capacity);
-                return rc;
-            }
-        }
-
-        /* point to the response buffer in a structured way. */
-        unpacked_resp = (eip_cip_co_resp *)(request->data);
-
-        /* copy the header down */
-        mem_copy(request->data, conn->data, (int)sizeof(eip_cip_co_resp));
-
-        /* size of the new packet */
-        new_eip_len = (uint16_t)(((uint8_t *)(&unpacked_resp->reply_service) + pkt_len) /* end of the packet */
-                                 - (uint8_t *)(request->data));                         /* start of the packet */
-
-        /* now copy the packet over that. */
-        mem_copy(&unpacked_resp->reply_service, pkt_start, pkt_len);
-
-        /* stitch up the packet sizes. */
-        unpacked_resp->cpf_cdi_item_length =
-            h2le16((uint16_t)(pkt_len + (int)sizeof(uint16_le))); /* extra for the connection sequence */
-        unpacked_resp->encap_length = h2le16((uint16_t)(new_eip_len - (uint16_t)sizeof(eip_encap)));
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, "Unpacked packet:");
-    pdebug_dump_bytes(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, request->tag_id, request->data, new_eip_len);
-
-    /* notify the reading thread that the request is ready */
-    spin_block(&request->lock) {
-        request->status = PLCTAG_STATUS_OK;
-        request->request_size = new_eip_len;
-        request->resp_received = 1;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, request->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests) {
-    eip_cip_co_req *new_req = NULL;
-    eip_cip_co_req *packed_req = NULL;
-    /* FIXME - is this the right way to check? */
-    int header_size = 0;
-    cip_multi_req_header *multi_header = NULL;
-    int current_offset = 0;
-    uint8_t *pkt_start = NULL;
-    int pkt_len = 0;
-    size_t pkt_offset = 0;
-    size_t src_offset = 0;
-    uint8_t *first_pkt_data = NULL;
-    uint8_t *next_pkt_data = NULL;
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "Starting.");
-
-    if((uint32_t)requests[0]->request_size > conn->data_capacity) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, requests[0]->tag_id,
-               "Request of %d bytes exceeds the conn buffer capacity of %u bytes!", requests[0]->request_size,
-               conn->data_capacity);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /* get the header info from the first request. Just copy the whole thing. */
-    mem_copy(conn->data, requests[0]->data, requests[0]->request_size);
-    conn->data_size = (uint32_t)requests[0]->request_size;
-
-    /* special case the case where there is just one request. */
-    if(num_requests == 1) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "Only one request, so done.");
-
-
-        return PLCTAG_STATUS_OK;
-    }
-
-    /* set up multi-packet header. */
-
-    header_size =
-        (int)(sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests)); /* offsets for each request. */
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "header size %d", header_size);
-
-    packed_req = (eip_cip_co_req *)(conn->data);
-
-    /* make room in the request packet in the conn for the header. */
-    pkt_offset = (size_t)((uint8_t *)(&packed_req->cpf_conn_seq_num) - conn->data) + sizeof(packed_req->cpf_conn_seq_num);
-    pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet 0 is of length %d.", pkt_len);
-
-    /*
-     * Bounds check before shifting data forward to make room for the multi-request header.
-     *
-     * Do this in offsets rather than pointers.  Forming first_pkt_data + pkt_len is itself
-     * undefined when the result would land outside the buffer, so a pointer comparison cannot
-     * be what decides whether it does -- the compiler may assume the addition stayed in bounds
-     * and fold the test away.  Each subtraction below is guarded by the term before it so none
-     * of them can wrap.
-     *
-     * pkt_len is signed and comes from a length field, so reject a negative one here too: it
-     * would move the destination backwards and hand mem_move() a negative size.
-     */
-    if(pkt_len < 0 || header_size < 0 || pkt_offset > (size_t)conn->data_capacity
-       || (size_t)header_size > (size_t)conn->data_capacity - pkt_offset
-       || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset - (size_t)header_size) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, requests[0]->tag_id,
-               "Bundled request header does not fit in the conn buffer of %u bytes!", conn->data_capacity);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    pkt_start = conn->data + pkt_offset;
-
-    /* point to where we want the current packet to start. */
-    first_pkt_data = pkt_start + header_size;
-
-    /* move the data over to make room */
-    mem_move(first_pkt_data, pkt_start, pkt_len);
-
-    /* now fill in the header. Use pkt_start as it is pointing to the right location. */
-    multi_header = (cip_multi_req_header *)pkt_start;
-    multi_header->service_code = OMRON_EIP_CMD_CIP_MULTI;
-    multi_header->req_path_size = 0x02; /* length of path in words */
-    multi_header->req_path[0] = 0x20;   /* Class */
-    multi_header->req_path[1] = 0x02;   /* CM */
-    multi_header->req_path[2] = 0x24;   /* Instance */
-    multi_header->req_path[3] = 0x01;   /* #1 */
-    multi_header->request_count = h2le16((uint16_t)num_requests);
-
-    /* set up the offset for the first request. */
-    current_offset = (int)(sizeof(uint16_le) + (sizeof(uint16_le) * (size_t)num_requests));
-    multi_header->request_offsets[0] = h2le16((uint16_t)current_offset);
-
-    next_pkt_data = first_pkt_data + pkt_len;
-    current_offset = current_offset + pkt_len;
-
-    /* now process the rest of the requests. */
-    for(int i = 1; i < num_requests; i++) {
-
-        /* set up the offset */
-        multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
-
-        /* get a pointer to the request. */
-        new_req = (eip_cip_co_req *)(requests[i]->data);
-
-        /* calculate the request start and length */
-        pkt_start = (uint8_t *)(&new_req->cpf_conn_seq_num) + sizeof(new_req->cpf_conn_seq_num);
-        pkt_len = (int)le2h16(new_req->cpf_cdi_item_length) - (int)sizeof(new_req->cpf_conn_seq_num);
-
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "packet %d is of length %d.", i, pkt_len);
-
-        /* as above: bound in offsets, and reject a negative length. */
-        if(pkt_len < 0) {
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
-                   "Bundled request %d has a negative payload length of %d!", i, pkt_len);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        /*
-         * pkt_len has to fit the SOURCE as well.  It comes from a length field in the request
-         * buffer, so bounding it only against the destination leaves mem_copy() free to read
-         * past the end of requests[i]->data.
-         */
-        src_offset = (size_t)(pkt_start - requests[i]->data);
-
-        if(requests[i]->request_size < 0 || src_offset > (size_t)requests[i]->request_size
-           || (size_t)pkt_len > (size_t)requests[i]->request_size - src_offset) {
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
-                   "Bundled request %d claims %d payload bytes but its buffer only holds %d!", i, pkt_len,
-                   requests[i]->request_size);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        pkt_offset = (size_t)(next_pkt_data - conn->data);
-
-        if(pkt_offset > (size_t)conn->data_capacity || (size_t)pkt_len > (size_t)conn->data_capacity - pkt_offset) {
-            pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, (requests[i] ? requests[i]->tag_id : 0),
-                   "Bundled requests do not fit in the conn buffer of %u bytes!", conn->data_capacity);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        /* copy the request into the conn buffer. */
-        mem_copy(next_pkt_data, pkt_start, pkt_len);
-
-        /* calculate the next packet info. */
-        next_pkt_data += pkt_len;
-        current_offset += pkt_len;
-    }
-
-    /* stitch up the CPF packet length */
-    packed_req->cpf_cdi_item_length = h2le16((uint16_t)(next_pkt_data - (uint8_t *)(&packed_req->cpf_conn_seq_num)));
-
-    /* stick up the EIP packet length */
-    packed_req->encap_length = h2le16((uint16_t)((size_t)(next_pkt_data - conn->data) - sizeof(eip_encap)));
-
-    /* set the total data size */
-    conn->data_size = (uint32_t)(next_pkt_data - conn->data);
-
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, requests[0]->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
 /* new version of Forward Open */
 int receive_forward_open_response(omron_conn_p conn) {
     eip_forward_open_response_t *fo_resp;
@@ -1939,7 +1454,7 @@ int receive_forward_open_response(omron_conn_p conn) {
             break;
         }
 
-        /* success! conn_create_request() reads max_payload_size (via GET_MAX_PAYLOAD_SIZE)
+        /* success! session_create_request() reads max_payload_size (via GET_MAX_PAYLOAD_SIZE)
          * under conn->session_mutex, so committing it here needs the same lock. */
         critical_block(conn->session_mutex) {
             conn->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
@@ -1956,48 +1471,6 @@ int receive_forward_open_response(omron_conn_p conn) {
     } while(0);
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
-
-    return rc;
-}
-int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *req) {
-    int rc = PLCTAG_STATUS_OK;
-    omron_request_p res;
-    size_t request_capacity = 0;
-    uint8_t *buffer = NULL;
-
-    critical_block(conn->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
-
-        // FIXME: no logging in a mutex!
-        // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "FIXME: max payload size %d", max_payload_size);
-
-        request_capacity = (size_t)(max_payload_size + EIP_CIP_PREFIX_SIZE);
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Starting.");
-
-    buffer = (uint8_t *)mem_alloc((int)request_capacity);
-    if(!buffer) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "Unable to allocate request buffer!");
-        *req = NULL;
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    res = (omron_request_p)rc_alloc((int)sizeof(cip_request_t), cip_request_destroy);
-    if(!res) {
-        mem_free(buffer);
-        *req = NULL;
-        rc = PLCTAG_ERR_NO_MEM;
-    } else {
-        res->data = buffer;
-        res->tag_id = tag_id;
-        res->request_capacity = (int)request_capacity;
-        res->lock = LOCK_INIT;
-
-        *req = res;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0, "Done.");
 
     return rc;
 }
