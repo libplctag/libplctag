@@ -469,22 +469,6 @@ int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *addr
 
     return PLCTAG_STATUS_OK;
 }
-
-
-uint8_t pccc_calculate_bcc(uint8_t *data, int size) {
-    int bcc = 0;
-    int i;
-
-    for(i = 0; i < size; i++) { bcc += data[i]; }
-
-    /* we want the twos-compliment of the lowest 8 bits. */
-    bcc = -bcc;
-
-    /* only the lowest 8 bits */
-    return (uint8_t)(bcc & 0xFF);
-}
-
-
 /* Calculate AB's version of CRC-16.  We use a precalculated
  * table for simplicity.   Note that modern processors execute
  * so many instructions per second, that using a table, even
@@ -510,35 +494,6 @@ uint16_t CRC16Bytes[] = {
     0x48C0, 0x4980, 0x8941, 0x4B00, 0x8BC1, 0x8A81, 0x4A40, 0x4E00, 0x8EC1, 0x8F81, 0x4F40, 0x8D01, 0x4DC0, 0x4C80, 0x8C41,
     0x4400, 0x84C1, 0x8581, 0x4540, 0x8701, 0x47C0, 0x4680, 0x8641, 0x8201, 0x42C0, 0x4380, 0x8341, 0x4100, 0x81C1, 0x8081,
     0x4040};
-
-
-uint16_t pccc_calculate_crc16(uint8_t *data, int size) {
-    uint16_t running_crc = 0;
-    int i;
-
-    /* for each byte in the data... */
-    for(i = 0; i < size; i++) {
-        /* calculate the running byte.  This is a lot like
-         * a CBC.  You keep the running value as you go along
-         * and the table is precalculated to have all the right
-         * 256 values.
-         */
-
-        /* mask the CRC and XOR with the data byte */
-        uint8_t running_byte = (uint8_t)(running_crc & 0x00FF) ^ data[i];
-
-        /* calculate the next CRC value by shifting and XORing with
-         * the value we get from a table lookup using the running
-         * byte as an index.  This chains the data forward as we
-         * calculate the CRC.
-         */
-        running_crc = (running_crc >> 8) ^ CRC16Bytes[running_byte];
-    }
-
-    return running_crc;
-}
-
-
 const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size) {
     uint8_t error = 0;
 

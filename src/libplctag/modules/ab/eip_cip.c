@@ -89,28 +89,6 @@ CIP Tag Info command
 
 */
 
-//
-// START_PACK typedef struct {
-//    uint8_t request_service;    /* AB_EIP_CMD_CIP_LIST_TAGS=0x55 */
-//    uint8_t request_path_size;  /* 3 word = 6 bytes */
-//    uint8_t request_path[4];    /* MAGIC
-//                                    0x20    get class
-//                                    0x6B    tag info/symbol class
-//                                    0x25    get instance (16-bit)
-//                                    0x00    padding
-//                                    0x00    instance byte 0
-//                                    0x00    instance byte 1
-//                                */
-//    uint16_le instance_id;      /* actually last two bytes above */
-//    uint16_le num_attributes;   /* 0x04    number of attributes to get */
-//    uint16_le requested_attributes[4];  /*
-//                                            0x02 attribute #2 - symbol type
-//                                            0x07 attribute #7 - base type size (array element) in bytes
-//                                            0x08    attribute #8 - array dimensions (3xu32)
-//                                            0x01    attribute #1 - symbol name
-//                                        */
-//
-//} END_PACK tag_list_req_DEAD;
 
 /*
  * This is a pseudo UDT structure for each tag entry when listing all the tags
@@ -128,7 +106,6 @@ START_PACK typedef struct {
 
 
 static int build_read_request_connected(ab_tag_p tag, int byte_offset);
-// static int build_tag_list_request_connected(ab_tag_p tag);
 static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_request_connected(ab_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
@@ -510,11 +487,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
     embed_start = data;
 
     /* set up the CIP Read request */
-    // if(tag->plc_type == AB_PLC_OMRON_NJNX) {
-    //     read_cmd = AB_EIP_CMD_CIP_READ;
-    // } else {
     read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
-    // }
 
     *data = read_cmd;
     data++;
@@ -992,10 +965,6 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
-    // if(multiple_requests && tag->plc_type == AB_PLC_OMRON_NJNX) {
-    //     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Tag too large for unfragmented request on Omron PLC!");
-    //     return PLCTAG_ERR_TOO_LARGE;
-    // }
 
     cip = (eip_cip_co_req *)(req->data);
 
@@ -1142,10 +1111,6 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
-    // if(multiple_requests && tag->plc_type == AB_PLC_OMRON_NJNX) {
-    //     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, "Tag too large for unfragmented request on Omron PLC!");
-    //     return PLCTAG_ERR_TOO_LARGE;
-    // }
 
     cip = (eip_cip_uc_req *)(req->data);
 

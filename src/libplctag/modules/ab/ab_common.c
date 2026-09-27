@@ -42,7 +42,6 @@
 #include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/connection_tag.h>
 #include <libplctag/modules/ab/eip_cip.h>
-#include <libplctag/modules/ab/eip_cip_special.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/eip_plc5_dhp.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>

@@ -16,7 +16,6 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/listing_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/raw_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/udt_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip_special.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/eip_lgx_pccc.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/eip_lgx_pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/eip_plc5_dhp.c"

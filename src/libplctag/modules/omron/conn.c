@@ -80,7 +80,6 @@ static omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *
 
 static omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
                                        omron_plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
-// static int get_plc_type(attr attribs);
 static int add_conn_unsafe(omron_conn_p n);
 static int remove_conn_unsafe(omron_conn_p n);
 static omron_conn_p find_conn_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
@@ -95,20 +94,13 @@ static THREAD_FUNC(conn_handler);
 static int purge_aborted_requests_unsafe(omron_conn_p conn);
 static int64_t calc_retry_time(unsigned int retry_count);
 static int process_requests(omron_conn_p conn);
-// static int check_packing(omron_conn_p conn, omron_request_p request);
 static int get_payload_size(omron_request_p request);
 static int pack_requests(omron_conn_p conn, omron_request_p *requests, int num_requests);
 static int prepare_request(omron_conn_p conn);
 static int send_eip_request(omron_conn_p conn, int timeout);
 static int recv_eip_response(omron_conn_p conn, int timeout);
 static int unpack_response(omron_conn_p conn, omron_request_p request, int sub_packet);
-// static int perform_forward_open(omron_conn_p conn);
 static int perform_forward_close(omron_conn_p conn);
-// static int try_forward_open_ex(omron_conn_p conn, int *max_payload_size_guess);
-// static int try_forward_open(omron_conn_p conn);
-// static int send_forward_open_req(omron_conn_p conn);
-// static int send_forward_open_req_ex(omron_conn_p conn);
-// static int recv_forward_open_resp(omron_conn_p conn, int *max_payload_size_guess);
 static int send_forward_close_req(omron_conn_p conn);
 static int recv_forward_close_resp(omron_conn_p conn);
 static int send_forward_open_request(omron_conn_p conn);
@@ -240,9 +232,7 @@ uint64_t conn_get_new_seq_id_unsafe(omron_conn_p conn) { return conn->conn_seq_i
 uint64_t conn_get_new_seq_id(omron_conn_p conn) {
     uint16_t res = 0;
 
-    // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "entering critical block %p",conn_mutex);
     critical_block(conn->mutex) { res = (uint16_t)conn_get_new_seq_id_unsafe(conn); }
-    // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "leaving critical block %p", conn_mutex);
 
     return res;
 }
@@ -305,8 +295,6 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
     const char *conn_gw = attr_get_str(attribs, "gateway", "");
     const char *conn_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
-    // int conn_gw_port = attr_get_int(attribs, "gateway_port", OMRON_EIP_DEFAULT_PORT);
-    //  omron_plc_type_t plc_type = get_plc_type(attribs);
     omron_conn_p conn = OMRON_CONN_NULL;
     int new_conn = 0;
     int shared_conn = attr_get_int(attribs, "share_conn", 1); /* share the conn by default. */
@@ -384,7 +372,6 @@ int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) 
             conn = OMRON_CONN_NULL;
         } else {
             /* save the status */
-            // conn->status = rc;
         }
     }
 
@@ -629,7 +616,6 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
 
     if(data_buffer_is_static) {
         conn->data = (uint8_t *)(conn) + data_buffer_offset;
-        // conn->data_capacity = max_buffer_size;
     } else {
         conn->data = (uint8_t *)mem_alloc(data_buffer_capacity);
         if(conn->data == NULL) {
@@ -1005,21 +991,6 @@ void conn_destroy(void *conn_arg) {
 
     /* these are all allocated in one large block. */
 
-    // pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_DETAIL, 0,  "Cleaning up allocated memory for paths and host name.");
-    // if(conn->conn_path) {
-    //     mem_free(conn->conn_path);
-    //     conn->conn_path = NULL;
-    // }
-
-    // if(conn->path) {
-    //     mem_free(conn->path);
-    //     conn->path = NULL;
-    // }
-
-    // if(conn->host) {
-    //     mem_free(conn->host);
-    //     conn->host = NULL;
-    // }
 
     pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Done.");
 
@@ -2316,7 +2287,6 @@ int prepare_request(omron_conn_p conn) {
         /* get new ID */
         conn->conn_seq_id++;
 
-        // request->conn_seq_id = conn->conn_seq_id;
         encap->encap_sender_context = h2le64(conn->conn_seq_id); /* link up the request seq ID and the packet seq ID */
 
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_INFO, 0, "Preparing unconnected packet with conn sequence ID %llx",
@@ -2403,9 +2373,6 @@ int send_eip_request(omron_conn_p conn, int timeout) {
         }
 
         /* give up the CPU if we still are looping */
-        // if(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size) {
-        //     sleep_ms(1);
-        // }
     } while(!atomic_get_int32(&conn->terminating) && rc >= 0 && conn->data_offset < conn->data_size && timeout_time > time_ms());
 
     if(atomic_get_int32(&conn->terminating)) {

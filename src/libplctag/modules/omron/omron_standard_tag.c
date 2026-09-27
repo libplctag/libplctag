@@ -48,7 +48,6 @@
 
 
 static int build_read_request_connected(omron_tag_p tag, int byte_offset);
-// static int build_tag_list_request_connected(omron_tag_p tag);
 static int build_read_request_unconnected(omron_tag_p tag, int byte_offset);
 static int build_write_request_connected(omron_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(omron_tag_p tag, int byte_offset);
@@ -78,29 +77,6 @@ struct tag_vtable_t omron_standard_tag_vtable = {
     .attribs = omron_attribs,
 };
 
-// /* default string types used for ControlLogix-class PLCs. */
-// tag_byte_order_t omron_udt_tag_byte_order = {
-//     .is_allocated = 0,
-
-//     .int16_order = {0,1},
-//     .int32_order = {0,1,2,3},
-//     .int64_order = {0,1,2,3,4,5,6,7},
-//     .float32_order = {0,1,2,3},
-//     .float64_order = {0,1,2,3,4,5,6,7},
-
-//     .str_is_defined = 1,
-//     .str_is_counted = 1,
-//     .str_is_fixed_length = 1,
-//     .str_is_zero_terminated = 0,
-//     .str_is_byte_swapped = 0,
-
-//     .str_pad_to_multiple_bytes = 1,
-//     .str_count_word_bytes = 4,
-//     .str_max_capacity = 82,
-//     .str_total_length = 88,
-//     .str_pad_bytes = 2
-// };
-
 
 /* default string types used for Omron-NJ/NX PLCs. */
 tag_byte_order_t omron_njnx_tag_byte_order = {.is_allocated = 0,
@@ -122,28 +98,6 @@ tag_byte_order_t omron_njnx_tag_byte_order = {.is_allocated = 0,
                                               .str_max_capacity = 0,
                                               .str_total_length = 0,
                                               .str_pad_bytes = 0};
-
-// tag_byte_order_t omron_tag_listing_byte_order = {
-//     .is_allocated = 0,
-
-//     .int16_order = {0,1},
-//     .int32_order = {0,1,2,3},
-//     .int64_order = {0,1,2,3,4,5,6,7},
-//     .float32_order = {0,1,2,3},
-//     .float64_order = {0,1,2,3,4,5,6,7},
-
-//     .str_is_defined = 1,
-//     .str_is_counted = 1,
-//     .str_is_fixed_length = 0,
-//     .str_is_zero_terminated = 0,
-//     .str_is_byte_swapped = 0,
-
-//     .str_pad_to_multiple_bytes = 2,
-//     .str_count_word_bytes = 2,
-//     .str_max_capacity = 0,
-//     .str_total_length = 0,
-//     .str_pad_bytes = 0
-// };
 
 
 /*************************************************************************
@@ -231,11 +185,7 @@ int tag_read_start(omron_tag_p tag) {
 
     /* i is the index of the first new request */
     if(tag->use_connected_msg) {
-        // if(tag->tag_list) {
-        //     rc = build_tag_list_request_connected(tag);
-        // } else {
         rc = build_read_request_connected(tag, tag->offset);
-        // }
     } else {
         rc = build_read_request_unconnected(tag, tag->offset);
     }
@@ -353,7 +303,6 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
      * uint16_t # of elements to read
      */
 
-    // embed_start = data;
 
     /* set up the CIP Read request */
     read_cmd = OMRON_EIP_CMD_CIP_READ;
@@ -371,11 +320,6 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
 
     /* here is where we need to add the data segment that controls Omron fragmentation */
 
-    // if (read_cmd == OMRON_EIP_CMD_CIP_READ_FRAG) {
-    //     /* add the byte offset for this request */
-    //     *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
-    //     data += sizeof(uint32_le);
-    // }
 
     /* now we go back and fill in the fields of the static part */
 
@@ -397,7 +341,6 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
     req->request_size = (int)(data - (req->data));
 
     /* set the conn so that we know what conn the request is aiming at */
-    // req->conn = tag->session;
 
     req->allow_packing = tag->allow_packing;
 
@@ -1669,7 +1612,6 @@ static int check_read_status_unconnected(omron_tag_p tag) {
     /* release the referene to the request. */
 
     // FIXME - why is this different than the connected case?
-    // rc_dec(request);
 
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_SPEW, tag->tag_id, "Done.");
 

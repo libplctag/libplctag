@@ -265,17 +265,6 @@ extern int attr_set_int(attr attrs, const char *name, int val) {
 
     return attr_set_str(attrs, name, buf);
 }
-
-
-extern int attr_set_float(attr attrs, const char *name, float val) {
-    char buf[64];
-
-    snprintf_platform(buf, sizeof buf, "%f", val);
-
-    return attr_set_str(attrs, name, buf);
-}
-
-
 /*
  * attr_get
  *
@@ -315,66 +304,6 @@ extern int attr_get_int(attr attrs, const char *name, int def) {
         return res;
     }
 }
-
-
-extern float attr_get_float(attr attrs, const char *name, float def) {
-    float res;
-    int rc;
-
-    const char *str_val = attr_get_str(attrs, name, NULL);
-
-    if(!str_val) { return def; }
-
-    rc = str_to_float(str_val, &res);
-
-    if(rc) {
-        /* format error? */
-        return def;
-    } else {
-        return res;
-    }
-}
-
-
-extern int attr_remove(attr attrs, const char *name) {
-    attr_entry e, p;
-
-    if(!attrs) { return 0; }
-
-    e = attrs->head;
-
-    /* no such entry, return */
-    if(!e) { return 0; }
-
-    /* loop to find the entry */
-    p = NULL;
-
-    while(e) {
-        if(str_cmp(e->name, name) == 0) { break; }
-
-        p = e;
-        e = e->next;
-    }
-
-    if(e) {
-        /* unlink the node */
-        if(!p) {
-            attrs->head = e->next;
-        } else {
-            p->next = e->next;
-        }
-
-        if(e->name) { mem_free(e->name); }
-
-        if(e->val) { mem_free(e->val); }
-
-        mem_free(e);
-    } /* else not found */
-
-    return 0;
-}
-
-
 /*
  * attr_delete
  *

@@ -36,7 +36,6 @@
 
 typedef struct vector_t *vector_p;
 
-typedef int (*vector_compare_func)(const void *a, const void *b);
 
 extern vector_p vector_create(int capacity, int max_inc);
 extern int vector_length(vector_p vec);
@@ -47,5 +46,4 @@ extern void *vector_remove(vector_p vec, int index);
 extern int vector_find_index(vector_p vec, void *val);
 extern int vector_reset(vector_p vec);
 extern int vector_destroy(vector_p vec);
-extern int vector_sort(vector_p vec, vector_compare_func compare);
 extern int vector_swap_element(vector_p vec, int current_index, int insert_before_index);

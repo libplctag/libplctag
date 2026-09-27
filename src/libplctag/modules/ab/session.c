@@ -61,12 +61,9 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 #define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4000)
 
 /* Omron is special */
-// #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
-// #define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PLC5_MSG_SIZE (244)
-// #define MAX_CIP_SLC_MSG_SIZE (222)
 #define MAX_CIP_SLC_MSG_SIZE (244)
 #define MAX_CIP_MLGX_MSG_SIZE (244)
 #define MAX_CIP_LGX_PCCC_MSG_SIZE (244)
@@ -120,18 +117,14 @@ static ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char 
                                                    int connection_group_id);
 static ab_session_p create_micro800_session_unsafe(const char *host, const char *path, int *use_connected_msg,
                                                    int connection_group_id);
-// static ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int
-// connection_group_id);
 
 static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host,
                                           const char *path, ab_plc_type_t plc_type, int *use_connected_msg,
                                           int connection_group_id);
-// static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
 static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
 static int session_match_valid(const char *host, const char *path, ab_session_p session);
-// static int session_add_request_unsafe(ab_session_p session, ab_request_p req);
 static int session_open_socket(ab_session_p session);
 static void session_destroy(void *session);
 static int session_register(ab_session_p session);
@@ -141,20 +134,13 @@ static int64_t calc_retry_time(unsigned int retry_count);
 static THREAD_FUNC(session_handler);
 static int purge_aborted_requests_unsafe(ab_session_p session);
 static int process_requests(ab_session_p session);
-// static int check_packing(ab_session_p session, ab_request_p request);
 static int get_payload_size(ab_request_p request);
 static int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests);
 static int prepare_request(ab_session_p session);
 static int send_eip_request(ab_session_p session, int timeout);
 static int recv_eip_response(ab_session_p session, int timeout);
 static int unpack_response(ab_session_p session, ab_request_p request, int sub_packet);
-// static int perform_forward_open(ab_session_p session);
 static int perform_forward_close(ab_session_p session);
-// static int try_forward_open_ex(ab_session_p session, int *max_payload_size_guess);
-// static int try_forward_open(ab_session_p session);
-// static int send_forward_open_req(ab_session_p session);
-// static int send_forward_open_req_ex(ab_session_p session);
-// static int recv_forward_open_resp(ab_session_p session, int *max_payload_size_guess);
 static int send_forward_close_req(ab_session_p session);
 static int recv_forward_close_resp(ab_session_p session);
 static int send_forward_open_request(ab_session_p session);
@@ -305,23 +291,6 @@ uint64_t session_get_new_seq_id(ab_session_p session) {
 
     return res;
 }
-
-
-int session_get_max_payload(ab_session_p session) {
-    int result = 0;
-
-    if(!session) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Called with null session pointer!");
-        return 0;
-    }
-
-    critical_block(session->session_mutex) { result = GET_MAX_PAYLOAD_SIZE(session); }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "max payload size is %d bytes.", result);
-
-    return result;
-}
-
 int session_get_available_cip_payload_space(ab_session_p session) {
     int result = 0;
 
@@ -362,7 +331,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
-    // int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
     ab_plc_type_t plc_type = get_plc_type(attribs);
     ab_session_p session = AB_SESSION_NULL;
     int new_session = 0;
@@ -434,9 +402,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
                     session = create_lgx_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
                     break;
 
-                    // case AB_PLC_OMRON_NJNX:
-                    //     session = create_omron_njnx_session_unsafe(session_gw, session_path, &use_connected_msg,
-                    //     connection_group_id); break;
 
                 default:
                     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unknown PLC type %d!", plc_type);
@@ -480,7 +445,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
             session = AB_SESSION_NULL;
         } else {
             /* save the status */
-            // session->status = rc;
         }
     }
 
@@ -861,7 +825,6 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 
     if(data_buffer_is_static) {
         session->data = (uint8_t *)(session) + data_buffer_offset;
-        // session->data_capacity = max_buffer_size;
     } else {
         session->data = (uint8_t *)mem_alloc((int)data_buffer_capacity);
         if(session->data == NULL) {
@@ -1233,21 +1196,6 @@ void session_destroy(void *session_arg) {
 
     /* these are all allocated in one large block. */
 
-    // pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, "Cleaning up allocated memory for paths and host name.");
-    // if(session->conn_path) {
-    //     mem_free(session->conn_path);
-    //     session->conn_path = NULL;
-    // }
-
-    // if(session->path) {
-    //     mem_free(session->path);
-    //     session->path = NULL;
-    // }
-
-    // if(session->host) {
-    //     mem_free(session->host);
-    //     session->host = NULL;
-    // }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
@@ -2563,7 +2511,6 @@ int prepare_request(ab_session_p session) {
         /* get new ID */
         session->session_seq_id++;
 
-        // request->session_seq_id = session->session_seq_id;
         encap->encap_sender_context = h2le64(session->session_seq_id); /* link up the request seq ID and the packet seq ID */
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Preparing unconnected packet with session sequence ID %llx",
@@ -2655,9 +2602,6 @@ int send_eip_request(ab_session_p session, int timeout) {
         }
 
         /* give up the CPU if we still are looping */
-        // if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
-        //     sleep_ms(1);
-        // }
     } while(!atomic_get_int32(&session->terminating) && rc >= 0 && session->data_offset < session->data_size
             && timeout_time > time_ms());
 

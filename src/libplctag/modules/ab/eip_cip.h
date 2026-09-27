@@ -41,8 +41,5 @@ extern tag_byte_order_t logix_tag_byte_order;
 // extern tag_byte_order_t omron_njnx_tag_byte_order;
 extern tag_byte_order_t logix_tag_listing_byte_order;
 
-/* tag listing helpers */
-extern int setup_tag_listing(ab_tag_p tag, const char *name);
-
 
 #endif

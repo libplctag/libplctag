@@ -194,22 +194,6 @@ int hashtable_entries(hashtable_p table) {
 
     return table->used_entries;
 }
-
-
-int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, int64_t key, void *data, void *context),
-                      void *context_arg) {
-    int rc = PLCTAG_STATUS_OK;
-
-    if(!table) { pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, 0, "Hashtable pointer null or invalid"); }
-
-    for(int i = 0; i < table->total_entries && rc == PLCTAG_STATUS_OK; i++) {
-        if(table->entries[i].data) { rc = callback_func(table, table->entries[i].key, table->entries[i].data, context_arg); }
-    }
-
-    return rc;
-}
-
-
 void *hashtable_remove(hashtable_p table, int64_t key) {
     int index = 0;
     void *result = NULL;

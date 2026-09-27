@@ -39,7 +39,6 @@
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/eip_cip.h> /* for the Logix decode types. */
-#include <libplctag/modules/ab/eip_cip_special.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/ab/tag.h>

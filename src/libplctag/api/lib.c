@@ -64,9 +64,6 @@
 /* these are only internal to the file */
 
 
-// static mutex_p global_library_mutex = NULL;
-
-
 /* helper functions. */
 static int plc_tag_abort_impl(plc_tag_p tag);
 static int32_t plc_tag_create_impl(const char *attrib_str,
@@ -80,11 +77,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
         case DLL_PROCESS_ATTACH:
-            // fprintf(stderr, "DllMain called with DLL_PROCESS_ATTACH\n");
             break;
 
         case DLL_PROCESS_DETACH:
-            // fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
             /*
              * Only tear down on an explicit FreeLibrary() (lpvReserved == NULL),
              * where the process is still alive and our worker threads can be
@@ -98,15 +93,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
             break;
 
         case DLL_THREAD_ATTACH:
-            // fprintf(stderr, "DllMain called with DLL_THREAD_ATTACH\n");
             break;
 
         case DLL_THREAD_DETACH:
-            // fprintf(stderr, "DllMain called with DLL_THREAD_DETACH\n");
             break;
 
         default:
-            // fprintf(stderr, "DllMain called with unexpected code %d!\n", fdwReason);
             break;
     }
 
@@ -202,7 +194,6 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
                     tag->read_in_flight = 0;
 
                     /* TODO - should we report an ABORT event here? */
-                    // tag->event_operation_aborted = 1;
                     tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
                 }
 
@@ -229,7 +220,6 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 
                     if(tag->vtable && tag->vtable->write) { tag->status = (int8_t)tag->vtable->write(tag); }
 
-                    // tag->event_write_started = 1;
                     tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
                 }
             }
@@ -239,10 +229,6 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
         if(tag->auto_sync_read_ms > 0) {
             int64_t current_time = time_ms();
 
-            // /* spread these out randomly to avoid too much clustering. */
-            // if(tag->auto_sync_next_read == 0) {
-            //     tag->auto_sync_next_read = current_time - (rand() % tag->auto_sync_read_ms);
-            // }
 
             /* do we need to read? */
             if(tag->auto_sync_next_read < current_time) {
@@ -256,7 +242,6 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 
                     if(tag->vtable && tag->vtable->read) { tag->status = (int8_t)tag->vtable->read(tag); }
 
-                    // tag->event_read_started = 1;
                     tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, tag->status);
 
                     /*
@@ -746,11 +731,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     /* we are creating a tag, there is no ID yet. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting");
 
-    // /* check to see if the library is initialized. */
-    // if(!atomic_get_bool(&lib_active)) {
-    //     pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "The plctag library is in the process of shutting down!");
-    //     return PLCTAG_ERR_NOT_ALLOWED;
-    // }
 
     /* make sure that all modules are initialized. */
     if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {
@@ -876,8 +856,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return PLCTAG_ERR_BAD_PARAM;
     } else if(tag->auto_sync_read_ms > 0) {
         /* how many periods did we already pass? */
-        // int64_t periods = (time_ms() / tag->auto_sync_read_ms);
-        // tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
         /* start some time in the future, but with random jitter. */
         tag->auto_sync_next_read = time_ms() + (int64_t)(random_u64((uint64_t)tag->auto_sync_read_ms));
     }
