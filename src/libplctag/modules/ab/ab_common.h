@@ -35,16 +35,19 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/ab/defs.h>
 #include <utils/vector.h>
 
 typedef struct ab_tag_t *ab_tag_p;
 #define AB_TAG_NULL ((ab_tag_p)NULL)
 
-typedef struct ab_session_t *ab_session_p;
+typedef cip_conn_t ab_session_t;
+typedef cip_conn_p ab_session_p;
 #define AB_SESSION_NULL ((ab_session_p)NULL)
 
-typedef struct ab_request_t *ab_request_p;
+typedef cip_request_t ab_request_t;
+typedef cip_request_p ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 extern int ab_tag_abort_request_only(ab_tag_p tag);

@@ -91,18 +91,8 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
  * Both are payload only -- the EIP and CPF encapsulation is accounted for separately.
  */
 #define MIN_PAYLOAD_SIZE_PCCC (92)
-#define MIN_PAYLOAD_SIZE_CIP (500)
-
-#define MIN_PAYLOAD_SIZE(session)                                                                                   \
-    (((session)->plc_type == AB_PLC_PLC5 || (session)->plc_type == AB_PLC_SLC || (session)->plc_type == AB_PLC_MLGX \
-      || (session)->plc_type == AB_PLC_LGX_PCCC) ?                                                                  \
-         MIN_PAYLOAD_SIZE_PCCC :                                                                                    \
-         MIN_PAYLOAD_SIZE_CIP)
 
 /* make sure we try hard to get a good payload size */
-#define GET_MAX_PAYLOAD_SIZE(session)                                \
-    ((session->max_payload_size > 0) ? (session->max_payload_size) : \
-                                       ((session->fo_conn_size > 0) ? (session->fo_conn_size) : (session->fo_ex_conn_size)))
 
 
 /* plc-specific session constructors */
@@ -122,14 +112,9 @@ static ab_session_p create_micro800_session_unsafe(const char *host, const char 
 static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host,
                                           const char *path, ab_plc_type_t plc_type, int *use_connected_msg,
                                           int connection_group_id);
-static int add_session_unsafe(ab_session_p n);
-static int remove_session_unsafe(ab_session_p n);
-static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
-static int session_match_valid(const char *host, const char *path, ab_session_p session);
 static int session_open_socket(ab_session_p session);
 static void session_destroy(void *session);
 static int session_register(ab_session_p session);
-static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
 static int64_t calc_retry_time(unsigned int retry_count);
 static THREAD_FUNC(session_handler);
@@ -145,33 +130,15 @@ static int perform_forward_close(ab_session_p session);
 static int send_forward_close_req(ab_session_p session);
 static int recv_forward_close_resp(ab_session_p session);
 static int send_forward_open_request(ab_session_p session);
-static uint16_t next_conn_serial_number(uint16_t current);
 static int send_old_forward_open_request(ab_session_p session);
 static int send_extended_forward_open_request(ab_session_p session);
 static int receive_forward_open_response(ab_session_p session);
-static void request_destroy(void *req_arg);
-static int session_request_increase_buffer(ab_request_p request, int new_capacity);
 
 
-static volatile mutex_p session_mutex = NULL;
-static volatile vector_p sessions = NULL;
+static cip_conn_list_t conn_list = {0};
 
 
-int session_startup(void) {
-    int rc = PLCTAG_STATUS_OK;
-
-    if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    if((sessions = vector_create(25, 5)) == NULL) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "Unable to create session vector!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    return rc;
-}
+int session_startup(void) { return session_list_init(&conn_list); }
 
 
 void session_teardown(void) {
@@ -183,21 +150,21 @@ void session_teardown(void) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
 
-    /* flag all open sessions for termination */
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Marking all open sessions for termination.");
+    /* flag all open connections for termination */
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Marking all open connections for termination.");
 
-    if(session_mutex) {
-        critical_block(session_mutex) {
-            if(sessions == NULL) {
+    if(conn_list.mutex) {
+        critical_block(conn_list.mutex) {
+            if(conn_list.conns == NULL) {
                 pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session list is already destroyed.");
 
                 break;
             }
 
-            remaining_sessions = vector_length(sessions);
+            remaining_sessions = vector_length(conn_list.conns);
 
             for(int sess_index = 0; sess_index < remaining_sessions; sess_index++) {
-                ab_session_p session = vector_get(sessions, sess_index);
+                ab_session_p session = vector_get(conn_list.conns, sess_index);
 
                 if(session) { atomic_set_int32(&session->terminating, 1); }
             }
@@ -207,11 +174,11 @@ void session_teardown(void) {
     /* flag the whole library shutting down. */
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Setting library shutdown flag.");
 
-    if(sessions && session_mutex) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting for sessions to terminate.");
+    if(conn_list.conns && conn_list.mutex) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Waiting for connections to terminate.");
 
         while(1) {
-            critical_block(session_mutex) { remaining_sessions = vector_length(sessions); }
+            critical_block(conn_list.mutex) { remaining_sessions = vector_length(conn_list.conns); }
 
             /* wait for things to terminate. */
             if(remaining_sessions > 0) {
@@ -223,9 +190,9 @@ void session_teardown(void) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Sessions all terminated.");
 
-        vector_destroy(sessions);
+        vector_destroy(conn_list.conns);
 
-        sessions = NULL;
+        conn_list.conns = NULL;
     }
 
     /* Wait for all active session handler threads to complete.
@@ -253,80 +220,13 @@ void session_teardown(void) {
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Destroying session mutex.");
 
-    if(session_mutex) {
-        mutex_destroy((mutex_p *)&session_mutex);
-        session_mutex = NULL;
+    if(conn_list.mutex) {
+        mutex_destroy(&(conn_list.mutex));
+        conn_list.mutex = NULL;
     }
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 }
-
-
-/*
- * session_get_new_seq_id_unsafe
- *
- * A wrapper to get a new session sequence ID.  Not thread safe.
- *
- * Note that this is dangerous to use in threaded applications
- * because 32-bit processors will not implement a 64-bit
- * integer as an atomic entity.
- */
-
-uint64_t session_get_new_seq_id_unsafe(ab_session_p session) {
-    /* check for rollover; zero is not a valid sequence id. */
-    if((++session->session_seq_id) == 0) { session->session_seq_id = 1; }
-
-    return session->session_seq_id;
-}
-
-/*
- * session_get_new_seq_id
- *
- * A thread-safe function to get a new session sequence ID.
- */
-
-uint64_t session_get_new_seq_id(ab_session_p session) {
-    uint16_t res = 0;
-
-    critical_block(session->session_mutex) { res = (uint16_t)session_get_new_seq_id_unsafe(session); }
-
-    return res;
-}
-int session_get_available_cip_payload_space(ab_session_p session) {
-    int result = 0;
-
-    if(!session) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Called with null session pointer!");
-        return 0;
-    }
-
-    critical_block(session->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
-        result = max_payload_size;
-
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-               "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               session->max_payload_size, session->fo_conn_size, session->fo_ex_conn_size, max_payload_size);
-
-        // Account for CPF data item overhead
-        if(session->use_connected_msg) {
-            result -= (int)sizeof(cpf_connected_data_item);
-        } else {
-            result -= (int)sizeof(cpf_unconnected_data_item);
-            result -= (int)(session->conn_path_size) + 2; /* encoded path size plus two bytes for length and padding */
-        }
-    }
-    if(result < 0) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Available payload space is negative (%d bytes)! This should not happen!",
-               result);
-        result = 0;
-    } else {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Available payload space is %d bytes.", result);
-    }
-
-    return result;
-}
-
 int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_session) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
@@ -360,10 +260,10 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
                connection_inactivity_timeout_ms);
     }
 
-    critical_block(session_mutex) {
-        /* if we are to share sessions, then look for an existing one. */
+    critical_block(conn_list.mutex) {
+        /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
-            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id);
+            session = session_list_find_by_host_unsafe(&conn_list, session_gw, session_path, connection_group_id);
         } else {
             /* no sharing, create a new one */
             session = AB_SESSION_NULL;
@@ -458,117 +358,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
 
     return rc;
 }
-
-
-int add_session_unsafe(ab_session_p session) {
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
-
-    if(!session) { return PLCTAG_ERR_NULL_PTR; }
-
-    vector_set(sessions, vector_length(sessions), session);
-
-    session->on_list = 1;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int add_session(ab_session_p s) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
-
-    critical_block(session_mutex) { rc = add_session_unsafe(s); }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
-
-    return rc;
-}
-
-
-int remove_session_unsafe(ab_session_p session) {
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting");
-
-    if(!session || !sessions) { return 0; }
-
-    for(int i = 0; i < vector_length(sessions); i++) {
-        ab_session_p tmp = vector_get(sessions, i);
-
-        /* FIXME potential ABA problem here */
-        if(tmp == session) {
-            vector_remove(sessions, i);
-            break;
-        }
-    }
-
-    /* no longer on the list */
-    session->on_list = 0;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-int remove_session(ab_session_p s) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
-
-    if(s->on_list) {
-        critical_block(session_mutex) { rc = remove_session_unsafe(s); }
-    } else {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session not on list, skipping removal.");
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
-
-    return rc;
-}
-
-
-int session_match_valid(const char *host, const char *path, ab_session_p session) {
-    if(!session) { return 0; }
-
-    if(!str_length(host)) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "New session host is NULL or zero length!");
-        return 0;
-    }
-
-    if(!str_length(session->host)) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Session host is NULL or zero length!");
-        return 0;
-    }
-
-    if(str_cmp_i(host, session->host)) { return 0; }
-
-    if(str_cmp_i(path, session->path)) { return 0; }
-
-    return 1;
-}
-
-
-ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id) {
-    for(int i = 0; i < vector_length(sessions); i++) {
-        ab_session_p session = vector_get(sessions, i);
-
-        /* is this session in the process of destruction? */
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_inc: Acquiring session reference.");
-        session = rc_inc(session);
-        if(session) {
-            if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)) {
-                return session;
-            }
-
-            rc_dec(session);
-        }
-    }
-
-    return NULL;
-}
-
-
 ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
     ab_session_p session = NULL;
 
@@ -870,7 +659,12 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     if(connection_id == 0) { connection_id = (uint32_t)(random_u64(UINT32_MAX) + 1); }
 
     /* fix up the rest of teh fields */
-    session->plc_type = plc_type;
+    session->plc_type = (int32_t)plc_type;
+    session->min_payload_size = (uint16_t)((plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX
+                                            || plc_type == AB_PLC_LGX_PCCC)
+                                               ? MIN_PAYLOAD_SIZE_PCCC
+                                               : MIN_PAYLOAD_SIZE_CIP);
+    session->dhp_capable = (dhp_kind == CIP_PLC_KIND_DHP_CAPABLE);
     session->use_connected_msg = *use_connected_msg;
     session->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     session->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
@@ -906,7 +700,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     }
 
     /* add the new session to the list. */
-    add_session_unsafe(session);
+    session_list_add_unsafe(&conn_list, session);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done");
 
@@ -1084,23 +878,6 @@ int session_unregister(ab_session_p session) {
 
     return PLCTAG_STATUS_OK;
 }
-
-
-int session_close_socket(ab_session_p session) {
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    if(session->sock) {
-        socket_close(session->sock);
-        socket_destroy(&(session->sock));
-        session->sock = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 void session_destroy(void *session_arg) {
     ab_session_p session = session_arg;
 
@@ -1113,7 +890,7 @@ void session_destroy(void *session_arg) {
     }
 
     /* so remove the session from the list so no one else can reference it. */
-    remove_session(session);
+    session_list_remove(&conn_list, session);
 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", session->packet_count);
 
@@ -1196,7 +973,7 @@ void session_destroy(void *session_arg) {
 /*
  * session_add_request_unsafe
  *
- * Add a request to the session's queue.  The caller must hold session_mutex.
+ * Add a request to the session's queue.  The caller must hold conn_list.mutex.
  */
 int session_add_request_unsafe(ab_session_p session, ab_request_p req) {
     int rc = PLCTAG_STATUS_OK;
@@ -1296,12 +1073,10 @@ typedef enum {
 } session_state_t;
 
 
-
-
 /* Set connection status and reason atomics, and push a ring buffer entry if the status changed.
  * Must only be called from the session handler thread (single writer).
  *
- * watch.status and the ring publish must change together under session_mutex:
+ * watch.status and the ring publish must change together under conn_list.mutex:
  * connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
  * and watch.status) to seed a freshly created connection tag, and needs the same
  * mutex to avoid reading one from before this transition and the other from after it --
@@ -2844,26 +2619,6 @@ int send_forward_open_request(ab_session_p session) {
 
     return rc;
 }
-
-
-/*
- * Advance the connection serial number, skipping zero.
- *
- * The field is 16 bits and is meant to cycle, but zero is not a usable serial
- * number -- conn setup seeds it into 1..65535 for exactly that reason -- so the
- * wrap has to land on 1 rather than 0. Doing the arithmetic in uint16_t here
- * also keeps -fsanitize=implicit-integer-truncation quiet: a bare ++ on a
- * uint16_t promotes to int and narrows again on store.
- */
-static uint16_t next_conn_serial_number(uint16_t current) {
-    uint16_t next = (uint16_t)(current + 1);
-
-    if(next == 0) { next = 1; }
-
-    return next;
-}
-
-
 int send_old_forward_open_request(ab_session_p session) {
     eip_forward_open_request_t *fo = NULL;
     uint8_t *data;
@@ -2923,8 +2678,7 @@ int send_old_forward_open_request(ab_session_p session) {
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX)
-       && session->is_dhp) {
+    if(session->dhp_capable && session->is_dhp) {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(
@@ -2934,8 +2688,7 @@ int send_old_forward_open_request(ab_session_p session) {
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX)
-       && session->is_dhp) {
+    if(session->dhp_capable && session->is_dhp) {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(
@@ -3107,7 +2860,7 @@ int receive_forward_open_response(ab_session_p session) {
                          * was allocated based on our request, and a PLC claiming to "support" a larger size
                          * than we asked for is a protocol disagreement, not a legitimate response.
                          */
-                        if(supported_size < MIN_PAYLOAD_SIZE(session)) {
+                        if(supported_size < session->min_payload_size) {
                             /*
                              * There is a floor as well as a ceiling.  Every protocol family has a
                              * fixed per-request overhead, and a payload below that leaves no room
@@ -3118,7 +2871,7 @@ int receive_forward_open_response(ab_session_p session) {
                             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0,
                                    "PLC reported a supported size of %u, below the %d bytes this protocol needs for a "
                                    "single request!",
-                                   supported_size, MIN_PAYLOAD_SIZE(session));
+                                   supported_size, session->min_payload_size);
                             rc = PLCTAG_ERR_TOO_SMALL;
                         } else if(supported_size <= session->max_payload_guess) {
                             critical_block(session->session_mutex) { session->max_payload_guess = supported_size; }
@@ -3323,7 +3076,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
         return PLCTAG_ERR_NO_MEM;
     }
 
-    res = (ab_request_p)rc_alloc((int)sizeof(struct ab_request_t), request_destroy);
+    res = (ab_request_p)rc_alloc((int)sizeof(cip_request_t), cip_request_destroy);
     if(!res) {
         mem_free(buffer);
         *req = NULL;
@@ -3340,52 +3093,4 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
 
     return rc;
-}
-
-
-/*
- * request_destroy
- *
- * The request must be removed from any lists before this!
- */
-
-void request_destroy(void *req_arg) {
-    ab_request_p req = req_arg;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Starting.");
-
-    atomic_set_int32(&req->abort_request, 1);
-
-    if(req->data) {
-        mem_free(req->data);
-        req->data = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Done.");
-}
-
-
-int session_request_increase_buffer(ab_request_p request, int new_capacity) {
-    uint8_t *old_buffer = NULL;
-    uint8_t *new_buffer = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, request->tag_id, "Starting.");
-
-    new_buffer = (uint8_t *)mem_alloc(new_capacity);
-    if(!new_buffer) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, request->tag_id, "Unable to allocate larger request buffer!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    spin_block(&request->lock) {
-        old_buffer = request->data;
-        request->request_capacity = new_capacity;
-        request->data = new_buffer;
-    }
-
-    mem_free(old_buffer);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, request->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
 }

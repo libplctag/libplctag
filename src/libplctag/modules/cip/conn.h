@@ -56,6 +56,14 @@
 #include <utils/vector.h>
 
 
+/*
+ * The smallest payload a plain CIP connection can still issue a request in.
+ * Every family has a fixed per-request overhead; below this there is no room
+ * for a request at all and the size arithmetic downstream underflows.
+ */
+#define MIN_PAYLOAD_SIZE_CIP (500)
+
+
 #define CIP_CONN_BASE_STRUCT                                                                        \
     int on_list;                                                                                    \
                                                                                                     \
@@ -84,6 +92,23 @@
     int is_dhp;                                                                                     \
                                                                                                     \
     int connection_group_id;                                                                        \
+                                                                                                    \
+    /*                                                                                              \
+     * What the dialect's PLC family implies, derived by the dialect's constructor.                 \
+     * The shared code reads these rather than the dialect's own plc_type enum, so it never         \
+     * has to know which family this is -- see cip_encode_path()'s CIP_PLC_KIND_* for the same      \
+     * idea applied to path encoding.                                                               \
+     */                                                                                             \
+    uint16_t min_payload_size; /* smallest payload worth negotiating down to */                     \
+    bool dhp_capable;          /* family can bridge to DH+ */                                       \
+                                                                                                    \
+    /*                                                                                              \
+     * The dialect's own PLC family enum, stored opaquely.  Shared code must never                  \
+     * interpret it: the two dialects' enums are deliberately distinct types (see A2), and          \
+     * only the dialect that wrote this value may cast it back.  It is here so a tag created        \
+     * from an @connection tag can inherit the family from the connection.                          \
+     */                                                                                             \
+    int32_t plc_type;                                                                               \
                                                                                                     \
     /* EIP session handle, from RegisterSession */                                                  \
     uint32_t session_handle;                                                                        \
@@ -124,3 +149,93 @@
                                                                                                     \
     /* connection inactivity timeout - readable/writable by tags via atomics */                     \
     atomic_int32_t connection_inactivity_timeout_ms /* milliseconds */
+
+
+/*
+ * The EtherNet/IP connection object.  One type for every CIP dialect: the
+ * dialects differ in how they construct one (see each module's create_*), not
+ * in what one is.
+ */
+typedef struct cip_conn_t {
+    CIP_CONN_BASE_STRUCT;
+} cip_conn_t;
+
+typedef cip_conn_t *cip_conn_p;
+
+
+/* One request in flight on a cip_conn_t. */
+struct cip_request_t {
+    /* used to force interlocks with other threads. */
+    lock_t lock;
+
+    int status;
+
+    /* flags for communicating with background thread */
+    int resp_received;
+    atomic_int32_t abort_request;
+
+    /* debugging info */
+    int tag_id;
+
+    /* allow requests to be packed into one packet */
+    int allow_packing;
+    int packing_num;
+
+    /* time stamp for debugging output */
+    int64_t time_sent;
+
+    /* used by the background thread for incrementally getting data */
+    int request_size; /* total bytes, not just data */
+    int request_capacity;
+
+    /* how much reply space this request expects to consume, for packing against the reply budget */
+    int response_size;
+
+    /* a first read does not know its own size yet, so it cannot be packed */
+    int first_read;
+
+    uint8_t *data;
+};
+
+typedef struct cip_request_t cip_request_t;
+typedef cip_request_t *cip_request_p;
+
+
+/*
+ * The negotiated payload for this connection: what the PLC agreed to, else
+ * what the Forward Open asked for.
+ */
+#define GET_MAX_PAYLOAD_SIZE(conn) \
+    (((conn)->max_payload_size > 0) ? (conn)->max_payload_size : (((conn)->fo_conn_size > 0) ? (conn)->fo_conn_size : (conn)->fo_ex_conn_size))
+
+
+/*
+ * A module's set of live connections.  Each dialect owns one and passes it in,
+ * so AB and Omron keep separate connection pools: session_match_valid() keys
+ * only on host and path, and the two dialects build a connection differently
+ * for the same address.
+ */
+typedef struct {
+    mutex_p mutex;
+    vector_p conns;
+} cip_conn_list_t;
+
+
+/* shared connection handling, see modules/cip/conn.c */
+
+extern int session_list_init(cip_conn_list_t *list);
+extern int session_list_add(cip_conn_list_t *list, cip_conn_p conn);
+extern int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn);
+extern int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
+extern int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn);
+extern cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
+                                                   int connection_group_id);
+
+extern uint16_t next_conn_serial_number(uint16_t current);
+extern uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn);
+extern uint64_t session_get_new_seq_id(cip_conn_p conn);
+extern int session_match_valid(const char *host, const char *path, cip_conn_p conn);
+extern int session_close_socket(cip_conn_p conn);
+extern void cip_request_destroy(void *req_arg);
+extern int session_request_increase_buffer(cip_request_p request, int new_capacity);
+extern int session_get_available_cip_payload_space(cip_conn_p conn);

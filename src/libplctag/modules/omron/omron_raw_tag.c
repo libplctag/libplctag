@@ -383,7 +383,7 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
 
     /* check the payload against what the connection has left before committing the request */
     int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = conn_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
@@ -525,7 +525,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
 
     /* check the payload against what the connection has left before committing the request */
     int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = conn_get_available_cip_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,

@@ -720,6 +720,14 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",
                "--expect-err"], T, ports_needed=1)
+    sec.test("@connection tag ERR_WAIT on unreachable host (Modbus, no server running)",
+              [exe("test_connection_tag"),
+               "--tag=protocol=modbus-tcp&gateway=127.0.0.1:{PORT}&path=0&name=@connection",
+               "--expect-err"], T, ports_needed=1)
+    sec.test("@connection tag ERR_WAIT on unreachable host (Omron, no server running)",
+              [exe("test_connection_tag"),
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
+               "--expect-err"], T, ports_needed=1)
     sec.test("Test async reconnect after PLC outage",
               [exe("test_reconnect_after_outage_async"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
     sec.test("Test sync reconnect after PLC outage",

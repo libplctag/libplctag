@@ -52,16 +52,11 @@
 #include <libplctag/modules/ab/tag.h>
 #include <libplctag/modules/omron/omron.h>
 #include <limits.h>
+#include <libplctag/lib/connection_tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
-
-/* Minimal view of AB device-tag layout needed for source-session sharing. */
-typedef struct ab_connection_tag_view_s {
-    TAG_BASE_STRUCT;
-    ab_session_p session;
-} ab_connection_tag_view_t;
 
 /*
  * Externally visible global variables
@@ -235,8 +230,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             }
 
             case TAG_PROTOCOL_AB_CONNECTION: {
-                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
-                tag->plc_type = src_device->session ? src_device->session->plc_type : AB_PLC_NONE;
+                ab_session_p src_session = (ab_session_p)((connection_tag_p)src_tag)->conn;
+                tag->plc_type = src_session ? (ab_plc_type_t)src_session->plc_type : AB_PLC_NONE;
                 break;
             }
 
@@ -326,8 +321,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             }
 
             case TAG_PROTOCOL_AB_CONNECTION: {
-                ab_connection_tag_view_t *src_device = (ab_connection_tag_view_t *)src_tag;
-                tag->session = rc_inc(src_device->session);
+                tag->session = rc_inc((ab_session_p)((connection_tag_p)src_tag)->conn);
                 break;
             }
 

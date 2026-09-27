@@ -44,13 +44,13 @@
 
 /* #define MAX_CONN_HOST    (128) */
 
-#define CONN_DEFAULT_TIMEOUT (2000)
-#define CONN_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
+#define SESSION_DEFAULT_TIMEOUT (2000)
+#define SESSION_DISCONNECT_TIMEOUT (OMRON_EIP_CONN_TIMEOUT_MS - 1000)
 
 #define MAX_PACKET_SIZE_EX (44 + 4002)
 
-#define CONN_MIN_REQUESTS (10)
-#define CONN_INC_REQUESTS (10)
+#define SESSION_MIN_REQUESTS (10)
+#define SESSION_INC_REQUESTS (10)
 
 #define MAX_CONN_PATH (260) /* 256 plus padding. */
 #define MAX_IP_ADDR_SEG_LEN (16)
@@ -67,50 +67,17 @@
 #define MAX_CONN_HOST_LEN (264)
 
 
-struct omron_conn_t {
-    CIP_CONN_BASE_STRUCT;
-
-    omron_plc_type_t plc_type;
-};
 
 
-struct omron_request_t {
-    /* used to force interlocks with other threads. */
-    lock_t lock;
-
-    int status;
-
-    /* flags for communicating with background thread */
-    int resp_received;
-    atomic_int32_t abort_request;
-
-    /* debugging info */
-    int tag_id;
-
-    /* allow requests to be packed in the conn */
-    int allow_packing;
-    int packing_num;
-
-    /* time stamp for debugging output */
-    int64_t time_sent;
-
-    /* used by the background thread for incrementally getting data */
-    int request_size; /* total bytes, not just data */
-    int request_capacity;
-    int response_size; /* size of data we expect to be returned by this request */
-
-    int first_read; /* whether this tag is being read for the first time and its size is therefor unknown*/
-    uint8_t *data;
-};
 
 
-uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess);
-uint64_t conn_get_new_seq_id(omron_conn_p sess);
+uint64_t session_get_new_seq_id_unsafe(omron_conn_p sess);
+uint64_t session_get_new_seq_id(omron_conn_p sess);
 
 extern int conn_startup(void);
 extern void conn_teardown(void);
 
 extern int conn_find_or_create(omron_conn_p *conn, attr attribs, int *is_new_conn);
-extern int conn_get_available_cip_payload_space(omron_conn_p conn);
+extern int session_get_available_cip_payload_space(omron_conn_p conn);
 extern int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *request);
 extern int conn_add_request(omron_conn_p sess, omron_request_p req);

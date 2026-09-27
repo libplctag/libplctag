@@ -35,16 +35,19 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/omron/defs.h>
 #include <utils/vector.h>
 
 typedef struct omron_tag_t *omron_tag_p;
 #define OMRON_TAG_NULL ((omron_tag_p)NULL)
 
-typedef struct omron_conn_t *omron_conn_p;
+typedef cip_conn_t omron_conn_t;
+typedef cip_conn_p omron_conn_p;
 #define OMRON_CONN_NULL ((omron_conn_p)NULL)
 
-typedef struct omron_request_t *omron_request_p;
+typedef cip_request_t omron_request_t;
+typedef cip_request_p omron_request_p;
 #define OMRON_REQUEST_NULL ((omron_request_p)NULL)
 
 

@@ -1759,7 +1759,7 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     /* if we are here, then we have all the type data etc. */
-    available_payload = conn_get_available_cip_payload_space(tag->session);
+    available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(tag->use_connected_msg) {
         pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Connected tag.");

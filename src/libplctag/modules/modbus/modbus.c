@@ -99,6 +99,25 @@ typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
 
 
+typedef enum {
+    PLC_CONNECT_START = 0,
+    PLC_CONNECT_WAIT,
+    PLC_READY,
+    PLC_BUILD_REQUEST,
+    PLC_SEND_REQUEST,
+    PLC_RECEIVE_RESPONSE,
+    PLC_IDLE_WAIT,
+    PLC_ERR_WAIT,
+
+    /*
+     * Every path that abandons a socket goes through here, so the link going
+     * down is reported exactly once and from one place, as AB and Omron do
+     * with SESSION_CLOSE_SOCKET.  The entering state sets state_after_close.
+     */
+    PLC_CLOSE_SOCKET
+} modbus_plc_state_t;
+
+
 struct modbus_plc_t {
     struct modbus_plc_t *next;
 
@@ -141,16 +160,7 @@ struct modbus_plc_t {
     thread_p handler_thread;
     mutex_p mutex;
 
-    enum {
-        PLC_CONNECT_START = 0,
-        PLC_CONNECT_WAIT,
-        PLC_READY,
-        PLC_BUILD_REQUEST,
-        PLC_SEND_REQUEST,
-        PLC_RECEIVE_RESPONSE,
-        PLC_IDLE_WAIT,
-        PLC_ERR_WAIT
-    } state;
+    modbus_plc_state_t state;
     int max_requests_in_flight;
     atomic_int32_t pending_request_count;
 
@@ -188,6 +198,7 @@ struct modbus_plc_t {
 };
 
 typedef struct modbus_plc_t *modbus_plc_p;
+
 
 typedef enum {
     MB_REG_UNKNOWN,
@@ -1017,6 +1028,9 @@ THREAD_FUNC(modbus_plc_handler) {
     int waitable_events = SOCK_EVENT_NONE;
     int32_t timeout_ms = 0;
 
+    /* where PLC_CLOSE_SOCKET goes once the socket is down; set by whoever enters it */
+    modbus_plc_state_t state_after_close = PLC_CONNECT_START;
+
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     if(!plc) {
@@ -1106,7 +1120,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
                            err_delay);
 
-                    plc->state = PLC_ERR_WAIT;
+                    state_after_close = PLC_ERR_WAIT;
+                    plc->state = PLC_CLOSE_SOCKET;
                 }
                 break;
 
@@ -1146,7 +1161,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
                            err_delay);
 
-                    plc->state = PLC_ERR_WAIT;
+                    state_after_close = PLC_ERR_WAIT;
+                    plc->state = PLC_CLOSE_SOCKET;
                 }
                 break;
 
@@ -1192,13 +1208,11 @@ THREAD_FUNC(modbus_plc_handler) {
                                ", last_packet_time=%" PRId64 ". Calling reset_plc() and going to PLC_IDLE_WAIT.",
                                idle_time, inactivity_timeout_ms, current_time, plc->last_packet_time_ms);
 
-                        /* reset the PLC state */
                         mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DISCONNECTING);
-                        reset_plc(plc);
-                        mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
 
-                        /* go to the state where we wait for something to happen. */
-                        plc->state = PLC_IDLE_WAIT;
+                        /* close the socket, then wait for something to happen. */
+                        state_after_close = PLC_IDLE_WAIT;
+                        plc->state = PLC_CLOSE_SOCKET;
                     } else if(atomic_get_int32(&plc->pending_request_count) > 0) {
                         /* Timeout while waiting for responses, just continue waiting */
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0,
@@ -1219,10 +1233,11 @@ THREAD_FUNC(modbus_plc_handler) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unexpected socket error!");
                     }
 
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Going to state PLC_CONNECT_START");
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Going to state PLC_CLOSE_SOCKET");
 
-                    /* try to reconnect immediately */
-                    plc->state = PLC_CONNECT_START;
+                    /* close the socket, report the link down, then reconnect immediately */
+                    state_after_close = PLC_CONNECT_START;
+                    plc->state = PLC_CLOSE_SOCKET;
                     break;
                 }
 
@@ -1279,8 +1294,9 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Resetting PLC due to write error %s.", plc_tag_decode_error(rc));
 
-                    /* try to reconnect immediately. */
-                    plc->state = PLC_CONNECT_START;
+                    /* close the socket, report the link down, then reconnect immediately */
+                    state_after_close = PLC_CONNECT_START;
+                    plc->state = PLC_CLOSE_SOCKET;
                 }
 
                 /* if we did not send all the packet, we stay in this state and keep trying. */
@@ -1305,8 +1321,9 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Reconnecting due to read error %s.", plc_tag_decode_error(rc));
 
-                    /* try to reconnect immediately. */
-                    plc->state = PLC_CONNECT_START;
+                    /* close the socket, report the link down, then reconnect immediately */
+                    state_after_close = PLC_CONNECT_START;
+                    plc->state = PLC_CLOSE_SOCKET;
                 }
 
                 /* in all cases we want to cycle through the state machine immediately. */
@@ -1335,6 +1352,16 @@ THREAD_FUNC(modbus_plc_handler) {
 
                 if(sock_events & SOCK_EVENT_TIMEOUT) { pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "PLC idle wait timed out."); }
 
+                break;
+
+            case PLC_CLOSE_SOCKET:
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "in PLC_CLOSE_SOCKET state.");
+
+                /* one place reports the link down, and one place tears the socket down */
+                mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_DOWN);
+                reset_plc(plc);
+
+                plc->state = state_after_close;
                 break;
 
             case PLC_ERR_WAIT:

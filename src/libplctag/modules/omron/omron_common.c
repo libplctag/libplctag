@@ -46,6 +46,7 @@
 #include <libplctag/modules/omron/omron_standard_tag.h>
 #include <libplctag/modules/omron/tag.h>
 #include <limits.h>
+#include <libplctag/lib/connection_tag.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
@@ -93,18 +94,6 @@ static int default_read(plc_tag_p tag);
 static int default_status(plc_tag_p tag);
 static int default_tickler(plc_tag_p tag);
 static int default_write(plc_tag_p tag);
-
-/*
- * A read-only view of the leading fields of omron_connection_tag_t, which is private to
- * omron_connection_tag.c.  This mirrors that struct's layout by hand, so the two must be
- * changed together.  A4 removes the duplication by giving the connection tag one shared
- * implementation.
- */
-typedef struct omron_connection_tag_view_s {
-    TAG_BASE_STRUCT;
-    omron_conn_p session;
-} omron_connection_tag_view_t;
-
 
 /* vtables for different kinds of tags */
 static struct tag_vtable_t default_vtable = {
@@ -225,8 +214,8 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
             case TAG_PROTOCOL_OMRON: tag->plc_type = ((omron_tag_p)src_tag)->plc_type; break;
 
             case TAG_PROTOCOL_OMRON_CONNECTION: {
-                omron_connection_tag_view_t *src_device = (omron_connection_tag_view_t *)src_tag;
-                tag->plc_type = src_device->session ? src_device->session->plc_type : OMRON_PLC_NONE;
+                omron_conn_p src_conn = (omron_conn_p)((connection_tag_p)src_tag)->conn;
+                tag->plc_type = src_conn ? (omron_plc_type_t)src_conn->plc_type : OMRON_PLC_NONE;
                 break;
             }
 
@@ -261,8 +250,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
             case TAG_PROTOCOL_OMRON: tag->session = rc_inc(((omron_tag_p)src_tag)->session); break;
 
             case TAG_PROTOCOL_OMRON_CONNECTION: {
-                omron_connection_tag_view_t *src_device = (omron_connection_tag_view_t *)src_tag;
-                tag->session = rc_inc(src_device->session);
+                tag->session = rc_inc((omron_conn_p)((connection_tag_p)src_tag)->conn);
                 break;
             }
 
@@ -792,7 +780,7 @@ static int32_t omron_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int
 
     /* no connection means the connection that will be created uses the default. */
     *result =
-        (tag->session ? atomic_get_int32(&tag->session->connection_inactivity_timeout_ms) : (int32_t)CONN_DISCONNECT_TIMEOUT);
+        (tag->session ? atomic_get_int32(&tag->session->connection_inactivity_timeout_ms) : (int32_t)SESSION_DISCONNECT_TIMEOUT);
 
     return PLCTAG_STATUS_OK;
 }
@@ -803,17 +791,17 @@ static int32_t omron_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int
     int32_t clamped_value = value;
     int32_t rc = PLCTAG_STATUS_OK;
 
-    /* Clamp to valid range: 100ms minimum, CONN_DISCONNECT_TIMEOUT (31000ms) maximum */
+    /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
     if(clamped_value < 100) {
         clamped_value = 100;
         rc = PLCTAG_ERR_OUT_OF_BOUNDS;
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
                "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
-    } else if(clamped_value > CONN_DISCONNECT_TIMEOUT) {
-        clamped_value = CONN_DISCONNECT_TIMEOUT;
+    } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
+        clamped_value = SESSION_DISCONNECT_TIMEOUT;
         rc = PLCTAG_ERR_OUT_OF_BOUNDS;
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, CONN_DISCONNECT_TIMEOUT);
+               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, SESSION_DISCONNECT_TIMEOUT);
     }
 
     if(!tag->session) {
