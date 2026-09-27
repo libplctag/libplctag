@@ -76,7 +76,7 @@ plc_tag_p omron_connection_tag_create(attr attribs,
     if(conn) {
         args.conn = conn;
         args.watch = &conn->watch;
-        args.conn_mutex = conn->mutex;
+        args.conn_mutex = conn->session_mutex;
     }
 
     pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_DETAIL, 0, "Done.");

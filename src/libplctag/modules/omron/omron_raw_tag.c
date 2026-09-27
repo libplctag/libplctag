@@ -330,6 +330,7 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     eip_cip_co_req *cip = NULL;
     uint8_t *data = NULL;
     omron_request_p req = NULL;
+    size_t required_space = 0;
 
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -340,9 +341,13 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
         return rc;
     }
 
-    if(tag->size > conn_get_max_payload(tag->session)) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Amount to write exceeds negotiated conn size %d!",
-               conn_get_max_payload(tag->session));
+    /* how much space do we need? */
+    required_space = (size_t)tag->size + sizeof(*cip);
+
+    if(required_space > (size_t)req->request_capacity) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
+               "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, req->request_capacity);
+        rc_dec(req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -375,6 +380,17 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
     cip->cpf_cdi_item_type = h2le16(OMRON_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
+
+    /* check the payload against what the connection has left before committing the request */
+    int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
+    int available_payload = conn_get_available_cip_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
+               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
+        rc_dec(req);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
@@ -412,6 +428,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     uint8_t *embed_start = NULL;
     uint8_t *embed_end = NULL;
     omron_request_p req = NULL;
+    size_t required_space = 0;
 
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -420,6 +437,16 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
         return rc;
+    }
+
+    /* how much space do we need? */
+    required_space = (size_t)tag->size + sizeof(eip_cip_uc_req) + (size_t)tag->session->conn_path_size;
+
+    if(required_space > (size_t)req->request_capacity) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
+               "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, req->request_capacity);
+        rc_dec(req);
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     cip = (eip_cip_uc_req *)(req->data);
@@ -495,6 +522,17 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
 
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
+
+    /* check the payload against what the connection has left before committing the request */
+    int packet_payload_size = (int)(embed_end - embed_start);
+    int available_payload = conn_get_available_cip_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
+               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
+        rc_dec(req);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));

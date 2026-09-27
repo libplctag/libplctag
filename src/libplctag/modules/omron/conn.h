@@ -35,7 +35,7 @@
 
 #include <stdbool.h>
 
-#include <libplctag/lib/conn_watch.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <utils/atomic_utils.h>
@@ -68,77 +68,9 @@
 
 
 struct omron_conn_t {
-    //    int status;
-    int on_list;
-
-    /* gateway connection related info */
-    char *host;
-    int port;
-    char *path;
-    sock_p sock;
-
-    /* connection variables. */
-    bool use_connected_msg;
-    bool only_use_old_forward_open;
-    int fo_conn_size;    /* old FO max connection size */
-    int fo_ex_conn_size; /* extended FO max connection size */
-    uint16_t max_payload_guess;
-    uint16_t max_payload_size;
-
-    uint32_t orig_connection_id;
-    uint32_t targ_connection_id;
-    uint16_t conn_seq_num;
-    uint16_t conn_serial_number;
+    CIP_CONN_BASE_STRUCT;
 
     omron_plc_type_t plc_type;
-
-    uint8_t *conn_path;
-    uint8_t conn_path_size;
-    uint16_t dhp_dest;
-    int is_dhp;
-
-    int connection_group_id;
-
-    /* registration info */
-    uint32_t conn_handle;
-
-    /* Sequence ID for requests. */
-    uint64_t conn_seq_id;
-
-    /* list of outstanding requests for this conn */
-    vector_p requests;
-
-    uint64_t resp_seq_id;
-
-    /*
-     * What we last put on the wire.  The response has to be an answer to the request we
-     * actually sent, so these are snapshotted from the outgoing packet in send_eip_request()
-     * and checked against the incoming one in recv_eip_response().
-     */
-    uint16_t req_encap_command;
-    uint64_t req_seq_id;
-    bool req_sent;
-
-    /* data for receiving messages */
-    uint32_t data_offset;
-    uint32_t data_capacity;
-    uint32_t data_size;
-    uint8_t *data;
-    bool data_buffer_is_static;
-    // uint8_t data[MAX_PACKET_SIZE_EX];
-
-    uint64_t packet_count;
-
-    thread_p handler_thread;
-    atomic_int32_t terminating;
-    mutex_p mutex;
-    cond_p wait_cond;
-
-    /* connection status and event ring - what connection tags observe */
-    conn_watch_t watch;
-
-    /* connection inactivity timeout - readable/writable by tags via atomics */
-    atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
 };
 
 
@@ -179,7 +111,6 @@ extern int conn_startup(void);
 extern void conn_teardown(void);
 
 extern int conn_find_or_create(omron_conn_p *conn, attr attribs, int *is_new_conn);
-extern int conn_get_max_payload(omron_conn_p conn);
 extern int conn_get_available_cip_payload_space(omron_conn_p conn);
 extern int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *request);
 extern int conn_add_request(omron_conn_p sess, omron_request_p req);
