@@ -78,6 +78,42 @@
 #define CIP_EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
 #define CIP_EIP_ITEM_NAI ((uint16_t)0x0000) /* NULL address item */
 #define CIP_EIP_ITEM_UDI ((uint16_t)0x00B2) /* unconnected data item */
+/*
+ * Multiple Service Packet reply accounting.  Packed responses all have to fit
+ * in one response packet; the PLC fails the whole exchange if they do not.
+ */
+#define CIP_MSP_OFFSET_ENTRY_SIZE (2)  /* the uint16 offset stored per packed packet */
+#define CIP_MSP_MAX_PACKET_PADDING (8) /* worst-case padding between packed packets */
+#define CIP_MSP_REPLY_OVERHEAD (2 + 4) /* the packet count field plus the CIP response header */
+#define CIP_MSP_REPLY_SLACK (10)       /* empirical margin, see ephemeral_docs/deferred_fixes.md */
+
+
+/* how long the handler sleeps when nothing else wakes it */
+#define SESSION_IDLE_WAIT_TIME (100)
+
+
+/* the connection handler's state machine */
+typedef enum {
+    SESSION_OPEN_SOCKET_START,
+    SESSION_OPEN_SOCKET_WAIT,
+    SESSION_REGISTER,
+    SESSION_SEND_FORWARD_OPEN,
+    SESSION_RECEIVE_FORWARD_OPEN,
+    SESSION_IDLE,
+    SESSION_DISCONNECT,
+    SESSION_UNREGISTER,
+    SESSION_CLOSE_SOCKET,
+    SESSION_START_RETRY,
+    SESSION_WAIT_ERR_RETRY,
+    SESSION_WAIT_IDLE_RECONNECT
+} session_state_t;
+
+
+/* the most requests that may be bundled into one Multiple Service Packet */
+#define MAX_REQUESTS (400)
+
+#define CIP_ERR_UNSUPPORTED_SERVICE ((uint8_t)0x08)
+#define CIP_ERR_PARTIAL_ERROR ((uint8_t)0x1e)
 #define CIP_EIP_VERSION ((uint16_t)0x0001)
 #define CIP_EIP_CMD_CIP_MULTI ((uint8_t)0x0A)
 #define CIP_EIP_CMD_CIP_OK ((uint8_t)0x80)
@@ -106,8 +142,24 @@
 #define MIN_PAYLOAD_SIZE_CIP (500)
 
 
+/*
+ * A module's set of live connections.  Each dialect owns one and passes it in,
+ * so AB and Omron keep separate connection pools: session_match_valid() keys
+ * only on host and path, and the two dialects build a connection differently
+ * for the same address.
+ */
+typedef struct {
+    mutex_p mutex;
+    vector_p conns;
+
+    /* handler threads still running for this list, so teardown can wait them out */
+    atomic_int32_t handler_count;
+} cip_conn_list_t;
+
+
 #define CIP_CONN_BASE_STRUCT                                                                        \
     int on_list;                                                                                    \
+    cip_conn_list_t *owner_list; /* the module list this connection belongs to */                   \
                                                                                                     \
     /* gateway connection related info */                                                           \
     char *host;                                                                                     \
@@ -251,18 +303,6 @@ typedef cip_request_t *cip_request_p;
     (((conn)->max_payload_size > 0) ? (conn)->max_payload_size : (((conn)->fo_conn_size > 0) ? (conn)->fo_conn_size : (conn)->fo_ex_conn_size))
 
 
-/*
- * A module's set of live connections.  Each dialect owns one and passes it in,
- * so AB and Omron keep separate connection pools: session_match_valid() keys
- * only on host and path, and the two dialects build a connection differently
- * for the same address.
- */
-typedef struct {
-    mutex_p mutex;
-    vector_p conns;
-} cip_conn_list_t;
-
-
 /* shared connection handling, see modules/cip/conn.c */
 
 extern int session_list_init(cip_conn_list_t *list);
@@ -302,3 +342,21 @@ extern int session_add_request(cip_conn_p conn, cip_request_p req);
 extern int64_t calc_retry_time(unsigned int retry_count);
 extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
 extern int session_register(cip_conn_p conn);
+extern void session_destroy(void *conn_arg);
+extern int receive_forward_open_response(cip_conn_p conn);
+
+/*
+ * How much of the single reply packet this request will consume: its own reply
+ * plus the offset entry and the worst-case inter-packet padding.  A request
+ * whose reply size is not yet known -- response_size of zero, typically because
+ * the tag has never been read -- cannot be budgeted, so it draws nothing here
+ * and is kept out of a bundle by the first_read gate instead.
+ */
+static inline int reply_budget_cost(cip_request_p request) {
+    if(request->response_size <= 0) { return 0; }
+
+    return request->response_size + CIP_MSP_MAX_PACKET_PADDING + CIP_MSP_OFFSET_ENTRY_SIZE;
+}
+extern int process_requests(cip_conn_p conn);
+extern THREAD_FUNC(session_handler);
+extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);

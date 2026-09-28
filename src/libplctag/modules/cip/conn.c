@@ -42,6 +42,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/wire.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -1660,4 +1661,988 @@ int session_register(cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
 
     return PLCTAG_STATUS_OK;
+}
+void session_destroy(void *conn_arg) {
+    cip_conn_p conn = conn_arg;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    if(!conn) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session ptr is null!");
+
+        return;
+    }
+
+    /* so remove the conn from the list so no one else can reference it. */
+    session_list_remove(conn->owner_list, conn);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", conn->packet_count);
+
+    /* terminate the conn thread first. */
+    atomic_set_int32(&conn->terminating, 1);
+
+    /* signal the condition variable in case it is waiting */
+    if(conn->session_wait_cond) { cond_signal(conn->session_wait_cond); }
+
+    /* get rid of the handler thread. */
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Destroying session thread.");
+    if(conn->handler_thread) {
+        /* this cannot be guarded by the mutex since the conn thread also locks it. */
+        thread_join(conn->handler_thread);
+
+        /* FIXME - is this critical block needed? */
+        critical_block(conn->session_mutex) {
+            thread_destroy(&(conn->handler_thread));
+            conn->handler_thread = NULL;
+        }
+    }
+
+
+    /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
+    critical_block(conn->session_mutex) {
+        /* close off the connection if is one. This helps the PLC clean up. */
+        if(conn->targ_connection_id) {
+            /*
+             * we do not want the internal loop to immediately
+             * return, so set the flag like we are not terminating.
+             * There is still a timeout that applies.
+             */
+            atomic_set_int32(&conn->terminating, 0);
+            perform_forward_close(conn);
+            atomic_set_int32(&conn->terminating, 1);
+        }
+
+        /* try to be nice and un-register the conn */
+        if(conn->session_handle) { session_unregister(conn); }
+
+        if(conn->sock) { session_close_socket(conn); }
+
+        /* release all the requests that are in the queue. */
+        if(conn->requests) {
+            for(int i = 0; i < vector_length(conn->requests); i++) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing request reference.");
+                cip_request_p req = vector_get(conn->requests, i);
+
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing request for tag %" PRId32 ".", req->tag_id);
+
+                rc_dec(req);
+            }
+
+            vector_destroy(conn->requests);
+            conn->requests = NULL;
+        }
+    }
+
+    /* we are done with the condition variable, finally destroy it. */
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Destroying session condition variable.");
+    if(conn->session_wait_cond) {
+        cond_destroy(&(conn->session_wait_cond));
+        conn->session_wait_cond = NULL;
+    }
+
+    /* we are done with the mutex, finally destroy it. */
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Destroying session mutex.");
+    if(conn->session_mutex) {
+        mutex_destroy(&(conn->session_mutex));
+        conn->session_mutex = NULL;
+    }
+
+    if(!conn->data_buffer_is_static) { mem_free(conn->data); }
+
+    /* these are all allocated in one large block. */
+
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
+
+    return;
+}
+
+
+int receive_forward_open_response(cip_conn_p conn) {
+    eip_forward_open_response_t *fo_resp;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
+
+    /* Never wait unboundedly for the forward open response. A dropped conn must surface as an */
+    /* error so the handler can log it and re-enter the connect/retry path instead of parking. */
+    rc = recv_eip_response(conn, SESSION_DEFAULT_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to receive Forward Open response.");
+        return rc;
+    }
+
+    fo_resp = (eip_forward_open_response_t *)(conn->data);
+
+    do {
+        /*
+         * recv_eip_response() only guarantees that we got an EIP header.  We are about to
+         * read the CIP reply status, so require everything up to and including status_size.
+         * An error reply legitimately stops there -- it carries extended status instead of
+         * the connection IDs -- so do not demand the whole struct here.  The buffer is not
+         * cleared between packets, so a short response would otherwise be read as stale
+         * data from the previous one.
+         */
+        if((size_t)conn->data_size < offsetof(eip_forward_open_response_t, orig_to_targ_conn_id)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                   "Forward Open response of %u bytes is too short to hold the CIP reply status at %d bytes!", conn->data_size,
+                   (int)offsetof(eip_forward_open_response_t, orig_to_targ_conn_id));
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        if(le2h16(fo_resp->encap_command) != CIP_EIP_UNCONNECTED_SEND) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unexpected EIP packet type received: %d!", fo_resp->encap_command);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if(le2h32(fo_resp->encap_status) != CIP_EIP_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "EIP command failed, response code: %d", fo_resp->encap_status);
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+        if(fo_resp->general_status != CIP_EIP_OK) {
+            size_t general_status_size = cip_error_data_size(&fo_resp->general_status, conn->data + conn->data_size);
+
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward Open command failed, response code: %s (%d)",
+                   decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
+            if(fo_resp->general_status == CIP_ERR_UNSUPPORTED_SERVICE) {
+                /* this type of command is not supported! */
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Received CIP command unsupported error from the PLC!");
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            } else {
+                rc = PLCTAG_ERR_REMOTE_ERR;
+
+                /* comparing pointers directly is UB, so compare the integer values instead. */
+                if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2
+                   && (intptr_t)(&fo_resp->status_size + 5) <= (intptr_t)(conn->data + conn->data_size)) {
+                    /* we might have an error that tells us the actual size to use. */
+                    uint8_t *data = &fo_resp->status_size;
+                    int extended_status = data[1] | (data[2] << 8);
+                    uint16_t supported_size = (uint16_t)((uint16_t)data[3] | (uint16_t)((uint16_t)data[4] << (uint16_t)8));
+
+                    if(extended_status == 0x109) { /* MAGIC */
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Error from forward open request, unsupported size, but size %d is supported.", supported_size);
+
+                        /*
+                         * The PLC is telling us the size we asked for is unsupported and offering a size it
+                         * does support.  That offered size must not exceed what we asked for -- conn->data
+                         * was allocated based on our request, and a PLC claiming to "support" a larger size
+                         * than we asked for is a protocol disagreement, not a legitimate response.
+                         */
+                        if(supported_size < conn->min_payload_size) {
+                            /*
+                             * There is a floor as well as a ceiling.  Every protocol family has a
+                             * fixed per-request overhead, and a payload below that leaves no room
+                             * for a request at all -- the size arithmetic downstream then has an
+                             * overhead larger than the space, which is where the underflows live.
+                             * A PLC offering less than we can use is not a size we can negotiate to.
+                             */
+                            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                                   "PLC reported a supported size of %u, below the %d bytes this protocol needs for a "
+                                   "single request!",
+                                   supported_size, conn->min_payload_size);
+                            rc = PLCTAG_ERR_TOO_SMALL;
+                        } else if(supported_size <= conn->max_payload_guess) {
+                            critical_block(conn->session_mutex) { conn->max_payload_guess = supported_size; }
+                            rc = PLCTAG_ERR_TOO_LARGE;
+                        } else {
+                            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                                   "PLC reported a supported size, %u, larger than what we requested, %u! This is a "
+                                   "protocol disagreement and may indicate a malicious or misbehaving PLC; aborting.",
+                                   supported_size, conn->max_payload_guess);
+                            rc = PLCTAG_ERR_BAD_DATA;
+                        }
+                    } else if(extended_status == 0x100) { /* MAGIC */
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Error from forward open request, duplicate connection ID.  Need to try again.");
+                        rc = PLCTAG_ERR_DUPLICATE;
+                    } else {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "CIP extended error %s (%s)!",
+                               decode_cip_error_short(&fo_resp->general_status, general_status_size),
+                               decode_cip_error_long(&fo_resp->general_status, general_status_size));
+                    }
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "CIP error code %s (%s)!",
+                           decode_cip_error_short(&fo_resp->general_status, general_status_size),
+                           decode_cip_error_long(&fo_resp->general_status, general_status_size));
+                }
+            }
+
+            break;
+        }
+
+        /* a success reply must carry the connection IDs and the rest of the fixed fields. */
+        if((size_t)conn->data_size < sizeof(*fo_resp)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                   "Successful Forward Open response of %u bytes is too short to hold the connection data of %d bytes!",
+                   conn->data_size, (int)sizeof(*fo_resp));
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        /* success! */
+        conn->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
+        conn->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
+
+        critical_block(conn->session_mutex) { conn->max_payload_size = conn->max_payload_guess; }
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0,
+               "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",
+               conn->orig_connection_id, conn->targ_connection_id, conn->max_payload_size);
+
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
+
+    return rc;
+}
+int process_requests(cip_conn_p conn) {
+    int rc = PLCTAG_STATUS_OK;
+    cip_request_p request = NULL;
+    cip_request_p bundled_requests[MAX_REQUESTS] = {NULL};
+    int num_bundled_requests = 0;
+    int remaining_request_space = 0;
+    int remaining_response_space = 0;
+    int allow_packing = 0;
+
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Starting.");
+
+    if(!conn) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Null session pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Checking for requests to process.");
+
+    rc = PLCTAG_STATUS_OK;
+    request = NULL;
+    conn->data_size = 0;
+    conn->data_offset = 0;
+
+    /* grab a request off the front of the list. */
+    critical_block(conn->session_mutex) {
+        // FIXME - no logging in a mutex!
+        // pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
+
+        /* is there anything to do? */
+        if(vector_length(conn->requests)) {
+            /* get rid of all aborted requests. */
+            purge_aborted_requests_unsafe(conn);
+
+            /* if there are still requests after purging all the aborted requests, process them. */
+
+            /*
+             * The total allowed space for requests is the negotiated packet capacity
+             * less the overhead of the CPF data item. The rest of the space is for
+             * the EIP encapsulation header and the CPF header and the CPF address item,
+             * which are already accounted for in the buffer structure.
+             */
+            remaining_request_space = session_get_available_cip_payload_space(conn);
+
+            /*
+             * The reply has its own budget.  Everything the packed responses need
+             * has to fit in one response packet, and the PLC will simply fail the
+             * whole exchange if it does not, so track it alongside the request side.
+             */
+            remaining_response_space = GET_MAX_PAYLOAD_SIZE(conn) - CIP_MSP_REPLY_OVERHEAD - CIP_MSP_REPLY_SLACK;
+
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Available payload space is %d bytes, reply space is %d bytes.",
+                   remaining_request_space, remaining_response_space);
+
+            /*
+             * The logic below is a bit convoluted.
+             *
+             * - If the first request takes up all the space, we cannot pack any more requests.
+             *
+             * - If the first request is packable, we can keep packing requests
+             *   until we run out of space or we reach the maximum number of requests.  We need to make sure
+             *   that the overhead of the CIP packed request header is accounted for in the remaining space as well as the
+             *   two-byte offset entry for each request.
+             *
+             * - If we are packing requests, and the next one is not packable, we stop packing.
+             *
+             * - If the first request is not packable, we can only pack it
+             *   if it is the first one in the queue. And then can pack no more
+             *   requests after that.
+             */
+
+            if(vector_length(conn->requests)) {
+                /* Always process the first request, regardless of packability */
+                request = vector_get(conn->requests, 0);
+                int first_request_size = get_payload_size(request);
+
+                /* Check if the first request fits at all */
+                if(first_request_size <= remaining_request_space) {
+                    bundled_requests[num_bundled_requests] = request;
+                    num_bundled_requests++;
+                    remaining_request_space -= first_request_size;
+                    remaining_response_space -= reply_budget_cost(request);
+                    vector_remove(conn->requests, 0);
+
+                    /*
+                     * A first read does not know how large its own reply will be, so it
+                     * cannot be budgeted against the reply space and must not be packed.
+                     */
+                    allow_packing = request->allow_packing && !request->first_read;
+
+                    /* If the first request is packable, try to pack more requests */
+                    if(allow_packing && vector_length(conn->requests) > 0) {
+                        /* Account for CIP multi-request overhead now that we know we'll have multiple requests */
+                        remaining_request_space -= (int)sizeof(cip_multi_req_header);
+
+                        /* Account for 2-byte offset entry per request (including the first one already processed) */
+                        int multi_request_overhead = CIP_MSP_OFFSET_ENTRY_SIZE;
+                        remaining_request_space -= multi_request_overhead; /* for the first request */
+
+                        while(vector_length(conn->requests) > 0 && num_bundled_requests < MAX_REQUESTS) {
+
+                            request = vector_get(conn->requests, 0);
+
+                            /* Only pack if this request is packable and its reply can be budgeted */
+                            allow_packing = request->allow_packing && !request->first_read;
+                            if(!allow_packing) { break; }
+
+                            int next_request_size = get_payload_size(request) + multi_request_overhead;
+
+                            /* Check if this request fits in remaining space */
+                            if(next_request_size > remaining_request_space) { break; }
+
+                            /* and that its reply still fits in the single response packet */
+                            int next_response_space = remaining_response_space - reply_budget_cost(request);
+                            if(next_response_space < 0) { break; }
+
+                            bundled_requests[num_bundled_requests] = request;
+                            num_bundled_requests++;
+                            remaining_request_space -= next_request_size;
+                            remaining_response_space = next_response_space;
+                            vector_remove(conn->requests, 0);
+                        }
+                    }
+                    /* If first request is not packable, we stop here (only the first request is packed) */
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                           "First request size %d exceeds remaining space %d, cannot process any requests.", first_request_size,
+                           remaining_request_space);
+                }
+            } else {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "All requests in queue were aborted, nothing to do.");
+            }
+        }
+    }
+
+    if(num_bundled_requests > 0) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "%d requests to process.", num_bundled_requests);
+
+        do {
+            /* copy and pack the requests into the conn buffer. */
+            /* FIXME - pack_requests() only returns PLCTAG_STATUS_OK */
+            rc = pack_requests(conn, bundled_requests, num_bundled_requests);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error while packing requests, %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* fill in all the necessary parts to the request. */
+            if((rc = prepare_request(conn)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to prepare request, %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* send the request */
+            if((rc = send_eip_request(conn, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error sending packet %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* wait for the response */
+            if((rc = recv_eip_response(conn, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error receiving packet response %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /*
+             * check the CIP status, but only if this is a bundled
+             * response.   If it is a singleton, then we pass the
+             * status back to the tag.
+             */
+            if(num_bundled_requests > 1) {
+                cip_multi_resp_header *multi_resp = NULL;
+
+                if(le2h16(((eip_encap *)(conn->data))->encap_command) == CIP_EIP_UNCONNECTED_SEND) {
+                    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(conn->data);
+                    uint16_t udi_item_length = 0;
+                    size_t response_overhead = 0;
+                    size_t response_size = 0;
+
+                    /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
+                    if((size_t)conn->data_size < sizeof(*resp)) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Unconnected response of %u bytes is too short to hold a CIP response of %d bytes!",
+                               conn->data_size, (int)sizeof(*resp));
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                        break;
+                    }
+
+                    udi_item_length = le2h16(resp->cpf_udi_item_length);
+
+                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
+
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Received unconnected packet with session sequence ID %llx",
+                           resp->encap_sender_context);
+
+                    /* punt if we got an overall error or it is not a partial/bundled error. */
+                    if(resp->status != CIP_EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
+                        rc = decode_cip_error_code(&(resp->status),
+                                                   cip_error_data_size(&resp->status, conn->data + conn->data_size));
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
+                               plc_tag_decode_error(rc));
+                        break;
+                    }
+
+                    response_overhead = (size_t)((uint8_t *)multi_resp - conn->data);
+                    response_size = (size_t)conn->data_size - response_overhead;
+
+                    /* check the passed UDI data item size against what we really got. */
+                    if((size_t)udi_item_length != response_size) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Incorrectly constructed response! UDI data length field is %zu but actual size is %zu!",
+                               (size_t)udi_item_length, response_size);
+
+                        rc = PLCTAG_ERR_BAD_DATA;
+                        break;
+                    }
+                } else if(le2h16(((eip_encap *)(conn->data))->encap_command) == CIP_EIP_CONNECTED_SEND) {
+                    eip_cip_co_resp *resp = (eip_cip_co_resp *)(conn->data);
+                    uint16_t cdi_item_length = 0;
+                    size_t response_overhead = 0;
+                    size_t response_size = 0;
+
+                    /* we only know we got an EIP header, so check before reading CPF/CIP fields. */
+                    if((size_t)conn->data_size < sizeof(*resp)) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Connected response of %u bytes is too short to hold a CIP response of %d bytes!",
+                               conn->data_size, (int)sizeof(*resp));
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                        break;
+                    }
+
+                    cdi_item_length = le2h16(resp->cpf_cdi_item_length);
+
+                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
+
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0,
+                           "Received connected packet with connection ID %x and sequence ID %u(%x)",
+                           le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
+
+                    /* punt if we got an overall error or it is not a partial/bundled error. */
+                    if(resp->status != CIP_EIP_OK && resp->status != CIP_ERR_PARTIAL_ERROR) {
+                        size_t status_size = cip_error_data_size(&resp->status, conn->data + conn->data_size);
+
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Response status=%u", resp->status);
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Received CIP error %s (%s).",
+                               decode_cip_error_long(&resp->status, status_size),
+                               decode_cip_error_short(&resp->status, status_size));
+                        rc = decode_cip_error_code(&(resp->status), status_size);
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Command failed! (%d/%d) %s", resp->status, rc,
+                               plc_tag_decode_error(rc));
+                        break;
+                    }
+
+                    response_overhead = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - conn->data);
+                    response_size = (size_t)conn->data_size - response_overhead;
+
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "response_overhead=%zu", response_overhead);
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "response_size=%zu", response_size);
+
+                    /* check the passed CDI data item size against what we really got. */
+                    if((size_t)cdi_item_length != response_size) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Incorrectly constructed response! CDI data length field is %zu but actual size is %zu!",
+                               (size_t)cdi_item_length, response_size);
+
+                        rc = PLCTAG_ERR_BAD_DATA;
+                        break;
+                    }
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unexpected EIP packet type, %04x!",
+                           le2h16(((eip_encap *)(conn->data))->encap_command));
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    break;
+                }
+
+                /*
+                 * The count word and the offset array that follows it are both past the
+                 * fixed part of the response we checked above, and the array is sized by a
+                 * count the PLC controls.  A short response with a large count would have us
+                 * reading offsets out of the buffer to decide whether the offsets are in the
+                 * buffer, so bound the whole header before touching any of it.
+                 */
+                {
+                    size_t offsets_start =
+                        (size_t)((uint8_t *)multi_resp - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
+                    size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
+
+                    if(offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "Response of %d bytes is too short to hold %d packed response offsets!", conn->data_size,
+                               num_bundled_requests);
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                        break;
+                    }
+                }
+
+                /* we have multiple requests, sanity check the data. */
+                if(le2h16(multi_resp->request_count) == num_bundled_requests) {
+                    size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - conn->data);
+
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
+
+                    /* check all the offsets */
+                    for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
+                        size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
+
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
+                               resp_offset);
+
+                        if(resp_offset >= (size_t)conn->data_size) {
+                            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                                   "Response %d has offset %zu which is outside the session data!", resp_index, resp_offset);
+                            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                            break;
+                        }
+                    }
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
+                           num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    break;
+                }
+            }
+
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Got error %s when processing incoming response(s)!",
+                       plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* copy the results back out. Every request gets a copy. */
+            for(int i = 0; i < num_bundled_requests; i++) {
+                rc = unpack_response(conn, bundled_requests[i], i);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, bundled_requests[i]->tag_id, "Unable to unpack response!");
+                    break;
+                }
+
+                /* release our reference */
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, bundled_requests[i]->tag_id,
+                       "rc_dec: Releasing request reference.");
+                bundled_requests[i] = rc_dec(bundled_requests[i]);
+            }
+
+            rc = PLCTAG_STATUS_OK;
+        } while(0);
+
+        /* problem? push the requests back on the queue. */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error sending or receiving requests!");
+
+            pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Pushing %d requests back into the queue.", num_bundled_requests);
+
+            /* conn->requests is also written by session_add_request() (tickler thread)
+             * under conn->session_mutex, so this push-back needs the same lock. */
+            critical_block(conn->session_mutex) {
+                for(int i = num_bundled_requests - 1; i >= 0; i--) {
+                    if(bundled_requests[i]) { vector_insert(conn->requests, 0, bundled_requests[i]); }
+                }
+            }
+        }
+
+        /* tickle the main tickler thread to note that we have responses. */
+        plc_tag_tickler_wake();
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Done.");
+
+    return rc;
+}
+void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
+    critical_block(conn->session_mutex) {
+        int32_t old_status = atomic_get_int32(&conn->watch.status);
+
+        atomic_set_int32(&conn->watch.status, new_status);
+
+        if(old_status != new_status) {
+            conn_watch_publish(&conn->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
+        }
+    }
+}
+
+
+THREAD_FUNC(session_handler) {
+    cip_conn_p conn = arg;
+    int rc = PLCTAG_STATUS_OK;
+    session_state_t state = SESSION_OPEN_SOCKET_START;
+    int64_t now = 0;
+    int64_t timeout_time = 0;
+    int64_t wait_until_time = 0;
+    int32_t inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+    int64_t auto_disconnect_time = time_ms() + inactivity_timeout_ms;
+    unsigned int retry_count = 0;
+    int auto_disconnect = 0;
+
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting thread for session %p", conn);
+
+    /* Increment the count of active conn handlers */
+    atomic_add_int32(&(conn->owner_list->handler_count), 1);
+
+    while(!atomic_get_int32(&conn->terminating) && atomic_get_bool(&lib_active)) {
+        now = time_ms();
+
+        /* how long should we wait if nothing wakes us? */
+        wait_until_time = now + SESSION_IDLE_WAIT_TIME;
+
+        /*
+         * Do this on every cycle.   This keeps the queue clean(ish).
+         *
+         * Make sure we get rid of all the aborted requests queued.
+         * This keeps the overall memory usage lower.
+         */
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
+        critical_block(conn->session_mutex) { purge_aborted_requests_unsafe(conn); }
+
+        switch(state) {
+            case SESSION_OPEN_SOCKET_START:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
+
+                /* we must connect to the gateway*/
+                rc = session_open_socket(conn);
+                if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
+                    state = SESSION_CLOSE_SOCKET;
+                } else {
+                    if(rc == PLCTAG_STATUS_OK) {
+                        /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
+                        inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                        auto_disconnect_time = now + inactivity_timeout_ms;
+
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "Connect complete immediately, going to state SESSION_REGISTER.");
+
+                        state = SESSION_REGISTER;
+
+                        retry_count = 0;
+                    } else {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
+
+                        state = SESSION_OPEN_SOCKET_WAIT;
+                    }
+                }
+
+                /* in all cases, don't wait. */
+                cond_signal(conn->session_wait_cond);
+
+                break;
+
+            case SESSION_OPEN_SOCKET_WAIT:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_WAIT state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
+
+                /* we must connect to the gateway */
+                rc = socket_connect_tcp_check(conn->sock, 20); /* MAGIC */
+                if(rc == PLCTAG_STATUS_OK) {
+                    /* connected! */
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Socket connection succeeded.");
+
+                    /* calculate the disconnect time. */
+                    inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                    auto_disconnect_time = now + inactivity_timeout_ms;
+
+                    state = SESSION_REGISTER;
+                } else if(rc == PLCTAG_ERR_TIMEOUT) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Still waiting for connection to succeed.");
+
+                    /* don't wait more.  The TCP connect check will wait in select(). */
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
+
+                    state = SESSION_CLOSE_SOCKET;
+                }
+
+                /* in all cases, don't wait. */
+                cond_signal(conn->session_wait_cond);
+
+                break;
+
+            case SESSION_REGISTER:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_REGISTER state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
+
+                if((rc = session_register(conn)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session registration failed %s!", plc_tag_decode_error(rc));
+                    state = SESSION_CLOSE_SOCKET;
+                } else {
+
+                    if(conn->use_connected_msg) {
+                        state = SESSION_SEND_FORWARD_OPEN;
+                    } else {
+                        state = SESSION_IDLE;
+                    }
+                }
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_SEND_FORWARD_OPEN:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_SEND_FORWARD_OPEN state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
+
+                if((rc = send_forward_open_request(conn)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
+                    state = SESSION_UNREGISTER;
+                } else {
+
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                           "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
+                    state = SESSION_RECEIVE_FORWARD_OPEN;
+                }
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_RECEIVE_FORWARD_OPEN:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_RECEIVE_FORWARD_OPEN state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
+
+                if((rc = receive_forward_open_response(conn)) != PLCTAG_STATUS_OK) {
+                    if(rc == PLCTAG_ERR_DUPLICATE) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "Duplicate connection error received, trying again with different connection ID.");
+                        state = SESSION_SEND_FORWARD_OPEN;
+                    } else if(rc == PLCTAG_ERR_TOO_LARGE) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "Requested packet size too large, retrying with smaller size.");
+                        state = SESSION_SEND_FORWARD_OPEN;
+                    } else if(rc == PLCTAG_ERR_UNSUPPORTED && !conn->only_use_old_forward_open) {
+                        /* if we got an unsupported error and we are trying with ForwardOpenEx, then try the old command. */
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
+                        conn->only_use_old_forward_open = 1;
+                        state = SESSION_SEND_FORWARD_OPEN;
+                    } else {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Receive Forward Open failed %s!",
+                               plc_tag_decode_error(rc));
+                        state = SESSION_UNREGISTER;
+                    }
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
+                    state = SESSION_IDLE;
+                }
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_IDLE:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_UP);
+
+                /* make sure that our timeout period has not changed */
+                if(inactivity_timeout_ms != atomic_get_int32(&conn->connection_inactivity_timeout_ms)) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                           "Inactivity timeout changed from %" PRId32 "ms to %" PRId32 "ms, updating auto disconnect time.",
+                           inactivity_timeout_ms, atomic_get_int32(&conn->connection_inactivity_timeout_ms));
+                    inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                    auto_disconnect_time = now + inactivity_timeout_ms;
+                }
+
+                /* if there is work to do, make sure we do not disconnect. */
+                critical_block(conn->session_mutex) {
+                    int num_reqs = vector_length(conn->requests);
+                    if(num_reqs > 0) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "There are %d requests pending before cleanup and sending.", num_reqs);
+                        inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+                        auto_disconnect_time = now + inactivity_timeout_ms;
+                    }
+                }
+
+                if((rc = process_requests(conn)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error while processing requests %s!",
+                           plc_tag_decode_error(rc));
+                    if(conn->use_connected_msg) {
+                        state = SESSION_DISCONNECT;
+                    } else {
+                        state = SESSION_UNREGISTER;
+                    }
+
+                    cond_signal(conn->session_wait_cond);
+                }
+
+                /* check if we should disconnect */
+                if(auto_disconnect_time < now) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Disconnecting due to inactivity.");
+
+                    auto_disconnect = 1;
+
+                    if(conn->use_connected_msg) {
+                        state = SESSION_DISCONNECT;
+                    } else {
+                        state = SESSION_UNREGISTER;
+                    }
+                    cond_signal(conn->session_wait_cond);
+                }
+
+                /* if there is work to do, make sure we signal the condition var. */
+                critical_block(conn->session_mutex) {
+                    int num_reqs = vector_length(conn->requests);
+                    if(num_reqs > 0) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "There are %d requests still pending after abort purge and sending.", num_reqs);
+                        cond_signal(conn->session_wait_cond);
+                    }
+                }
+
+                break;
+
+            case SESSION_DISCONNECT:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_DISCONNECT state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_DISCONNECTING);
+
+                if((rc = perform_forward_close(conn)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward close failed %s!", plc_tag_decode_error(rc));
+                }
+
+                state = SESSION_UNREGISTER;
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_UNREGISTER:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_UNREGISTER state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_DISCONNECTING);
+
+                if((rc = session_unregister(conn)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
+                }
+
+                state = SESSION_CLOSE_SOCKET;
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_CLOSE_SOCKET:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_CLOSE_SOCKET state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_DOWN);
+
+                if((rc = session_close_socket(conn)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Closing session socket failed %s!", plc_tag_decode_error(rc));
+                }
+
+                if(auto_disconnect) {
+                    state = SESSION_WAIT_IDLE_RECONNECT;
+                } else {
+                    state = SESSION_START_RETRY;
+                }
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_START_RETRY:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
+
+                /* FIXME - make this a tag attribute. */
+                int64_t retry_wait_ms = calc_retry_time(retry_count);
+
+                timeout_time = now + retry_wait_ms;
+                retry_count++;
+
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Waiting %" PRId64 "ms before trying to reconnect.",
+                       retry_wait_ms);
+
+                /* start waiting. */
+                state = SESSION_WAIT_ERR_RETRY;
+
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_WAIT_ERR_RETRY:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_WAIT_ERR_RETRY state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_ERR_WAIT);
+
+                if(timeout_time < now) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
+                    state = SESSION_OPEN_SOCKET_START;
+                    cond_signal(conn->session_wait_cond);
+                } else {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Wait not complete, still %dms to go.",
+                           (int)(timeout_time - now));
+                }
+
+                break;
+
+            case SESSION_WAIT_IDLE_RECONNECT:
+                /* wait for at least one request to queue before reconnecting. */
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_WAIT_IDLE_RECONNECT state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_IDLE_WAIT);
+
+                auto_disconnect = 0;
+
+                /* if there is work to do, reconnect.. */
+                pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
+                critical_block(conn->session_mutex) {
+                    if(vector_length(conn->requests) > 0) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "There are requests waiting, reopening connection to PLC.");
+
+                        state = SESSION_OPEN_SOCKET_START;
+                        cond_signal(conn->session_wait_cond);
+                    }
+                }
+
+                break;
+
+
+            default:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0, "Unknown state %d!", state);
+
+                /* FIXME - this logic is not complete.  We might be here without
+                 * a connected conn or a registered conn. */
+
+                if(conn->use_connected_msg) {
+                    state = SESSION_DISCONNECT;
+                } else {
+                    state = SESSION_UNREGISTER;
+                }
+
+                cond_signal(conn->session_wait_cond);
+                break;
+        }
+
+        /*
+         * give up the CPU a bit, but only if we are not
+         * doing some linked states.
+         */
+        if(wait_until_time > 0) {
+            int64_t time_left = wait_until_time - now;
+
+            if(time_left > 0) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Waiting up to %" PRId64 "ms for something to happen.",
+                       time_left);
+                cond_wait(conn->session_wait_cond, (int)time_left);
+            }
+        }
+    }
+
+    /*
+     * One last time before we exit.
+     */
+    critical_block(conn->session_mutex) { purge_aborted_requests_unsafe(conn); }
+
+    /* Decrement the count of active conn handlers */
+    atomic_add_int32(&(conn->owner_list->handler_count), -1);
+
+    THREAD_RETURN(0);
 }

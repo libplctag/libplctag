@@ -454,7 +454,8 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection",
                "--num-tags=3",
-               f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
+               f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
+               "--idle-timeout-ms=5000"], F)
     sec.test("@connection tag late join -- session already UP before tag created (ControlLogix)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
@@ -860,7 +861,8 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
                "--num-tags=3",
-               f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]"], F)
+               f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
+               "--idle-timeout-ms=5000"], F)
     sec.test("@connection tag 2-cycle reconnect (5 s idle timeout, Omron)",
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
@@ -1106,7 +1108,8 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--num-tags=3",
-               f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
+               f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+               "--idle-timeout-ms=5000"], F)
     sec.test("@connection tag 2-cycle reconnect (5 s idle timeout, Modbus)",
               [exe("test_connection_tag"),
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
