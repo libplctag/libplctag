@@ -43,6 +43,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/wire.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -2645,4 +2646,415 @@ THREAD_FUNC(session_handler) {
     atomic_add_int32(&(conn->owner_list->handler_count), -1);
 
     THREAD_RETURN(0);
+}
+
+
+cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_profile_t *profile, const char *host,
+                                       const char *path, int *use_connected_msg, int connection_group_id) {
+    const int max_payload_capacity = profile->max_payload_capacity;
+    const bool data_buffer_is_static = true;
+    static volatile uint32_t connection_id = 0;
+
+    int rc = PLCTAG_STATUS_OK;
+    cip_conn_p conn = NULL;
+    size_t total_allocation_size = sizeof(*conn);
+    size_t data_buffer_capacity =
+        (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity + (size_t)32;  // MAGIC - FIXME this is just a bandaid.
+    size_t data_buffer_offset = 0;
+    size_t host_name_offset = 0;
+    size_t host_name_size = 0;
+    size_t path_offset = 0;
+    size_t path_size = 0;
+    size_t conn_path_offset = 0;
+    uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    int tmp_conn_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
+    int is_dhp = 0;
+    uint16_t dhp_dest = 0;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
+
+    /*
+     * The host string is copied into this allocation verbatim, so its length is part of the
+     * conn's size.  It comes straight from the "gateway" attribute with nothing between
+     * the application and here, so bound it: without this a caller can size the conn
+     * object arbitrarily.
+     */
+    if(!host || str_length(host) >= MAX_SESSION_HOST_LEN) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Gateway string is missing or longer than the maximum of %d bytes!",
+               MAX_SESSION_HOST_LEN - 1);
+        return NULL;
+    }
+
+    /*
+     * The path string is copied in verbatim too, and it is not self-limiting: spaces are
+     * skipped everywhere in cip_encode_path(), so an arbitrarily long string can still
+     * encode to a valid short path.  Bound it against the encoded path buffer -- a real
+     * route is a handful of hops, so this rejects nothing that describes real hardware.
+     */
+    if(path && str_length(path) >= MAX_CONN_PATH) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Path string is longer than the maximum of %d bytes!", MAX_CONN_PATH - 1);
+        return NULL;
+    }
+
+    if(*use_connected_msg) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Session should use connected messaging.");
+    } else {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Session should not use connected messaging.");
+    }
+
+    /* add in space for the data buffer. */
+    if(data_buffer_is_static) {
+        data_buffer_offset = total_allocation_size;
+        total_allocation_size += data_buffer_capacity;
+    } else {
+        data_buffer_offset = 0;
+    }
+
+    /* add in space for the host name.  + 1 for the NUL terminator. */
+    host_name_offset = total_allocation_size;
+    host_name_size = (size_t)str_length(host) + 1;
+    total_allocation_size += host_name_size;
+
+    /* add in space for the path copy. */
+    if(path && str_length(path) > 0) {
+        path_offset = total_allocation_size;
+        path_size = (size_t)str_length(path) + 1;
+        total_allocation_size += path_size;
+    } else {
+        path_offset = 0;
+    }
+
+    /* encode the path */
+    /*
+     * The shared encoder knows only whether the family can bridge DH+, not which AB
+     * family this is.  PLC-5, SLC and MicroLogix can; everything else rejects a DH+
+     * segment rather than ignoring it.
+     */
+    int dhp_kind = (profile->dhp_capable ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
+
+    rc = cip_encode_path(path, use_connected_msg, dhp_kind, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
+               plc_tag_decode_error(rc));
+        return NULL;
+    }
+
+    conn_path_offset = total_allocation_size;
+    total_allocation_size += (size_t)tmp_conn_path_size;
+
+    /* allocate the conn struct and the buffer in the same allocation. */
+    pdebug(
+        DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+        "Allocating %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
+        total_allocation_size, (data_buffer_is_static ? data_buffer_capacity : 0), str_length(host) + 1,
+        (path_offset == 0 ? 0 : str_length(path) + 1), tmp_conn_path_size);
+
+    conn = (cip_conn_p)rc_alloc((int)total_allocation_size, session_destroy);
+    if(!conn) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error allocating new session!");
+        return NULL;
+    }
+
+    /* fill in the interior pointers */
+
+    /* fix up the data buffer. */
+    conn->data_buffer_is_static = data_buffer_is_static;
+    conn->data_capacity = (uint32_t)data_buffer_capacity;
+
+    if(data_buffer_is_static) {
+        conn->data = (uint8_t *)(conn) + data_buffer_offset;
+    } else {
+        conn->data = (uint8_t *)mem_alloc((int)data_buffer_capacity);
+        if(conn->data == NULL) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate the connection data buffer!");
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
+            return rc_dec(conn);
+        }
+    }
+
+    /* point the host pointer just after the data. */
+    conn->host = (char *)(conn) + host_name_offset;
+    str_copy(conn->host, (int)host_name_size, host);
+
+    if(path_offset) {
+        conn->path = (char *)(conn) + path_offset;
+        str_copy(conn->path, (int)path_size, path);
+    }
+
+    if(conn_path_offset) {
+        conn->conn_path = (uint8_t *)(conn) + conn_path_offset;
+
+        // FIXME - the path length cannot be 8 bits with a buffer length that is over 260.
+        conn->conn_path_size = (uint8_t)tmp_conn_path_size;
+        mem_copy(conn->conn_path, tmp_conn_path, tmp_conn_path_size);
+    }
+
+
+    /*
+        TO DO
+            remove mem_free from destructor for host, path, and conn_path.
+    */
+
+    conn->requests = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
+    if(!conn->requests) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate vector for requests!");
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
+        rc_dec(conn);
+        return NULL;
+    }
+
+    /* check for ID set up. This does not need to be thread safe since we just need a random value. */
+    if(connection_id == 0) { connection_id = (uint32_t)(random_u64(UINT32_MAX) + 1); }
+
+    /* fix up the rest of teh fields */
+    conn->owner_list = list;
+    conn->plc_type = profile->plc_type;
+    conn->min_payload_size = profile->min_payload_size;
+    conn->dhp_capable = profile->dhp_capable;
+
+    /* what the family will negotiate for, straight off the row */
+    conn->only_use_old_forward_open = profile->only_use_old_forward_open;
+    conn->fo_conn_size = profile->fo_conn_size;
+    conn->fo_ex_conn_size = profile->fo_ex_conn_size;
+    conn->max_payload_size = (uint16_t)profile->fo_conn_size;
+    conn->use_connected_msg = *use_connected_msg;
+    conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
+    conn->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
+    conn->is_dhp = is_dhp;
+    conn->dhp_dest = dhp_dest;
+    conn_watch_init(&conn->watch, PLCTAG_CONN_STATUS_DOWN);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_group_id to %d.", connection_group_id);
+    conn->connection_group_id = connection_group_id;
+
+    /*
+     * Why is connection_id global?  Because it looks like the PLC might
+     * be treating it globally.  I am seeing ForwardOpen errors that seem
+     * to be because of duplicate connection IDs even though the conn
+     * was closed.
+     *
+     * So, this is more or less unique across all invocations of the library.
+     * FIXME - this could collide.  The probability is low, but it could happen
+     * as there are only 32 bits.
+     */
+    conn->orig_connection_id = ++connection_id;
+
+    /* create the conn mutex. */
+    if((rc = mutex_create(&(conn->session_mutex))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create session mutex!");
+        return rc_dec(conn);
+    }
+
+    /* create the conn condition variable. */
+    if((rc = cond_create(&(conn->session_wait_cond))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create session condition var!");
+        return rc_dec(conn);
+    }
+
+    /* add the new conn to the list. */
+    session_list_add_unsafe(list, conn);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done");
+
+    return conn;
+}
+int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, attr attribs,
+                            cip_conn_p *tag_conn, int *is_new_conn) {
+    /*int debug = attr_get_int(attribs,"debug",0);*/
+    const char *session_gw = attr_get_str(attribs, "gateway", "");
+    const char *session_path = attr_get_str(attribs, "path", "");
+    int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
+    cip_conn_p session = NULL;
+    int new_session = 0;
+    /*
+     * Connections are shared by default.  Two spellings of the same deprecated
+     * attribute reached here from the two dialects, so both are still honoured.
+     */
+    int shared_session = attr_get_int(attribs, "share_session", attr_get_int(attribs, "share_conn", 1));
+    int rc = PLCTAG_STATUS_OK;
+    int connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+    int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
+    int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
+
+    /* both are subsumed by connection_group_id.  Warn only if the tag string actually set one. */
+    if(attr_get_str(attribs, "share_session", NULL)) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+               "The attribute \"share_session\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
+    }
+
+    if(attr_get_str(attribs, "share_conn", NULL)) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+               "The attribute \"share_conn\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
+    }
+
+    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
+    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+               "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
+               connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, SESSION_DISCONNECT_TIMEOUT);
+        connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+    } else {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
+               connection_inactivity_timeout_ms);
+    }
+
+    critical_block(list->mutex) {
+        /* if we are to share connections, then look for an existing one. */
+        if(shared_session) {
+            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id);
+        } else {
+            /* no sharing, create a new one */
+            session = NULL;
+        }
+
+        if(session == NULL) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating new session.");
+
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s session.", profile->name);
+
+            /* a stateless family cannot use connected messaging whatever the tag asked for */
+            if(profile->force_unconnected) { use_connected_msg = 0; }
+
+            session = session_create_from_profile(list, profile, session_gw, session_path, &use_connected_msg,
+                                                  connection_group_id);
+
+            if(session == NULL) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "unable to create or find a session!");
+                rc = PLCTAG_ERR_BAD_GATEWAY;
+            } else {
+                atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
+
+                /* see if we have an attribute set for forcing the use of the older ForwardOpen */
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                       "Passed attribute to prohibit use of extended ForwardOpen is %d.", only_use_old_forward_open);
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                       "Existing attribute to prohibit use of extended ForwardOpen is %d.", session->only_use_old_forward_open);
+                session->only_use_old_forward_open = (session->only_use_old_forward_open ? 1 : only_use_old_forward_open);
+
+                new_session = 1;
+            }
+        } else {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Reusing existing session.");
+        }
+    }
+
+    /*
+     * Make sure that we have created the mutex and cond var first.
+     */
+
+    if(new_session) {
+        if((rc = thread_create((thread_p *)&(session->handler_thread), session_handler, 32 * 1024, session))
+           != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create session thread!");
+        }
+
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
+            rc_dec(session);
+            session = NULL;
+        } else {
+            /* save the status */
+        }
+    }
+
+    /* store it into the tag */
+    *tag_conn = session;
+
+    if(is_new_conn) { *is_new_conn = new_session; }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done");
+
+    return rc;
+}
+
+
+/*
+ * Bring a module's whole connection list down.
+ *
+ * The order matters: the list is emptied and freed first, but the mutex cannot
+ * go until the handler threads have finished, because a handler may still be
+ * in its own cleanup holding conn->session_mutex.  An allocator that returns
+ * freed pages to the OS immediately turns any use-after-free here into a
+ * SIGSEGV rather than something harmless.
+ */
+void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module) {
+    int64_t start_time = 0;
+    int active_count = 0;
+
+    pdebug(debug_module, DEBUG_INFO, 0, "Starting.");
+
+    /* tell every connection to stop, and wake its handler so it notices now */
+    pdebug(debug_module, DEBUG_INFO, 0, "Marking all open connections for termination.");
+
+    if(list->conns && list->mutex) {
+        critical_block(list->mutex) {
+            int num_conns = vector_length(list->conns);
+
+            for(int i = 0; i < num_conns; i++) {
+                cip_conn_p conn = vector_get(list->conns, i);
+
+                if(conn) {
+                    atomic_set_int32(&conn->terminating, 1);
+                    if(conn->session_wait_cond) { cond_signal(conn->session_wait_cond); }
+                }
+            }
+        }
+    }
+
+    if(list->conns && list->mutex) {
+        int remaining_conns = 0;
+
+        pdebug(debug_module, DEBUG_DETAIL, 0, "Waiting for connections to terminate.");
+
+        start_time = time_ms();
+
+        while(1) {
+            critical_block(list->mutex) { remaining_conns = vector_length(list->conns); }
+
+            if(remaining_conns == 0) { break; }
+
+            if(time_ms() - start_time >= SESSION_TEARDOWN_TIMEOUT_MS) {
+                pdebug(debug_module, DEBUG_WARN, 0, "Timeout waiting for %d connections to terminate.", remaining_conns);
+                break;
+            }
+
+            sleep_ms(10);
+        }
+
+        if(remaining_conns == 0) { pdebug(debug_module, DEBUG_DETAIL, 0, "Connections all terminated."); }
+
+        vector_destroy(list->conns);
+        list->conns = NULL;
+    }
+
+    pdebug(debug_module, DEBUG_DETAIL, 0, "Waiting for handler threads to complete.");
+
+    start_time = time_ms();
+
+    while((active_count = atomic_get_int32(&(list->handler_count))) > 0) {
+        int64_t elapsed = time_ms() - start_time;
+
+        if(elapsed >= SESSION_TEARDOWN_TIMEOUT_MS) {
+            pdebug(debug_module, DEBUG_WARN, 0, "Timeout waiting for %d handler threads to complete.", active_count);
+            break;
+        }
+
+        pdebug(debug_module, DEBUG_DETAIL, 0, "Waiting for %d handler threads to complete. Elapsed: %" PRId64 "ms",
+               active_count, elapsed);
+
+        sleep_ms(20);
+    }
+
+    if(active_count == 0) { pdebug(debug_module, DEBUG_INFO, 0, "All handler threads completed."); }
+
+    pdebug(debug_module, DEBUG_DETAIL, 0, "Destroying connection list mutex.");
+
+    if(list->mutex) {
+        mutex_destroy(&(list->mutex));
+        list->mutex = NULL;
+    }
+
+    pdebug(debug_module, DEBUG_INFO, 0, "Done.");
 }

@@ -44,15 +44,10 @@
 
 /* #define MAX_SESSION_HOST    (128) */
 
-#define SESSION_DISCONNECT_TIMEOUT (AB_EIP_CONN_TIMEOUT_MS - 1000)
 
 #define MAX_PACKET_SIZE_EX (44 + 4002)
 
-#define SESSION_MIN_REQUESTS (10)
-#define SESSION_INC_REQUESTS (10)
 
-#define MAX_CONN_PATH (260) /* 256 plus padding. */
-#define MAX_IP_ADDR_SEG_LEN (16)
 
 /*
  * Longest gateway string we will copy into a session, NUL included.
@@ -63,7 +58,6 @@
  * terminating zero), so 253 + ":65535" + NUL is 260.  Rounded up to keep the following
  * fields aligned.
  */
-#define MAX_SESSION_HOST_LEN (264)
 
 
 

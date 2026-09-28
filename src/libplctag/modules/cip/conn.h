@@ -88,6 +88,29 @@
 #define CIP_MSP_REPLY_SLACK (10)       /* empirical margin, see ephemeral_docs/deferred_fixes.md */
 
 
+/*
+ * How long a connection may sit idle before it is dropped.  One second less
+ * than the timeout we negotiate with the PLC, so we close first.
+ */
+#define CIP_EIP_CONN_TIMEOUT_MS ((CIP_EIP_RPI * 4 * (1 << CIP_EIP_TIMEOUT_MULTIPLIER)) / 1000)
+#define SESSION_DISCONNECT_TIMEOUT (CIP_EIP_CONN_TIMEOUT_MS - 1000)
+
+
+/* how long teardown waits for connections and then handler threads to finish */
+#define SESSION_TEARDOWN_TIMEOUT_MS (5000)
+
+
+/* initial size and growth step of a connection's outstanding-request vector */
+#define SESSION_MIN_REQUESTS (10)
+#define SESSION_INC_REQUESTS (10)
+
+
+/* limits on the strings copied into a connection's allocation */
+#define MAX_SESSION_HOST_LEN (264)
+#define MAX_CONN_PATH (260) /* 256 plus padding. */
+#define MAX_IP_ADDR_SEG_LEN (16)
+
+
 /* how long the handler sleeps when nothing else wakes it */
 #define SESSION_IDLE_WAIT_TIME (100)
 
@@ -107,6 +130,29 @@ typedef enum {
     SESSION_WAIT_ERR_RETRY,
     SESSION_WAIT_IDLE_RECONNECT
 } session_state_t;
+
+
+/*
+ * Everything that varies between PLC families, as data.
+ *
+ * A dialect declares one row per family it supports and hands the matching row
+ * to session_create_from_profile().  Nothing here is interpreted by the shared
+ * code except as the values it stores, so adding a family is adding a row --
+ * there is no dispatch to extend and no constructor to write.
+ */
+typedef struct {
+    int32_t plc_type;  /* the dialect's own enum value, stored opaquely on the connection */
+    const char *name;  /* for logging only */
+
+    int max_payload_capacity; /* sizes the connection's receive buffer */
+    int fo_conn_size;         /* payload to ask for in a plain Forward Open */
+    int fo_ex_conn_size;      /* payload to ask for in an extended Forward Open, 0 if unsupported */
+    bool only_use_old_forward_open;
+
+    uint16_t min_payload_size; /* refuse to negotiate below this */
+    bool dhp_capable;          /* family can bridge to DH+ */
+    bool force_unconnected;    /* stateless family: never use connected messaging */
+} cip_conn_profile_t;
 
 
 /* the most requests that may be bundled into one Multiple Service Packet */
@@ -360,3 +406,9 @@ static inline int reply_budget_cost(cip_request_p request) {
 extern int process_requests(cip_conn_p conn);
 extern THREAD_FUNC(session_handler);
 extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);
+
+extern cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_profile_t *profile, const char *host,
+                                              const char *path, int *use_connected_msg, int connection_group_id);
+extern int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, attr attribs,
+                                   cip_conn_p *tag_conn, int *is_new_conn);
+extern void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
