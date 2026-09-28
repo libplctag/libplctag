@@ -130,6 +130,14 @@ extern void mem_copy(void *dest, void *src, int size);
 extern void mem_move(void *dest, void *src, int size);
 extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
 
+/*
+ * Standard library calls whose names differ between platforms.  The portable
+ * bodies in platform_common.c use these rather than an #ifdef per call site.
+ */
+#define platform_strcasecmp _stricmp
+#define platform_strncasecmp _strnicmp
+#define platform_strdup _strdup
+
 /* string functions/defs */
 extern int str_cmp(const char *first, const char *second);
 extern int str_cmp_i(const char *first, const char *second);
