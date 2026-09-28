@@ -620,22 +620,16 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
+        rc_dec(req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
-
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
     tag->read_in_progress = 1;
-    rc = session_add_request(tag->session, req);
 
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)((int)sizeof(*cip) + (int)(data - data_start)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 

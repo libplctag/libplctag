@@ -423,21 +423,14 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
                packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
+        rc_dec(req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -566,22 +559,14 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
                packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
+        rc_dec(req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -603,13 +588,6 @@ int build_write_bit_request_connected(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
@@ -620,6 +598,13 @@ int build_write_bit_request_connected(ab_tag_p tag) {
     if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
         return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
+        return rc;
     }
 
     cip = (eip_cip_co_req *)(req->data);
@@ -723,18 +708,10 @@ int build_write_bit_request_connected(ab_tag_p tag) {
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -758,13 +735,6 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
@@ -775,6 +745,13 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
     if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
         return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
+        return rc;
     }
 
     cip = (eip_cip_uc_req *)(req->data);
@@ -912,18 +889,10 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -949,13 +918,6 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(tag->is_bit) { return build_write_bit_request_connected(tag); }
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
@@ -965,6 +927,21 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
+    /*
+     * A write has to carry the tag's encoded type, so reject a tag that has none before
+     * anything is allocated.  The type comes from the first read of the tag.
+     */
+    if(!tag->encoded_type_info_size) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
 
     cip = (eip_cip_co_req *)(req->data);
 
@@ -996,14 +973,9 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* copy encoded type info */
-    if(tag->encoded_type_info_size) {
-        mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-        data += tag->encoded_type_info_size;
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
+    /* copy encoded type info.  Part 1 already rejected a tag without any. */
+    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
+    data += tag->encoded_type_info_size;
 
     /* copy the item count, little endian */
     *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
@@ -1056,18 +1028,10 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1095,13 +1059,6 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(tag->is_bit) { return build_write_bit_request_unconnected(tag); }
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
@@ -1111,6 +1068,21 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
+    /*
+     * A write has to carry the tag's encoded type, so reject a tag that has none before
+     * anything is allocated.  The type comes from the first read of the tag.
+     */
+    if(!tag->encoded_type_info_size) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
 
     cip = (eip_cip_uc_req *)(req->data);
 
@@ -1144,14 +1116,9 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* copy encoded type info */
-    if(tag->encoded_type_info_size) {
-        mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-        data += tag->encoded_type_info_size;
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
+    /* copy encoded type info.  Part 1 already rejected a tag without any. */
+    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
+    data += tag->encoded_type_info_size;
 
     /* copy the item count, little endian */
     *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
@@ -1237,18 +1204,10 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 

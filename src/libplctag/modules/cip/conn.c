@@ -1526,6 +1526,55 @@ int session_add_request(cip_conn_p conn, cip_request_p req) {
 }
 
 
+/*
+ * Finish a request that a tag-level builder has filled in and hand it to the
+ * connection's request queue.
+ *
+ * The caller owns the only reference on entry.  On success the queue holds a
+ * reference of its own and the caller keeps theirs.  On failure the request is
+ * released here and the caller must not touch it again, so a failed submission
+ * leaves the caller nothing to roll back.
+ */
+int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_size, bool allow_packing) {
+    int rc = PLCTAG_STATUS_OK;
+
+    if(!req) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Called with a null request!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Starting.");
+
+    /*
+     * The builder walked a cursor across the request buffer to arrive at this size.  Nothing
+     * up to this point has checked that the cursor stayed inside the buffer, so check it here
+     * before the request goes anywhere.
+     */
+    if(request_size <= 0 || request_size > req->request_capacity) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id,
+               "Built request of %d bytes does not fit the %d byte request buffer!", request_size, req->request_capacity);
+        rc_dec(req);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    req->request_size = request_size;
+    req->allow_packing = allow_packing;
+
+    rc = session_add_request(conn, req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id, "Unable to add the request to the connection, %s!",
+               plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "rc_dec: Releasing the unsubmitted request.");
+        rc_dec(req);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int64_t calc_retry_time(unsigned int retry_count) {
     int64_t result = 0;
     result = RETRY_WAIT_INITIAL_MS * (int64_t)(1 << retry_count);

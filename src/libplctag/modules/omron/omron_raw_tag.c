@@ -392,23 +392,11 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
-
-    /* add the request to the conn's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to conn! rc=%d", rc);
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
-               tag->tag_id);
-        tag->req = rc_dec(req);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -534,23 +522,11 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
-
-    /* allow packing if the tag allows it. */
-    req->allow_packing = tag->allow_packing;
-
-    /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
-
-    /* add the request to the conn's list. */
-    rc = session_add_request(tag->session, req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to add request to conn! rc=%d", rc);
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to request of tag %" PRId32 ".",
-               tag->tag_id);
-        tag->req = rc_dec(req);
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 

@@ -320,6 +320,7 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     if(required_space > (size_t)tag->req->request_capacity) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, tag->req->request_capacity);
+        tag->req = rc_dec(tag->req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -360,27 +361,21 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
+        tag->req = rc_dec(tag->req);
         return PLCTAG_ERR_TOO_LARGE;
     }
-
-    /* set the size of the request */
-    tag->req->request_size = (int)(data - (tag->req->data));
-
-    /* allow packing if the tag allows it. */
-    tag->req->allow_packing = tag->allow_packing;
 
     /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
-
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, tag->req, (int)(data - (tag->req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! Error %s",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
                plc_tag_decode_error(rc));
 
-        ab_tag_abort_request(tag);
+        /* cip_submit_request() released the request, so drop the tag's dangling pointer to it. */
+        tag->req = NULL;
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done");
@@ -413,6 +408,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     if(required_space > (size_t)tag->req->request_capacity) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, tag->req->request_capacity);
+        tag->req = rc_dec(tag->req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -497,25 +493,19 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
+        tag->req = rc_dec(tag->req);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    tag->req->request_size = (int)(data - (tag->req->data));
-
-    /* allow packing if the tag allows it. */
-    tag->req->allow_packing = tag->allow_packing;
-
-    /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
+    /* hand the finished request to the connection. */
+    rc = cip_submit_request(tag->session, tag->req, (int)(data - (tag->req->data)), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! Error %s",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
                plc_tag_decode_error(rc));
-        ab_tag_abort_request(tag);
+
+        /* cip_submit_request() released the request, so drop the tag's dangling pointer to it. */
+        tag->req = NULL;
         return rc;
     }
 

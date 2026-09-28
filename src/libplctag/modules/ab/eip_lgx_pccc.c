@@ -256,13 +256,11 @@ int tag_read_start(ab_tag_p tag) {
             data += tag->session->conn_path_size;
         }
         lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
-        req->request_size = (int)(data - (req->data));
-        req->allow_packing = tag->allow_packing;
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection. */
+        rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-            req = rc_dec(req);
-            ab_tag_abort_request(tag);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
             break;
         }
         tag->req = req;
@@ -526,13 +524,11 @@ int tag_write_start(ab_tag_p tag) {
             data += tag->session->conn_path_size;
         }
         lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
-        req->request_size = (int)(data - (req->data));
-        req->allow_packing = tag->allow_packing;
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection. */
+        rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-            req = rc_dec(req);
-            ab_tag_abort_request(tag);
+            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
             break;
         }
         tag->req = req;

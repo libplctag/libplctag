@@ -1696,10 +1696,12 @@ int pccc_tag_read_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request data:");
         pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -1722,7 +1724,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new read request rc=%s",
                plc_tag_decode_error(rc));
         tag->read_in_progress = 0;
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1974,10 +1976,12 @@ int pccc_tag_write_start(ab_tag_p tag) {
         req->request_size = (int)calculated_request_size;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -1999,7 +2003,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new write request rc=%s",
                plc_tag_decode_error(rc));
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         tag->write_in_progress = 0;
         tag->write_complete = 1;
         ab_tag_abort_request(tag);
@@ -2175,10 +2179,12 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         req->request_size = (int)calculated_request_size;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -2200,7 +2206,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new write request rc=%s",
                plc_tag_decode_error(rc));
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         tag->write_in_progress = 0;
         tag->write_complete = 1;
         ab_tag_abort_request(tag);
@@ -2378,10 +2384,12 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         req->request_size = (int)calculated_request_size;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -2403,7 +2411,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new write request rc=%s",
                plc_tag_decode_error(rc));
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         tag->write_in_progress = 0;
         tag->write_complete = 1;
         ab_tag_abort_request(tag);
@@ -2720,10 +2728,12 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request data:");
         pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, (int)calculated_request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -2746,7 +2756,7 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new read request rc=%s",
                plc_tag_decode_error(rc));
         tag->read_in_progress = 0;
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -2989,10 +2999,12 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request size set to %d bytes.",
                req->request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add write request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -3014,7 +3026,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new write request rc=%s",
                plc_tag_decode_error(rc));
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         tag->write_in_progress = 0;
         tag->write_complete = 1;
         ab_tag_abort_request(tag);
@@ -3181,10 +3193,12 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request size set to %d bytes.",
                req->request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add bit write request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -3206,7 +3220,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new bit write request rc=%s",
                plc_tag_decode_error(rc));
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         tag->write_in_progress = 0;
         tag->write_complete = 1;
         ab_tag_abort_request(tag);
@@ -3376,10 +3390,12 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request size set to %d bytes.",
                req->request_size);
 
-        /* add request to session */
-        rc = session_add_request(tag->session, req);
+        /* hand the finished request to the connection.  PCCC never packs requests. */
+        rc = cip_submit_request(tag->session, req, req->request_size, false);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to add bit write request to session! rc=%d", rc);
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+                   plc_tag_decode_error(rc));
+            req = NULL; /* cip_submit_request() released it. */
             break;
         }
 
@@ -3401,7 +3417,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new bit write request rc=%s",
                plc_tag_decode_error(rc));
-        req = rc_dec(req);
+        if(req) { req = rc_dec(req); }
         tag->write_in_progress = 0;
         tag->write_complete = 1;
         ab_tag_abort_request(tag);

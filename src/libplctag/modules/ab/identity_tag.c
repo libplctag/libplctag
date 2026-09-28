@@ -244,22 +244,16 @@ int identity_tag_build_read_request_connected(ab_tag_p tag) {
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
-    /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
-
-    req->allow_packing = 0; /* identity requests should not be packed */
+    /* hand the finished request to the connection.  Identity requests are never packed. */
+    rc = cip_submit_request(tag->session, req, (int)((int)sizeof(*cip) + (int)(data - data_start)), false);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
 
     /* save the request for later */
     critical_block(tag->api_mutex) { tag->req = req; }
-
-    /* add the request to the session's list */
-    rc = session_add_request(tag->session, req);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
-        return rc;
-    }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
 
@@ -443,22 +437,16 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
     uint16_t cpf_length = (uint16_t)(data - cpf_items);
     hdr->encap_length = h2le16(cpf_length);
 
-    /* Set the total request size */
-    req->request_size = (int)(sizeof(eip_encap) + cpf_length);
-
-    req->allow_packing = 0;
+    /* hand the finished request to the connection.  Identity requests are never packed. */
+    rc = cip_submit_request(tag->session, req, (int)(sizeof(eip_encap) + cpf_length), false);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
 
     /* save the request for later */
     critical_block(tag->api_mutex) { tag->req = req; }
-
-    /* add the request to the session's list */
-    rc = session_add_request(tag->session, req);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
-        return rc;
-    }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
 

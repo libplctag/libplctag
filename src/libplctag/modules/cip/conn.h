@@ -385,6 +385,13 @@ extern int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_reque
 extern int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet);
 extern int session_add_request_unsafe(cip_conn_p conn, cip_request_p req);
 extern int session_add_request(cip_conn_p conn, cip_request_p req);
+
+/*
+ * Set the final size and packing flag on a built request and add it to the connection's
+ * request queue.  Releases the request and returns non-OK if it cannot be queued, so the
+ * caller never has to unwind a failed submission.
+ */
+extern int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_size, bool allow_packing);
 extern int64_t calc_retry_time(unsigned int retry_count);
 extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
 extern int session_register(cip_conn_p conn);
