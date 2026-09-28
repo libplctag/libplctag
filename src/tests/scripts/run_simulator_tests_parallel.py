@@ -454,7 +454,8 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection",
                "--num-tags=3",
-               f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
+               f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
+               "--idle-timeout-ms=5000"], F)
     sec.test("@connection tag late join -- session already UP before tag created (ControlLogix)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
@@ -720,6 +721,14 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",
                "--expect-err"], T, ports_needed=1)
+    sec.test("@connection tag ERR_WAIT on unreachable host (Modbus, no server running)",
+              [exe("test_connection_tag"),
+               "--tag=protocol=modbus-tcp&gateway=127.0.0.1:{PORT}&path=0&name=@connection",
+               "--expect-err"], T, ports_needed=1)
+    sec.test("@connection tag ERR_WAIT on unreachable host (Omron, no server running)",
+              [exe("test_connection_tag"),
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
+               "--expect-err"], T, ports_needed=1)
     sec.test("Test async reconnect after PLC outage",
               [exe("test_reconnect_after_outage_async"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
     sec.test("Test sync reconnect after PLC outage",
@@ -837,8 +846,8 @@ def build_manifest() -> Manifest:
                  r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong EIP command in reply", "eip_cmd", ogw, omron_corrupt_tag,
                  r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=omron_corrupt_args)
-    corrupt_test(sec, "Omron wrong EIP connection handle", "session", ogw, omron_corrupt_tag,
-                 r"Received a response for connection handle [0-9a-f]+ but this connection is", plc_args=omron_corrupt_args)
+    corrupt_test(sec, "Omron wrong EIP session handle", "session", ogw, omron_corrupt_tag,
+                 r"Received a response for session handle [0-9a-f]+ but this session is", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong sender context echoed", "context", ogw, omron_corrupt_tag,
                  r"Received a response with sender context [0-9a-f]+ but we sent", plc_args=omron_corrupt_args)
 
@@ -852,7 +861,8 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
                "--num-tags=3",
-               f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]"], F)
+               f"--data-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
+               "--idle-timeout-ms=5000"], F)
     sec.test("@connection tag 2-cycle reconnect (5 s idle timeout, Omron)",
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@connection",
@@ -1098,7 +1108,8 @@ def build_manifest() -> Manifest:
               [exe("test_connection_tag"),
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--num-tags=3",
-               f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
+               f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+               "--idle-timeout-ms=5000"], F)
     sec.test("@connection tag 2-cycle reconnect (5 s idle timeout, Modbus)",
               [exe("test_connection_tag"),
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",

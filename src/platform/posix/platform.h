@@ -36,6 +36,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <strings.h> /* strcasecmp()/strncasecmp() */
+#include <sys/types.h> /* ssize_t; the Windows platform.h typedefs it instead. */
 #include <math.h>
 #include <stdarg.h>
 
@@ -79,6 +81,14 @@ extern void mem_set(void *dest, int c, int size);
 extern void mem_copy(void *dest, void *src, int size);
 extern void mem_move(void *dest, void *src, int size);
 extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
+
+/*
+ * Standard library calls whose names differ between platforms.  The portable
+ * bodies in platform_common.c use these rather than an #ifdef per call site.
+ */
+#define platform_strcasecmp strcasecmp
+#define platform_strncasecmp strncasecmp
+#define platform_strdup strdup
 
 /* string functions/defs */
 extern int str_cmp(const char *first, const char *second);

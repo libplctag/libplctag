@@ -16,7 +16,6 @@ message("Building unit tests with mini_mock (local CMocka-macro stand-in, see mi
 # from deep inside the prebuilt library would need something else.
 set(MOCK_DEFINITIONS
     "refcount_startup=mock_refcount_startup"
-    "lib_init=mock_lib_init"
     "ab_init=mock_ab_init"
     "mb_init=mock_mb_init"
     "omron_init=mock_omron_init"
@@ -35,7 +34,7 @@ target_include_directories(test_init PRIVATE
 
 # If you have platform headers or utils
 target_include_directories(test_init PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
     ${PLATFORM_SHIM_PATH}
 )
@@ -50,7 +49,7 @@ add_executable(test_platform_str test_platform_str.c)
 
 target_include_directories(test_platform_str PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
     ${PLATFORM_SHIM_PATH}
 )
@@ -63,7 +62,7 @@ add_executable(test_tag_name_bounds test_tag_name_bounds.c)
 
 target_include_directories(test_tag_name_bounds PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
     ${PLATFORM_SHIM_PATH}
 )
@@ -80,7 +79,7 @@ if(NOT WIN32)
 
     target_include_directories(test_eip_response_validation PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
         ${PLATFORM_SHIM_PATH}
     )
@@ -98,7 +97,7 @@ if(NOT WIN32)
 
     target_include_directories(test_eip_forward_open_peer_close PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/protocols
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
         ${PLATFORM_SHIM_PATH}
     )

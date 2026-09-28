@@ -34,38 +34,38 @@
 /*
  * Unit tests for initialize_modules() in src/libplctag/lib/init.c.
  *
- * The module-init functions it calls are replaced by the mocks below. init.c
- * is compiled directly into this test binary (see CMakeLists.txt), so its
- * calls are redirected at compile time via -Dlib_init=mock_lib_init and
+ * The device-module init functions it calls are replaced by the mocks below.
+ * init.c is compiled directly into this test binary (see CMakeLists.txt), so
+ * its calls are redirected at compile time via -Dab_init=mock_ab_init and
  * friends. No linker features are involved, which is what lets this test
  * build on MSVC and Apple's ld64 as well as GNU ld.
  *
  * Link-order shadowing was the other option and does not work here: every
  * mocked *_init shares an object file with the *_teardown that
- * destroy_modules() calls (lib_init/lib_teardown in lib.c, ab_init/ab_teardown
- * in ab_common.c, and so on), so the linker must pull that member from the
- * archive and the real *_init comes with it, colliding with the mock.
+ * destroy_modules() calls (ab_init/ab_teardown in ab_common.c, and so on), so
+ * the linker must pull that member from the archive and the real *_init comes
+ * with it, colliding with the mock.
  *
- * The teardown functions are deliberately not mocked; they resolve to the
- * real implementations in the library.
+ * tag_registry_init() is deliberately NOT mocked, so the registry that
+ * initialize_modules() builds, then either discards or publishes, is the real
+ * one.  The teardown functions are not mocked either; they resolve to the real
+ * implementations in the library.
  */
 
 #include "mini_mock.h"
 
 #include <libplctag/lib/init.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <utils/rc.h>
 
 /*
  * These return int rather than int32_t to stay type-compatible with the real
- * declarations they replace (extern int lib_init(void) in tag.h, and so on).
- * The -D redirection renames the declaration in the header, so the definition
- * here has to match it exactly.
+ * declarations they replace (extern int ab_init(void) in ab_common.h, and so
+ * on).  The -D redirection renames the declaration in the header, so the
+ * definition here has to match it exactly.
  */
 
 int mock_refcount_startup(void) { return mock_type(int); }
-
-int mock_lib_init(void) { return mock_type(int); }
 
 int mock_ab_init(void) { return mock_type(int); }
 
@@ -74,12 +74,17 @@ int mock_mb_init(void) { return mock_type(int); }
 int mock_omron_init(void) { return mock_type(int); }
 
 
-/* If lib_init() fails, initialization must bail out and report the failure. */
-static void test_initialization_fails_if_lib_init_fails(void **state) {
+/*
+ * If a module fails to start, initialization must bail out at that point and
+ * report the failure.  The modules after the failing one must not be started,
+ * which is what the unconsumed mock return values assert: mini_mock aborts if
+ * mb_init() or omron_init() is called with nothing queued for it.
+ */
+static void test_initialization_fails_if_module_init_fails(void **state) {
     (void)state;
 
     will_return(mock_refcount_startup, PLCTAG_STATUS_OK);
-    will_return(mock_lib_init, PLCTAG_ERR_BAD_STATUS);
+    will_return(mock_ab_init, PLCTAG_ERR_BAD_STATUS);
 
     int rc = initialize_modules();
 
@@ -92,7 +97,6 @@ static void test_initialization_success(void **state) {
     (void)state;
 
     will_return(mock_refcount_startup, PLCTAG_STATUS_OK);
-    will_return(mock_lib_init, PLCTAG_STATUS_OK);
     will_return(mock_ab_init, PLCTAG_STATUS_OK);
     will_return(mock_mb_init, PLCTAG_STATUS_OK);
     will_return(mock_omron_init, PLCTAG_STATUS_OK);
@@ -107,7 +111,7 @@ static void test_initialization_success(void **state) {
 
 int main(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_initialization_fails_if_lib_init_fails),
+        cmocka_unit_test(test_initialization_fails_if_module_init_fails),
         cmocka_unit_test(test_initialization_success),
     };
 

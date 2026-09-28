@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdarg.h>

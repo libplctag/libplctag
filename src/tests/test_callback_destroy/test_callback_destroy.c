@@ -50,7 +50,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
 

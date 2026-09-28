@@ -33,7 +33,8 @@
 
 /*
  * Exercises public API entry points that no other test in the suite reaches:
- * plc_tag_get/set_float32/float64/int64/uint64/int8, plc_tag_get/set_raw_bytes
+ * plc_tag_get/set_float32/float64/int64/uint64/int8/uint8/uint16/int16/uint32,
+ * plc_tag_get/set_raw_bytes
  * (including its validation branches), plc_tag_lock/unlock,
  * plc_tag_unregister_callback, and the custom byte-order attribute parser
  * (check_byte_order_str, via int32_byte_order=).
@@ -44,8 +45,10 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -198,6 +201,79 @@ static void test_int8(const char *attribs) {
 }
 
 
+/*
+ * plc_tag_get/set for the integer widths no other case reaches: uint8, uint16,
+ * int16 and uint32.
+ *
+ * Each value makes a full round trip through the device rather than just through
+ * the local buffer, so the byte order is checked against what the PLC actually
+ * stores rather than only against our own serializer.  Each width is then probed
+ * one element past the end: the getter must return its sentinel AND set
+ * PLCTAG_ERR_OUT_OF_BOUNDS, since a sentinel alone is indistinguishable from a
+ * legitimately stored 0xFF..FF.
+ */
+static void test_int_widths(const char *attribs) {
+    int32_t tag = create_tag(attribs);
+    int size = 0;
+
+    if(tag < 0) { return; }
+
+    CHECK(plc_tag_read(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "int widths initial read");
+
+    size = plc_tag_get_size(tag);
+    CHECK(size >= 4, "int widths tag is at least one uint32 wide");
+    if(size < 4) {
+        plc_tag_destroy(tag);
+        return;
+    }
+
+    plc_tag_set_uint8(tag, 0, (uint8_t)0xA5);
+    CHECK(plc_tag_status(tag) == PLCTAG_STATUS_OK, "uint8 set_uint8");
+    CHECK(plc_tag_write(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "uint8 write");
+    CHECK(plc_tag_read(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "uint8 read-back");
+    CHECK(plc_tag_get_uint8(tag, 0) == (uint8_t)0xA5, "uint8 round-trip value");
+
+    plc_tag_set_uint16(tag, 0, (uint16_t)0xBEEF);
+    CHECK(plc_tag_status(tag) == PLCTAG_STATUS_OK, "uint16 set_uint16");
+    CHECK(plc_tag_write(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "uint16 write");
+    CHECK(plc_tag_read(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "uint16 read-back");
+    CHECK(plc_tag_get_uint16(tag, 0) == (uint16_t)0xBEEF, "uint16 round-trip value");
+
+    plc_tag_set_int16(tag, 0, (int16_t)-12345);
+    CHECK(plc_tag_status(tag) == PLCTAG_STATUS_OK, "int16 set_int16");
+    CHECK(plc_tag_write(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "int16 write");
+    CHECK(plc_tag_read(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "int16 read-back");
+    CHECK(plc_tag_get_int16(tag, 0) == (int16_t)-12345, "int16 round-trip value");
+
+    plc_tag_set_uint32(tag, 0, (uint32_t)0xDEADBEEFUL);
+    CHECK(plc_tag_status(tag) == PLCTAG_STATUS_OK, "uint32 set_uint32");
+    CHECK(plc_tag_write(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "uint32 write");
+    CHECK(plc_tag_read(tag, DATA_TIMEOUT) == PLCTAG_STATUS_OK, "uint32 read-back");
+    CHECK(plc_tag_get_uint32(tag, 0) == (uint32_t)0xDEADBEEFUL, "uint32 round-trip value");
+
+    /* every width must refuse an offset past the end, and say why. */
+    CHECK(plc_tag_get_uint8(tag, size) == UINT8_MAX, "uint8 out-of-bounds sentinel");
+    CHECK(plc_tag_status(tag) == PLCTAG_ERR_OUT_OF_BOUNDS, "uint8 out-of-bounds status");
+
+    CHECK(plc_tag_get_uint16(tag, size) == UINT16_MAX, "uint16 out-of-bounds sentinel");
+    CHECK(plc_tag_status(tag) == PLCTAG_ERR_OUT_OF_BOUNDS, "uint16 out-of-bounds status");
+
+    CHECK(plc_tag_get_int16(tag, size) == INT16_MIN, "int16 out-of-bounds sentinel");
+    CHECK(plc_tag_status(tag) == PLCTAG_ERR_OUT_OF_BOUNDS, "int16 out-of-bounds status");
+
+    CHECK(plc_tag_get_uint32(tag, size) == UINT32_MAX, "uint32 out-of-bounds sentinel");
+    CHECK(plc_tag_status(tag) == PLCTAG_ERR_OUT_OF_BOUNDS, "uint32 out-of-bounds status");
+
+    CHECK(plc_tag_get_int32(tag, size) == INT32_MIN, "int32 out-of-bounds sentinel");
+    CHECK(plc_tag_status(tag) == PLCTAG_ERR_OUT_OF_BOUNDS, "int32 out-of-bounds status");
+
+    CHECK(plc_tag_get_uint8(tag, -1) == UINT8_MAX, "negative offset sentinel");
+    CHECK(plc_tag_status(tag) == PLCTAG_ERR_OUT_OF_BOUNDS, "negative offset status");
+
+    plc_tag_destroy(tag);
+}
+
+
 /* plc_tag_get/set_raw_bytes -- the most defensively-coded getter/setter pair
  * in lib.c: null-buffer, non-positive-size, and out-of-bounds-offset are all
  * distinct returns, plus the normal success path. */
@@ -321,6 +397,7 @@ int main(int argc, char **argv) {
     test_float64(args.lreal_tag);
     test_int64(args.lint_tag);
     test_int8(args.sint_tag);
+    test_int_widths(args.byteorder_tag);
     test_raw_bytes(args.byteorder_tag);
     test_unregister_callback(args.byteorder_tag);
     test_byte_order(args.byteorder_tag);

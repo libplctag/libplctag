@@ -50,7 +50,7 @@
 #include <math.h>
 #include "compat_utils.h"
 #include "stats.h"
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 
 #define DEFAULT_NUM_TAGS 200          /* Number of tags to test */
 #define DEFAULT_TEST_DURATION_SECS 10 /* Test duration in seconds */

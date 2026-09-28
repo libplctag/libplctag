@@ -1,0 +1,3443 @@
+/***************************************************************************
+ *   Copyright (C) 2026 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *                                                                         *
+ * This software is available under either the Mozilla Public License      *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * you choose.                                                             *
+ *                                                                         *
+ * MPL 2.0:                                                                *
+ *                                                                         *
+ *   This Source Code Form is subject to the terms of the Mozilla Public   *
+ *   License, v. 2.0. If a copy of the MPL was not distributed with this   *
+ *   file, You can obtain one at http://mozilla.org/MPL/2.0/.              *
+ *                                                                         *
+ *                                                                         *
+ * LGPL 2:                                                                 *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+#define LIBPLCTAGDLL_EXPORTS (1)
+
+#include <libplctag/api/libplctag.h>
+
+#include <ctype.h>
+#include <float.h>
+#include <inttypes.h>
+#include <libplctag/lib/byte_order.h>
+#include <libplctag/lib/init.h>
+#include <libplctag/lib/tag_registry.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/lib/tag_registry.h>
+#include <libplctag/lib/tag_string.h>
+#include <libplctag/lib/version.h>
+#include <libplctag/modules/ab/ab.h>
+#include <libplctag/modules/modbus/modbus.h>
+#include <libplctag/modules/omron/omron.h>
+#include <limits.h>
+#include <platform.h>
+#include <stdlib.h>
+#include <utils/atomic_utils.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/hash.h>
+#include <utils/hashtable.h>
+#include <utils/random_utils.h>
+#include <utils/rc.h>
+#include <utils/vector.h>
+
+
+/* these are only internal to the file */
+
+
+/* helper functions. */
+static int plc_tag_abort_impl(plc_tag_p tag);
+static int32_t plc_tag_create_impl(const char *attrib_str,
+                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata, int timeout, plc_tag_p src_tag);
+
+
+#ifdef LIBPLCTAGDLL_EXPORTS
+#    if defined(_WIN32) || defined(_WIN64)
+#        include <process.h>
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+    switch(fdwReason) {
+        case DLL_PROCESS_ATTACH:
+            break;
+
+        case DLL_PROCESS_DETACH:
+            /*
+             * Only tear down on an explicit FreeLibrary() (lpvReserved == NULL),
+             * where the process is still alive and our worker threads can be
+             * joined. When lpvReserved != NULL the process is terminating: the
+             * loader has already killed every other thread, so plc_tag_shutdown()
+             * would block forever waiting on them. Applications should still call
+             * plc_tag_shutdown() explicitly during orderly shutdown rather than
+             * rely on this path.
+             */
+            if(lpvReserved == NULL) { plc_tag_shutdown(); }
+            break;
+
+        case DLL_THREAD_ATTACH:
+            break;
+
+        case DLL_THREAD_DETACH:
+            break;
+
+        default:
+            break;
+    }
+
+    return TRUE;
+}
+#    endif
+#endif
+
+
+/*
+ * Initialize the library.  This is called in a threadsafe manner and
+ * only called once.
+ *
+ * Builds the tag hashtable, its lookup mutex, and the tag tickler condition
+ * variable, and stages the result in building_instance for initialize_modules()
+ * to either publish (lib_instance_publish(), once ab_init()/mb_init()/omron_init()
+ * have also succeeded) or discard (lib_instance_discard_pending(), if one of them
+ * fails). Deliberately does not start the tickler thread -- see the comment on
+ * lib_instance_publish() above.
+ */
+
+
+int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting. Called from %s:%d.", func, line_num);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Called from %s:%d when tag is NULL!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!tag->tag_cond_wait) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Called from %s:%d when tag condition var is NULL!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    rc = cond_signal(tag->tag_cond_wait);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s trying to signal condition variable in call from %s:%d",
+               plc_tag_decode_error(rc), func, line_num);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Done. Called from %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_generic_tickler
+ *
+ * This implements the protocol-independent tickling functions such as handling
+ * automatic tag operations and callbacks.
+ */
+
+void plc_tag_generic_tickler(plc_tag_p tag) {
+    if(tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tickling tag %d.", tag->tag_id);
+
+        /* first check for aborts */
+        if(atomic_get_bool(&tag->abort_requested)) {
+            if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting ongoing operation if any!");
+
+            tag->read_complete = 0;
+            tag->read_in_flight = 0;
+            tag->write_complete = 0;
+            tag->write_in_flight = 0;
+
+            /* clear the flag so we do not do this again. */
+            atomic_set_bool(&tag->abort_requested, false);
+
+            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+
+            /* do not do anything else. */
+            return;
+        }
+
+        /* if this tag has automatic writes, then there are many things we should check */
+        if(tag->auto_sync_write_ms > 0) {
+            /* has the tag been written to? */
+            if(tag->tag_is_dirty) {
+                /* abort any in flight read if the tag is dirty. */
+                if(tag->read_in_flight) {
+                    if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting in-flight automatic read!");
+
+                    tag->read_complete = 0;
+                    tag->read_in_flight = 0;
+
+                    /* TODO - should we report an ABORT event here? */
+                    tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+                }
+
+                /* have we already done something about automatic reads? */
+                if(!tag->auto_sync_next_write) {
+                    /* we need to queue up a new write. */
+                    tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
+
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Queueing up automatic write in %dms.",
+                           tag->auto_sync_write_ms);
+                } else if(!tag->write_in_flight && tag->auto_sync_next_write <= time_ms()) {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Triggering automatic write start.");
+
+                    /* clear out any outstanding reads. */
+                    if(tag->read_in_flight) {
+                        if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+
+                        tag->read_in_flight = 0;
+                    }
+
+                    tag->tag_is_dirty = 0;
+                    tag->write_in_flight = 1;
+                    tag->auto_sync_next_write = 0;
+
+                    if(tag->vtable && tag->vtable->write) { tag->status = (int8_t)tag->vtable->write(tag); }
+
+                    tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
+                }
+            }
+        }
+
+        /* if this tag has automatic reads, we need to check that state too. */
+        if(tag->auto_sync_read_ms > 0) {
+            int64_t current_time = time_ms();
+
+
+            /* do we need to read? */
+            if(tag->auto_sync_next_read < current_time) {
+                /* make sure that we do not have an outstanding read or write. */
+                if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
+                    int64_t periods = 0;
+
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Triggering automatic read start.");
+
+                    tag->read_in_flight = 1;
+
+                    if(tag->vtable && tag->vtable->read) { tag->status = (int8_t)tag->vtable->read(tag); }
+
+                    tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, tag->status);
+
+                    /*
+                     * schedule the next read.
+                     *
+                     * Note that there will be some jitter.  In that case we want to skip
+                     * to the next read time that is a whole multiple of the read period.
+                     *
+                     * This keeps the jitter from slowly moving the polling cycle.
+                     *
+                     * Round up to the next period.
+                     */
+                    periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1)) / tag->auto_sync_read_ms;
+
+                    /* warn if we need to skip more than one period. */
+                    if(periods > 1) {
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Skipping %" PRId64 " periods of %" PRId32 "ms.",
+                               periods, tag->auto_sync_read_ms);
+                    }
+
+                    tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Scheduling next read at time %" PRId64 ".",
+                           tag->auto_sync_next_read);
+                } else {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id,
+                           "Unable to start auto read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!",
+                           tag->read_in_flight, tag->tag_is_dirty, tag->write_in_flight);
+                }
+            }
+        }
+    } else {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Called with null tag pointer!");
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Done.");
+}
+
+
+void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
+    /* punt if not needed. */
+    if(!tag) { return; }
+
+    critical_block(tag->api_mutex) {
+        /* Check the callback under the API mutex, not before: plc_tag_destroy() clears
+         * the callback (and userdata) under this same mutex while tearing the tag down.
+         * The tag tickler thread holds its own reference and can call this function
+         * after plc_tag_destroy() has returned, so an unsynchronized pre-check here would
+         * race that clear -- benign in practice since this check alone re-runs properly
+         * guarded below, but still a real data race by the C11/TSan memory model. */
+        if(!tag->callback) { break; }
+
+        /* trigger this if there is any other event. Only once. */
+        if(tag->event_creation_complete) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag creation complete with status %s.",
+                   plc_tag_decode_error(tag->event_creation_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
+            tag->event_creation_complete = 0;
+            tag->event_creation_complete_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a read start? */
+        if(tag->event_read_started) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag read started with status %s.",
+                   plc_tag_decode_error(tag->event_read_started_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
+            tag->event_read_started = 0;
+            tag->event_read_started_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a write start? */
+        if(tag->event_write_started) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag write started with status %s.",
+                   plc_tag_decode_error(tag->event_write_started_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
+            tag->event_write_started = 0;
+            tag->event_write_started_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there an abort? */
+        if(tag->event_operation_aborted) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag operation aborted with status %s.",
+                   plc_tag_decode_error(tag->event_operation_aborted_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
+            tag->event_operation_aborted = 0;
+            tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a read completion? */
+        if(tag->event_read_complete) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag read completed with status %s.",
+                   plc_tag_decode_error(tag->event_read_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
+            tag->event_read_complete = 0;
+            tag->event_read_complete_status = PLCTAG_STATUS_OK;
+        }
+
+        /* was there a write completion? */
+        if(tag->event_write_complete) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag write completed with status %s.",
+                   plc_tag_decode_error(tag->event_write_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
+            tag->event_write_complete = 0;
+            tag->event_write_complete_status = PLCTAG_STATUS_OK;
+        }
+
+        /* do this last so that we raise all other events first. we only start deletion events. */
+        if(tag->event_deletion_started) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag deletion started with status %s.",
+                   plc_tag_decode_error(tag->event_creation_complete_status));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
+            tag->event_deletion_started = 0;
+            tag->event_deletion_started_status = PLCTAG_STATUS_OK;
+        }
+
+    } /* end of API mutex critical area. */
+}
+
+
+int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
+                             void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    /* get the connection group ID here rather than in each PLC specific tag type. */
+    tag->connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
+    if(tag->connection_group_id < 0 || tag->connection_group_id > 32767) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
+               "Connection group ID must be between 0 and 32767, inclusive, but was %d!", tag->connection_group_id);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    rc = mutex_create(&(tag->ext_mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag external mutex!");
+        return PLCTAG_ERR_CREATE;
+    }
+
+    rc = mutex_create(&(tag->api_mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag API mutex!");
+        return PLCTAG_ERR_CREATE;
+    }
+
+    rc = cond_create(&(tag->tag_cond_wait));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag condition variable!");
+        return PLCTAG_ERR_CREATE;
+    }
+
+    /* do this early so that events can be raised early. */
+    tag->callback = tag_callback_func;
+    tag->userdata = userdata;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
+
+    return rc;
+}
+
+
+/* must be called with a valid tag pointer and the API mutex held!*/
+static int plc_tag_abort_impl(plc_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    /*
+     * flag an abort request before we wait on the mutex.
+     * Otherwise we will wait until any long running operation
+     * completes (such as a plc_tag_read() call with a wait).
+     */
+
+    atomic_set_bool(&tag->abort_requested, true);
+
+    /* if the tag does not use a tickler, then wake the PLC thread */
+    if(tag->vtable && tag->vtable->wake_plc) { rc = tag->vtable->wake_plc(tag); }
+
+    /* wake the tag tickler */
+    plc_tag_tickler_wake();
+
+    /*
+     * this blocks until we get the mutex by which time any
+     * long running operation is done.
+     */
+    critical_block(tag->api_mutex) {
+        tag->read_cache_expire = (uint64_t)0;
+
+        /* Is the abort flag still set? This may be synchronous. */
+        if(atomic_get_bool(&tag->abort_requested)) {
+            /* Clear the abort flag so the tickler won't process it again */
+            atomic_set_bool(&tag->abort_requested, false);
+
+            /*
+             * Operation-aware cleanup of in-flight flags.
+             *
+             * Handle flags BEFORE calling protocol abort, since the protocol
+             * abort function may modify these flags. We need to know what
+             * was in flight at the time of the abort.
+             *
+             * If a read was in flight, we need to signal completion with abort status
+             * so that any waiting thread (e.g. plc_tag_read with timeout) wakes up.
+             *
+             * If no operation was in flight, just clear the flags.
+             */
+            if(tag->read_in_flight) {
+                tag->read_in_flight = 0;
+                tag->read_complete = 1;
+                tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_ERR_ABORT);
+            } else {
+                tag->read_in_flight = 0;
+                tag->read_complete = 0;
+            }
+
+            if(tag->write_in_flight) {
+                tag->write_in_flight = 0;
+                tag->write_complete = 1;
+                tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_ERR_ABORT);
+            } else {
+                tag->write_in_flight = 0;
+                tag->write_complete = 0;
+            }
+
+            /* Call protocol-specific abort to clean up protocol state */
+            if(tag->vtable && tag->vtable->abort) {
+                rc = tag->vtable->abort(tag);
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have an abort function.");
+                rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+            }
+
+            /* Raise abort event */
+            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, (int8_t)rc);
+
+            /* Signal any waiting threads */
+            cond_signal(tag->tag_cond_wait);
+        } else {
+            /*
+             * The abort was already handled by the tickler or PLC thread.
+             * Do not touch the flags - a new operation may have started.
+             */
+            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Abort flag is not set, so abort already completed.");
+            rc = PLCTAG_STATUS_OK;
+        }
+    }
+
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    return rc;
+}
+
+
+static int plc_tag_status_impl(plc_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
+
+    critical_block(tag->api_mutex) {
+        if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
+
+        /* If the vtable tickler just completed a read or write, finalize it
+         * here rather than waiting for the background tickler thread to wake
+         * up and do it.  This mirrors what tag_tickler_func does after calling
+         * both ticklers, and is what allows async polling via plc_tag_status()
+         * to observe completion in the same call instead of paying an extra OS
+         * scheduling round-trip. */
+        if(tag->read_complete) {
+            tag->read_complete = 0;
+            tag->read_in_flight = 0;
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
+            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
+            cond_signal(tag->tag_cond_wait);
+        }
+
+        if(tag->write_complete) {
+            tag->write_complete = 0;
+            tag->write_in_flight = 0;
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
+            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
+            cond_signal(tag->tag_cond_wait);
+        }
+
+        if(tag->vtable && tag->vtable->status) {
+            rc = tag->vtable->status(tag);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "vtable->status returned %d (%s)", rc, plc_tag_decode_error(rc));
+        } else {
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(tag->read_in_flight || tag->write_in_flight) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id,
+                       "rc was OK but read_in_flight=%d write_in_flight=%d, changing to PENDING", tag->read_in_flight,
+                       tag->write_in_flight);
+                rc = PLCTAG_STATUS_PENDING;
+            }
+        }
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "final rc=%d (%s)", rc, plc_tag_decode_error(rc));
+    }
+
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    return rc;
+}
+
+
+/**************************************************************************
+ ***************************  API Functions  ******************************
+ **************************************************************************/
+
+
+/*
+ * plc_tag_decode_error()
+ *
+ * This takes an integer error value and turns it into a printable string.
+ *
+ * Returns a pointer to a static string.
+ */
+
+
+LIB_EXPORT const char *plc_tag_decode_error(int rc) {
+    switch(rc) {
+        case PLCTAG_STATUS_PENDING: return "PLCTAG_STATUS_PENDING";
+        case PLCTAG_STATUS_OK: return "PLCTAG_STATUS_OK";
+        case PLCTAG_ERR_ABORT: return "PLCTAG_ERR_ABORT";
+        case PLCTAG_ERR_BAD_CONFIG: return "PLCTAG_ERR_BAD_CONFIG";
+        case PLCTAG_ERR_BAD_CONNECTION: return "PLCTAG_ERR_BAD_CONNECTION";
+        case PLCTAG_ERR_BAD_DATA: return "PLCTAG_ERR_BAD_DATA";
+        case PLCTAG_ERR_BAD_DEVICE: return "PLCTAG_ERR_BAD_DEVICE";
+        case PLCTAG_ERR_BAD_GATEWAY: return "PLCTAG_ERR_BAD_GATEWAY";
+        case PLCTAG_ERR_BAD_PARAM: return "PLCTAG_ERR_BAD_PARAM";
+        case PLCTAG_ERR_BAD_REPLY: return "PLCTAG_ERR_BAD_REPLY";
+        case PLCTAG_ERR_BAD_STATUS: return "PLCTAG_ERR_BAD_STATUS";
+        case PLCTAG_ERR_CLOSE: return "PLCTAG_ERR_CLOSE";
+        case PLCTAG_ERR_CREATE: return "PLCTAG_ERR_CREATE";
+        case PLCTAG_ERR_DUPLICATE: return "PLCTAG_ERR_DUPLICATE";
+        case PLCTAG_ERR_ENCODE: return "PLCTAG_ERR_ENCODE";
+        case PLCTAG_ERR_MUTEX_DESTROY: return "PLCTAG_ERR_MUTEX_DESTROY";
+        case PLCTAG_ERR_MUTEX_INIT: return "PLCTAG_ERR_MUTEX_INIT";
+        case PLCTAG_ERR_MUTEX_LOCK: return "PLCTAG_ERR_MUTEX_LOCK";
+        case PLCTAG_ERR_MUTEX_UNLOCK: return "PLCTAG_ERR_MUTEX_UNLOCK";
+        case PLCTAG_ERR_NOT_ALLOWED: return "PLCTAG_ERR_NOT_ALLOWED";
+        case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND";
+        case PLCTAG_ERR_NOT_IMPLEMENTED: return "PLCTAG_ERR_NOT_IMPLEMENTED";
+        case PLCTAG_ERR_NO_DATA: return "PLCTAG_ERR_NO_DATA";
+        case PLCTAG_ERR_NO_MATCH: return "PLCTAG_ERR_NO_MATCH";
+        case PLCTAG_ERR_NO_MEM: return "PLCTAG_ERR_NO_MEM";
+        case PLCTAG_ERR_NO_RESOURCES: return "PLCTAG_ERR_NO_RESOURCES";
+        case PLCTAG_ERR_NULL_PTR: return "PLCTAG_ERR_NULL_PTR";
+        case PLCTAG_ERR_OPEN: return "PLCTAG_ERR_OPEN";
+        case PLCTAG_ERR_OUT_OF_BOUNDS: return "PLCTAG_ERR_OUT_OF_BOUNDS";
+        case PLCTAG_ERR_READ: return "PLCTAG_ERR_READ";
+        case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR";
+        case PLCTAG_ERR_THREAD_CREATE: return "PLCTAG_ERR_THREAD_CREATE";
+        case PLCTAG_ERR_THREAD_JOIN: return "PLCTAG_ERR_THREAD_JOIN";
+        case PLCTAG_ERR_TIMEOUT: return "PLCTAG_ERR_TIMEOUT";
+        case PLCTAG_ERR_TOO_LARGE: return "PLCTAG_ERR_TOO_LARGE";
+        case PLCTAG_ERR_TOO_SMALL: return "PLCTAG_ERR_TOO_SMALL";
+        case PLCTAG_ERR_UNSUPPORTED: return "PLCTAG_ERR_UNSUPPORTED";
+        case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK";
+        case PLCTAG_ERR_WRITE: return "PLCTAG_ERR_WRITE";
+        case PLCTAG_ERR_PARTIAL: return "PLCTAG_ERR_PARTIAL";
+        case PLCTAG_ERR_BUSY: return "PLCTAG_ERR_BUSY";
+
+        default: return "Unknown error."; break;
+    }
+
+    return "Unknown error.";
+}
+
+
+/*
+ * Set the debug level.
+ *
+ * This function takes values from the defined debug levels.  It sets
+ * the debug level to the passed value.  Higher numbers output increasing amounts
+ * of information.   Input values not defined will be ignored.
+ */
+
+LIB_EXPORT void plc_tag_set_debug_level(int debug_level) {
+    if(debug_level >= PLCTAG_DEBUG_NONE && debug_level <= PLCTAG_DEBUG_SPEW) { set_debug_level(debug_level); }
+}
+
+
+LIB_EXPORT int plc_tag_set_debug_module_level(plctag_debug_module_t module, int debug_level) {
+    if(debug_level < PLCTAG_DEBUG_NONE || debug_level > PLCTAG_DEBUG_SPEW) { return PLCTAG_ERR_BAD_PARAM; }
+    debug_module_set_level((debug_module_t)module, debug_level);
+    return PLCTAG_STATUS_OK;
+}
+
+
+LIB_EXPORT int plc_tag_get_debug_module_level(plctag_debug_module_t module) {
+    return debug_module_get_level((debug_module_t)module);
+}
+
+
+LIB_EXPORT int plc_tag_get_debug_level(void) { return get_debug_level(); }
+
+
+/*
+ * Check that the library supports the required API version.
+ *
+ * PLCTAG_STATUS_OK is returned if the version matches.  If it does not,
+ * PLCTAG_ERR_UNSUPPORTED is returned.
+ */
+
+LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_patch) {
+    /* encode these with 16-bits per version part. */
+    uint64_t lib_encoded_version =
+        (((uint64_t)version_major) << 32u) + (((uint64_t)version_minor) << 16u) + (uint64_t)version_patch;
+
+    uint64_t req_encoded_version = (((uint64_t)req_major) << 32u) + (((uint64_t)req_minor) << 16u) + (uint64_t)req_patch;
+
+    if(version_major == (uint64_t)req_major && lib_encoded_version >= req_encoded_version) {
+        return PLCTAG_STATUS_OK;
+    } else {
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+}
+
+
+/*
+ * plc_tag_create()
+ *
+ * This is where the dispatch occurs to the protocol specific implementation.
+ */
+
+LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout) {
+    return plc_tag_create_impl(attrib_str, NULL, NULL, timeout, NULL);
+}
+
+
+LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
+                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                     void *userdata, int timeout) {
+    return plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, NULL);
+}
+
+
+LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attrib_str,
+                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                           void *userdata, int timeout) {
+    plc_tag_p src_tag = NULL;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, src_tag_id, "Starting create-from-tag.");
+
+    if(src_tag_id <= 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag ID is invalid.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    src_tag = lookup_tag(src_tag_id);
+    if(!src_tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    switch(src_tag->protocol_type) {
+        case TAG_PROTOCOL_SYSTEM:
+        case TAG_PROTOCOL_UNKNOWN:
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
+                   src_tag->protocol_type);
+            rc_dec(src_tag);
+            return PLCTAG_ERR_NOT_ALLOWED;
+        default: break;
+    }
+
+    rc = plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, src_tag);
+    rc_dec(src_tag);
+
+    return rc;
+}
+
+
+static int32_t plc_tag_create_impl(const char *attrib_str,
+                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata, int timeout, plc_tag_p src_tag) {
+    plc_tag_p tag = PLC_TAG_P_NULL;
+    int id = PLCTAG_ERR_OUT_OF_BOUNDS;
+    attr attribs = NULL;
+    int rc = PLCTAG_STATUS_OK;
+    int read_cache_ms = 0;
+    tag_create_function tag_constructor;
+    int debug_level = -1;
+    tag_registry_p inst = NULL;
+
+    /* we are creating a tag, there is no ID yet. */
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting");
+
+
+    /* make sure that all modules are initialized. */
+    if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to initialize the internal library state!");
+        return rc;
+    }
+
+    /* check the arguments */
+
+    if(timeout < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Timeout must not be negative!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!attrib_str) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag attribute string is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(str_length(attrib_str) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag attribute string is zero length!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    attribs = attr_create_from_str(attrib_str);
+    if(!attribs) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Unable to parse attribute string!");
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    /* set debug level */
+    debug_level = attr_get_int(attribs, "debug", -1);
+    if(debug_level > DEBUG_NONE) { set_debug_level(debug_level); }
+
+    /* Acquire a reference to the running instance and transfer it into tag->instance
+     * below once the tag exists. initialize_modules() above guarantees one was
+     * published, but a shutdown can race in between -- tag_registry_acquire()
+     * returning NULL here means exactly that. */
+    inst = tag_registry_acquire();
+    if(!inst) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, cannot create tag.");
+        attr_destroy(attribs);
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    /*
+     * create the tag, this is protocol specific.
+     *
+     * If this routine wants to keep the attributes around, it needs
+     * to clone them.
+     *
+     * FIXME - there has to be a better way to do this.  We now have repetitive code
+     * that looks up the tag constructor based on the protocol type.  Is this the sort
+     * of thing that we should be doing with a registry or a vtable entry?
+     */
+    if(src_tag) {
+        switch(src_tag->protocol_type) {
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
+
+            case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
+            case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;
+
+            case TAG_PROTOCOL_MODBUS:
+            case TAG_PROTOCOL_MB_CONNECTION: tag_constructor = mb_tag_create; break;
+
+            default: tag_constructor = NULL; break;
+        }
+    } else {
+        tag_constructor = find_tag_create_func(attribs);
+    }
+
+    if(!tag_constructor) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, no tag constructor found for tag type!");
+        attr_destroy(attribs);
+        rc_dec(inst);
+        return src_tag ? PLCTAG_ERR_NOT_ALLOWED : PLCTAG_ERR_BAD_PARAM;
+    }
+
+    tag = tag_constructor(attribs, tag_callback_func, userdata, src_tag);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, skipping mutex creation and other generic setup.");
+        attr_destroy(attribs);
+        rc_dec(inst);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    /* Transfer the acquired reference into the tag; the tag's own destructor
+     * releases it (see each protocol destructor's rc_dec(tag->instance)). Every
+     * failure path below this point already routes through rc_dec(tag), so it does
+     * not need its own rc_dec(inst) -- that would double-release. */
+    tag->instance = inst;
+    inst = NULL;
+
+    if(tag->status != PLCTAG_STATUS_OK && tag->status != PLCTAG_STATUS_PENDING) {
+        int tag_status = tag->status;
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Warning, %s error found while creating tag!", plc_tag_decode_error(tag_status));
+
+        attr_destroy(attribs);
+        rc_dec(tag);
+
+        return tag_status;
+    }
+
+    /* set up the read cache config. */
+    read_cache_ms = attr_get_int(attribs, "read_cache_ms", 0);
+    if(read_cache_ms < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "read_cache_ms value must be positive, using zero.");
+        read_cache_ms = 0;
+    }
+
+    tag->read_cache_expire = (int64_t)0;
+    tag->read_cache_ms = (int64_t)read_cache_ms;
+
+    /* set up any automatic read/write */
+    tag->auto_sync_read_ms = attr_get_int(attribs, "auto_sync_read_ms", 0);
+    if(tag->auto_sync_read_ms < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "auto_sync_read_ms value must be positive!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    } else if(tag->auto_sync_read_ms > 0) {
+        /* how many periods did we already pass? */
+        /* start some time in the future, but with random jitter. */
+        tag->auto_sync_next_read = time_ms() + (int64_t)(random_u64((uint64_t)tag->auto_sync_read_ms));
+    }
+
+    tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
+    if(tag->auto_sync_write_ms < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "auto_sync_write_ms value must be positive!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    } else {
+        tag->auto_sync_next_write = 0;
+    }
+
+    /* See if we are allowed to resize fields */
+    tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
+
+    /* set up the tag byte order if there are any overrides. */
+    rc = set_tag_byte_order(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Unable to correctly set tag data byte order: %s!", plc_tag_decode_error(rc));
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return rc;
+    }
+
+    /*
+     * Release memory for attributes
+     */
+    attr_destroy(attribs);
+
+    /* map the tag to a tag ID */
+    id = add_tag_lookup(tag);
+
+    /* if the mapping failed, then punt */
+    if(id < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", tag,
+               plc_tag_decode_error(id));
+        rc_dec(tag);
+        return id;
+    }
+
+    /* tag->tag_id is already set (add_tag_lookup() sets it under tag_lookup_mutex,
+     * in the same critical section that publishes the tag into the hashtable --
+     * see the comment there). */
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Returning mapped tag ID %d", id);
+
+    /* Let protocols with their own worker-thread publishing step (e.g. Modbus) do it
+     * now that every generic field above is set. See the comment on activate in
+     * tag.h for why this can't happen earlier, inside the protocol's tag_create_function.
+     *
+     * The tag is already published into the hashtable (add_tag_lookup() above), so the
+     * PLC handler thread can already find and tickle it -- activate() must take api_mutex
+     * like status()/abort() below do, or its reads/writes of tag fields (e.g. tag->op in
+     * mb_activate/mb_read_start) race the handler thread's tickle_tag(), which changes
+     * tag->op under api_mutex + plc->mutex (see modbus.c tickle_all_tags). */
+    if(tag->vtable && tag->vtable->activate) {
+        critical_block(tag->api_mutex) { tag->vtable->activate(tag); }
+    }
+
+    /* wake up tag's PLC here. */
+    if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
+
+    /* get the tag status. */
+    if(tag->vtable && tag->vtable->status) {
+        critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+    }
+
+    /* check to see if there was an error during tag creation. */
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+        if(tag->vtable && tag->vtable->abort) {
+            critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+        }
+
+        /* remove the tag from the hashtable. */
+        remove_tag_lookup(tag);
+
+        rc_dec(tag);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag status after creation is %s.", plc_tag_decode_error(rc));
+
+    /*
+     * if there is a timeout, then wait until we get
+     * an error or we timeout.
+     */
+    if(timeout > 0 && rc == PLCTAG_STATUS_PENDING) {
+        int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
+
+        /* wake up the tickler in case it is needed to create the tag. */
+        plc_tag_tickler_wake();
+
+        /* we loop as long as we have time left to wait. */
+        do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /*
+             * clamp the value so that we do not wait some rediculous time.
+             * FIXME - should this return a BAD_PARAM error?  Or some sort of out of range error. A value like this is
+             * almost certainly a logic bug or a wrapping error.
+             */
+            if(timeout_left > INT_MAX) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Timeout left %" PRId64 " is too large, clamping to 100ms.",
+                       timeout_left);
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
+            }
+
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
+                       plc_tag_decode_error(rc));
+                if(tag->vtable && tag->vtable->abort) {
+                    critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                }
+
+                /* remove the tag from the hashtable. */
+                remove_tag_lookup(tag);
+
+                rc_dec(tag);
+                return rc;
+            }
+
+            /* get the tag status. */
+            if(tag->vtable && tag->vtable->status) {
+                critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have a status function!");
+            }
+
+            /* are we out of time? FIXME - this is too complicated.  Refactor. */
+            if(rc == PLCTAG_STATUS_PENDING && time_ms() >= end_time) { rc = PLCTAG_ERR_TIMEOUT; }
+        } while(rc == PLCTAG_STATUS_PENDING);
+
+        /* check to see if there was an error during tag creation. */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+
+            /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
+            if(tag->vtable && tag->vtable->abort) {
+                critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+            }
+
+            /* remove the tag from the hashtable. */
+            remove_tag_lookup(tag);
+
+            rc_dec(tag);
+            return rc;
+        }
+
+        /* clear up any remaining flags.  This should be refactored. */
+        critical_block(tag->api_mutex) {
+            tag->read_in_flight = 0;
+            tag->write_in_flight = 0;
+
+            /* raise create event. */
+            tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "tag set up elapsed time %" PRId64 "ms", (time_ms() - start_time));
+    }
+
+    /* dispatch any outstanding events. */
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
+
+    return id;
+}
+
+
+/*
+ * plc_tag_shutdown
+ *
+ * Some systems may not be able to call atexit() handlers.  In those cases, wrappers should
+ * call this function before unloading the library or terminating.   Most OSes will cleanly
+ * recover all system resources when a process is terminated and this will not be necessary.
+ */
+
+LIB_EXPORT void plc_tag_shutdown(void) {
+    tag_registry_p inst = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
+
+    /* Atomically close the gate: exactly one caller -- concurrent or repeated --
+     * can ever observe current_instance non-NULL and clear it. Every other caller
+     * sees NULL and returns immediately. This replaces the old two-load
+     * "if(!tags || !lib_active)" guard, which could let concurrent or repeated
+     * plc_tag_shutdown() calls both proceed. */
+    inst = tag_registry_close();
+
+    if(!inst) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0,
+               "plc_tag_shutdown() called after previous shutdown, or library not running. Ignoring.");
+        return;
+    }
+
+    /* terminate anything waiting on the library and prevent any tags from being created. */
+    atomic_set_bool(&lib_active, false);
+
+    /* close all tags. */
+    tag_registry_destroy_all_tags(inst);
+
+    /*
+     * Join the tag tickler thread now, before the protocol modules are torn down: the
+     * tickler calls into protocol vtable functions for every active tag, so it must not
+     * still be running once ab_teardown()/mb_teardown()/omron_teardown() (called from
+     * destroy_modules() below) start freeing protocol-level globals.
+     */
+    tag_registry_stop_tickler(inst);
+
+    /* Stage the registry for tag_registry_teardown() (called via destroy_modules() below) to
+     * drop the last ("genesis") reference, once refcount_teardown() has drained
+     * every tag's own reference too. */
+    tag_registry_stage_shutdown(inst);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Cleaning up library resources.");
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy modules.");
+    destroy_modules();
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Modules destroyed successfully.");
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Done.");
+}
+
+
+/*
+ * plc_tag_register_callback
+ *
+ * This function registers the passed callback function with the tag.  Only one callback function
+ * may be registered on a tag at a time!
+ *
+ * Once registered, any of the following operations on or in the tag will result in the callback
+ * being called:
+ *
+ *      * a tag handle finishing creation.
+ *      * starting a tag read operation.
+ *      * a tag read operation ending.
+ *      * a tag read being aborted.
+ *      * starting a tag write operation.
+ *      * a tag write operation ending.
+ *      * a tag write being aborted.
+ *      * a tag being destroyed
+ *
+ * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
+ * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
+ * This means that YOU are responsible for making sure that all client application data structures the callback
+ * function touches are safe to access by the callback!
+ *
+ * Do not do any operations in the callback that block for any significant time.   This will cause library
+ * performance to be poor or even to start failing!
+ *
+ * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * not guaranteed that they will work and they will possibly hang or fail.
+ *
+ * Return values:
+ *void (*tag_callback_func)(int32_t tag_id, uint32_t event, int status)
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ *
+ * Also see plc_tag_register_callback_ex.
+ */
+
+
+/* there needs to be a better way to make the cast clean than this! */
+#ifndef _MSC_VER
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
+
+    rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func)callback_func, NULL);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Done.");
+
+    return rc;
+}
+
+#ifndef _MSC_VER
+#    pragma GCC diagnostic pop
+#endif
+
+/*
+ * plc_tag_register_callback_ex
+ *
+ * This function registers the passed callback function and user data with the tag.  Only one callback function
+ * may be registered on a tag at a time!
+ *
+ * Once registered, any of the following operations on or in the tag will result in the callback
+ * being called:
+ *
+ *      * a tag handle finishing creation.
+ *      * starting a tag read operation.
+ *      * a tag read operation ending.
+ *      * a tag read being aborted.
+ *      * starting a tag write operation.
+ *      * a tag write operation ending.
+ *      * a tag write being aborted.
+ *      * a tag being destroyed
+ *
+ * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
+ * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
+ * This means that YOU are responsible for making sure that all client application data structures the callback
+ * function touches are safe to access by the callback!
+ *
+ * Do not do any operations in the callback that block for any significant time.   This will cause library
+ * performance to be poor or even to start failing!
+ *
+ * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * not guaranteed that they will work and they will possibly hang or fail.
+ *
+ * Return values:
+ *
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ *
+ * Also see plc_tag_register_callback.
+ */
+
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func callback_func, void *userdata) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(tag->callback) {
+            rc = PLCTAG_ERR_DUPLICATE;
+        } else {
+            if(callback_func) {
+                tag->callback = callback_func;
+                tag->userdata = userdata;
+            } else {
+                tag->callback = NULL;
+                tag->userdata = NULL;
+            }
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_unregister_callback
+ *
+ * This function removes the callback already registered on the tag.
+ *
+ * Return values:
+ *
+ * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
+ * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ */
+
+LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(tag->callback) {
+            rc = PLCTAG_STATUS_OK;
+            tag->callback = NULL;
+            tag->userdata = NULL;
+        } else {
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_register_logger
+ *
+ * This function registers the passed callback function with the library.  Only one callback function
+ * may be registered with the library at a time!
+ *
+ * Once registered, the function will be called with any logging message that is normally printed due
+ * to the current log level setting.
+ *
+ * WARNING: the callback will usually be called when the internal tag API mutex is held.   You cannot
+ * call any tag functions within the callback!
+ *
+ * Return values:
+ *
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ */
+
+LIB_EXPORT int plc_tag_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message)) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, 0, DEBUG_DETAIL, "Starting.");
+
+    rc = debug_register_logger(log_callback_func);
+
+    pdebug(DEBUG_MODULE_LIB, 0, DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_unregister_logger
+ *
+ * This function removes the logger callback already registered for the library.
+ *
+ * Return values:
+ *
+ * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
+ * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ */
+
+LIB_EXPORT int plc_tag_unregister_logger(void) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_LIB, 0, DEBUG_DETAIL, "Starting");
+
+    rc = debug_unregister_logger();
+
+    pdebug(DEBUG_MODULE_LIB, 0, DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_lock
+ *
+ * Lock the tag against use by other threads.  Because operations on a tag are
+ * very much asynchronous, actions like getting and extracting the data from
+ * a tag take more than one API call.  If more than one thread is using the same tag,
+ * then the internal state of the tag will get broken and you will probably experience
+ * a crash.
+ *
+ * This should be used to initially lock a tag when starting operations with it
+ * followed by a call to plc_tag_unlock when you have everything you need from the tag.
+ */
+
+LIB_EXPORT int plc_tag_lock(int32_t id) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* FIXME - there has to be a better way that this! */
+    /* we cannot nest the mutexes otherwise we will deadlock. */
+    do {
+        critical_block(tag->api_mutex) { rc = mutex_try_lock(tag->ext_mutex); }
+
+        /* if the mutex is already locked then we get a mutex lock error. */
+        if(rc == PLCTAG_ERR_MUTEX_LOCK) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Mutex already locked, wait and retry.");
+            sleep_ms(10);
+        }
+    } while(rc == PLCTAG_ERR_MUTEX_LOCK);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "External mutex locked.");
+    } else {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s trying to lock external mutex!", plc_tag_decode_error(rc));
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_unlock
+ *
+ * The opposite action of plc_tag_unlock.  This allows other threads to access the
+ * tag.
+ */
+
+LIB_EXPORT int plc_tag_unlock(int32_t id) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) { rc = mutex_unlock(tag->ext_mutex); }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_abort()
+ *
+ * This function calls through the vtable in the passed tag to call
+ * the protocol-specific implementation.
+ *
+ * The implementation must do whatever is necessary to abort any
+ * ongoing IO.
+ *
+ * The status of the operation is returned.
+ */
+
+LIB_EXPORT int plc_tag_abort(int32_t id) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    rc = plc_tag_abort_impl(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_destroy()
+ *
+ * Remove all implementation specific details about a tag and clear its
+ * memory.
+ */
+
+
+/* Common tail of tag destruction, given a tag already found and already removed
+ * from the tag hashtable. Factored out so plc_tag_shutdown()'s own tag-destroy
+ * loop -- which already holds the instance and does its own hashtable_remove --
+ * does not have to go through plc_tag_destroy()'s fresh tag_registry_acquire(),
+ * which by that point in shutdown correctly (and unhelpfully) returns NULL: the
+ * gate is deliberately closed before that loop runs, to stop new tags being
+ * created, but tags already found by the loop are not "new". */
+void destroy_tag_common(plc_tag_p tag) {
+    int32_t tag_id = tag->tag_id;
+
+    /* abort anything in flight */
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Aborting any in-flight operations.");
+
+    plc_tag_abort_impl(tag);
+
+    critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK); }
+
+    /* wake the tickler */
+    plc_tag_tickler_wake();
+
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    /* The tickler thread can still hold a reference and call
+     * plc_tag_generic_handle_event_callbacks() after this point,
+     * so clear the callback and userdata under the API mutex.
+     * This guarantees no stale callback fires after plc_tag_destroy(). */
+    critical_block(tag->api_mutex) {
+        tag->callback = NULL;
+        tag->userdata = NULL;
+    }
+
+    /* release the reference outside the mutex. */
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 " and tag mutex not locked.",
+           tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Done.");
+}
+
+
+LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
+    plc_tag_p tag = NULL;
+    tag_registry_p inst = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
+
+    if(tag_id <= 0 || tag_id >= TAG_ID_MASK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Called with zero or invalid tag!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* No tag in hand yet to borrow tag->instance from, so this is a per-call
+     * acquire/release, same as lookup_tag(). */
+    inst = tag_registry_acquire();
+    if(!inst) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Library not running, cannot destroy tag.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    tag = remove_tag_lookup_by_id(inst, tag_id);
+    rc_dec(inst);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Called with non-existent tag!");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    destroy_tag_common(tag);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * plc_tag_read()
+ *
+ * This function calls through the vtable in the passed tag to call
+ * the protocol-specific implementation.  That starts the read operation.
+ * If there is a timeout passed, then this routine waits for either
+ * a timeout or an error.
+ *
+ * The status of the operation is returned.
+ */
+
+LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+    int is_done = 0;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if(timeout < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout must not be negative!");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    critical_block(tag->api_mutex) {
+        tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+        plc_tag_generic_handle_event_callbacks(tag);
+
+        /* check read cache, if not expired, return existing data. */
+        if(tag->read_cache_expire > time_ms()) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Returning cached data.");
+            rc = PLCTAG_STATUS_OK;
+            is_done = 1;
+            break;
+        }
+
+        if(tag->read_in_flight || tag->write_in_flight) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "An operation is already in flight!");
+            rc = PLCTAG_ERR_BUSY;
+            is_done = 1;
+            break;
+        }
+
+        if(tag->tag_is_dirty) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has locally updated data that will be overwritten!");
+            rc = PLCTAG_ERR_BUSY;
+            is_done = 1;
+            break;
+        }
+
+        tag->read_in_flight = 1;
+        tag->status = PLCTAG_STATUS_PENDING;
+
+        /* clear the condition var */
+        cond_clear(tag->tag_cond_wait);
+
+        /* the protocol implementation does not do the timeout. */
+        if(tag->vtable && tag->vtable->read) {
+            rc = tag->vtable->read(tag);
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attempt to call read on a tag that does not support reads.");
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
+
+        /* if not pending then check for success or error. */
+        if(rc != PLCTAG_STATUS_PENDING) {
+            if(rc != PLCTAG_STATUS_OK) {
+                /* not pending and not OK, so error. Abort and clean up. */
+
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from read command returned error %s!",
+                       plc_tag_decode_error(rc));
+
+                /* the abort's own result must not mask the error that caused it. */
+                plc_tag_abort_impl(tag);
+            }
+
+            tag->read_in_flight = 0;
+            is_done = 1;
+            break;
+        }
+    }
+
+    /*
+     * if there is a timeout, then wait until we get
+     * an error or we timeout.
+     */
+    if(!is_done && timeout > 0) {
+        int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
+
+        /* wake up the tickler in case it is needed to read the tag. */
+        plc_tag_tickler_wake();
+
+        /* we loop as long as we have time left to wait. */
+        do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /*
+             * The deadline has passed. cond_wait() rejects a zero or negative
+             * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
+             * a bad-parameter error instead of the timeout that actually
+             * happened, so stop here and report the timeout itself.
+             */
+            if(timeout_left <= 0) {
+                rc = PLCTAG_ERR_TIMEOUT;
+                break;
+            }
+
+            if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
+
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag read to complete!",
+                       plc_tag_decode_error(rc));
+                plc_tag_abort_impl(tag);
+
+                break;
+            }
+
+            /* get the tag status. */
+            rc = plc_tag_status_impl(tag);
+
+            /* check to see if there was an error during tag read. */
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
+                plc_tag_abort_impl(tag);
+            }
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
+
+        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag read to complete!");
+
+            /*
+             * The protocol layer is still working on the request.  Every other exit from this
+             * loop aborts it; without that here the operation stays in flight after the tag
+             * looks idle, and the next read fails with PLCTAG_ERR_BUSY out of nowhere.
+             */
+            plc_tag_abort_impl(tag);
+
+            rc = PLCTAG_ERR_TIMEOUT;
+        }
+
+        /* the read is not in flight anymore. */
+        critical_block(tag->api_mutex) {
+            tag->read_in_flight = 0;
+            tag->read_complete = 0;
+            /* is_done = 1; */
+            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "elapsed time %" PRId64 "ms", (time_ms() - start_time));
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
+        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
+    }
+
+    /* fire any events that are pending. */
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done");
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_status
+ *
+ * Return the current status of the tag.  This will be PLCTAG_STATUS_PENDING if there is
+ * an uncompleted IO operation.  It will be PLCTAG_STATUS_OK if everything is fine.  Other
+ * errors will be returned as appropriate.
+ *
+ * This is a function provided by the underlying protocol implementation.
+ */
+
+LIB_EXPORT int plc_tag_status(int32_t id) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    /* check the ID.  It might be an error status from creating the tag. */
+    if(!tag) {
+        if(id < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Called with an error status %s!", plc_tag_decode_error(id));
+            return id;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+    }
+
+    rc = plc_tag_status_impl(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done with rc=%s.", plc_tag_decode_error(rc));
+
+    return rc;
+}
+
+
+/*
+ * plc_tag_write()
+ *
+ * This function calls through the vtable in the passed tag to call
+ * the protocol-specific implementation.  That starts the write operation.
+ * If there is a timeout passed, then this routine waits for either
+ * a timeout or an error.
+ *
+ * The status of the operation is returned.
+ */
+
+LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+    int is_done = 0;
+
+    pdebug(DEBUG_MODULE_LIB, id, DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if(timeout < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout must not be negative!");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(tag->read_in_flight || tag->write_in_flight) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
+            is_done = 1;
+            rc = PLCTAG_ERR_BUSY;
+            break;
+        }
+
+        /* a write is now in flight. */
+        tag->write_in_flight = 1;
+        tag->status = PLCTAG_STATUS_OK;
+
+        /*
+         * This needs to be done before we raise the event below in case the user code
+         * tries to do something tricky like abort the write.   In that case, the condition
+         * variable will be set by the abort.   So we have to clear it here and then see
+         * if it gets raised afterward.
+         */
+        cond_clear(tag->tag_cond_wait);
+
+        /*
+         * This must be raised _before_ we start the write to enable
+         * application code to fill in the tag data buffer right before
+         * we start the write process.
+         */
+        tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
+        plc_tag_generic_handle_event_callbacks(tag);
+
+        /* the protocol implementation does not do the timeout. */
+        if(tag->vtable && tag->vtable->write) {
+            rc = tag->vtable->write(tag);
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attempt to call write on a tag that does not support writes.");
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
+
+        /* if not pending then check for success or error. */
+        if(rc != PLCTAG_STATUS_PENDING) {
+            if(rc != PLCTAG_STATUS_OK) {
+                /* not pending and not OK, so error. Abort and clean up. */
+
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from write command returned error %s!",
+                       plc_tag_decode_error(rc));
+
+                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+            }
+
+            tag->write_in_flight = 0;
+            is_done = 1;
+            break;
+        }
+    } /* end of api mutex block */
+
+    /*
+     * if there is a timeout, then wait until we get
+     * an error or we timeout.
+     */
+    if(!is_done && timeout > 0) {
+        int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
+
+        /* wake up the tickler in case it is needed to write the tag. */
+        plc_tag_tickler_wake();
+
+        /* we loop as long as we have time left to wait. */
+        do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /*
+             * The deadline has passed. cond_wait() rejects a zero or negative
+             * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
+             * a bad-parameter error instead of the timeout that actually
+             * happened, so stop here and report the timeout itself.
+             */
+            if(timeout_left <= 0) {
+                rc = PLCTAG_ERR_TIMEOUT;
+                break;
+            }
+
+            if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
+
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag write to complete!",
+                       plc_tag_decode_error(rc));
+                plc_tag_abort_impl(tag);
+
+                break;
+            }
+
+            /* get the tag status. */
+            rc = plc_tag_status_impl(tag);
+
+            /* check to see if there was an error during tag creation. */
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
+                plc_tag_abort_impl(tag);
+            }
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
+
+        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag write to complete!");
+
+            /* see the matching comment in plc_tag_read(). */
+            plc_tag_abort_impl(tag);
+
+            rc = PLCTAG_ERR_TIMEOUT;
+        }
+
+        /* the write is not in flight anymore. */
+        critical_block(tag->api_mutex) {
+            tag->write_in_flight = 0;
+            tag->write_complete = 0;
+            is_done = 1;
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Write finshed with elapsed time %" PRId64 "ms", (time_ms() - start_time));
+    }
+
+    if(is_done) {
+        critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc); }
+    }
+
+    /* fire any events that are pending. */
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done: status = %s.", plc_tag_decode_error(rc));
+
+    return rc;
+}
+
+
+/*
+ * Tag data accessors.
+ */
+
+
+LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, int default_value) {
+    int res = default_value;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    /* FIXME - this should set the tag status if there is a tag. */
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
+        return default_value;
+    }
+
+    /* get library attributes */
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(def && def->type == ATTR_TYPE_INT && def->get_int) {
+            int32_t value = 0;
+
+            res = (def->get_int(NULL, &value) == PLCTAG_STATUS_OK ? (int)value : default_value);
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
+            res = default_value;
+        }
+    } else {
+        tag = lookup_tag(id);
+
+        if(!tag) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+            return default_value;
+        }
+
+        critical_block(tag->api_mutex) {
+            const attr_def_t *def = attr_find(tag, attrib_name);
+
+            if(def) {
+                if(def->type != ATTR_TYPE_INT) {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold an integer value!", attrib_name);
+                    tag->status = PLCTAG_ERR_UNSUPPORTED;
+                    res = default_value;
+                } else if(def->get_int) {
+                    int32_t value = 0;
+                    int32_t rc = def->get_int(tag, &value);
+
+                    tag->status = (int8_t)rc;
+                    res = (rc == PLCTAG_STATUS_OK ? (int)value : default_value);
+                } else {
+                    /* the name exists but is write only, or the protocol suppressed it. */
+                    tag->status = PLCTAG_ERR_UNSUPPORTED;
+                    res = default_value;
+                }
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
+                res = default_value;
+                tag->status = PLCTAG_ERR_UNSUPPORTED;
+            }
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, int new_value) {
+    int res = PLCTAG_ERR_NOT_FOUND;
+    plc_tag_p tag = NULL;
+
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting for int attribute %s.", attrib_name);
+
+    /* set library attributes */
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(!def || def->type != ATTR_TYPE_INT || !def->set_int) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
+            return PLCTAG_ERR_UNSUPPORTED;
+        }
+
+        /* there is no tag at library scope, so this must not fall through to the rc_dec() below. */
+        return (int)def->set_int(NULL, (int32_t)new_value);
+    } else {
+        tag = lookup_tag(id);
+
+        if(!tag) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+
+        critical_block(tag->api_mutex) {
+            const attr_def_t *def = attr_find(tag, attrib_name);
+
+            if(def) {
+                if(def->type != ATTR_TYPE_INT) {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold an integer value!", attrib_name);
+                    res = PLCTAG_ERR_UNSUPPORTED;
+                } else if(def->set_int) {
+                    res = (int)def->set_int(tag, (int32_t)new_value);
+                } else {
+                    /* the name exists but is read only, or the protocol suppressed it. */
+                    res = PLCTAG_ERR_UNSUPPORTED;
+                }
+
+                tag->status = (int8_t)res;
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
+                res = PLCTAG_ERR_UNSUPPORTED;
+                tag->status = (int8_t)res;
+            }
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_name, uint8_t *buffer, int buffer_length) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
+
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!buffer) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Host data buffer pointer must not be null!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(buffer_length <= 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Buffer length must not be negative or zero!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(def && (def->type == ATTR_TYPE_BYTES || def->type == ATTR_TYPE_STRING) && def->get_bytes) {
+            return (int)def->get_bytes(NULL, buffer, (int32_t)buffer_length);
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
+
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    tag = lookup_tag(id);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        const attr_def_t *def = attr_find(tag, attrib_name);
+
+        if(def) {
+            if(def->type != ATTR_TYPE_BYTES && def->type != ATTR_TYPE_STRING) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" does not hold a byte array value!", attrib_name);
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            } else if(def->get_bytes) {
+                rc = (int)def->get_bytes(tag, buffer, (int32_t)buffer_length);
+            } else {
+                /* the name exists but is write only, or the protocol suppressed it. */
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            }
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Unsupported attribute \"%s\"!", attrib_name);
+            rc = PLCTAG_ERR_UNSUPPORTED;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting.");
+
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute name must not be null or zero-length!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(id == 0) {
+        const attr_def_t *def = attr_find_lib(attrib_name);
+
+        if(!def) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not supported at the library level!", attrib_name);
+            return PLCTAG_ERR_UNSUPPORTED;
+        }
+
+        if(def->type == ATTR_TYPE_INT) { return (int)sizeof(int32_t); }
+
+        return (def->get_bytes_size ? (int)def->get_bytes_size(NULL) : PLCTAG_ERR_UNSUPPORTED);
+    }
+
+    tag = lookup_tag(id);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        const attr_def_t *def = attr_find(tag, attrib_name);
+
+        if(!def) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Attribute \"%s\" is not known to the library!", attrib_name);
+            rc = PLCTAG_ERR_UNSUPPORTED;
+        } else if(def->type != ATTR_TYPE_INT) {
+            if(def->get_bytes_size) {
+                rc = (int)def->get_bytes_size(tag);
+            } else {
+                rc = PLCTAG_ERR_UNSUPPORTED;
+            }
+        } else {
+            rc = (int)sizeof(int32_t);
+        }
+
+        tag->status = (int8_t)(rc < 0 ? rc : PLCTAG_STATUS_OK);
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_get_size(int32_t id) {
+    int result = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        result = tag->size;
+        tag->status = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return result;
+}
+
+
+LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Starting with new size %d.", new_size);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if(new_size < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Illegal new size %d bytes for tag is illegal.  Tag size must be positive.");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    critical_block(tag->api_mutex) { rc = resize_tag_buffer_unsafe(tag, new_size); }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    if(rc >= 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Done with old size %d.", rc);
+    } else {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag buffer resize failed with error %s!", plc_tag_decode_error(rc));
+    }
+
+    return rc;
+}
+
+
+static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
+    int res = 0;
+    int real_offset = 0;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
+
+    do {
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        /* if this is a single bit, then make sure the offset is the tag bit. */
+        if(tag->is_bit) {
+            real_offset = tag->bit;
+        } else {
+            real_offset = offset_bit;
+        }
+
+        /* note: do not log tag->data[real_offset / 8] until the offset has been checked below. */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "selecting bit %d with offset %d in byte %d.", real_offset,
+               (real_offset % 8), (real_offset / 8));
+
+        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
+            res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
+            tag->status = PLCTAG_STATUS_OK;
+            break;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Data offset out of bounds!");
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+    } while(0);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Done.");
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
+    int res = PLCTAG_ERR_OUT_OF_BOUNDS;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) { res = plc_tag_get_bit_impl(tag, offset_bit); }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return res;
+}
+
+/*
+ * tag_set_dirty - mark a tag as having locally-modified data and notify
+ * the protocol layer so it can schedule a write without waiting for the
+ * generic tickler (which is not called for some protocols, e.g. Modbus).
+ * Must be called while tag->api_mutex is held.
+ */
+static void tag_set_dirty(plc_tag_p tag) {
+    tag->tag_is_dirty = 1;
+    if(tag->vtable && tag->vtable->tag_data_written) { tag->vtable->tag_data_written(tag); }
+}
+
+
+static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
+    int res = PLCTAG_STATUS_OK;
+    int real_offset = offset_bit;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
+
+    do {
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        /* if this is a single bit, then make sure the offset is the tag bit. */
+        if(tag->is_bit) {
+            real_offset = tag->bit;
+        } else {
+            real_offset = offset_bit;
+        }
+
+        /* note: do not log tag->data[real_offset / 8] until the offset has been checked below. */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Setting bit %d with offset %d in byte %d.", real_offset,
+               (real_offset % 8), (real_offset / 8));
+
+        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
+            if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
+
+            if(val) {
+                tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
+            } else {
+                tag->data[real_offset / 8] &= (uint8_t)(~(1 << (real_offset % 8)));
+            }
+
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+    } while(0);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Done.");
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val) {
+    int res = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) { res = plc_tag_set_bit_impl(tag, offset_bit, val); }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return res;
+}
+
+
+/*
+ * The integer accessor families.
+ *
+ * plc_tag_get_uint8()/int8()/uint16()/.../int64() and their setters all do the same
+ * thing: look the tag up, take its mutex, check that it has data and that the field is
+ * in bounds, then move `width` bytes through the byte-order map for that width.  Only
+ * the width, the signedness of the result and the failure sentinel differ, so the whole
+ * body lives here once and each public function is a cast around it.
+ *
+ * Bit tags are a separate case that these still have to carry: when tag->is_bit is set
+ * the tag holds a single bit, and a get returns it while a set writes it, ignoring
+ * `offset` and the width entirely.
+ *
+ * Values move as uint64_t.  A signed accessor casts on the way out, which is
+ * implementation-defined before C23 for out-of-range values but well defined for the
+ * two's-complement round trip these perform.
+ */
+
+/* Pick the byte-order map for a width.  A single byte has no order to apply. */
+static const int *byte_order_for_width(plc_tag_p tag, int width) {
+    switch(width) {
+        case 1: return NULL;
+        case 2: return tag->byte_order->int16_order;
+        case 4: return tag->byte_order->int32_order;
+        case 8: return tag->byte_order->int64_order;
+        default: return NULL;
+    }
+}
+
+
+/*
+ * Shared body of every integer getter.  On success *out holds the value zero-extended
+ * to 64 bits and PLCTAG_STATUS_OK is returned; on any failure the caller substitutes
+ * its own sentinel.
+ */
+static int tag_get_int_common(int32_t id, int offset, int width, uint64_t *out) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    *out = 0;
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        if(tag->is_bit) {
+            int bit_rc = plc_tag_get_bit_impl(tag, tag->bit);
+
+            if(bit_rc < 0) {
+                rc = bit_rc;
+            } else {
+                *out = (uint64_t)(unsigned int)bit_rc;
+            }
+
+            break;
+        }
+
+        if(!tag_range_is_valid(tag, offset, width)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        const int *order = byte_order_for_width(tag, width);
+
+        for(int i = 0; i < width; i++) {
+            int src = order ? (offset + order[i]) : offset;
+
+            *out += ((uint64_t)(tag->data[src])) << (i * 8);
+        }
+
+        tag->status = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return rc;
+}
+
+
+/* Shared body of every integer setter.  `val` holds the value zero-extended to 64 bits. */
+static int tag_set_int_common(int32_t id, int offset, int width, uint64_t val) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        if(tag->is_bit) {
+            rc = plc_tag_set_bit_impl(tag, 0, val ? 1 : 0);
+            break;
+        }
+
+        if(!tag_range_is_valid(tag, offset, width)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
+
+        const int *order = byte_order_for_width(tag, width);
+
+        for(int i = 0; i < width; i++) {
+            int dest = order ? (offset + order[i]) : offset;
+
+            tag->data[dest] = (uint8_t)((val >> (i * 8)) & 0xFF);
+        }
+
+        tag->status = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return rc;
+}
+
+
+LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(uint64_t), &raw) != PLCTAG_STATUS_OK) { return UINT64_MAX; }
+
+    return (uint64_t)raw;
+}
+
+
+LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val) {
+    return tag_set_int_common(id, offset, (int)sizeof(uint64_t), (uint64_t)val);
+}
+
+
+LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(int64_t), &raw) != PLCTAG_STATUS_OK) { return INT64_MIN; }
+
+    return (int64_t)raw;
+}
+
+
+LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
+    return tag_set_int_common(id, offset, (int)sizeof(int64_t), (uint64_t)(uint64_t)ival);
+}
+
+
+LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(uint32_t), &raw) != PLCTAG_STATUS_OK) { return UINT32_MAX; }
+
+    return (uint32_t)raw;
+}
+
+LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
+    return tag_set_int_common(id, offset, (int)sizeof(uint32_t), (uint64_t)val);
+}
+
+LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(int32_t), &raw) != PLCTAG_STATUS_OK) { return INT32_MIN; }
+
+    return (int32_t)raw;
+}
+
+LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
+    return tag_set_int_common(id, offset, (int)sizeof(int32_t), (uint64_t)(uint32_t)ival);
+}
+
+LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(uint16_t), &raw) != PLCTAG_STATUS_OK) { return UINT16_MAX; }
+
+    return (uint16_t)raw;
+}
+
+
+LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val) {
+    return tag_set_int_common(id, offset, (int)sizeof(uint16_t), (uint64_t)val);
+}
+
+
+LIB_EXPORT int16_t plc_tag_get_int16(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(int16_t), &raw) != PLCTAG_STATUS_OK) { return INT16_MIN; }
+
+    return (int16_t)raw;
+}
+
+
+LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival) {
+    return tag_set_int_common(id, offset, (int)sizeof(int16_t), (uint64_t)(uint16_t)ival);
+}
+
+
+LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(uint8_t), &raw) != PLCTAG_STATUS_OK) { return UINT8_MAX; }
+
+    return (uint8_t)raw;
+}
+
+
+LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val) {
+    return tag_set_int_common(id, offset, (int)sizeof(uint8_t), (uint64_t)val);
+}
+
+
+LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset) {
+    uint64_t raw = 0;
+
+    if(tag_get_int_common(id, offset, (int)sizeof(int8_t), &raw) != PLCTAG_STATUS_OK) { return INT8_MIN; }
+
+    return (int8_t)raw;
+}
+
+
+LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
+    return tag_set_int_common(id, offset, (int)sizeof(int8_t), (uint64_t)(uint8_t)ival);
+}
+
+LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset) {
+    double res = DBL_MIN;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return res;
+    }
+
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = DBL_MIN;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Getting float64 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            res = DBL_MIN;
+            break;
+        }
+
+        if(tag_range_is_valid(tag, offset, (int)sizeof(double))) {
+            uint64_t ures = ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[3]]) << 24)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[4]]) << 32)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[5]]) << 40)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[6]]) << 48)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[7]]) << 56);
+
+            /* copy the data */
+            mem_copy(&res, &ures, sizeof(res));
+
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            res = DBL_MIN;
+            break;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Setting float64 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        if(tag_range_is_valid(tag, offset, (int)sizeof(double))) {
+            if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
+
+            uint64_t val;
+            /* copy the data into the uint64 value */
+            mem_copy(&val, &fval, sizeof(val));
+
+            tag->data[offset + tag->byte_order->float64_order[0]] = (uint8_t)((val >> 0) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[1]] = (uint8_t)((val >> 8) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
+
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return rc;
+}
+
+
+LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset) {
+    float res = FLT_MIN;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return res;
+    }
+
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = FLT_MIN;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Getting float32 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            res = FLT_MIN;
+            break;
+        }
+
+        if(tag_range_is_valid(tag, offset, (int)sizeof(float))) {
+            uint32_t ures = (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0)
+                                       + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8)
+                                       + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16)
+                                       + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[3]]) << 24));
+
+            /* copy the data */
+            mem_copy(&res, &ures, sizeof(res));
+
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            res = FLT_MIN;
+            break;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Setting float32 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        if(tag_range_is_valid(tag, offset, (int)sizeof(float))) {
+            if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
+
+            uint32_t val;
+            /* copy the data into the uint32 value */
+            mem_copy(&val, &fval, sizeof(val));
+
+            tag->data[offset + tag->byte_order->float32_order[0]] = (uint8_t)((val >> 0) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[1]] = (uint8_t)((val >> 8) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+    int max_len = 0;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Getting a string value from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(!buffer || buffer_length < 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Buffer is null or has a negative length!");
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* set all buffer bytes to zero. */
+    mem_set(buffer, 0, buffer_length);
+
+    critical_block(tag->api_mutex) {
+        int string_length = get_string_length_unsafe(tag, string_start_offset);
+
+        /* a bad start offset shows up as a negative length here.  Do not treat it as a count. */
+        if(string_length < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Unable to get the string length, error %s!",
+                   plc_tag_decode_error(string_length));
+            tag->status = (int8_t)string_length;
+            rc = string_length;
+            break;
+        }
+
+        /* determine the maximum number of characters/bytes to copy. */
+        if(buffer_length < string_length) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Buffer length, %d, is less than the string length, %d!", buffer_length,
+                   string_length);
+            max_len = buffer_length;
+        } else {
+            max_len = string_length;
+        }
+
+        /* check the amount of space. */
+        if(string_start_offset + (int)tag->byte_order->str_count_word_bytes + max_len <= tag->size) {
+            for(int i = 0; i < max_len && i < tag->size; i++) {
+                size_t char_index =
+                    (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                    + (size_t)(unsigned int)string_start_offset + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+
+                if(char_index < (size_t)tag->size) {
+                    buffer[i] = (char)tag->data[char_index];
+                } else {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Out of bounds index, %zu, generated!", char_index);
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                    break;
+                }
+            }
+
+            if(rc != PLCTAG_STATUS_OK) { break; }
+
+            tag->status = PLCTAG_STATUS_OK;
+            rc = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Done.");
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const char *string_val) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+    unsigned int string_length = 0;
+    unsigned int string_data_start_offset = (unsigned int)string_start_offset;
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Starting with string %s.", string_val);
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(!string_val) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "New string value pointer is null!");
+        tag->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* note that passing a zero-length string is valid. */
+
+    if(tag->is_bit) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Setting a string value on a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    string_length = (unsigned int)str_length(string_val);
+
+    /* will the string fit in the space on the PLC?  If we have a max capacity we check. */
+    if(tag->byte_order->str_max_capacity && string_length > tag->byte_order->str_max_capacity) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "String is longer, %u bytes, than the maximum capacity, %u!", string_length,
+               tag->byte_order->str_max_capacity);
+        rc = PLCTAG_ERR_TOO_LARGE;
+        tag->status = (int8_t)rc;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        return rc;
+    }
+
+    /* we may be changing things, so take the mutex */
+    critical_block(tag->api_mutex) {
+        int old_string_size_in_buffer = 0;
+        int new_string_size_in_buffer = 0;
+
+        old_string_size_in_buffer = get_string_total_length_unsafe(tag, string_start_offset);
+        if(old_string_size_in_buffer < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Error getting existing string size in the tag buffer!");
+            rc = old_string_size_in_buffer;
+            break;
+        }
+
+        new_string_size_in_buffer = get_new_string_total_length_unsafe(tag, string_val);
+        if(new_string_size_in_buffer < 0) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Error getting new string size!");
+            rc = new_string_size_in_buffer;
+            break;
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id,
+               "allow_field_resize=%d, old_string_size_in_buffer=%" PRId32 ", new_string_size_in_buffer=%" PRId32 ".",
+               tag->allow_field_resize, old_string_size_in_buffer, new_string_size_in_buffer);
+
+        if(!tag->allow_field_resize && (new_string_size_in_buffer != old_string_size_in_buffer)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "This tag does not allow resizing of fields.");
+            rc = PLCTAG_ERR_NOT_ALLOWED;
+            break;
+        }
+
+        rc = resize_tag_buffer_at_offset_unsafe(tag, string_start_offset + old_string_size_in_buffer,
+                                                string_start_offset + new_string_size_in_buffer);
+        if(rc != PLCTAG_STATUS_OK) { break; }
+
+        /* zero out the string data in the buffer. */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Zeroing out the string data in the buffer.");
+        for(unsigned int i = (unsigned int)string_start_offset;
+            i < (unsigned int)(string_start_offset + new_string_size_in_buffer) && i < (unsigned int)tag->size; i++) {
+            tag->data[i] = 0;
+        }
+
+        /* if the string is counted, set the length */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Set count word if the string is counted.");
+        if(tag->byte_order->str_is_counted) {
+            int last_count_word_index = string_start_offset + (int)(unsigned int)tag->byte_order->str_count_word_bytes;
+
+            if(last_count_word_index > (int)(tag->size)) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
+                       "Unable to write valid count word as count word would go past the end of the tag buffer!");
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                tag->status = (int8_t)rc;
+                break;
+            }
+
+            /* move the index of the string data start past the count word. */
+            string_data_start_offset += tag->byte_order->str_count_word_bytes;
+
+            switch(tag->byte_order->str_count_word_bytes) {
+                case 1:
+                    if(string_length > UINT8_MAX) {
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
+                               "String length, %u, is greater than can be expressed in a one-byte count word!", string_length);
+                        rc = PLCTAG_ERR_TOO_LARGE;
+                        break;
+                    }
+
+                    tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
+                    break;
+
+                case 2:
+                    if(string_length > UINT16_MAX) {
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
+                               "String length, %u, is greater than can be expressed in a two-byte count word!", string_length);
+                        rc = PLCTAG_ERR_TOO_LARGE;
+                        break;
+                    }
+
+                    tag->data[string_start_offset + tag->byte_order->int16_order[0]] =
+                        (uint8_t)((((unsigned int)string_length) >> 0) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int16_order[1]] =
+                        (uint8_t)((((unsigned int)string_length) >> 8) & 0xFF);
+                    break;
+
+                case 4:
+                    if(string_length > UINT32_MAX) {
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
+                               "String length, %u, is greater than can be expressed in a four-byte count word!", string_length);
+                        rc = PLCTAG_ERR_TOO_LARGE;
+                        break;
+                    }
+
+                    tag->data[string_start_offset + tag->byte_order->int32_order[0]] =
+                        (uint8_t)((((unsigned int)string_length) >> 0) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int32_order[1]] =
+                        (uint8_t)((((unsigned int)string_length) >> 8) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int32_order[2]] =
+                        (uint8_t)((((unsigned int)string_length) >> 16) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int32_order[3]] =
+                        (uint8_t)((((unsigned int)string_length) >> 24) & 0xFF);
+                    break;
+
+                default:
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Unsupported string count size, %d!",
+                           tag->byte_order->str_count_word_bytes);
+                    rc = PLCTAG_ERR_UNSUPPORTED;
+                    tag->status = (int8_t)rc;
+                    break;
+            }
+        }
+
+        /* if status is bad, punt out of the critical block */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Error %s (%d) trying to set the count word!", plc_tag_decode_error(rc),
+                   rc);
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        /* copy the string data into the tag. */
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Copying %u bytes of the string into the tag data buffer.", string_length);
+        for(unsigned int i = 0; i < string_length; i++) {
+            size_t char_index = 0;
+
+            if(tag->byte_order->str_is_byte_swapped) {
+                char_index = string_data_start_offset + ((i & 0x01) ? i - 1 : i + 1);
+            } else {
+                char_index = string_data_start_offset + i;
+            }
+
+            if(char_index < (size_t)(uint32_t)tag->size) {
+                tag->data[char_index] = (uint8_t)string_val[i];
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
+                       "Out of bounds index, %zu, generated during string copy!  Tag size is %" PRId32 ".", char_index,
+                       tag->size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+
+                /* note: only breaks out of the for loop, we need another break. */
+                break;
+            }
+        }
+
+        /* break out of the critical block if bad status. */
+        if(rc != PLCTAG_STATUS_OK) {
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "If string is nul terminated we need to set the termination byte.");
+        if(tag->byte_order->str_is_zero_terminated) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Setting the nul termination byte.");
+
+            if(string_data_start_offset + string_length < (unsigned int)tag->size) {
+                tag->data[string_data_start_offset + string_length] = (uint8_t)0;
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
+                       "Index of nul termination byte, %u, is outside of the tag data of %u bytes!",
+                       string_data_start_offset + string_length, tag->size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
+            }
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "String data in buffer:");
+        pdebug_dump_bytes(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, tag->data + string_start_offset, new_string_size_in_buffer);
+
+        /* if this is an auto-write tag, mark dirty and notify the protocol layer */
+        if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
+
+        /* set the return and tag status. */
+        rc = PLCTAG_STATUS_OK;
+        tag->status = (int8_t)rc;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Done with status %s (%d).", plc_tag_decode_error(rc), rc);
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset) {
+    int string_capacity = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Getting string capacity from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* FIXME - there is no capacity that is valid if it str_max_capacity is not set.  Should return 0 or an error. */
+    critical_block(tag->api_mutex) {
+        string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) :
+                                                               get_string_length_unsafe(tag, string_start_offset));
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return string_capacity;
+}
+
+
+LIB_EXPORT int plc_tag_get_string_length(int32_t id, int string_start_offset) {
+    int string_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Getting string length from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) { string_length = get_string_length_unsafe(tag, string_start_offset); }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return string_length;
+}
+
+
+LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offset) {
+    int total_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Getting a string total length from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* FIXME - what about byte swapping?  If the string length is not even, what happens? */
+    critical_block(tag->api_mutex) { total_length = get_string_total_length_unsafe(tag, string_start_offset); }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Done.");
+
+    return total_length;
+}
+
+
+LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, int buffer_size) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(!buffer) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Buffer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(buffer_size <= 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "The buffer must have some capacity for data.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!tag->is_bit) {
+        critical_block(tag->api_mutex) {
+            if(tag_range_is_valid(tag, offset, buffer_size)) {
+                if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
+
+                int i;
+                for(i = 0; i < buffer_size; i++) { tag->data[offset + i] = buffer[i]; }
+
+                tag->status = PLCTAG_STATUS_OK;
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+        }
+    } else {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Trying to write a list of values on a Tag bit.");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, int buffer_size) {
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, id, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(!buffer) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Buffer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(buffer_size <= 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        rc_dec(tag);
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "The buffer must have some capacity for data.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!tag->is_bit) {
+        critical_block(tag->api_mutex) {
+            if(tag_range_is_valid(tag, offset, buffer_size)) {
+                int i;
+                for(i = 0; i < buffer_size; i++) { buffer[i] = tag->data[offset + i]; }
+
+                tag->status = PLCTAG_STATUS_OK;
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Data offset out of bounds!");
+                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+        }
+    } else {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Trying to read a list of values from a Tag bit.");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+    rc_dec(tag);
+
+    return rc;
+}

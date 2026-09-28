@@ -58,7 +58,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <libplctag/lib/libplctag.h>
+#include <libplctag/api/libplctag.h>
 #include <utils/debug.h>
 
 
@@ -69,542 +69,6 @@
 #        define _DARWIN_C_SOURCE _POSIX_C_SOURCE
 #    endif
 #endif
-
-
-/***************************************************************************
- ******************************* Memory ************************************
- **************************************************************************/
-
-
-/*
- * mem_alloc
- *
- * This is a wrapper around the platform's memory allocation routine.
- * It will zero out memory before returning it.
- *
- * It will return NULL on failure.
- */
-extern void *mem_alloc(int size) {
-    if(size <= 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Allocation size must be greater than zero bytes!");
-        return NULL;
-    }
-
-    return calloc((size_t)(unsigned int)size, 1);
-}
-
-
-/*
- * mem_realloc
- *
- * This is a wrapper around the platform's memory re-allocation routine.
- *
- * It will return NULL on failure.
- */
-extern void *mem_realloc(void *orig, int size) {
-    if(size <= 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "New allocation size must be greater than zero bytes!");
-        return NULL;
-    }
-
-    return realloc(orig, (size_t)(ssize_t)size);
-}
-
-
-/*
- * mem_free
- *
- * Free the allocated memory passed in.  If the passed pointer is
- * null, do nothing.
- */
-extern void mem_free(const void *mem) {
-    if(mem) { free((void *)mem); }
-}
-
-
-/*
- * mem_set
- *
- * set memory to the passed argument.
- */
-extern void mem_set(void *dest, int c, int size) {
-    if(!dest) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
-        return;
-    }
-
-    if(size <= 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Size to set must be a positive number!");
-        return;
-    }
-
-    // NOLINTNEXTLINE
-    memset(dest, c, (size_t)(ssize_t)size);
-}
-
-
-/*
- * mem_copy
- *
- * copy memory from one pointer to another for the passed number of bytes.
- */
-extern void mem_copy(void *dest, void *src, int size) {
-    if(!dest) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
-        return;
-    }
-
-    if(!src) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source pointer is NULL!");
-        return;
-    }
-
-    if(size < 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Size to copy must be a positive number!");
-        return;
-    }
-
-    if(size == 0) {
-        /* nothing to do. */
-        return;
-    }
-
-    // NOLINTNEXTLINE
-    memcpy(dest, src, (size_t)(unsigned int)size);
-}
-
-
-/*
- * mem_move
- *
- * move memory from one pointer to another for the passed number of bytes.
- */
-extern void mem_move(void *dest, void *src, int size) {
-    if(!dest) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
-        return;
-    }
-
-    if(!src) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source pointer is NULL!");
-        return;
-    }
-
-    if(size < 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Size to move must be a positive number!");
-        return;
-    }
-
-    if(size == 0) {
-        /* nothing to do. */
-        return;
-    }
-
-    // NOLINTNEXTLINE
-    memmove(dest, src, (size_t)(unsigned int)size);
-}
-
-
-int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
-    if(!src1 || src1_size <= 0) {
-        if(!src2 || src2_size <= 0) {
-            /* both are NULL or zero length, but that is "equal" for our purposes. */
-            return 0;
-        } else {
-            /* first one is "less" than second. */
-            return -1;
-        }
-    } else {
-        if(!src2 || src2_size <= 0) {
-            /* first is "greater" than second */
-            return 1;
-        } else {
-            /* both pointers are non-NULL and the lengths are positive. */
-
-            /* short circuit the comparison if the blocks are different lengths */
-            if(src1_size != src2_size) { return (src1_size - src2_size); }
-
-            return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
-        }
-    }
-}
-
-
-/***************************************************************************
- ******************************* Strings ***********************************
- **************************************************************************/
-
-
-/*
- * str_cmp
- *
- * Return -1, 0, or 1 depending on whether the first string is "less" than the
- * second, the same as the second, or "greater" than the second.  This routine
- * just passes through to POSIX strcmp.
- *
- * Handle edge cases when NULL or zero length strings are passed.
- */
-extern int str_cmp(const char *first, const char *second) {
-    int first_zero = !str_length(first);
-    int second_zero = !str_length(second);
-
-    if(first_zero) {
-        if(second_zero) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "NULL or zero length strings passed.");
-            return 0;
-        } else {
-            /* first is "less" than second. */
-            return -1;
-        }
-    } else {
-        if(second_zero) {
-            /* first is "more" than second. */
-            return 1;
-        } else {
-            /* both are non-zero length. */
-            return strcmp(first, second);
-        }
-    }
-}
-
-
-/*
- * str_cmp_i
- *
- * Returns -1, 0, or 1 depending on whether the first string is "less" than the
- * second, the same as the second, or "greater" than the second.  The comparison
- * is done case insensitive.
- *
- * Handle the usual edge cases.
- */
-extern int str_cmp_i(const char *first, const char *second) {
-    int first_zero = !str_length(first);
-    int second_zero = !str_length(second);
-
-    if(first_zero) {
-        if(second_zero) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "NULL or zero length strings passed.");
-            return 0;
-        } else {
-            /* first is "less" than second. */
-            return -1;
-        }
-    } else {
-        if(second_zero) {
-            /* first is "more" than second. */
-            return 1;
-        } else {
-            /* both are non-zero length. */
-            return strcasecmp(first, second);
-        }
-    }
-}
-
-
-/*
- * str_cmp_i_n
- *
- * Returns -1, 0, or 1 depending on whether the first string is "less" than the
- * second, the same as the second, or "greater" than the second.  The comparison
- * is done case insensitive.  Compares only the first count characters.
- *
- * It just passes this through to POSIX strncasecmp.
- */
-extern int str_cmp_i_n(const char *first, const char *second, int count) {
-    int first_zero = !str_length(first);
-    int second_zero = !str_length(second);
-
-    if(count < 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Illegal negative count!");
-        return -1;
-    }
-
-    if(count == 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Called with comparison count of zero!");
-        return 0;
-    }
-
-    if(first_zero) {
-        if(second_zero) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "NULL or zero length strings passed.");
-            return 0;
-        } else {
-            /* first is "less" than second. */
-            return -1;
-        }
-    } else {
-        if(second_zero) {
-            /* first is "more" than second. */
-            return 1;
-        } else {
-            /* both are non-zero length. */
-            return strncasecmp(first, second, (size_t)(unsigned int)count);
-        }
-    }
-    return strncasecmp(first, second, (size_t)(unsigned int)count);
-}
-
-
-/*
- * str_str_cmp_i
- *
- * Returns a pointer to the location of the needle string in the haystack string
- * or NULL if there is no match.  The comparison is done case-insensitive.
- *
- * Handle the usual edge cases.
- */
-extern char *str_str_cmp_i(const char *haystack, const char *needle) {
-    int haystack_zero = !str_length(haystack);
-    int needle_zero = !str_length(needle);
-
-    if(haystack_zero) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Haystack string is NULL or zero length.");
-        return NULL;
-    }
-
-    if(needle_zero) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Needle string is NULL or zero length.");
-        return NULL;
-    }
-
-    return strcasestr(haystack, needle);
-}
-
-
-/*
- * str_copy
- *
- * Returns
- */
-extern int str_copy(char *dst, int dst_size, const char *src) {
-    if(!dst) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination string pointer is NULL!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!src) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source string pointer is NULL!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(dst_size <= 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination size is negative or zero!");
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    /*
-     * Refuse rather than truncate.  strncpy() writes no terminator when the source fills the
-     * destination exactly, so a caller that ignored a truncation would be left holding an
-     * unterminated buffer -- every later str_length() or print of it runs off the end.  There
-     * is no safe partial result here, so do not produce one.
-     */
-    if(str_length(src) >= dst_size) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Source string of %d bytes does not fit a destination of %d bytes!",
-               str_length(src), dst_size);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    // NOLINTNEXTLINE
-    strncpy(dst, src, (size_t)(unsigned int)dst_size);
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * str_length
- *
- * Return the length of the string.  If a null pointer is passed, return
- * null.
- */
-extern int str_length(const char *str) {
-    if(!str) { return 0; }
-
-    return (int)strlen(str);
-}
-
-
-/*
- * str_dup
- *
- * Copy the passed string and return a pointer to the copy.
- * The caller is responsible for freeing the memory.
- */
-extern char *str_dup(const char *str) {
-    if(!str) { return NULL; }
-
-    return strdup(str);
-}
-
-
-/*
- * str_to_int
- *
- * Convert the characters in the passed string into
- * an int.  Return an int in integer in the passed
- * pointer and a status from the function.
- */
-extern int str_to_int(const char *str, int *val) {
-    char *endptr;
-    long int tmp_val;
-
-    /*
-     * strtol() only ever sets errno, it never clears it, so a stale ERANGE left
-     * behind by any earlier library or system call would be read back below as
-     * this conversion's own failure. Clear it first so the check means something.
-     */
-    errno = 0;
-
-    tmp_val = strtol(str, &endptr, 0);
-
-    if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "strtol returned %ld with errno %d", tmp_val, errno);
-        return -1;
-    }
-
-    if(endptr == str) { return -1; }
-
-    /*
-     * long is wider than int on most 64-bit platforms, so strtol() happily returns values
-     * that do not survive the cast.  Without this check "4294967296" converts to zero on
-     * LP64 and the caller has no way to tell that from a real zero.  Reject instead.
-     */
-    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
-        return -1;
-    }
-
-    *val = (int)tmp_val;
-
-    return 0;
-}
-
-
-extern int str_to_float(const char *str, float *val) {
-    char *endptr;
-    float tmp_val;
-
-    /*
-     * See str_to_int() above. This one matters more: the ERANGE test also covers
-     * underflow-to-zero, so a stale ERANGE would reject a plain "0" as an error.
-     */
-    errno = 0;
-
-    tmp_val = strtof(str, &endptr);
-
-    if(errno == ERANGE && (tmp_val == HUGE_VALF || tmp_val == -HUGE_VALF || tmp_val == 0)) { return -1; }
-
-    if(endptr == str) { return -1; }
-
-    /* FIXME - this will truncate long values. */
-    *val = tmp_val;
-
-    return 0;
-}
-
-
-extern char **str_split(const char *str, const char *sep) {
-    int sub_str_count = 0;
-    int size = 0;
-    const char *sub;
-    const char *tmp;
-    char **res;
-
-    /* first, count the sub strings */
-    tmp = str;
-    sub = strstr(tmp, sep);
-
-    while(sub && *sub) {
-        /* separator could be at the front, ignore that. */
-        if(sub != tmp) { sub_str_count++; }
-
-        tmp = sub + str_length(sep);
-        sub = strstr(tmp, sep);
-    }
-
-    if(tmp && *tmp && (!sub || !*sub)) { sub_str_count++; }
-
-    /* calculate total size for string plus pointers */
-    size = ((int)sizeof(char *) * (sub_str_count + 1) + str_length(str) + 1);
-
-    /* allocate enough memory */
-    res = mem_alloc(size);
-
-    if(!res) { return NULL; }
-
-    /* calculate the beginning of the string */
-    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count + 1);
-
-    /* copy the string into the new buffer past the first part with the array of char pointers. */
-    str_copy((char *)tmp, (int)(size - ((char *)tmp - (char *)res)), str);
-
-    /* set up the pointers */
-    sub_str_count = 0;
-    sub = strstr(tmp, sep);
-
-    while(sub && *sub) {
-        /* separator could be at the front, ignore that. */
-        if(sub != tmp) {
-            /* store the pointer */
-            res[sub_str_count] = (char *)tmp;
-
-            sub_str_count++;
-        }
-
-        /* zero out the separator chars */
-        mem_set((char *)sub, 0, str_length(sep));
-
-        /* point past the separator (now zero) */
-        tmp = sub + str_length(sep);
-
-        /* find the next separator */
-        sub = strstr(tmp, sep);
-    }
-
-    /* if there is a chunk at the end, store it. */
-    if(tmp && *tmp && (!sub || !*sub)) { res[sub_str_count] = (char *)tmp; }
-
-    return res;
-}
-
-
-char *str_concat_impl(int num_args, ...) {
-    va_list arg_list;
-    int total_length = 0;
-    char *result = NULL;
-    char *tmp = NULL;
-
-    /* first loop to find the length */
-    va_start(arg_list, num_args);
-    for(int i = 0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) { total_length += str_length(tmp); }
-    }
-    va_end(arg_list);
-
-    /* make a buffer big enough */
-    total_length += 1;
-
-    result = mem_alloc(total_length);
-    if(!result) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Unable to allocate new string buffer!");
-        return NULL;
-    }
-
-    /* loop to copy the strings */
-    result[0] = 0;
-    va_start(arg_list, num_args);
-    for(int i = 0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) {
-            int len = str_length(result);
-            str_copy(&result[len], total_length - len, tmp);
-        }
-    }
-    va_end(arg_list);
-
-    return result;
-}
 
 
 /***************************************************************************
@@ -1190,8 +654,32 @@ struct sock_t {
 
 
 static int sock_create_event_wakeup_channel(sock_p sock);
+static void socket_set_cloexec(int fd);
 
 #define MAX_IPS (8)
+
+
+/*
+ * Keep socket descriptors out of child processes.
+ *
+ * A descriptor without FD_CLOEXEC survives fork()/exec(), so a child process
+ * holds the connection open after this process closes it.  SOCK_CLOEXEC sets
+ * the flag atomically where it exists; macOS has no SOCK_CLOEXEC, so there
+ * the flag is set right after creation and a fork() from another thread in
+ * between still leaks the descriptor.
+ */
+static void socket_set_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD, 0);
+
+    if(flags < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to get descriptor flags, errno: %d", errno);
+        return;
+    }
+
+    if(fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to set FD_CLOEXEC, errno: %d", errno);
+    }
+}
 
 extern int socket_create(sock_p *s) {
     int32_t rc = PLCTAG_STATUS_OK;
@@ -1241,7 +729,11 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
 
     /* Open a socket for communication with the gateway. */
+#ifdef SOCK_CLOEXEC
+    fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+#else
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#endif
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "socket() created fd=%d", fd);
 
@@ -1250,6 +742,10 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Socket creation failed, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
+
+#ifndef SOCK_CLOEXEC
+    socket_set_cloexec(fd);
+#endif
 
     /* set up our socket to allow reuse if we crash suddenly. */
     sock_opt = 1;
@@ -1949,7 +1445,8 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
             }
         } else if(rc == 0) {
             /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer after select (read returned 0) on fd=%d", s->fd);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer after select (read returned 0) on fd=%d",
+                   s->fd);
             return PLCTAG_ERR_READ;
         }
     }
@@ -2187,7 +1684,11 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     do {
         /* open the pipe for waking the select wait. */
         // if(pipe(wake_fds)) {
+#ifdef SOCK_CLOEXEC
+        if((rc = socketpair(PF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0, wake_fds))) {
+#else
         if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
+#endif
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to open waker pipe!");
             switch(errno) {
                 case EAFNOSUPPORT:
@@ -2236,6 +1737,11 @@ int sock_create_event_wakeup_channel(sock_p sock) {
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
+
+#ifndef SOCK_CLOEXEC
+        socket_set_cloexec(wake_fds[0]);
+        socket_set_cloexec(wake_fds[1]);
+#endif
 
 #ifdef BSD_OS_TYPE
         /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
