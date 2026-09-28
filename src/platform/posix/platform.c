@@ -1013,8 +1013,32 @@ struct sock_t {
 
 
 static int sock_create_event_wakeup_channel(sock_p sock);
+static void socket_set_cloexec(int fd);
 
 #define MAX_IPS (8)
+
+
+/*
+ * Keep socket descriptors out of child processes.
+ *
+ * A descriptor without FD_CLOEXEC survives fork()/exec(), so a child process
+ * holds the connection open after this process closes it.  SOCK_CLOEXEC sets
+ * the flag atomically where it exists; macOS has no SOCK_CLOEXEC, so there
+ * the flag is set right after creation and a fork() from another thread in
+ * between still leaks the descriptor.
+ */
+static void socket_set_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD, 0);
+
+    if(flags < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to get descriptor flags, errno: %d", errno);
+        return;
+    }
+
+    if(fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to set FD_CLOEXEC, errno: %d", errno);
+    }
+}
 
 extern int socket_create(sock_p *s) {
     int32_t rc = PLCTAG_STATUS_OK;
@@ -1064,7 +1088,11 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
 
     /* Open a socket for communication with the gateway. */
+#ifdef SOCK_CLOEXEC
+    fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+#else
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#endif
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "socket() created fd=%d", fd);
 
@@ -1073,6 +1101,10 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Socket creation failed, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
+
+#ifndef SOCK_CLOEXEC
+    socket_set_cloexec(fd);
+#endif
 
     /* set up our socket to allow reuse if we crash suddenly. */
     sock_opt = 1;
@@ -2011,7 +2043,11 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     do {
         /* open the pipe for waking the select wait. */
         // if(pipe(wake_fds)) {
+#ifdef SOCK_CLOEXEC
+        if((rc = socketpair(PF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0, wake_fds))) {
+#else
         if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
+#endif
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to open waker pipe!");
             switch(errno) {
                 case EAFNOSUPPORT:
@@ -2060,6 +2096,11 @@ int sock_create_event_wakeup_channel(sock_p sock) {
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
+
+#ifndef SOCK_CLOEXEC
+        socket_set_cloexec(wake_fds[0]);
+        socket_set_cloexec(wake_fds[1]);
+#endif
 
 #ifdef BSD_OS_TYPE
         /* The *BSD family has a different way to suppress SIGPIPE on sockets. */

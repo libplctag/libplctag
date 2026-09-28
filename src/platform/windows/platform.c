@@ -1023,6 +1023,51 @@ struct sock_t {
 #define MAX_IPS (8)
 
 static int sock_create_event_wakeup_channel(sock_p sock);
+static SOCKET socket_create_no_inherit(void);
+static void socket_clear_inherit(SOCKET fd);
+
+
+#ifndef WSA_FLAG_NO_HANDLE_INHERIT
+/* Defined by the Windows 7 SDK and later. */
+    #define WSA_FLAG_NO_HANDLE_INHERIT (0x80)
+#endif
+
+
+/*
+ * Keep socket handles out of child processes.
+ *
+ * socket() creates an inheritable handle.  A child process started with
+ * bInheritHandles=TRUE -- the only way to redirect its standard streams, and
+ * what .NET's Process.Start() does by default -- then holds the connection
+ * open after this process closes it.  WSASocketW() can create the socket
+ * non-inheritable in one step.  WSA_FLAG_OVERLAPPED matches what socket()
+ * does, so nothing else about the socket changes.
+ */
+static SOCKET socket_create_no_inherit(void) {
+    SOCKET fd = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+
+    if(fd == INVALID_SOCKET && WSAGetLastError() == WSAEINVAL) {
+        /* WSA_FLAG_NO_HANDLE_INHERIT needs Windows 7 SP1 or Server 2008 R2 SP1. */
+        fd = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+
+        if(fd != INVALID_SOCKET) { socket_clear_inherit(fd); }
+    }
+
+    return fd;
+}
+
+
+/*
+ * Clear the inherit flag on a handle we could not create non-inheritable:
+ * the fallback above and accept(), which has no flag of its own.  This is
+ * not atomic with the socket's creation, so a child process started on
+ * another thread in between still inherits the handle.
+ */
+static void socket_clear_inherit(SOCKET fd) {
+    if(!SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0)) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to clear socket handle inheritance, error %d!", (int)GetLastError());
+    }
+}
 
 
 /*
@@ -1103,7 +1148,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Starting.");
 
     /* Open a socket for communication with the gateway. */
-    fd = socket(AF_INET, SOCK_STREAM, 0 /*IPPROTO_TCP*/);
+    fd = socket_create_no_inherit();
 
     /* check for errors */
     if(fd == INVALID_SOCKET) {
@@ -1992,7 +2037,7 @@ static int sock_create_event_wakeup_channel(sock_p sock) {
          * Set up our listening socket.
          */
 
-        listener = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        listener = socket_create_no_inherit();
         if(listener == INVALID_SOCKET) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error %d creating the listener socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
@@ -2041,7 +2086,7 @@ static int sock_create_event_wakeup_channel(sock_p sock) {
          * Set up our wake read side socket.
          */
 
-        wake_fds[0] = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        wake_fds[0] = socket_create_no_inherit();
         if(wake_fds[0] <= 0) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error %d creating the wake channel read side socket!",
                    WSAGetLastError());
@@ -2067,6 +2112,9 @@ static int sock_create_event_wakeup_channel(sock_p sock) {
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
+
+        /* an accepted socket does not inherit the listener's handle flags. */
+        socket_clear_inherit(wake_fds[1]);
 
         /* now we need to set these to non-blocking. */
 
