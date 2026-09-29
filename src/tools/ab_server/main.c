@@ -715,6 +715,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
 
     /* allocate the tag data array. */
     log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
+    tag->data_size = tag->elem_count * tag->elem_size;
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -882,6 +883,29 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
                 tag->elem_size = TAG_CIP_SIZE_STRING;
                 break;
         }
+    } else if(str_cmp_i(type_str, "VSTRING") == 0) {
+        /*
+         * A CIP STRING packed at its actual length, which is the shape an Omron NJ/NX sends.
+         * The wire type is the ordinary CIP STRING because that is what the PLC reports; what
+         * differs is that the elements have no stride, so elem_size means nothing here.
+         */
+        tag->tag_type = TAG_CIP_TYPE_STRING;
+        tag->elem_size = 0;
+        tag->variable_elements = true;
+        tag->count_word_bytes = TAG_CIP_STRING_COUNT_WORD_BYTES;
+        tag->elements_zero_terminated = true;
+    } else if(str_cmp_i(type_str, "VSHORTSTRING") == 0) {
+        /*
+         * A CIP SHORT_STRING packed at its actual length: a one-byte count and exactly that
+         * many characters, with no terminator and no padding out to a capacity.  This is what
+         * a real Micro800 returns, as opposed to the fixed full-size slots the SHORT_STRING
+         * type above uses.
+         */
+        tag->tag_type = TAG_CIP_TYPE_SHORT_STRING;
+        tag->elem_size = 0;
+        tag->variable_elements = true;
+        tag->count_word_bytes = TAG_CIP_SHORT_STRING_COUNT_WORD_BYTES;
+        tag->elements_zero_terminated = false;
     } else if(str_cmp_i(type_str, "BOOL") == 0) {
         tag->tag_type = TAG_CIP_TYPE_BOOL;
         tag->elem_size = 1;
@@ -950,13 +974,56 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
-    tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
-    if(!tag->data) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Unable to allocate tag data buffer!\n");
-        free(tag->name);
-        exit(1);
+    if(tag->variable_elements) {
+        /*
+         * Seed each element with a string of a different length, so the array genuinely has no
+         * stride and a client that assumes one reads the wrong bytes.  Element i holds i+1
+         * copies of 'a'+i: short, deterministic and easy to assert against.
+         */
+        size_t offset = 0;
+        size_t terminator = tag->elements_zero_terminated ? 1u : 0u;
+
+        tag->data_size = 0;
+        for(size_t i = 0; i < tag->elem_count; i++) {
+            tag->data_size += tag->count_word_bytes + i + 1 + terminator;
+        }
+
+        tag->data = calloc(tag->data_size, 1);
+        if(!tag->data) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Unable to allocate tag data buffer!\n");
+            free(tag->name);
+            exit(1);
+        }
+
+        for(size_t i = 0; i < tag->elem_count; i++) {
+            size_t len = i + 1;
+
+            tag->data[offset] = (uint8_t)(len & 0xFF);
+            if(tag->count_word_bytes == 2) { tag->data[offset + 1] = (uint8_t)((len >> 8) & 0xFF); }
+            offset += tag->count_word_bytes;
+
+            for(size_t j = 0; j < len; j++) { tag->data[offset + j] = (uint8_t)('a' + (i % 26)); }
+
+            offset += len;
+
+            if(terminator) {
+                tag->data[offset] = 0;
+                offset++;
+            }
+        }
+
+        log_info("allocated %zu bytes for %zu variable-length string elements.", tag->data_size, tag->elem_count);
+    } else {
+        log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
+        tag->data_size = tag->elem_count * tag->elem_size;
+        tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
+        if(!tag->data) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Unable to allocate tag data buffer!\n");
+            free(tag->name);
+            exit(1);
+        }
     }
 
     log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,

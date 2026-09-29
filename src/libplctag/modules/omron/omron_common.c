@@ -378,6 +378,21 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
  * determine the tag's data type and size.  Or at least guess it.
  */
 
+/*
+ * An Omron string has no element size.
+ *
+ * It is a two-byte count, that many characters and a zero terminator, packed at its actual
+ * length with no padding out to a capacity -- omron_njnx_tag_byte_order says as much with
+ * str_is_fixed_length of zero, str_max_capacity of zero and str_total_length of zero.  An
+ * array of them therefore has no stride, and the library's string layer reaches element N by
+ * walking the count words of the N before it rather than by multiplying.
+ *
+ * So the string types below take an element size of one byte, the same answer the tag
+ * listing and @udt tags give for the same reason.  It used to be 88 here, which is the Logix
+ * STRING layout of a four-byte count, 82 characters and two pad bytes -- a different PLC
+ * family's structure, and one that contradicts the byte order a few lines away in
+ * omron_standard_tag.c.
+ */
 int get_tag_data_type(omron_tag_p tag, attr attribs) {
     const char *elem_type = NULL;
 
@@ -419,13 +434,12 @@ int get_tag_data_type(omron_tag_p tag, attr attribs) {
             tag->elem_size = 8;
             tag->elem_type = CIP_TYPE_FLOAT64;
         } else if(str_cmp_i(elem_type, "string") == 0) {
-            /* FIXME - is this correct? */
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Fount tag element type of string.");
-            tag->elem_size = 88;
+            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of string.");
+            tag->elem_size = 1;
             tag->elem_type = CIP_TYPE_STRING;
         } else if(str_cmp_i(elem_type, "short string") == 0) {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of short string.");
-            tag->elem_size = 256; /* TODO - find the real length */
+            tag->elem_size = 1;
             tag->elem_type = CIP_TYPE_SHORT_STRING;
         } else {
             pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Unknown tag type %s", elem_type);

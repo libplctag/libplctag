@@ -784,7 +784,7 @@ def build_manifest() -> Manifest:
     micro800_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Micro800", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
-                        "--tag=TestString:STRING[4]"],
+                        "--tag=TestString:STRING[4]", "--tag=VarShort:VSHORTSTRING[4]"],
         startup_wait_s=1,
     )
 
@@ -792,12 +792,30 @@ def build_manifest() -> Manifest:
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
-    # Micro800's STRING is a SHORT_STRING: a 1-byte count and that many characters, up to 255.
-    # Two things have to be spelled out by hand here.  First, the library maps every AB CIP PLC
-    # onto the Logix 88-byte string definition (eip_cip.c cip_tag_byte_order), so it does not
-    # know about SHORT_STRING at all.  Second, a real Micro800 returns only the count byte and
-    # the valid characters, while ab_server stores every element in a full-size 256-byte slot,
-    # so the definition below is fixed-length to match the simulator, not the hardware.
+    # A real Micro800 packs its strings: a one-byte count and exactly that many characters, no
+    # terminator, no padding to a capacity, so an array of them has no element stride.
+    # VSHORTSTRING is the simulator's version of that, and micro800_tag_byte_order is what lets
+    # the library read it with no string attributes given at all -- the defaults used to be the
+    # Logix STRING UDT's, whose four-byte count misreads even a single string.  Element i holds
+    # i+1 copies of 'a'+i, so a client that assumes a stride reads the wrong bytes.
+    var_short_test = sec.test("Micro800 packed SHORT_STRING array, default attributes",
+              [exe("tag_rw2"), "--type=string",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4&name=VarShort",
+               "--debug=4"], F)
+    sec.test("check: Micro800 packed SHORT_STRING array", None, F, depends_on=var_short_test.id, ports_needed=0,
+              check=CheckSpec(log_file=var_short_test.log_file,
+                              pattern=r'^data\[0\]="a"$|^data\[1\]="bb"$|^data\[2\]="ccc"$|^data\[3\]="dddd"$',
+                              expected=4))
+    # Writing strings of different lengths changes the packed extent, which is what
+    # allow_field_resize permits and what the simulator has to reallocate for.
+    sec.test("Micro800 packed SHORT_STRING round trip with changed lengths",
+              [exe("tag_rw2"), "--type=string",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4"
+               "&allow_field_resize=1&name=VarShort",
+               "--debug=4", "--write=w0,ww1,www2,wwww3"], F)
+
+    # The fixed full-size SHORT_STRING slots ab_server also offers are not what hardware sends,
+    # so this one still spells the layout out by hand to match the simulator rather than the PLC.
     sec.test("Micro800 SHORT_STRING read/write",
               [exe("tag_rw2"), "--type=string",
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4&name=TestString"
@@ -809,7 +827,7 @@ def build_manifest() -> Manifest:
     omron_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Omron", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
-                        "--tag=TestString:STRING[4]"],
+                        "--tag=TestString:STRING[4]", "--tag=VarStrings:VSTRING[4]"],
         startup_wait_s=1,
     )
     ogw = "127.0.0.1:{PORT}"
@@ -822,6 +840,20 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=string",
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=TestString",
                "--debug=4", "--write=str_zero,str_one,CipStr,str_three"], F)
+    # A real NJ/NX packs its strings at their actual length -- two-byte count, that many
+    # characters, a zero terminator, no padding to a capacity -- so an array of them has no
+    # element stride.  VSTRING is the simulator's version of that; the STRING above is
+    # fixed-stride and cannot express it.  Element i holds i+1 copies of 'a'+i, so a client
+    # that assumes a stride reads the wrong bytes and the check below fails.
+    var_str_test = sec.test("Omron variable-length CIP STRING array",
+              [exe("tag_rw2"), "--type=string",
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=VarStrings",
+               "--debug=4"], F)
+    sec.test("check: Omron variable-length CIP STRING array", None, F, depends_on=var_str_test.id, ports_needed=0,
+              check=CheckSpec(log_file=var_str_test.log_file,
+                              pattern=r'^data\[0\]="a"$|^data\[1\]="bb"$|^data\[2\]="ccc"$|^data\[3\]="dddd"$',
+                              expected=4))
+
     # The Omron module has its own copies of the attribute checks -- same wording, different
     # module tag in the log -- so they need their own tests rather than riding on the AB ones.
     # Note that omron_common.c only guards the element count; it has no elem_size or overall

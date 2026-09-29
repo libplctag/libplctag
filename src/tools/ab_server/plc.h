@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -80,6 +81,17 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_STRUCT_HANDLE_STRING ((uint16_t)0x0FCE)
 
 #define TAG_CIP_SIZE_STRING (84)
+
+/*
+ * A CIP STRING whose elements are packed end to end at their actual length -- a two-byte
+ * count followed by exactly that many characters, with no padding out to a capacity.  An
+ * array of them has no element stride: finding element N means walking the count words of
+ * the N before it.  Omron NJ/NX strings behave this way, which is why the Omron byte order
+ * in the library sets str_is_fixed_length to zero, and it is the case the fixed-size STRING
+ * above cannot express.
+ */
+#define TAG_CIP_STRING_COUNT_WORD_BYTES (2)
+#define TAG_CIP_SHORT_STRING_COUNT_WORD_BYTES (1)
 #define TAG_CIP_SIZE_SHORT_STRING (256) /* 1 count byte + up to 255 characters. */
 #define TAG_CIP_SIZE_LOGIX_STRING (88)
 
@@ -153,6 +165,20 @@ struct tag_def_s {
 
     size_t elem_size;
     size_t elem_count;
+
+    /*
+     * True when the elements are packed at their own lengths rather than a fixed stride, so
+     * elem_size means nothing and data_size holds the real extent of data.  See
+     * TAG_CIP_STRING_COUNT_WORD_BYTES above.
+     */
+    bool variable_elements;
+    size_t data_size;
+
+    /* width of the count word ahead of each element when variable_elements is set. */
+    size_t count_word_bytes;
+
+    /* true when each element carries a zero terminator after its characters. */
+    bool elements_zero_terminated;
     size_t data_file_num;
     size_t num_dimensions;
     size_t dimensions[3];

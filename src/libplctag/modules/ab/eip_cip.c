@@ -157,6 +157,37 @@ tag_byte_order_t logix_tag_byte_order = {.is_allocated = 0,
                                          .str_pad_bytes = 2};
 
 
+/*
+ * Micro800 strings are CIP SHORT_STRING: a one-byte count followed by exactly that many
+ * characters, with no terminator and no padding out to a capacity, so the encoded size varies
+ * with the content.  That is a different shape from the Logix STRING UDT (a four-byte count,
+ * 82 characters and two pad bytes, 88 bytes however short the text), which this PLC family
+ * used to borrow -- a wrong count word width misreads even a single string, not just an array.
+ *
+ * The one-byte count puts the hard ceiling at 255 characters.  The controller's own limit is
+ * lower and undocumented, so nothing here can bound it more tightly.
+ */
+tag_byte_order_t micro800_tag_byte_order = {.is_allocated = 0,
+
+                                            .int16_order = {0, 1},
+                                            .int32_order = {0, 1, 2, 3},
+                                            .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+                                            .float32_order = {0, 1, 2, 3},
+                                            .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+
+                                            .str_is_defined = 1,
+                                            .str_is_counted = 1,
+                                            .str_is_fixed_length = 0,
+                                            .str_is_zero_terminated = 0,
+                                            .str_is_byte_swapped = 0,
+
+                                            .str_pad_to_multiple_bytes = 1,
+                                            .str_count_word_bytes = 1,
+                                            .str_max_capacity = 255,
+                                            .str_total_length = 0,
+                                            .str_pad_bytes = 0};
+
+
 tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,
 
                                                  .int16_order = {0, 1},
@@ -248,6 +279,34 @@ int tag_tickler(plc_tag_p tag_arg) {
  *
  * The function starts the process of getting tag data from the PLC.
  */
+
+/*
+ * True when the tag's elements are packed at their own lengths rather than laid out on a
+ * fixed stride.
+ *
+ * A CIP STRING or SHORT_STRING is a count word followed by exactly that many characters, so
+ * an array of them has no element size: reaching element N means walking the counts of the N
+ * before it, which is what the library's string layer does when str_is_fixed_length is zero.
+ * Dividing a reply by the element count would invent a stride that is not there.
+ *
+ * The type can arrive two ways: declared up front with elem_type, or discovered from the type
+ * code the PLC returns with the data.  Both are checked, because a Micro800 string tag is
+ * usually created without an elem_type at all.
+ *
+ * Note that a Logix STRING is not one of these: it is a UDT of a fixed 88 bytes and comes
+ * back as an abbreviated struct, not as a 0xD0 or 0xDA type code.
+ */
+static bool tag_elements_are_variable(ab_tag_p tag) {
+    if(tag->elem_type == CIP_TYPE_STRING || tag->elem_type == CIP_TYPE_SHORT_STRING) { return true; }
+
+    if(tag->encoded_type_info_size > 0
+       && (tag->encoded_type_info[0] == AB_CIP_DATA_STRING || tag->encoded_type_info[0] == AB_CIP_DATA_SHORT_STRING)) {
+        return true;
+    }
+
+    return false;
+}
+
 
 /*
  * How many elements a read request should ask for.
@@ -1359,46 +1418,46 @@ static int check_read_status_connected(ab_tag_p tag) {
             payload_size = (data_end - data);
 
             /*
-             * The pre-read asked for one element, so the payload is one element and
-             * that is the element size.  Size the tag from it rather than from the
-             * reply length: the write that follows needs elem_size, and the general
-             * path below would divide a single element by elem_count.
+             * The pre-read asked for a single element, so the payload is that element and
+             * its length is the element size.  The write that follows needs elem_size to
+             * chunk itself, and deriving it the general way below -- reply length divided
+             * by elem_count -- yields zero for any array whose first fragment is shorter
+             * than elem_count bytes.
+             *
+             * That the payload is one element's worth only holds where elements are a
+             * fixed stride.  It is true for the tags this function serves: they carry
+             * logix_tag_byte_order, whose strings are a fixed 88 bytes.  It is not true
+             * generally -- the tag listing, @udt and the Omron types all set
+             * str_is_fixed_length to zero, and a listing entry's size varies with the
+             * length of the tag name it carries.  Those types declare an element size of
+             * one byte and build their own requests, so they never reach this code.
+             *
+             * Nothing here extrapolates a whole-tag size from the one element, because
+             * that is the step that would be wrong if a variable-stride tag ever did
+             * arrive: tag->size belongs to the caller, who set it staging the write.
              */
             if(tag->pre_write_read) {
-                ptrdiff_t full_size = payload_size * tag->elem_count;
-
                 if(payload_size <= 0) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Pre-write read returned no element data!");
                     rc = PLCTAG_ERR_TOO_SMALL;
                     break;
                 }
 
-                if(full_size > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                if(tag_elements_are_variable(tag)) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
+                           "Pre-write read of %d bytes; elements are variable length, so the element size is unchanged.",
+                           (int)payload_size);
+                } else if(tag->elem_size <= 0) {
+                    tag->elem_size = (int)payload_size;
+
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Pre-write read: element size is %d bytes.",
+                           tag->elem_size);
+                } else if(tag->elem_size != (int)payload_size) {
+                    /* keep what the tag already believes; a mismatch means the stride is not uniform. */
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                           "Tag data size of %d bytes is larger than the maximum of %d bytes!", (int)full_size,
-                           AB_MAX_TAG_DATA_SIZE);
-                    rc = PLCTAG_ERR_TOO_LARGE;
-                    break;
+                           "Pre-write read returned a %d byte element but the element size is %d bytes!", (int)payload_size,
+                           tag->elem_size);
                 }
-
-                tag->elem_size = (int)payload_size;
-
-                /* only ever grow: the caller may already have staged the data it wants written. */
-                if((int)full_size > tag->size) {
-                    uint8_t *tag_data = (uint8_t *)mem_realloc(tag->data, (int)full_size);
-
-                    if(!tag_data) {
-                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                        rc = PLCTAG_ERR_NO_MEM;
-                        break;
-                    }
-
-                    tag->data = tag_data;
-                    tag->size = (int)full_size;
-                }
-
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
-                       "Pre-write read: element size %d bytes, tag size %d bytes.", tag->elem_size, tag->size);
             } else if(payload_size + tag->offset > tag->size) {
                 /* a PLC can keep returning fragments forever.  Do not grow without bound. */
                 if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
@@ -1410,7 +1469,18 @@ static int check_read_status_connected(ab_tag_p tag) {
                 }
 
                 tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
+
+                /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
+                if(!tag_elements_are_variable(tag)) {
+                    tag->elem_size = tag->size / tag->elem_count;
+                } else if(tag->elem_size <= 0) {
+                    /*
+                     * There is no stride, so the element size is one byte -- the same answer the
+                     * tag listing and @udt tags give.  It still has to be set to something
+                     * usable: calculate_write_data_per_packet() divides by it.
+                     */
+                    tag->elem_size = 1;
+                }
 
                 pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
 
@@ -1609,46 +1679,46 @@ static int check_read_status_unconnected(ab_tag_p tag) {
             payload_size = (data_end - data);
 
             /*
-             * The pre-read asked for one element, so the payload is one element and
-             * that is the element size.  Size the tag from it rather than from the
-             * reply length: the write that follows needs elem_size, and the general
-             * path below would divide a single element by elem_count.
+             * The pre-read asked for a single element, so the payload is that element and
+             * its length is the element size.  The write that follows needs elem_size to
+             * chunk itself, and deriving it the general way below -- reply length divided
+             * by elem_count -- yields zero for any array whose first fragment is shorter
+             * than elem_count bytes.
+             *
+             * That the payload is one element's worth only holds where elements are a
+             * fixed stride.  It is true for the tags this function serves: they carry
+             * logix_tag_byte_order, whose strings are a fixed 88 bytes.  It is not true
+             * generally -- the tag listing, @udt and the Omron types all set
+             * str_is_fixed_length to zero, and a listing entry's size varies with the
+             * length of the tag name it carries.  Those types declare an element size of
+             * one byte and build their own requests, so they never reach this code.
+             *
+             * Nothing here extrapolates a whole-tag size from the one element, because
+             * that is the step that would be wrong if a variable-stride tag ever did
+             * arrive: tag->size belongs to the caller, who set it staging the write.
              */
             if(tag->pre_write_read) {
-                ptrdiff_t full_size = payload_size * tag->elem_count;
-
                 if(payload_size <= 0) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Pre-write read returned no element data!");
                     rc = PLCTAG_ERR_TOO_SMALL;
                     break;
                 }
 
-                if(full_size > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                if(tag_elements_are_variable(tag)) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
+                           "Pre-write read of %d bytes; elements are variable length, so the element size is unchanged.",
+                           (int)payload_size);
+                } else if(tag->elem_size <= 0) {
+                    tag->elem_size = (int)payload_size;
+
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Pre-write read: element size is %d bytes.",
+                           tag->elem_size);
+                } else if(tag->elem_size != (int)payload_size) {
+                    /* keep what the tag already believes; a mismatch means the stride is not uniform. */
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                           "Tag data size of %d bytes is larger than the maximum of %d bytes!", (int)full_size,
-                           AB_MAX_TAG_DATA_SIZE);
-                    rc = PLCTAG_ERR_TOO_LARGE;
-                    break;
+                           "Pre-write read returned a %d byte element but the element size is %d bytes!", (int)payload_size,
+                           tag->elem_size);
                 }
-
-                tag->elem_size = (int)payload_size;
-
-                /* only ever grow: the caller may already have staged the data it wants written. */
-                if((int)full_size > tag->size) {
-                    uint8_t *tag_data = (uint8_t *)mem_realloc(tag->data, (int)full_size);
-
-                    if(!tag_data) {
-                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                        rc = PLCTAG_ERR_NO_MEM;
-                        break;
-                    }
-
-                    tag->data = tag_data;
-                    tag->size = (int)full_size;
-                }
-
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
-                       "Pre-write read: element size %d bytes, tag size %d bytes.", tag->elem_size, tag->size);
             } else if(payload_size + tag->offset > tag->size) {
                 /* a PLC can keep returning fragments forever.  Do not grow without bound. */
                 if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
@@ -1660,7 +1730,18 @@ static int check_read_status_unconnected(ab_tag_p tag) {
                 }
 
                 tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
+
+                /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
+                if(!tag_elements_are_variable(tag)) {
+                    tag->elem_size = tag->size / tag->elem_count;
+                } else if(tag->elem_size <= 0) {
+                    /*
+                     * There is no stride, so the element size is one byte -- the same answer the
+                     * tag listing and @udt tags give.  It still has to be set to something
+                     * usable: calculate_write_data_per_packet() divides by it.
+                     */
+                    tag->elem_size = 1;
+                }
 
                 pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
 

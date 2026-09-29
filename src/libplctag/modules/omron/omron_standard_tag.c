@@ -170,6 +170,34 @@ int tag_tickler(omron_tag_p tag) {
  * The function starts the process of getting tag data from the PLC.
  */
 
+/*
+ * True when the tag's elements are packed at their own lengths rather than laid out on a
+ * fixed stride.
+ *
+ * An Omron string is a two-byte count, that many characters and a zero terminator, with no
+ * padding out to a capacity, so an array of them has no element size: reaching element N
+ * means walking the count words of the N before it.  That is what the library's string layer
+ * already does -- omron_njnx_tag_byte_order sets str_is_fixed_length to zero, and
+ * get_string_total_length_unsafe() walks rather than strides.  Dividing a reply by the
+ * element count would invent a stride that is not there.
+ */
+static bool tag_elements_are_variable(omron_tag_p tag) {
+    return tag->elem_type == CIP_TYPE_STRING || tag->elem_type == CIP_TYPE_SHORT_STRING;
+}
+
+
+/*
+ * How many elements a read request should ask for.
+ *
+ * A pre-read before a write exists only to learn the tag's type and element size; its data is
+ * discarded and it does not chase the remaining fragments.  Ask for a single element so that
+ * the reply is one element rather than however much fits in a packet.
+ */
+static uint16_t read_request_elem_count(omron_tag_p tag) {
+    return (uint16_t)(tag->pre_write_read ? 1 : tag->elem_count);
+}
+
+
 int tag_read_start(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -315,7 +343,7 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+    *((uint16_le *)data) = h2le16(read_request_elem_count(tag));
     data += sizeof(uint16_le);
 
     /* here is where we need to add the data segment that controls Omron fragmentation */
@@ -410,7 +438,7 @@ int build_read_request_unconnected(omron_tag_p tag, int byte_offset) {
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    tmp_uint16_le = h2le16((uint16_t)(tag->elem_count));
+    tmp_uint16_le = h2le16(read_request_elem_count(tag));
     mem_copy(data, &tmp_uint16_le, (int)(unsigned int)sizeof(tmp_uint16_le));
     data += sizeof(tmp_uint16_le);
 
@@ -1264,8 +1292,36 @@ static int check_read_status_connected(omron_tag_p tag) {
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
-            /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
+            /*
+             * The pre-read asked for a single element, so the payload is that element and its
+             * length is the element size.  Nothing here extrapolates a whole-tag size from it:
+             * tag->size belongs to the caller, who set it staging the write, and for a string
+             * array there is no stride to extrapolate along in the first place.
+             */
+            if(tag->pre_write_read) {
+                if(payload_size <= 0) {
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                           "Pre-write read returned no element data!");
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                    break;
+                }
+
+                if(tag_elements_are_variable(tag)) {
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id,
+                           "Pre-write read of %d bytes; elements are variable length, so the element size is unchanged.",
+                           (int)payload_size);
+                } else if(tag->elem_size <= 0) {
+                    tag->elem_size = (int)payload_size;
+
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id,
+                           "Pre-write read: element size is %d bytes.", tag->elem_size);
+                } else if(tag->elem_size != (int)payload_size) {
+                    /* keep what the tag already believes; a mismatch means the stride is not uniform. */
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                           "Pre-write read returned a %d byte element but the element size is %d bytes!",
+                           (int)payload_size, tag->elem_size);
+                }
+            } else if(payload_size + tag->offset > tag->size) {
                 /* the buffer size comes off the wire, so bound it whatever the PLC claims. */
                 if((payload_size + tag->offset) > (ptrdiff_t)OMRON_MAX_TAG_DATA_SIZE) {
                     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
@@ -1276,7 +1332,18 @@ static int check_read_status_connected(omron_tag_p tag) {
                 }
 
                 tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
+
+                /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
+                if(!tag_elements_are_variable(tag)) {
+                    tag->elem_size = tag->size / tag->elem_count;
+                } else if(tag->elem_size <= 0) {
+                    /*
+                     * There is no stride, so the element size is one byte -- the same answer the
+                     * tag listing and @udt tags give.  It still has to be set to something
+                     * usable: calculate_write_data_per_packet() divides by it.
+                     */
+                    tag->elem_size = 1;
+                }
 
                 pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.",
                        tag->size);
@@ -1477,8 +1544,36 @@ static int check_read_status_unconnected(omron_tag_p tag) {
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
-            /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
+            /*
+             * The pre-read asked for a single element, so the payload is that element and its
+             * length is the element size.  Nothing here extrapolates a whole-tag size from it:
+             * tag->size belongs to the caller, who set it staging the write, and for a string
+             * array there is no stride to extrapolate along in the first place.
+             */
+            if(tag->pre_write_read) {
+                if(payload_size <= 0) {
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                           "Pre-write read returned no element data!");
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                    break;
+                }
+
+                if(tag_elements_are_variable(tag)) {
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id,
+                           "Pre-write read of %d bytes; elements are variable length, so the element size is unchanged.",
+                           (int)payload_size);
+                } else if(tag->elem_size <= 0) {
+                    tag->elem_size = (int)payload_size;
+
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id,
+                           "Pre-write read: element size is %d bytes.", tag->elem_size);
+                } else if(tag->elem_size != (int)payload_size) {
+                    /* keep what the tag already believes; a mismatch means the stride is not uniform. */
+                    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+                           "Pre-write read returned a %d byte element but the element size is %d bytes!",
+                           (int)payload_size, tag->elem_size);
+                }
+            } else if(payload_size + tag->offset > tag->size) {
                 /* the buffer size comes off the wire, so bound it whatever the PLC claims. */
                 if((payload_size + tag->offset) > (ptrdiff_t)OMRON_MAX_TAG_DATA_SIZE) {
                     pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
@@ -1489,7 +1584,18 @@ static int check_read_status_unconnected(omron_tag_p tag) {
                 }
 
                 tag->size = (int)payload_size + tag->offset;
-                tag->elem_size = tag->size / tag->elem_count;
+
+                /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
+                if(!tag_elements_are_variable(tag)) {
+                    tag->elem_size = tag->size / tag->elem_count;
+                } else if(tag->elem_size <= 0) {
+                    /*
+                     * There is no stride, so the element size is one byte -- the same answer the
+                     * tag listing and @udt tags give.  It still has to be set to something
+                     * usable: calculate_write_data_per_packet() divides by it.
+                     */
+                    tag->elem_size = 1;
+                }
 
                 pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.",
                        tag->size);

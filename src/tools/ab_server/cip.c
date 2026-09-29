@@ -838,7 +838,10 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* what is the minimum amount of data we can send back without breaking an atomic base type? */
     // FIXME - does this actually work?
-    if(tag->elem_size > CIP_MIN_ATOMIC_ELEMENT_SIZE) {
+    if(tag->variable_elements) {
+        /* no stride to preserve; the smallest meaningful unit is an empty string. */
+        min_data_element_size = tag->count_word_bytes;
+    } else if(tag->elem_size > CIP_MIN_ATOMIC_ELEMENT_SIZE) {
         min_data_element_size = CIP_MIN_ATOMIC_ELEMENT_SIZE;
     } else {
         min_data_element_size = tag->elem_size;
@@ -1032,21 +1035,61 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 
     /* TODO - check the amount of data to write and make sure it does not partially write a primitive/atomic value. */
 
-    /* get the starting offset of the request, and checks tag size. */
-    if(!calculate_request_start_and_end_offsets(tag, num_indexes, indexes, request_element_count, &request_start_byte_offset,
-                                                &request_end_byte_offset)) {
-        log_info("Unable to calculate the starting or ending offset of the write request!");
-        // FIXME - need other error.
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
-    }
+    if(tag->variable_elements) {
+        /*
+         * The elements have no stride, so a write cannot be placed by multiplying and the new
+         * content is free to be a different length than what is stored.  The client sends the
+         * whole packed array, so its payload simply becomes the tag's new extent.
+         *
+         * Writing part of such an array would mean shifting everything after it, which no
+         * client here does -- the Omron and Micro800 paths never fragment a write -- so reject
+         * that rather than implement it.
+         */
+        uint8_t *new_data = NULL;
 
-    /* what is the actual starting byte offset for this specific request which might be a fragment. */
-    request_start_byte_offset += request_fragment_start_byte_offset;
+        if(request_fragment_start_byte_offset != 0 || (num_indexes > 0 && indexes[0] != 0)) {
+            log_info("A partial write to a variable-length element tag is not supported!");
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
 
-    /* Make sure we are not trying to write too much. */
-    if((slice_len(write_request_payload_slice) + request_start_byte_offset) > request_end_byte_offset) {
-        log_info("Too much data in the write request!");
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        if(request_element_count != tag->elem_count) {
+            log_info("A write to a variable-length element tag must cover all %zu elements, not %u.", tag->elem_count,
+                     request_element_count);
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        critical_block(tag->data_mutex) {
+            new_data = realloc(tag->data, slice_len(write_request_payload_slice));
+            if(new_data) {
+                tag->data = new_data;
+                tag->data_size = slice_len(write_request_payload_slice);
+            }
+        }
+
+        if(!new_data) {
+            log_info("Unable to resize the tag data buffer for the write!");
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        request_start_byte_offset = 0;
+        request_end_byte_offset = tag->data_size;
+    } else {
+        /* get the starting offset of the request, and checks tag size. */
+        if(!calculate_request_start_and_end_offsets(tag, num_indexes, indexes, request_element_count,
+                                                    &request_start_byte_offset, &request_end_byte_offset)) {
+            log_info("Unable to calculate the starting or ending offset of the write request!");
+            // FIXME - need other error.
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        /* what is the actual starting byte offset for this specific request which might be a fragment. */
+        request_start_byte_offset += request_fragment_start_byte_offset;
+
+        /* Make sure we are not trying to write too much. */
+        if((slice_len(write_request_payload_slice) + request_start_byte_offset) > request_end_byte_offset) {
+            log_info("Too much data in the write request!");
+            return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
     }
 
     critical_block(tag->data_mutex) {
@@ -1292,12 +1335,95 @@ bool extract_cip_path(slice_s input, size_t *offset, bool padded, slice_s *outpu
 
 /* we assume that the number of indexes matches that of the tag or is zero */
 
+/*
+ * Step over one packed CIP string: a two-byte count followed by exactly that many characters.
+ * Returns false if the count runs off the end of the data, which is what a truncated or
+ * corrupted buffer looks like.
+ */
+static bool step_over_string(tag_def_s *tag, size_t *offset) {
+    size_t count = 0;
+    size_t terminator = tag->elements_zero_terminated ? 1u : 0u;
+
+    if(*offset + tag->count_word_bytes > tag->data_size) { return false; }
+
+    /* the count word is one byte for a SHORT_STRING and two, little endian, for a STRING. */
+    count = (size_t)tag->data[*offset];
+    if(tag->count_word_bytes == 2) { count += ((size_t)tag->data[*offset + 1] << 8); }
+
+    if(count + terminator > tag->data_size - *offset - tag->count_word_bytes) { return false; }
+
+    *offset += tag->count_word_bytes + count + terminator;
+
+    return true;
+}
+
+
+/*
+ * Byte range of a request against a tag whose elements are packed at their own lengths.  There
+ * is no stride to multiply by, so walk the count words instead.
+ */
+static bool calculate_variable_offsets(tag_def_s *tag, uint32_t num_indexes, uint32_t *indexes,
+                                       uint16_t request_element_count, size_t *request_start_byte_offset,
+                                       size_t *request_end_byte_offset) {
+    size_t offset = 0;
+    size_t element_offset = 0;
+
+    /* only a single dimension makes sense for a packed array, and that is all this serves. */
+    if(num_indexes > 1) {
+        log_info("A variable-length element tag supports at most one index!");
+        return false;
+    }
+
+    if(num_indexes == 1) {
+        if(indexes[0] >= tag->elem_count) {
+            log_info("Index %zu out of bounds for %zu elements.", (size_t)indexes[0], tag->elem_count);
+            return false;
+        }
+
+        element_offset = indexes[0];
+    }
+
+    for(size_t i = 0; i < element_offset; i++) {
+        if(!step_over_string(tag, &offset)) {
+            log_info("Element %zu runs past the end of the tag data!", i);
+            return false;
+        }
+    }
+
+    *request_start_byte_offset = offset;
+
+    if((size_t)request_element_count > tag->elem_count - element_offset) {
+        log_info("Request for %u elements from element %zu exceeds the %zu in the tag.", request_element_count,
+                 element_offset, tag->elem_count);
+        return false;
+    }
+
+    for(size_t i = 0; i < (size_t)request_element_count; i++) {
+        if(!step_over_string(tag, &offset)) {
+            log_info("Element %zu runs past the end of the tag data!", element_offset + i);
+            return false;
+        }
+    }
+
+    *request_end_byte_offset = offset;
+
+    log_info("Variable element request byte offsets: %zu to %zu.", *request_start_byte_offset, *request_end_byte_offset);
+
+    return true;
+}
+
+
 bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexes, uint32_t *indexes,
                                              uint16_t request_element_count, size_t *request_start_byte_offset,
                                              size_t *request_end_byte_offset) {
     size_t total_elements = 1;
     size_t tag_size = 0;
     size_t element_offset = 0;
+
+    if(tag->variable_elements) {
+        return calculate_variable_offsets(tag, num_indexes, indexes, request_element_count, request_start_byte_offset,
+                                          request_end_byte_offset);
+    }
 
     /* Calculate the total number of elements in the tag */
     total_elements = 1;

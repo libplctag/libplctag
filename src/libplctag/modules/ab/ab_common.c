@@ -451,7 +451,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             /* if we did not fill in the byte order elsewhere, fill it in now. */
             if(!tag->byte_order) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Using default Micro8x0 byte order.");
-                tag->byte_order = &logix_tag_byte_order;
+                tag->byte_order = &micro800_tag_byte_order;
             }
 
             /* if this was not filled in elsewhere default to generic *Logix */
@@ -674,12 +674,19 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
                     tag->elem_size = 8;
                     tag->elem_type = CIP_TYPE_FLOAT64;
                 } else if(str_cmp_i(elem_type, "string") == 0) {
+                    /*
+                     * A CIP STRING and a CIP SHORT_STRING are both a count word followed by
+                     * exactly that many characters, so neither has an element size -- see
+                     * tag_elements_are_variable() in eip_cip.c.  One byte, as the tag listing
+                     * and @udt tags use for the same reason.  This used to be 88 and 256, the
+                     * Logix STRING UDT size and the SHORT_STRING worst case respectively.
+                     */
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of string.");
-                    tag->elem_size = 88;
+                    tag->elem_size = 1;
                     tag->elem_type = CIP_TYPE_STRING;
                 } else if(str_cmp_i(elem_type, "short string") == 0) {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Found tag element type of short string.");
-                    tag->elem_size = 256; /* TODO - find the real length */
+                    tag->elem_size = 1;
                     tag->elem_type = CIP_TYPE_SHORT_STRING;
                 } else {
                     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Unknown tag type %s", elem_type);
