@@ -249,6 +249,21 @@ int tag_tickler(plc_tag_p tag_arg) {
  * The function starts the process of getting tag data from the PLC.
  */
 
+/*
+ * How many elements a read request should ask for.
+ *
+ * A pre-read before a write exists only to learn the tag's type and element size;
+ * check_read_status_*() throws its data away and does not chase the remaining
+ * fragments.  Ask for a single element.  The reply carries the encoded type either
+ * way, and one element is the only thing that tells us the element size directly:
+ * a full read derives it as size/elem_count, which comes out wrong -- zero, for an
+ * array whose first fragment is smaller than elem_count bytes.
+ */
+static uint16_t read_request_elem_count(ab_tag_p tag) {
+    return (uint16_t)(tag->pre_write_read ? 1 : tag->elem_count);
+}
+
+
 int tag_read_start(plc_tag_p tag_arg) {
     int rc = PLCTAG_STATUS_OK;
     ab_tag_p tag = (ab_tag_p)tag_arg;
@@ -391,7 +406,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+    *((uint16_le *)data) = h2le16(read_request_elem_count(tag));
     data += sizeof(uint16_le);
 
     if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
@@ -490,7 +505,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    tmp_uint16_le = h2le16((uint16_t)(tag->elem_count));
+    tmp_uint16_le = h2le16(read_request_elem_count(tag));
     mem_copy(data, &tmp_uint16_le, (int)(unsigned int)sizeof(tmp_uint16_le));
     data += sizeof(tmp_uint16_le);
 
@@ -1343,8 +1358,48 @@ static int check_read_status_connected(ab_tag_p tag) {
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
-            /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
+            /*
+             * The pre-read asked for one element, so the payload is one element and
+             * that is the element size.  Size the tag from it rather than from the
+             * reply length: the write that follows needs elem_size, and the general
+             * path below would divide a single element by elem_count.
+             */
+            if(tag->pre_write_read) {
+                ptrdiff_t full_size = payload_size * tag->elem_count;
+
+                if(payload_size <= 0) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Pre-write read returned no element data!");
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                    break;
+                }
+
+                if(full_size > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!", (int)full_size,
+                           AB_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
+                tag->elem_size = (int)payload_size;
+
+                /* only ever grow: the caller may already have staged the data it wants written. */
+                if((int)full_size > tag->size) {
+                    uint8_t *tag_data = (uint8_t *)mem_realloc(tag->data, (int)full_size);
+
+                    if(!tag_data) {
+                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
+                        rc = PLCTAG_ERR_NO_MEM;
+                        break;
+                    }
+
+                    tag->data = tag_data;
+                    tag->size = (int)full_size;
+                }
+
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
+                       "Pre-write read: element size %d bytes, tag size %d bytes.", tag->elem_size, tag->size);
+            } else if(payload_size + tag->offset > tag->size) {
                 /* a PLC can keep returning fragments forever.  Do not grow without bound. */
                 if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
@@ -1553,8 +1608,48 @@ static int check_read_status_unconnected(ab_tag_p tag) {
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
-            /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
+            /*
+             * The pre-read asked for one element, so the payload is one element and
+             * that is the element size.  Size the tag from it rather than from the
+             * reply length: the write that follows needs elem_size, and the general
+             * path below would divide a single element by elem_count.
+             */
+            if(tag->pre_write_read) {
+                ptrdiff_t full_size = payload_size * tag->elem_count;
+
+                if(payload_size <= 0) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Pre-write read returned no element data!");
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                    break;
+                }
+
+                if(full_size > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
+                           "Tag data size of %d bytes is larger than the maximum of %d bytes!", (int)full_size,
+                           AB_MAX_TAG_DATA_SIZE);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
+                tag->elem_size = (int)payload_size;
+
+                /* only ever grow: the caller may already have staged the data it wants written. */
+                if((int)full_size > tag->size) {
+                    uint8_t *tag_data = (uint8_t *)mem_realloc(tag->data, (int)full_size);
+
+                    if(!tag_data) {
+                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
+                        rc = PLCTAG_ERR_NO_MEM;
+                        break;
+                    }
+
+                    tag->data = tag_data;
+                    tag->size = (int)full_size;
+                }
+
+                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
+                       "Pre-write read: element size %d bytes, tag size %d bytes.", tag->elem_size, tag->size);
+            } else if(payload_size + tag->offset > tag->size) {
                 /* a PLC can keep returning fragments forever.  Do not grow without bound. */
                 if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,

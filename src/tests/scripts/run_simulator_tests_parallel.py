@@ -309,7 +309,7 @@ REQUIRED_EXECUTABLES = [
     "test_reconnect_after_outage_sync", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
-    "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
+    "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
 ]
 
 
@@ -433,6 +433,13 @@ def build_manifest() -> Manifest:
                "--read=TestReal"], F)
     # Several raw tags at once so the connection bundles their CIP messages into one
     # Multiple Service Packet, which assembles and splits differently from a lone request.
+    # Writing a tag the caller never read: the library has to fetch the type itself and
+    # still land a correct element size.  The array matters -- an element size derived
+    # from a fragmented reply rather than from one element comes out as zero.
+    sec.test("write before read, scalar and array",
+              [exe("test_write_before_read"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F)
     sec.test("raw CIP tags bundled into one packet",
               [exe("test_raw_cip"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
