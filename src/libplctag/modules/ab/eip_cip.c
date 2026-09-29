@@ -105,16 +105,11 @@ START_PACK typedef struct {
 } END_PACK tag_list_entry;
 
 
-static int build_read_request_connected(ab_tag_p tag, int byte_offset);
-static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
-static int build_write_request_connected(ab_tag_p tag, int byte_offset);
-static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
-static int build_write_bit_request_connected(ab_tag_p tag);
-static int build_write_bit_request_unconnected(ab_tag_p tag);
-static int check_read_status_connected(ab_tag_p tag);
-static int check_read_status_unconnected(ab_tag_p tag);
-static int check_write_status_connected(ab_tag_p tag);
-static int check_write_status_unconnected(ab_tag_p tag);
+static int build_read_request(ab_tag_p tag, int byte_offset);
+static int build_write_request(ab_tag_p tag, int byte_offset);
+static int build_write_bit_request(ab_tag_p tag);
+static int check_read_status(ab_tag_p tag);
+static int check_write_status(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
 static int tag_read_start(plc_tag_p tag_arg);
@@ -224,11 +219,7 @@ int tag_tickler(plc_tag_p tag_arg) {
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        if(tag->use_connected_msg) {
-            rc = check_read_status_connected(tag);
-        } else {
-            rc = check_read_status_unconnected(tag);
-        }
+        rc = check_read_status(tag);
 
         tag->status = (int8_t)rc;
 
@@ -249,11 +240,7 @@ int tag_tickler(plc_tag_p tag_arg) {
     }
 
     if(tag->write_in_progress) {
-        if(tag->use_connected_msg) {
-            rc = check_write_status_connected(tag);
-        } else {
-            rc = check_write_status_unconnected(tag);
-        }
+        rc = check_write_status(tag);
 
         tag->status = (int8_t)rc;
 
@@ -337,11 +324,7 @@ int tag_read_start(plc_tag_p tag_arg) {
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
 
-    if(tag->use_connected_msg) {
-        rc = build_read_request_connected(tag, tag->offset);
-    } else {
-        rc = build_read_request_unconnected(tag, tag->offset);
-    }
+    rc = build_read_request(tag, tag->offset);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
@@ -405,11 +388,7 @@ int tag_write_start(plc_tag_p tag_arg) {
         return rc;
     }
 
-    if(tag->use_connected_msg) {
-        rc = build_write_request_connected(tag, tag->offset);
-    } else {
-        rc = build_write_request_unconnected(tag, tag->offset);
-    }
+    rc = build_write_request(tag, tag->offset);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
@@ -424,12 +403,17 @@ int tag_write_start(plc_tag_p tag_arg) {
 }
 
 
-int build_read_request_connected(ab_tag_p tag, int byte_offset) {
-    eip_cip_co_req *cip = NULL;
-    uint8_t *data = NULL;
+/*
+ * Build the CIP read request.
+ *
+ * The request is the CIP message alone; the connection adds the EIP encapsulation and the CPF
+ * framing, and that framing was the only thing that ever separated the connected form of this
+ * function from the unconnected one.
+ */
+int build_read_request(ab_tag_p tag, int byte_offset) {
     ab_request_p req = NULL;
+    uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
-    uint8_t read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
@@ -440,848 +424,45 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
         return rc;
     }
 
-    /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_co_req);
+    data = req->data;
 
     /*
-     * set up the embedded CIP read packet
-     * The format is:
+     * The CIP Read Tag Fragmented request:
      *
-     * uint8_t cmd
-     * LLA formatted name
-     * uint16_t # of elements to read
+     *   uint8_t    service code
+     *   uint8_t[]  the tag name, as an encoded path
+     *   uint16_t   number of elements to read
+     *   uint32_t   byte offset into the tag's data
+     *
+     * The fragmented service is used whatever the offset: the plain Read Tag service carries
+     * no offset, so it cannot continue a transfer the PLC split across replies.
      */
-
-    read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
-
-    *data = read_cmd;
+    *data = AB_EIP_CMD_CIP_READ_FRAG;
     data++;
 
-    /* copy the tag name into the request */
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* add the count of elements to read. */
     *((uint16_le *)data) = h2le16(read_request_elem_count(tag));
     data += sizeof(uint16_le);
 
-    if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
-        /* add the byte offset for this request */
-        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
-        data += sizeof(uint32_le);
-    }
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
-               packet_payload_size, available_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
-    eip_cip_uc_req *cip;
-    uint8_t *data;
-    uint8_t *embed_start, *embed_end;
-    ab_request_p req = NULL;
-    int rc = PLCTAG_STATUS_OK;
-    uint8_t read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
-    uint16_le tmp_uint16_le;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    /* point the request struct at the buffer */
-    cip = (eip_cip_uc_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_uc_req);
+    *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
+    data += sizeof(uint32_le);
 
     /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * uint16_t # of elements to read
+     * What this read will cost in the shared reply packet, so process_requests() can budget it
+     * when bundling.  tag->size is what the previous read returned, which is the best estimate
+     * of what this one will.  A first read has no previous size, so it cannot be budgeted and
+     * must not be packed.
      */
-
-    embed_start = data;
-
-    /* set up the CIP Read request */
-    read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
-
-    *data = read_cmd;
-    data++;
-
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* add the count of elements to read. */
-    tmp_uint16_le = h2le16(read_request_elem_count(tag));
-    mem_copy(data, &tmp_uint16_le, (int)(unsigned int)sizeof(tmp_uint16_le));
-    data += sizeof(tmp_uint16_le);
-
-    /* add the byte offset for this request */
-    if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
-        /* FIXME - this may not work on some processors. */
-        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
-        data += sizeof(uint32_le);
-    }
-
-    /* mark the end of the embedded packet */
-    embed_end = data;
-
-    /* Now copy in the routing information for the embedded message */
-    /*
-     * routing information.  Format:
-     *
-     * uint8_t path_size in 16-bit words
-     * uint8_t reserved/pad (zero)
-     * uint8_t[...] path (padded to even number of bytes)
-     */
-    if(tag->session->conn_path_size > 0) {
-        *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
-        data++;
-        *data = 0; /* reserved/pad */
-        data++;
-        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-        data += tag->session->conn_path_size;
-    }
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&cip->cm_service_code))); /* REQ: fill in with length of remaining data. */
-
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = src_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Request payload (%d bytes) exceeds available space (%d bytes)!",
-               packet_payload_size, available_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
+    req->response_size = tag->size;
+    req->first_read = tag->first_read;
 
     /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
+    rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int build_write_bit_request_connected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_req *cip = NULL;
-    uint8_t *data = NULL;
-    ab_request_p req = NULL;
-    int i;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    rc = calculate_write_data_per_packet(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
                plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_co_req);
-
-    /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * uint16_t # size of a mask element
-     * OR mask
-     * AND mask
-     */
-
-    /*
-     * set up the CIP Read-Modify-Write request type.
-     */
-    *data = AB_EIP_CMD_CIP_RMW;
-    data++;
-
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* write an INT of the mask size. */
-    *data = (uint8_t)(tag->elem_size & 0xFF);
-    data++;
-    *data = (uint8_t)((tag->elem_size >> 8) & 0xFF);
-    data++;
-
-    /* write the OR mask */
-    for(i = 0; i < tag->elem_size; i++) {
-        if((tag->bit / 8) == i) {
-            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-            /* if the bit is set, then we want to mask it on. */
-            if(tag->data[tag->bit / 8] & mask) {
-                *data = mask;
-            } else {
-                *data = (uint8_t)0;
-            }
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding OR mask byte %d: %x", i, *data);
-
-            data++;
-        } else {
-            /* this is not the data we care about. */
-            *data = (uint8_t)0;
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding OR mask byte %d: %x", i, *data);
-
-            data++;
-        }
-    }
-
-    /* write the AND mask */
-    for(i = 0; i < tag->elem_size; i++) {
-        if((tag->bit / 8) == i) {
-            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-            /* if the bit is set, then we want to _not_ mask it off. */
-            if(tag->data[tag->bit / 8] & mask) {
-                *data = (uint8_t)0xFF;
-            } else {
-                *data = (uint8_t)(~mask);
-            }
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding AND mask byte %d: %x", i, *data);
-
-            data++;
-        } else {
-            /* this is not the data we care about. */
-            *data = (uint8_t)0xFF;
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding AND mask byte %d: %x", i, *data);
-
-            data++;
-        }
-    }
-
-    /* let the rest of the system know that the write is complete after this. */
-    tag->offset = tag->size;
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
-
-    /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int build_write_bit_request_unconnected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_req *cip = NULL;
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    uint8_t *embed_end = NULL;
-    ab_request_p req = NULL;
-    int i = 0;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    rc = calculate_write_data_per_packet(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    cip = (eip_cip_uc_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_uc_req);
-
-    embed_start = data;
-
-    /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * uint16_t # size of a mask element
-     * OR mask
-     * AND mask
-     */
-
-    /*
-     * set up the CIP Read-Modify-Write request type.
-     */
-    *data = AB_EIP_CMD_CIP_RMW;
-    data++;
-
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* write an INT of the mask size. */
-    *data = (uint8_t)(tag->elem_size & 0xFF);
-    data++;
-    *data = (uint8_t)((tag->elem_size >> 8) & 0xFF);
-    data++;
-
-    /* write the OR mask */
-    for(i = 0; i < tag->elem_size; i++) {
-        if((tag->bit / 8) == i) {
-            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-            /* if the bit is set, then we want to mask it on. */
-            if(tag->data[tag->bit / 8] & mask) {
-                *data = mask;
-            } else {
-                *data = (uint8_t)0;
-            }
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding OR mask byte %d: %x", i, *data);
-
-            data++;
-        } else {
-            /* this is not the data we care about. */
-            *data = (uint8_t)0;
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding OR mask byte %d: %x", i, *data);
-
-            data++;
-        }
-    }
-
-    /* write the AND mask */
-    for(i = 0; i < tag->elem_size; i++) {
-        if((tag->bit / 8) == i) {
-            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-            /* if the bit is set, then we want to _not_ mask it off. */
-            if(tag->data[tag->bit / 8] & mask) {
-                *data = (uint8_t)0xFF;
-            } else {
-                *data = (uint8_t)(~mask);
-            }
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding AND mask byte %d: %x", i, *data);
-
-            data++;
-        } else {
-            /* this is not the data we care about. */
-            *data = (uint8_t)0xFF;
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding AND mask byte %d: %x", i, *data);
-
-            data++;
-        }
-    }
-
-    /* let the rest of the system know that the write is complete after this. */
-    tag->offset = tag->size;
-
-    /* now we go back and fill in the fields of the static part */
-    /* mark the end of the embedded packet */
-    embed_end = data;
-
-    /*
-     * after the embedded packet, we need to tell the message router
-     * how to get to the target device.
-     */
-
-    /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
-    data++;
-    *data = 0;
-    data++;
-    mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-    data += tag->session->conn_path_size;
-
-    /* now fill in the rest of the structure. */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
-
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
-
-    /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int build_write_request_connected(ab_tag_p tag, int byte_offset) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_req *cip = NULL;
-    uint8_t *data = NULL;
-    ab_request_p req = NULL;
-    int multiple_requests = 0;
-    int write_size = 0;
-    int str_pad_to_multiple_bytes = 1;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->is_bit) { return build_write_bit_request_connected(tag); }
-
-    rc = calculate_write_data_per_packet(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
-
-    /*
-     * A write has to carry the tag's encoded type, so reject a tag that has none before
-     * anything is allocated.  The type comes from the first read of the tag.
-     */
-    if(!tag->encoded_type_info_size) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_co_req);
-
-    /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * data type to write
-     * uint16_t # of elements to write
-     * data to write
-     */
-
-    /*
-     * set up the CIP Read request type.
-     * Different if more than one request.
-     *
-     * This handles a bug where attempting fragmented requests
-     * does not appear to work with a single boolean.
-     */
-    *data = (multiple_requests) ? AB_EIP_CMD_CIP_WRITE_FRAG : AB_EIP_CMD_CIP_WRITE;
-    data++;
-
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* copy encoded type info.  Part 1 already rejected a tag without any. */
-    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-    data += tag->encoded_type_info_size;
-
-    /* copy the item count, little endian */
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
-    data += sizeof(uint16_le);
-
-    if(multiple_requests) {
-        /* put in the byte offset */
-        *((uint32_le *)data) = h2le32((uint32_t)(byte_offset));
-        data += sizeof(uint32_le);
-    }
-
-    /* how much data to write? */
-    write_size = tag->size - tag->offset;
-
-    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
-
-    /* now copy the data to write */
-    mem_copy(data, tag->data + tag->offset, write_size);
-    data += write_size;
-    tag->offset += write_size;
-
-    /* need to pad data to multiple of either 1, 2 or 4 bytes */
-    /* for some PLCs (OmronNJ), padding causes issues when writing counted strings as it creates a mismatch between
-        the length of the string and the count integer, therefor this padding can be disabled using the str_pad_16_bits attribute
-     */
-    str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
-    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0) {
-        if(write_size % str_pad_to_multiple_bytes != 0) {
-            int pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
-            for(int i = 0; i < pad_size; i++) {
-                *data = 0;
-                data++;
-            }
-        }
-    }
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
-
-    /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_req *cip = NULL;
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    uint8_t *embed_end = NULL;
-    ab_request_p req = NULL;
-    int multiple_requests = 0;
-    int write_size = 0;
-    int str_pad_to_multiple_bytes = 1;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->is_bit) { return build_write_bit_request_unconnected(tag); }
-
-    rc = calculate_write_data_per_packet(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
-
-    /*
-     * A write has to carry the tag's encoded type, so reject a tag that has none before
-     * anything is allocated.  The type comes from the first read of the tag.
-     */
-    if(!tag->encoded_type_info_size) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    cip = (eip_cip_uc_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_uc_req);
-
-    embed_start = data;
-
-    /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * data type to write
-     * uint16_t # of elements to write
-     * data to write
-     */
-
-    /*
-     * set up the CIP Read request type.
-     * Different if more than one request.
-     *
-     * This handles a bug where attempting fragmented requests
-     * does not appear to work with a single boolean.
-     */
-    *data = (multiple_requests) ? AB_EIP_CMD_CIP_WRITE_FRAG : AB_EIP_CMD_CIP_WRITE;
-    data++;
-
-    /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* copy encoded type info.  Part 1 already rejected a tag without any. */
-    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-    data += tag->encoded_type_info_size;
-
-    /* copy the item count, little endian */
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
-    data += sizeof(uint16_le);
-
-    if(multiple_requests) {
-        /* put in the byte offset */
-        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
-        data += sizeof(uint32_le);
-    }
-
-    /* how much data to write? */
-    write_size = tag->size - tag->offset;
-
-    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
-
-    /* now copy the data to write */
-    mem_copy(data, tag->data + tag->offset, write_size);
-    data += write_size;
-    tag->offset += write_size;
-
-    /* need to pad data to multiple of either 1, 2 or 4 bytes */
-    /* for some PLCs (OmronNJ), padding causes issues when writing counted strings as it creates a mismatch between
-        the length of the string and the count integer, therefor this padding can be disabled using the str_pad_16_bits attribute
-     */
-    str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
-    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0) {
-        if(write_size % str_pad_to_multiple_bytes != 0) {
-            int pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
-            for(int i = 0; i < pad_size; i++) {
-                *data = 0;
-                data++;
-            }
-        }
-    }
-
-
-    /* now we go back and fill in the fields of the static part */
-    /* mark the end of the embedded packet */
-    embed_end = data;
-
-    /*
-     * after the embedded packet, we need to tell the message router
-     * how to get to the target device.
-     */
-
-    /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
-    data++;
-    *data = 0;
-    data++;
-    mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-    data += tag->session->conn_path_size;
-
-    /* now fill in the rest of the structure. */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
-
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
-
-    /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -1295,17 +476,229 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
 
 /*
- * check_read_status_connected
+ * Build the CIP Read-Modify-Write request that sets or clears a single bit.
  *
- * This routine checks for any outstanding requests and copies in data
- * that has arrived.  At the end of the request, it will clean up the request
- * buffers.  This is not thread-safe!  It should be called with the tag mutex
- * locked!
+ * RMW takes a pair of masks the size of one element: the OR mask turns bits on and the AND
+ * mask leaves them alone, so a bit is set by putting it in the OR mask and cleared by leaving
+ * it out of the AND mask.
  */
-
-static int check_read_status_connected(ab_tag_p tag) {
+int build_write_bit_request(ab_tag_p tag) {
+    ab_request_p req = NULL;
+    uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+
+    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    rc = calculate_write_data_per_packet(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
+
+    data = req->data;
+
+    /*
+     * The CIP Read-Modify-Write request:
+     *
+     *   uint8_t    service code
+     *   uint8_t[]  the tag name, as an encoded path
+     *   uint16_t   size of one mask in bytes
+     *   uint8_t[]  OR mask
+     *   uint8_t[]  AND mask
+     */
+    *data = AB_EIP_CMD_CIP_RMW;
+    data++;
+
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    *data = (uint8_t)(tag->elem_size & 0xFF);
+    data++;
+    *data = (uint8_t)((tag->elem_size >> 8) & 0xFF);
+    data++;
+
+    /* the OR mask carries the bit only when it is being set. */
+    for(int i = 0; i < tag->elem_size; i++) {
+        if((tag->bit / 8) == i) {
+            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+
+            *data = (tag->data[tag->bit / 8] & mask) ? mask : (uint8_t)0;
+        } else {
+            *data = (uint8_t)0;
+        }
+
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding OR mask byte %d: %x", i, *data);
+
+        data++;
+    }
+
+    /* the AND mask clears the bit only when it is being cleared; every other bit stays. */
+    for(int i = 0; i < tag->elem_size; i++) {
+        if((tag->bit / 8) == i) {
+            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+
+            *data = (tag->data[tag->bit / 8] & mask) ? (uint8_t)0xFF : (uint8_t)(~mask);
+        } else {
+            *data = (uint8_t)0xFF;
+        }
+
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "adding AND mask byte %d: %x", i, *data);
+
+        data++;
+    }
+
+    /* let the rest of the system know that the write is complete after this. */
+    tag->offset = tag->size;
+
+    /* hand the finished request to the connection. */
+    rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* save the request for later */
+    tag->req = req;
+
+    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Build the CIP write request, or the next fragment of one.
+ */
+int build_write_request(ab_tag_p tag, int byte_offset) {
+    ab_request_p req = NULL;
+    uint8_t *data = NULL;
+    int rc = PLCTAG_STATUS_OK;
+    int multiple_requests = 0;
+    int write_size = 0;
+    int str_pad_to_multiple_bytes = 1;
+
+    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    if(tag->is_bit) { return build_write_bit_request(tag); }
+
+    rc = calculate_write_data_per_packet(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
+
+    /*
+     * A write has to carry the tag's encoded type, so reject a tag that has none before
+     * anything is allocated.  The type comes from the first read of the tag.
+     */
+    if(!tag->encoded_type_info_size) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
+
+    data = req->data;
+
+    /*
+     * The CIP Write Tag request:
+     *
+     *   uint8_t    service code
+     *   uint8_t[]  the tag name, as an encoded path
+     *   uint8_t[]  the encoded data type
+     *   uint16_t   number of elements to write
+     *   uint32_t   byte offset, on the fragmented service only
+     *   uint8_t[]  the data
+     *
+     * The plain service is used when the whole tag fits in one request.  Fragmented writes of
+     * a single boolean have been seen not to work, and a single boolean always fits, so this
+     * is not merely an optimisation.
+     */
+    *data = (multiple_requests) ? AB_EIP_CMD_CIP_WRITE_FRAG : AB_EIP_CMD_CIP_WRITE;
+    data++;
+
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
+    data += tag->encoded_type_info_size;
+
+    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+    data += sizeof(uint16_le);
+
+    if(multiple_requests) {
+        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
+        data += sizeof(uint32_le);
+    }
+
+    /* how much data to write? */
+    write_size = tag->size - tag->offset;
+
+    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
+
+    mem_copy(data, tag->data + tag->offset, write_size);
+    data += write_size;
+    tag->offset += write_size;
+
+    /*
+     * Pad the data out to a multiple of 1, 2 or 4 bytes.  On some PLCs (OmronNJ) padding a
+     * counted string breaks it, because the padding makes the data longer than the count says,
+     * so str_pad_to_multiple_bytes can turn this off.
+     */
+    str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
+    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0) {
+        if(write_size % str_pad_to_multiple_bytes != 0) {
+            int pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
+
+            for(int i = 0; i < pad_size; i++) {
+                *data = 0;
+                data++;
+            }
+        }
+    }
+
+    /* hand the finished request to the connection. */
+    rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* save the request for later */
+    tag->req = req;
+
+    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int check_read_status(ab_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -1315,10 +708,10 @@ static int check_read_status_connected(ab_tag_p tag) {
     /* The request is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(cip_header);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -1564,274 +957,8 @@ static int check_read_status_connected(ab_tag_p tag) {
 }
 
 
-static int check_read_status_unconnected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_resp *cip_resp;
-    uint8_t *data;
-    uint8_t *data_end;
-    int partial_data = 0;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_uc_resp);
-
-    /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
-
-    /* check the status */
-    do {
-        ptrdiff_t payload_size = 0;
-
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
-           && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-
-            break;
-        }
-
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
-
-        /*
-         * check to see if there is any data to process.  If this is a packed
-         * response, there might not be.
-         */
-        payload_size = (data_end - data);
-        if(payload_size > 0) {
-            /* we got data, so the transfer is moving again. */
-            tag->fragment_retry_count = 0;
-
-            /* skip the copy if we already have type data */
-            if(tag->encoded_type_info_size == 0) {
-                int type_length = 0;
-
-                /* the first byte of the response is a type byte. */
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "type byte = %d (0x%02x)", (int)*data, (int)*data);
-
-                if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
-                    /* found it and we got the type data size */
-
-                    /* some types use the second byte to indicate how many bytes more are used. */
-                    if(type_length == 0) {
-                        if(payload_size < 2) {
-                            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                                   "Response too short to hold extended type length byte!");
-                            rc = PLCTAG_ERR_TOO_SMALL;
-                            break;
-                        }
-
-                        type_length = *(data + 1) + 2;
-                    }
-
-                    if(type_length <= 0 || type_length > (int)sizeof(tag->encoded_type_info)
-                       || type_length > (int)payload_size) {
-                        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                               "Type data length %d for type byte 0x%02x is out of range (max %d, available %d)!",
-                               type_length, *data, (int)sizeof(tag->encoded_type_info), (int)payload_size);
-                        rc = PLCTAG_ERR_TOO_LARGE;
-                        break;
-                    }
-
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Type data is %d bytes long.", type_length);
-                    pdebug_dump_bytes(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, data, type_length);
-
-                    tag->encoded_type_info_size = type_length;
-                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
-                } else {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unsupported data type returned, type byte=0x%02x",
-                           *data);
-                    rc = PLCTAG_ERR_UNSUPPORTED;
-                    break;
-                }
-            }
-
-            /* skip past the type data */
-            data += (tag->encoded_type_info_size);
-
-            if((intptr_t)data > (intptr_t)data_end) {
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                       "Response too short to hold remembered type info of %d bytes!", tag->encoded_type_info_size);
-                rc = PLCTAG_ERR_TOO_SMALL;
-                break;
-            }
-
-            /* check payload size now that we have bumped past the data type info. */
-            payload_size = (data_end - data);
-
-            /*
-             * The pre-read asked for a single element, so the payload is that element and
-             * its length is the element size.  The write that follows needs elem_size to
-             * chunk itself, and deriving it the general way below -- reply length divided
-             * by elem_count -- yields zero for any array whose first fragment is shorter
-             * than elem_count bytes.
-             *
-             * That the payload is one element's worth only holds where elements are a
-             * fixed stride.  It is true for the tags this function serves: they carry
-             * logix_tag_byte_order, whose strings are a fixed 88 bytes.  It is not true
-             * generally -- the tag listing, @udt and the Omron types all set
-             * str_is_fixed_length to zero, and a listing entry's size varies with the
-             * length of the tag name it carries.  Those types declare an element size of
-             * one byte and build their own requests, so they never reach this code.
-             *
-             * Nothing here extrapolates a whole-tag size from the one element, because
-             * that is the step that would be wrong if a variable-stride tag ever did
-             * arrive: tag->size belongs to the caller, who set it staging the write.
-             */
-            if(tag->pre_write_read) {
-                if(payload_size <= 0) {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Pre-write read returned no element data!");
-                    rc = PLCTAG_ERR_TOO_SMALL;
-                    break;
-                }
-
-                if(tag_elements_are_variable(tag)) {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id,
-                           "Pre-write read of %d bytes; elements are variable length, so the element size is unchanged.",
-                           (int)payload_size);
-                } else if(tag->elem_size <= 0) {
-                    tag->elem_size = (int)payload_size;
-
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Pre-write read: element size is %d bytes.",
-                           tag->elem_size);
-                } else if(tag->elem_size != (int)payload_size) {
-                    /* keep what the tag already believes; a mismatch means the stride is not uniform. */
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                           "Pre-write read returned a %d byte element but the element size is %d bytes!", (int)payload_size,
-                           tag->elem_size);
-                }
-            } else if(payload_size + tag->offset > tag->size) {
-                /* a PLC can keep returning fragments forever.  Do not grow without bound. */
-                if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                           "Tag data size of %d bytes is larger than the maximum of %d bytes!",
-                           (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
-                    rc = PLCTAG_ERR_TOO_LARGE;
-                    break;
-                }
-
-                tag->size = (int)payload_size + tag->offset;
-
-                /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
-                if(!tag_elements_are_variable(tag)) {
-                    tag->elem_size = tag->size / tag->elem_count;
-                } else if(tag->elem_size <= 0) {
-                    /*
-                     * There is no stride, so the element size is one byte -- the same answer the
-                     * tag listing and @udt tags give.  It still has to be set to something
-                     * usable: calculate_write_data_per_packet() divides by it.
-                     */
-                    tag->elem_size = 1;
-                }
-
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
-
-                tag->data = (uint8_t *)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
-                    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
-            }
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);
-
-            /*
-             * copy the data, but only if this is not
-             * a pre-read for a subsequent write!  We do not
-             * want to overwrite the data the upstream has
-             * put into the tag's data buffer.
-             */
-            if(!tag->pre_write_read) { mem_copy(tag->data + tag->offset, data, (int)payload_size); }
-
-            /* bump the byte offset */
-            tag->offset += (int)payload_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
-
-            /* no payload means no forward progress on a fragmented transfer. */
-            tag->fragment_retry_count++;
-        }
-
-        /* set the return code */
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    ab_tag_abort_request_only(tag);
-
-    /* are we actually done? */
-    if(rc == PLCTAG_STATUS_OK) {
-        /* this read is done. */
-        tag->read_in_progress = 0;
-
-        /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id,
-                   "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
-                   tag->fragment_retry_count);
-            rc = PLCTAG_ERR_PARTIAL;
-        } else if(!tag->pre_write_read && partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "calling tag_read_start() to get the next chunk.");
-            rc = tag_read_start((plc_tag_p)tag);
-        } else {
-            tag->offset = 0;
-
-            /* the transfer is over one way or the other, so start the next one clean. */
-            tag->fragment_retry_count = 0;
-
-            /* if this is a pre-read for a write, then pass off to the write routine */
-            if(tag->pre_write_read) {
-                pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-                tag->pre_write_read = 0;
-                rc = tag_write_start((plc_tag_p)tag);
-            }
-        }
-    }
-
-    /* this is not an else clause because the above if could result in bad rc. */
-    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        /* error ! */
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Error received!");
-
-        /* clean up everything. */
-        ab_tag_abort_request(tag);
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-
-/*
- * check_write_status_connected
- *
- * This routine must be called with the tag mutex locked.  It checks the current
- * status of a write operation.  If the write is done, it triggers the clean up.
- */
-
-static int check_write_status_connected(ab_tag_p tag) {
-    eip_cip_co_resp *cip_resp;
+static int check_write_status(ab_tag_p tag) {
+    cip_header *cip_resp;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -1839,7 +966,7 @@ static int check_write_status_connected(ab_tag_p tag) {
     /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     do {
         if(cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
@@ -1877,61 +1004,6 @@ static int check_write_status_connected(ab_tag_p tag) {
     } else {
         pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Write failed!");
 
-        tag->offset = 0;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-
-static int check_write_status_unconnected(ab_tag_p tag) {
-    eip_cip_uc_resp *cip_resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    do {
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
-           && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
-           && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
-    } while(0);
-
-    ab_tag_abort_request_only(tag);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        if(tag->offset < tag->size) {
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_DETAIL, tag->tag_id, "Write not complete, triggering next round.");
-            rc = tag_write_start((plc_tag_p)tag);
-        } else {
-            /* only clear this if we are done. */
-            tag->offset = 0;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP, DEBUG_WARN, tag->tag_id, "Write failed!");
         tag->offset = 0;
     }
 
