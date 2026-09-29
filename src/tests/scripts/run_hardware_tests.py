@@ -41,6 +41,17 @@ class Test:
     expect_failure: bool = False
 
 
+@dataclasses.dataclass(frozen=True)
+class LogixTarget:
+    """One cell of the chassis matrix: an Ethernet entry point plus a CPU slot."""
+    label: str
+    gateway: str
+    path: str
+    #: whether the TestBigArray / TestDINTArray / TestINTArray family is loaded on this CPU.
+    #: Cells without them run only the tests that name no tag.
+    has_test_tags: bool
+
+
 @dataclasses.dataclass
 class Result:
     test: Test
@@ -77,6 +88,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_special", "test_tag_attributes", "test_tag_type_attribute",
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
+    "test_write_before_read", "thread_stress",
 ]
 
 
@@ -216,6 +228,24 @@ def build_manifest() -> list[Test]:
         test("tag listing", [exe("list_tags_logix"), logix_gw, logix_path]),
         test("generic CIP device identity query",
              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={logix_gw}&plc=generic&name=@identity&debug=3"]),
+        # An @identity tag on a ControlLogix uses connected messaging, unlike the plc=generic
+        # query above, which ab_common.c forces to unconnected.  Those are two different
+        # builders and two different status checkers, and only the unconnected pair was under
+        # test until this was added.
+        test("identity tag over connected messaging",
+             [exe("get_identity"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@identity&debug=3"]),
+        # Several ordinary tags read together, so the requests are bundled into one Multiple
+        # Service Packet and the reply budget decides how many fit.  The raw CIP bundling test
+        # covers the assembly; this covers it for tags that carry a reply size.
+        test("bundled reads of several ordinary tags",
+             [exe("thread_stress"), "4",
+              f"protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
+        # Writing a tag the caller never read: the library fetches the type itself first.
+        test("write before read",
+             [exe("test_write_before_read"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1000&name=TestBigArray"]),
         test("connection tag connection state transitions (ControlLogix)",
              [exe("test_connection_tag"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
@@ -224,6 +254,106 @@ def build_manifest() -> list[Test]:
         test("connection tag connection state transitions (PLC5)",
              [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&name=@connection"]),
     ]
+
+    tests.extend(build_logix_matrix())
+
+    return tests
+
+
+# ---------------------------------------------------------------------------
+# The 1756 chassis matrix
+# ---------------------------------------------------------------------------
+
+#: The cells worth running beyond the primary one.  The primary cell -- the L81 through its
+#: own port -- already carries the full Logix set above.
+#:
+#: Confirmed by querying the Identity object of each slot through .37, so every entry point
+#: reaches every CPU across the backplane:
+#:
+#:     slot 0  1756-L61/B  LOGIX5561   firmware 20.12
+#:     slot 4  1756-L81E/B             firmware 31.11   (own Ethernet port, .40)
+#:     slot 5  1756-L55/A  LOGIX5555   firmware 16.22   (with a 1756-M22/A)
+#:
+#: The cells below form a cross rather than a diagonal: three CPUs through one entry module
+#: isolates the CPU, and one CPU through three entry modules isolates the entry module.
+LOGIX_TARGETS = [
+    # --- CPU axis: each slot through the oldest ENBT ---
+    #
+    # v16 predates the Extended Forward Open, so this is the only device in the building that
+    # makes the library try service 0x5B, be refused, and fall back to 0x54 (conn.c:2930).  It
+    # also negotiates the smallest connection here, which is what puts cip_conn_max_cip_payload()
+    # near its limit and makes the reply budget actually decide bundle sizes -- neither binds at
+    # the 4000 bytes the L8x port offers.
+    LogixTarget("L55 v16.22 via ENBT 4.8", "10.206.1.37", "1,5", has_test_tags=True),
+    # v20 sits either side of the Extended Forward Open depending on platform, so this cell is
+    # worth having for the negotiation alone.
+    LogixTarget("L61 v20.12 via ENBT 4.8", "10.206.1.37", "1,0", has_test_tags=True),
+    # --- entry-module axis: the same CPU through each way in ---
+    #
+    # Holding the CPU and its data table constant makes these an A/B on the entry module
+    # alone: the connection size it will agree to, and the fact that an ENBT is a separate
+    # routing device applying the Unconnected Send route timeout, which going in via the L8x
+    # port does not have in the path at all.  Reading these two against each other also
+    # compares the two ENBT firmware revisions.
+    LogixTarget("L81 v31.11 via ENBT 4.8", "10.206.1.37", "1,4", has_test_tags=True),
+    LogixTarget("L81 v31.11 via ENBT 6.6", "10.206.1.39", "1,4", has_test_tags=True),
+]
+
+
+def build_logix_matrix() -> list[Test]:
+    """
+    The Logix tests worth repeating per chassis cell.
+
+    Not the whole Logix set: this is the subset that the connection size, the Forward Open
+    variant and the presence of a routing device actually change.  Running all fourteen
+    against all four cells would quadruple a run that talks to shared lab hardware without
+    testing four times as much.
+    """
+    tests: list[Test] = []
+
+    for target in LOGIX_TARGETS:
+        gw, path = target.gateway, target.path
+        base = f"protocol=ab-eip&gateway={gw}&path={path}&plc=ControlLogix"
+
+        # Needs no tag to exist, so every cell can run it.
+        tests.append(test(f"{target.label}: identity",
+                          [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&plc=generic&name=@identity&debug=3"]))
+        tests.append(test(f"{target.label}: tag listing and UDT definitions",
+                          [exe("list_tags_logix"), gw, path]))
+        # Raw CIP is what exercises the library's own EIP and CPF framing.  List Tag Instances
+        # names no tag, so it runs everywhere; both messaging modes, because the framing is
+        # the only thing that differs between them.
+        tests.append(test(f"{target.label}: raw cip, connected",
+                          [exe("test_raw_cip"), f"--tag={base}&name=@raw"]))
+        tests.append(test(f"{target.label}: raw cip, unconnected",
+                          [exe("test_raw_cip"), f"--tag={base}&use_connected_msg=0&name=@raw"]))
+        tests.append(test(f"{target.label}: connection tag state transitions",
+                          [exe("test_connection_tag"), f"--tag={base}&name=@connection"]))
+
+        if not target.has_test_tags:
+            continue
+
+        # A large array is where a small connection forces many fragments; on the L8x port the
+        # same read takes two.
+        # TestBigArray is DINT[1000] -- 4000 bytes.  That is roughly one payload through the
+        # L8x port and eight or nine fragments through an ENBT, which is the contrast.
+        tests.append(test(f"{target.label}: large fragmented read",
+                          [exe("tag_rw2"), "--type=sint32",
+                           f"--tag={base}&elem_count=1000&name=TestBigArray", "--debug=4"]))
+        tests.append(test(f"{target.label}: large fragmented write",
+                          [exe("tag_rw2"), "--type=sint32",
+                           f"--tag={base}&elem_count=1000&name=TestBigArray", "--debug=4",
+                           "--write=" + ",".join(str(i % 97) for i in range(1000))]))
+        # Unconnected messaging on an ordinary tag, which nothing covered before the connected
+        # and unconnected builders were merged into one.
+        tests.append(test(f"{target.label}: unconnected tag read/write",
+                          [exe("tag_rw2"), "--type=sint32",
+                           f"--tag={base}&use_connected_msg=0&elem_count=4&name=TestDINTArray",
+                           "--debug=4", "--write=11,22,33,44"]))
+        tests.append(test(f"{target.label}: raw cip, bundled into one packet",
+                          [exe("test_raw_cip"), f"--tag={base}&name=@raw",
+                           "--read=TestBigArray", "--count=4"]))
+
     return tests
 
 
