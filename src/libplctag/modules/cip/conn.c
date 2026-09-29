@@ -189,6 +189,26 @@ int session_get_available_cip_payload_space(cip_conn_p conn) {
 
 
 
+/*
+ * The bound a payload-only request is checked against.  Start from what the CPF
+ * data item leaves and, for unconnected messaging, take off the Unconnected Send
+ * wrapper as well -- session_get_available_cip_payload_space() leaves that to the
+ * caller, which is how the framed builders ended up measuring it three different
+ * ways.
+ */
+int cip_conn_max_cip_payload(cip_conn_p conn) {
+    int result = session_get_available_cip_payload_space(conn);
+
+    if(!conn->use_connected_msg) { result -= CIP_EIP_UC_SEND_OVERHEAD; }
+
+    if(result < 0) { result = 0; }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Maximum CIP payload is %d bytes.", result);
+
+    return result;
+}
+
+
 int session_list_init(cip_conn_list_t *list) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -1048,6 +1068,12 @@ int get_payload_size(cip_request_p request) {
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Starting.");
 
+    /* a payload-only request carries no framing to parse; its size is the payload. */
+    if(request->payload_only) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Done, payload size: %d bytes.", request->request_size);
+        return request->request_size;
+    }
+
     header = (eip_encap *)(request->data);
 
     if(le2h16(header->encap_command) == CIP_EIP_CONNECTED_SEND) {
@@ -1134,6 +1160,169 @@ int purge_aborted_requests_unsafe(cip_conn_p conn) {
 
     return purge_count;
 }
+/* bytes of EIP and CPF framing the transport puts ahead of the CIP message. */
+static int cip_framing_size(cip_conn_p conn) {
+    return conn->use_connected_msg ? (int)sizeof(eip_cip_co_req) : (int)sizeof(eip_cip_uc_req);
+}
+
+
+/*
+ * Lay the EIP encapsulation and CPF framing into the connection buffer around a
+ * CIP message that already sits cip_framing_size() bytes in, and append the route
+ * path for unconnected messaging.  The session handle and the sequence numbers are
+ * left zeroed: prepare_request() fills those in afterwards, exactly as it does for
+ * a packet a builder framed itself.
+ */
+static int write_request_framing(cip_conn_p conn, int payload_size) {
+    int offset = cip_framing_size(conn);
+    uint8_t *data = conn->data + offset + payload_size;
+
+    /*
+     * Clear the framing first.  The connection buffer is reused packet to packet, so
+     * every field this function and prepare_request() do not write would otherwise keep
+     * whatever the previous packet left there -- interface_handle, which must be zero,
+     * picks up the session registration's protocol version, and a ControlLogix rejects
+     * the packet at the encapsulation layer for it.  The framed builders never saw this
+     * because they filled a freshly allocated, zeroed request buffer and pack_requests()
+     * copied the whole thing over the stale bytes.
+     */
+    mem_set(conn->data, 0, offset);
+
+    if(conn->use_connected_msg) {
+        eip_cip_co_req *cip = (eip_cip_co_req *)(conn->data);
+
+        cip->encap_command = h2le16(CIP_EIP_CONNECTED_SEND);
+        cip->router_timeout = h2le16(1);
+
+        cip->cpf_item_count = h2le16(2);
+        cip->cpf_cai_item_type = h2le16(CIP_EIP_ITEM_CAI);
+        cip->cpf_cai_item_length = h2le16(4);
+        cip->cpf_cdi_item_type = h2le16(CIP_EIP_ITEM_CDI);
+
+        /* the connected data item covers the sequence number as well as the CIP message. */
+        cip->cpf_cdi_item_length = h2le16((uint16_t)(payload_size + (int)sizeof(cip->cpf_conn_seq_num)));
+    } else {
+        eip_cip_uc_req *cip = (eip_cip_uc_req *)(conn->data);
+
+        /* the route path to the target follows the embedded CIP message. */
+        if(conn->conn_path_size > 0) {
+            *data = (uint8_t)(conn->conn_path_size / 2); /* in 16-bit words */
+            data++;
+            *data = 0; /* reserved/pad */
+            data++;
+            mem_copy(data, conn->conn_path, (int)conn->conn_path_size);
+            data += conn->conn_path_size;
+        }
+
+        cip->encap_command = h2le16(CIP_EIP_UNCONNECTED_SEND);
+        cip->router_timeout = h2le16(1);
+
+        cip->cpf_item_count = h2le16(2);
+        cip->cpf_nai_item_type = h2le16(CIP_EIP_ITEM_NAI);
+        cip->cpf_nai_item_length = h2le16(0);
+        cip->cpf_udi_item_type = h2le16(CIP_EIP_ITEM_UDI);
+        cip->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&cip->cm_service_code)));
+
+        cip->cm_service_code = CIP_EIP_CMD_UNCONNECTED_SEND;
+        cip->cm_req_path_size = 2; /* in 16-bit words */
+        cip->cm_req_path[0] = 0x20; /* class */
+        cip->cm_req_path[1] = 0x06; /* Connection Manager */
+        cip->cm_req_path[2] = 0x24; /* instance */
+        cip->cm_req_path[3] = 0x01; /* instance 1 */
+
+        cip->secs_per_tick = CIP_EIP_SECS_PER_TICK;
+        cip->timeout_ticks = CIP_EIP_TIMEOUT_TICKS;
+
+        cip->uc_cmd_length = h2le16((uint16_t)payload_size);
+    }
+
+    conn->data_size = (uint32_t)(data - conn->data);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Assemble payload-only requests into the connection buffer.  Each request holds
+ * just its CIP message, so a single request is one copy and a bundle is the
+ * Multiple Service Packet header followed by the messages back to back.  Nothing
+ * here has to find or move a header, because none of the requests carries one.
+ */
+static int pack_payload_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
+    int offset = cip_framing_size(conn);
+    uint8_t *payload = conn->data + offset;
+    int payload_size = 0;
+    int route_path_size = conn->use_connected_msg ? 0 : ((int)conn->conn_path_size + 2);
+    size_t room = 0;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Starting with %d request(s).", num_requests);
+
+    /* everything the framing does not use is what the messages have to fit in. */
+    if((size_t)(offset + route_path_size) > (size_t)conn->data_capacity) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+               "Framing of %d bytes does not fit the connection buffer of %u bytes!", offset + route_path_size,
+               conn->data_capacity);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    room = (size_t)conn->data_capacity - (size_t)offset - (size_t)route_path_size;
+
+    if(num_requests == 1) {
+        if((size_t)requests[0]->request_size > room) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+                   "CIP message of %d bytes does not fit the %zu bytes left in the connection buffer!",
+                   requests[0]->request_size, room);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        mem_copy(payload, requests[0]->data, requests[0]->request_size);
+        payload_size = requests[0]->request_size;
+    } else {
+        cip_multi_req_header *multi = (cip_multi_req_header *)payload;
+        size_t header_size = sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests);
+        int current_offset = (int)(sizeof(uint16_le) + (sizeof(uint16_le) * (size_t)num_requests));
+        uint8_t *next = payload + header_size;
+
+        if(header_size > room) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+                   "Bundled request header does not fit the connection buffer!");
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        multi->service_code = CIP_EIP_CMD_CIP_MULTI;
+        multi->req_path_size = 0x02; /* length of path in words */
+        multi->req_path[0] = 0x20;   /* Class */
+        multi->req_path[1] = 0x02;   /* CM */
+        multi->req_path[2] = 0x24;   /* Instance */
+        multi->req_path[3] = 0x01;   /* #1 */
+        multi->request_count = h2le16((uint16_t)num_requests);
+
+        for(int i = 0; i < num_requests; i++) {
+            size_t used = (size_t)(next - payload);
+
+            if(requests[i]->request_size < 0 || (size_t)requests[i]->request_size > room - used) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[i]->tag_id,
+                       "Bundled requests do not fit the connection buffer of %u bytes!", conn->data_capacity);
+                return PLCTAG_ERR_TOO_LARGE;
+            }
+
+            multi->request_offsets[i] = h2le16((uint16_t)current_offset);
+
+            mem_copy(next, requests[i]->data, requests[i]->request_size);
+
+            next += requests[i]->request_size;
+            current_offset += requests[i]->request_size;
+        }
+
+        payload_size = (int)(next - payload);
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "CIP message is %d bytes.", payload_size);
+
+    return write_request_framing(conn, payload_size);
+}
+
+
 int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
     eip_cip_co_req *new_req = NULL;
     eip_cip_co_req *packed_req = NULL;
@@ -1149,6 +1338,9 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
     uint8_t *next_pkt_data = NULL;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Starting.");
+
+    /* the bundling loop never mixes the two formats, so the first request decides. */
+    if(requests[0]->payload_only) { return pack_payload_requests(conn, requests, num_requests); }
 
     if((uint32_t)requests[0]->request_size > conn->data_capacity) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
@@ -1299,6 +1491,225 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
 }
 
 
+/*
+ * Check the CPF layer of a received packet.  The framed path leaves this to the
+ * tag modules, because they are the ones that can still see the framing; once the
+ * transport strips it, the transport has to be the one that validates it.
+ */
+static int validate_response_cpf(cip_conn_p conn) {
+    if(le2h16(((eip_encap *)(conn->data))->encap_command) == CIP_EIP_CONNECTED_SEND) {
+        eip_cip_co_resp *resp = (eip_cip_co_resp *)(conn->data);
+        size_t data_item_start = 0;
+        size_t data_item_length = 0;
+
+        if((size_t)conn->data_size < sizeof(eip_cip_co_resp)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Connected response of %u bytes is too short for a CIP response!",
+                   conn->data_size);
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
+        if(le2h16(resp->cpf_item_count) != 2) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Connected response has %u CPF items, expected 2!",
+                   le2h16(resp->cpf_item_count));
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        if(le2h16(resp->cpf_cai_item_type) != CIP_EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != CIP_EIP_ITEM_CDI) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                   "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
+                   le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), CIP_EIP_ITEM_CAI, CIP_EIP_ITEM_CDI);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /*
+         * Only meaningful once ForwardOpen has negotiated a connection.  Until then we send
+         * connection ID zero and the target echoes zero back, so there is nothing to check.
+         */
+        if(conn->targ_connection_id != 0 && le2h32(resp->cpf_orig_conn_id) != conn->orig_connection_id) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Connected response is for connection %" PRIx32 " but ours is %" PRIx32 "!",
+                   le2h32(resp->cpf_orig_conn_id), conn->orig_connection_id);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /*
+         * Require the data item length to match what we received rather than merely fit,
+         * otherwise the PLC can shorten the item and leave us reading bytes it never sent.
+         */
+        data_item_start = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - conn->data);
+        data_item_length = (size_t)le2h16(resp->cpf_cdi_item_length);
+
+        if(data_item_start + data_item_length != (size_t)conn->data_size) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                   "Connected data item claims %zu bytes but the response is %u bytes with the item starting at %zu!",
+                   data_item_length, conn->data_size, data_item_start);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+    } else {
+        eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(conn->data);
+        size_t data_item_start = 0;
+        size_t data_item_length = 0;
+
+        if((size_t)conn->data_size < sizeof(eip_cip_uc_resp)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unconnected response of %u bytes is too short for a CIP response!",
+                   conn->data_size);
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
+        if(le2h16(resp->cpf_item_count) != 2) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unconnected response has %u CPF items, expected 2!",
+                   le2h16(resp->cpf_item_count));
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        if(le2h16(resp->cpf_nai_item_type) != CIP_EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != CIP_EIP_ITEM_UDI) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                   "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
+                   le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), CIP_EIP_ITEM_NAI, CIP_EIP_ITEM_UDI);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        data_item_start = (size_t)((uint8_t *)(&resp->reply_service) - conn->data);
+        data_item_length = (size_t)le2h16(resp->cpf_udi_item_length);
+
+        if(data_item_start + data_item_length != (size_t)conn->data_size) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                   "Unconnected data item claims %zu bytes but the response is %u bytes with the item starting at %zu!",
+                   data_item_length, conn->data_size, data_item_start);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Hand a payload-only request its CIP response, stripped of the EIP and CPF
+ * framing.  The framed path has to rebuild a header here so the tag can skip
+ * past it; there is nothing to rebuild when the tag never sees one.
+ */
+static int unpack_payload_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
+    int rc = PLCTAG_STATUS_OK;
+    eip_encap *header = (eip_encap *)(conn->data);
+    size_t resp_offset = 0;
+    uint8_t *resp = NULL;
+    int resp_size = 0;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Starting.");
+
+    /* the tag never sees the framing, so check it here before throwing it away. */
+    rc = validate_response_cpf(conn);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    /* trust the reply's own type rather than the connection's, as recv checked it. */
+    resp_offset = (le2h16(header->encap_command) == CIP_EIP_CONNECTED_SEND)
+                      ? offsetof(eip_cip_co_resp, reply_service)
+                      : offsetof(eip_cip_uc_resp, reply_service);
+
+    if(resp_offset > (size_t)conn->data_size) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Response of %u bytes is shorter than its own framing!",
+               conn->data_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    resp = conn->data + resp_offset;
+    resp_size = (int)((size_t)conn->data_size - resp_offset);
+
+    if(resp_size > 0 && resp[0] == (uint8_t)(CIP_EIP_CMD_CIP_MULTI | CIP_EIP_CMD_CIP_OK)) {
+        cip_multi_resp_header *multi = (cip_multi_resp_header *)resp;
+        uint16_t total_responses = 0;
+        size_t offsets_start = 0;
+        size_t offsets_size = 0;
+        uint8_t *pkt_start = NULL;
+        uint8_t *pkt_end = NULL;
+        uint8_t *buf_end = conn->data + conn->data_size;
+
+        if((size_t)resp_size < sizeof(cip_multi_resp_header)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Packed response is too short to hold its own header!");
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
+        total_responses = le2h16(multi->request_count);
+
+        /*
+         * The count and the offsets all come from the wire.  Check that the offset array
+         * itself is inside the data we received BEFORE reading any offset out of it.
+         */
+        offsets_start = resp_offset + offsetof(cip_multi_resp_header, request_offsets);
+        offsets_size = (size_t)total_responses * sizeof(uint16_le);
+
+        if(sub_packet < 0 || sub_packet >= (int)total_responses || offsets_start > (size_t)conn->data_size
+           || offsets_size > (size_t)conn->data_size - offsets_start) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
+                   "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
+        /* offsets are counted from the request count field. */
+        pkt_start = (uint8_t *)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet]);
+
+        if((sub_packet + 1) < (int)total_responses) {
+            pkt_end = (uint8_t *)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet + 1]);
+        } else {
+            pkt_end = buf_end;
+        }
+
+        /* comparing the pointers directly would be undefined, so compare the values. */
+        if((intptr_t)pkt_start < (intptr_t)(&multi->request_count) || (intptr_t)pkt_start > (intptr_t)buf_end
+           || (intptr_t)pkt_end < (intptr_t)pkt_start || (intptr_t)pkt_end > (intptr_t)buf_end) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
+                   "Packed response sub-packet %d has an out of bounds data range!", sub_packet);
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+
+        resp = pkt_start;
+        resp_size = (int)(pkt_end - pkt_start);
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Sub-packet %d of %d is %d bytes.", sub_packet,
+               (int)total_responses, resp_size);
+    } else {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Single response of %d bytes.", resp_size);
+    }
+
+    if(resp_size > request->request_capacity) {
+        int request_capacity = 0;
+
+        critical_block(conn->session_mutex) { request_capacity = (int)GET_MAX_PAYLOAD_SIZE(conn); }
+
+        if(resp_size > request_capacity) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
+                   "Response of %d bytes is larger than the %d bytes this connection can carry!", resp_size,
+                   request_capacity);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        rc = session_request_increase_buffer(request, request_capacity);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Unable to grow the request buffer to %d bytes!",
+                   request_capacity);
+            return rc;
+        }
+    }
+
+    mem_set(request->data, 0, request->request_capacity);
+    mem_copy(request->data, resp, resp_size);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "CIP response:");
+    pdebug_dump_bytes(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, request->data, resp_size);
+
+    /* notify the reading thread that the request is ready */
+    spin_block(&request->lock) {
+        request->status = PLCTAG_STATUS_OK;
+        request->request_size = resp_size;
+        request->resp_received = 1;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_co_resp *packed_resp = (eip_cip_co_resp *)(conn->data);
@@ -1308,6 +1719,8 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
     int new_eip_len = 0;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Starting.");
+
+    if(request->payload_only) { return unpack_payload_response(conn, request, sub_packet); }
 
     /* clear out the request data. */
     mem_set(request->data, 0, request->request_capacity);
@@ -1572,6 +1985,31 @@ int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_size, boo
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
+}
+
+
+int cip_submit_payload(cip_conn_p conn, cip_request_p req, int payload_size, bool allow_packing) {
+    int max_payload = 0;
+
+    if(!req) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Called with a null request!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Starting.");
+
+    max_payload = cip_conn_max_cip_payload(conn);
+
+    if(payload_size > max_payload) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id,
+               "CIP payload of %d bytes exceeds the %d bytes this connection can carry!", payload_size, max_payload);
+        rc_dec(req);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    req->payload_only = true;
+
+    return cip_submit_request(conn, req, payload_size, allow_packing);
 }
 
 
@@ -2038,8 +2476,12 @@ int process_requests(cip_conn_p conn) {
                     /*
                      * A first read does not know how large its own reply will be, so it
                      * cannot be budgeted against the reply space and must not be packed.
+                     *
+                     * Multiple Service Packet also only ever goes out on a connection.
+                     * pack_requests() reads the connected framing out of the first request,
+                     * so bundling unconnected requests would have it parse the wrong layout.
                      */
-                    allow_packing = request->allow_packing && !request->first_read;
+                    allow_packing = request->allow_packing && !request->first_read && conn->use_connected_msg;
 
                     /* If the first request is packable, try to pack more requests */
                     if(allow_packing && vector_length(conn->requests) > 0) {
@@ -2054,8 +2496,13 @@ int process_requests(cip_conn_p conn) {
 
                             request = vector_get(conn->requests, 0);
 
-                            /* Only pack if this request is packable and its reply can be budgeted */
-                            allow_packing = request->allow_packing && !request->first_read;
+                            /*
+                             * Only pack if this request is packable, its reply can be budgeted,
+                             * and it is framed the same way as the first one -- pack_requests()
+                             * handles one format per packet.
+                             */
+                            allow_packing = request->allow_packing && !request->first_read
+                                            && (request->payload_only == bundled_requests[0]->payload_only);
                             if(!allow_packing) { break; }
 
                             int next_request_size = get_payload_size(request) + multi_request_overhead;

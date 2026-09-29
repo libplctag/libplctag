@@ -78,6 +78,16 @@
 #define CIP_EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
 #define CIP_EIP_ITEM_NAI ((uint16_t)0x0000) /* NULL address item */
 #define CIP_EIP_ITEM_UDI ((uint16_t)0x00B2) /* unconnected data item */
+#define CIP_EIP_ITEM_CAI ((uint16_t)0x00A1) /* connected address item */
+#define CIP_EIP_ITEM_CDI ((uint16_t)0x00B1) /* connected data item */
+#define CIP_EIP_CMD_UNCONNECTED_SEND ((uint8_t)0x52)
+
+/*
+ * Bytes the Unconnected Send wrapper adds ahead of the embedded CIP message:
+ * service code, path size, the four-byte Connection Manager path, the two
+ * timeout tick bytes and the embedded length.
+ */
+#define CIP_EIP_UC_SEND_OVERHEAD (10)
 /*
  * Multiple Service Packet reply accounting.  Packed responses all have to fit
  * in one response packet; the PLC fails the whole exchange if they do not.
@@ -334,6 +344,13 @@ struct cip_request_t {
     /* a first read does not know its own size yet, so it cannot be packed */
     int first_read;
 
+    /*
+     * When true, data holds only the CIP message and the transport adds the EIP
+     * encapsulation and CPF framing on the way out and strips it on the way back.
+     * When false, the builder wrote the whole framed packet itself.
+     */
+    bool payload_only;
+
     uint8_t *data;
 };
 
@@ -368,6 +385,17 @@ extern void cip_request_destroy(void *req_arg);
 extern int session_request_increase_buffer(cip_request_p request, int new_capacity);
 extern int session_get_available_cip_payload_space(cip_conn_p conn);
 
+/*
+ * The largest CIP message this connection can carry in one request once the
+ * transport has added its framing: the CPF data item, and for unconnected
+ * messaging the Unconnected Send wrapper and the route path as well.
+ *
+ * This is the bound for payload-only requests.  Builders that still frame their
+ * own packets use session_get_available_cip_payload_space() and account for the
+ * rest themselves.
+ */
+extern int cip_conn_max_cip_payload(cip_conn_p conn);
+
 extern int send_eip_request(cip_conn_p conn, int timeout);
 extern int recv_eip_response(cip_conn_p conn, int timeout);
 extern int send_extended_forward_open_request(cip_conn_p conn);
@@ -392,6 +420,13 @@ extern int session_add_request(cip_conn_p conn, cip_request_p req);
  * caller never has to unwind a failed submission.
  */
 extern int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_size, bool allow_packing);
+
+/*
+ * Submit a request whose buffer holds only the CIP message, starting at offset
+ * zero.  The transport owns the EIP and CPF framing from here on.  Releases the
+ * request and returns non-OK if the payload does not fit or cannot be queued.
+ */
+extern int cip_submit_payload(cip_conn_p conn, cip_request_p req, int payload_size, bool allow_packing);
 extern int64_t calc_retry_time(unsigned int retry_count);
 extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
 extern int session_register(cip_conn_p conn);

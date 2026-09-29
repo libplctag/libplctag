@@ -420,6 +420,23 @@ def build_manifest() -> Manifest:
               server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("CIP thread stress",
               [exe("thread_stress"), "20", f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], S)
+    # Raw CIP tags are the one tag type whose request is the CIP message alone, so
+    # they are what exercises the library's own EIP/CPF framing. Run both messaging
+    # modes: the framing is the only thing that differs between them.
+    sec.test("raw CIP tag, connected messaging",
+              [exe("test_raw_cip"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
+               "--read=TestReal"], F)
+    sec.test("raw CIP tag, unconnected messaging",
+              [exe("test_raw_cip"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@raw",
+               "--read=TestReal"], F)
+    # Several raw tags at once so the connection bundles their CIP messages into one
+    # Multiple Service Packet, which assembles and splits differently from a lone request.
+    sec.test("raw CIP tags bundled into one packet",
+              [exe("test_raw_cip"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
+               "--read=TestReal", "--count=4"], F)
     sec.test("auto sync",
               [exe("test_auto_sync"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=600&auto_sync_write_ms=20"], T)

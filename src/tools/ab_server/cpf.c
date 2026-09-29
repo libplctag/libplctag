@@ -90,6 +90,16 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
     header.router_timeout = slice_get_uint16_le(input, 4);
     header.item_count = slice_get_uint16_le(input, 6);
 
+    /*
+     * The interface handle selects the object interface the CPF items are addressed to, and
+     * CIP messaging is always interface zero.  Nothing checked this before, which let a client
+     * leave a stale value here and never find out until it met a real PLC.
+     */
+    if(header.interface_handle != (uint32_t)0) {
+        log_info("Expected interface handle of zero for CIP messaging but found %u!", header.interface_handle);
+        return slice_make_err(EIP_ERR_BAD_REQUEST);
+    }
+
     /* sanity check the number of items. */
     if(header.item_count != (uint16_t)2) {
         log_info("Unsupported unconnected CPF packet, expected two items but found %u!", header.item_count);
@@ -184,6 +194,12 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
     header.interface_handle = slice_get_uint32_le(input, 0);
     header.router_timeout = slice_get_uint16_le(input, 4);
     header.item_count = slice_get_uint16_le(input, 6);
+
+    /* as in the unconnected case, CIP messaging is always interface zero. */
+    if(header.interface_handle != (uint32_t)0) {
+        log_info("Expected interface handle of zero for CIP messaging but found %u!", header.interface_handle);
+        return slice_make_err(EIP_ERR_BAD_REQUEST);
+    }
 
     /* sanity check the number of items. */
     if(header.item_count != (uint16_t)2) {

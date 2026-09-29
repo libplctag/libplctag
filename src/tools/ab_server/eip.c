@@ -38,6 +38,7 @@
 #include "slice.h"
 #include "utils.h"
 #include "log.h"
+#include <stdbool.h>
 #include <stdlib.h>
 
 #define EIP_REGISTER_SESSION ((uint16_t)0x0065)
@@ -63,6 +64,7 @@ typedef struct {
 
 static slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
 static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
+static bool check_session_request(plc_s *plc, eip_header_s *header);
 
 
 slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
@@ -107,12 +109,22 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
             break;
 
         case EIP_UNCONNECTED_SEND:
+            if(!check_session_request(plc, &header)) {
+                response = slice_make_err(EIP_ERR_BAD_REQUEST);
+                break;
+            }
+
             response =
                 handle_cpf_unconnected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
                                        slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
         case EIP_CONNECTED_SEND:
+            if(!check_session_request(plc, &header)) {
+                response = slice_make_err(EIP_ERR_BAD_REQUEST);
+                break;
+            }
+
             response = handle_cpf_connected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
                                             slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
@@ -172,6 +184,41 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
         return slice_from_slice(output, 0, EIP_HEADER_SIZE);
     }
+}
+
+
+/*
+ * Check the encapsulation header of a SendRRData or SendUnitData request.  RegisterSession
+ * checks its own copy of these fields below; until this function existed, nothing checked
+ * them on the requests that carry all the actual traffic, so a client could send a malformed
+ * encapsulation header for the life of a session and never hear about it.
+ */
+bool check_session_request(plc_s *plc, eip_header_s *header) {
+    /* the client has to register before it can send anything else. */
+    if(plc->session_handle == (uint32_t)0) {
+        log_info("Request failed sanity check: no session has been registered yet.");
+        return false;
+    }
+
+    if(header->session_handle != plc->session_handle) {
+        log_info("Request failed sanity check: request session handle is %u but this session is %u.",
+                 header->session_handle, plc->session_handle);
+        return false;
+    }
+
+    /* the status field is only set in a reply; a request must send zero. */
+    if(header->status != (uint32_t)0) {
+        log_info("Request failed sanity check: request status is %u but should be zero.", header->status);
+        return false;
+    }
+
+    /* options is reserved and must be zero. */
+    if(header->options != (uint32_t)0) {
+        log_info("Request failed sanity check: request options is %u but should be zero.", header->options);
+        return false;
+    }
+
+    return true;
 }
 
 

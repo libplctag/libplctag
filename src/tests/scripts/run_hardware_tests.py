@@ -190,7 +190,29 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
               "--debug=4", "--write=5"]),
-        test("raw cip tag", [exe("test_raw_cip")]),
+        # Raw CIP tags are the only tag type whose request is the bare CIP message, so
+        # they are what exercises the library's own EIP and CPF framing. Cover every
+        # combination that frames differently: connected vs unconnected, a service the
+        # PLC answers in one reply vs one that answers with a partial transfer, and
+        # several tags at once so their messages are bundled into one Multiple Service
+        # Packet. Packing only ever happens on a connection, so there is no unconnected
+        # bundled case.
+        test("raw cip tag, connected, list tag instances", [exe("test_raw_cip")]),
+        test("raw cip tag, unconnected, list tag instances",
+             [exe("test_raw_cip"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@raw"]),
+        test("raw cip tag, connected, read named tag",
+             [exe("test_raw_cip"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@raw",
+              "--read=TestBigArray"]),
+        test("raw cip tag, unconnected, read named tag",
+             [exe("test_raw_cip"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@raw",
+              "--read=TestBigArray"]),
+        test("raw cip tags bundled into one packet",
+             [exe("test_raw_cip"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@raw",
+              "--read=TestBigArray", "--count=4"]),
         test("tag listing", [exe("list_tags_logix"), logix_gw, logix_path]),
         test("generic CIP device identity query",
              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={logix_gw}&plc=generic&name=@identity&debug=3"]),

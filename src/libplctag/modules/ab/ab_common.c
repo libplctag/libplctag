@@ -1643,6 +1643,18 @@ int check_request_status(ab_tag_p tag) {
         /* if we failed above, punt out of the do/while loop. */
         if(rc != PLCTAG_STATUS_OK) { break; }
 
+        /*
+         * A payload-only request holds just the CIP response.  The connection already
+         * checked the EIP status and the CPF layer and then stripped them, so there is
+         * no framing left here to look at.
+         */
+        if(request->payload_only) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received a %d byte CIP response.",
+                   request->request_size);
+            rc = PLCTAG_STATUS_OK;
+            break;
+        }
+
         /* check the length */
         if((request->request_size < 0) || (size_t)request->request_size < sizeof(*eip_header)) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Insufficient data returned for even an EIP header!");
