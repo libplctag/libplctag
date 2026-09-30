@@ -85,6 +85,17 @@ const uint8_t PCCC_ERR_UNSUPPORTED_COMMAND = (uint8_t)0x0e;
 // 4f f0 fa da 07 - file is wrong size.
 // 4f f0 a6 b3 0e - command could not be decoded
 
+/*
+ * The SLC masked write is fixed width: cmd, transfer size, the four byte logical address,
+ * a two byte mask and two bytes of data.
+ */
+#define SLC_RMW_MASK_OFFSET (6)
+#define SLC_RMW_DATA_OFFSET (8)
+#define SLC_RMW_PACKET_SIZE (10)
+
+/* The PLC/5 read-modify-write header: cmd, data file prefix, file number, element. */
+#define PLC5_RMW_HEADER_SIZE (4)
+
 static slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc);
 static slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc);
 static slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc);
@@ -369,6 +380,16 @@ slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc) {
     log_info("Got packet:");
     log_info_slice(input);
 
+    /*
+     * cmd(1) + prefix(1) + file(1) + element(1), then an AND mask and an OR mask of one
+     * element each.  The element size is not known until the tag is found, so only the
+     * header can be checked here; the exact total is checked once elem_size is known.
+     */
+    if(slice_len(input) < PLC5_RMW_HEADER_SIZE) {
+        log_info("PLC/5 RMW request is %zu bytes, too short for its %d byte header!", slice_len(input), PLC5_RMW_HEADER_SIZE);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
+
     /* decode the data file. */
     data_file_prefix = slice_get_uint8(input, 1);
 
@@ -409,12 +430,17 @@ slice_s handle_plc5_rmw_request(slice_s input, slice_s output, plc_s *plc) {
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
-    /* Verify packet has enough data: cmd(1) + prefix(1) + file(1) + element(1) + AND masks + OR masks */
-    and_mask_offset = 4;
+    and_mask_offset = PLC5_RMW_HEADER_SIZE;
     or_mask_offset = and_mask_offset + elem_size;
 
-    if(slice_len(input) < or_mask_offset + elem_size) {
-        log_info("Packet too short for AND and OR masks!");
+    /*
+     * Exact, not "at least": the masks are one element each and nothing follows them, so a
+     * longer packet is a malformed one and a real PLC refuses it rather than ignoring the
+     * extra bytes.
+     */
+    if(slice_len(input) != or_mask_offset + elem_size) {
+        log_info("PLC/5 RMW request is %zu bytes, expected exactly %zu for two %zu byte masks!", slice_len(input),
+                 or_mask_offset + elem_size, elem_size);
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
@@ -654,7 +680,19 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
      * <file subelement> - data file subelement.
      * <mask bytes> - 2 bytes indicating which bits change.
      * <data bytes> - 2 bytes with new values for masked bits.
+     *
+     * Every field is at a fixed offset and the whole request is exactly
+     * SLC_RMW_PACKET_SIZE bytes, so check the length before reading anything and reject
+     * any other size.  A packet one byte too long used to be accepted here, with the mask
+     * and data read from the wrong offsets, while a real MicroLogix rejected it -- which
+     * is how a client bug reached hardware with the simulator green.  A real PLC answers
+     * this with "file is wrong size", so that is what is returned.
      */
+
+    if(slice_len(input) != SLC_RMW_PACKET_SIZE) {
+        log_info("SLC RMW request is %zu bytes, expected exactly %d!", slice_len(input), SLC_RMW_PACKET_SIZE);
+        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
+    }
 
     transfer_size = slice_get_uint8(input, 1);
     data_file_num = slice_get_uint8(input, 2);
@@ -710,14 +748,9 @@ slice_s handle_slc_rmw_request(slice_s input, slice_s output, plc_s *plc) {
         return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
-    /* Verify packet has mask and data bytes. */
-    mask_offset = 6;
-    data_offset = 8;
-
-    if(slice_len(input) < data_offset + 2) {
-        log_info("Packet too short for mask and data!");
-        return make_pccc_log_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
-    }
+    /* the exact-length check above already guarantees both of these are present. */
+    mask_offset = SLC_RMW_MASK_OFFSET;
+    data_offset = SLC_RMW_DATA_OFFSET;
 
     /* Apply the mask and data to the tag. */
     log_info("Applying mask and data to tag.");
