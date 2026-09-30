@@ -82,6 +82,13 @@ struct run_args {
         char **string;
         void *dummy;
     } write_vals;
+
+    /*
+     * --check=N asserts the value read back after the write.  Without it a bit write is
+     * only checked for a non-error return, which is not enough: a masked write can be
+     * accepted and still change the wrong bit.  -1 means no check was asked for.
+     */
+    int check_val;
 };
 
 #define REQUIRED_VERSION 2, 2, 1
@@ -104,6 +111,9 @@ int main(int argc, char **argv) {
     /* zero out all the bytes of args. */
     // NOLINTNEXTLINE
     memset(&args, 0, sizeof(args));
+
+    /* zero is a legal value to check for, so "no check" cannot be zero. */
+    args.check_val = -1;
 
     /* make sure we have the required library version */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -184,6 +194,26 @@ int main(int argc, char **argv) {
             /* dump out the tag values. */
             dump_values(&args);
         }
+
+        if(args.check_val >= 0) {
+            int actual = 0;
+
+            if(args.element_type != TYPE_BIT) {
+                printf("ERROR: --check is only supported for --type=bit!\n");
+                rc = 1;
+                break;
+            }
+
+            actual = plc_tag_get_bit(args.tag, 0);
+
+            if(actual != args.check_val) {
+                printf("ERROR: expected bit value %d but read back %d!\n", args.check_val, actual);
+                rc = 1;
+                break;
+            }
+
+            printf("Checked: bit value is %d as expected.\n", args.check_val);
+        }
     } while(0);
 
     cleanup(&args);
@@ -195,7 +225,7 @@ int main(int argc, char **argv) {
 void usage(void) {
     printf(
         "Usage:\n "
-        "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--timeout=<timeout>] [--debug=<debug>] \n"
+        "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--check=<bit>] [--timeout=<timeout>] [--debug=<debug>] \n"
         "\n"
         "  <type>    - type is one of 'bit', 'uint8', 'sint8', 'uint16', 'sint16', \n "
         "              'uint32', 'sint32', 'real32', 'real64', 'string', 'metadata', \n"
@@ -214,6 +244,9 @@ void usage(void) {
         "\n"
         "  <vals>    - The value(s) to write.  Must be formatted appropriately\n"
         "              for the data type.  Multiple values are comma separated. Optional.\n"
+        "\n"
+        "  <bit>     - Assert that the bit reads back as this value, 0 or 1, and exit non-zero if\n"
+        "              it does not.  Only valid with --type=bit.  Optional.\n"
         "\n"
         "  <timeout> - Set the timeout to this number of milliseconds.  Default is 5000.  Optional.\n"
         "\n"
@@ -295,6 +328,16 @@ void parse_args(int argc, char **argv, struct run_args *args) {
             }
 
             has_timeout = true;
+        } else if(strncmp(argv[i], "--check=", 8) == 0) {
+            args->check_val = atoi(&(argv[i][8]));
+
+            if(args->check_val < 0 || args->check_val > 1) {
+                printf("ERROR: --check requires a bit value of 0 or 1!\n");
+                cleanup(args);
+                usage();
+            }
+
+            printf("Will check that the bit reads back as %d.\n", args->check_val);
         } else if(strncmp(argv[i], "--write=", 8) == 0) {
             if(has_write_vals) {
                 printf("ERROR: Only one write value(s) argument may be present!\n");
