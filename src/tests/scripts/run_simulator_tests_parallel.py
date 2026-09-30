@@ -300,7 +300,7 @@ def kill_stray_servers() -> None:
 
 
 REQUIRED_EXECUTABLES = [
-    "ab_server", "modbus_server", "list_tags_logix", "string_non_standard_udt", "string_standard",
+    "ab_server", "modbus_server", "list_tags_logix", "get_identity", "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
@@ -379,6 +379,14 @@ def build_manifest() -> Manifest:
     gw = "127.0.0.1:{PORT}"
 
     sec = m.section("controllogix_fast", server=fast_server)
+
+    # @identity: Get_Attributes_All on the Identity object, class 1 instance 1.  With a path
+    # the request is routed inside an Unconnected Send, without one it goes out unrouted --
+    # the two branches of identity_tag.c:226.  Nothing in this suite reached either before.
+    sec.test("identity, routed",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&plc=generic&name=@identity&debug=3"], F)
     # "STRING" is a different type on each PLC family: a UDT sent as an abbreviated struct
     # (a0 02 ce 0f) on Logix, SHORT_STRING on Micro800, the plain CIP STRING on Omron.  The
     # element stride differs with it (88/83/84 bytes), so writing one element of an array and
@@ -792,6 +800,8 @@ def build_manifest() -> Manifest:
     )
 
     sec = m.section("micro800", server=micro800_server)
+    sec.test("identity, unrouted",
+              [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=generic&name=@identity&debug=3"], F)
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
@@ -836,6 +846,8 @@ def build_manifest() -> Manifest:
     ogw = "127.0.0.1:{PORT}"
 
     sec = m.section("omron", server=omron_server)
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={ogw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("basic Omron read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
@@ -973,6 +985,10 @@ def build_manifest() -> Manifest:
     mgw = "127.0.0.1:{PORT}"
 
     sec = m.section("micrologix", server=micrologix_server)
+    # The MicroLogix and the PLC/5 answer the Identity object while their data plane is PCCC,
+    # which is the case the bench proves and nothing here did.
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--debug=4"], F)
     sec.test("B bit data file Micrologix tag read/write",
@@ -1068,6 +1084,8 @@ def build_manifest() -> Manifest:
     lgx_pccc_tag = f"protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=1"
 
     sec = m.section("lgx_pccc", server=lgx_pccc_server)
+    sec.test("identity, routed",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={lgw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PCCC-mapped Logix tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--debug=4"], F)
     sec.test("B bit data file PCCC-mapped Logix tag read/write",
@@ -1124,6 +1142,8 @@ def build_manifest() -> Manifest:
     pgw = "127.0.0.1:{PORT}"
 
     sec = m.section("plc5", server=plc5_server)
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={pgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0"], F)
     sec.test("B bit data file PLC5 tag read/write",

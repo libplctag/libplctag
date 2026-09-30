@@ -244,8 +244,29 @@ def build_manifest() -> list[Test]:
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@raw",
               "--read=TestBigArray", "--count=4"]),
         test("tag listing", [exe("list_tags_logix"), logix_gw, logix_path]),
-        test("generic CIP device identity query",
+        # @identity with no path: the request is not routed onward, so it is answered by
+        # whatever device owns the gateway address.  One per distinct entry point, which is
+        # every way into the lab.  The routed form, which reaches a CPU in a chassis slot,
+        # is the identity test in the Logix matrix below.
+        test("identity, unrouted: L81 Ethernet port",
              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={logix_gw}&plc=generic&name=@identity&debug=3"]),
+        test("identity, unrouted: ENBT 4.8",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&plc=generic&name=@identity&debug=3"]),
+        test("identity, unrouted: ENBT 6.6",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={cip_bridge_target}&plc=generic&name=@identity&debug=3"]),
+        # The PLC/5 and the MicroLogix are single-box devices with no chassis to route into,
+        # so unrouted is the only form they have.  Neither is a CIP-native PLC, which makes
+        # them the test that Get_Attributes_All on the Identity object is answered by a
+        # device whose data plane is PCCC.
+        test("identity, unrouted: PLC/5",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={plc5_gw}&plc=generic&name=@identity&debug=3"]),
+        test("identity, unrouted: MicroLogix 1100",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mlgx_gw}&plc=generic&name=@identity&debug=3"]),
+        # The L8x port is the one entry point the matrix below does not cover, so route
+        # through it to the CPU behind it here.
+        test("identity, routed: L81 v31.11 via L8x port",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=generic&name=@identity&debug=3"]),
         # There is deliberately no connected-messaging identity test.  ab_common.c recognises
         # "@identity" only under the generic PLC type, which sets use_connected_msg to zero
         # unconditionally, so a connected identity request is unreachable -- asking for one
@@ -330,9 +351,13 @@ def build_logix_matrix() -> list[Test]:
         gw, path = target.gateway, target.path
         base = f"protocol=ab-eip&gateway={gw}&path={path}&plc=ControlLogix"
 
-        # Needs no tag to exist, so every cell can run it.
+        # Needs no tag to exist, so every cell can run it.  The path matters: with one the
+        # request is routed to the CPU in that slot inside an Unconnected Send, without one
+        # it stops at the entry module.  Those are the two branches of identity_tag.c:226,
+        # and this axis is what identifies each CPU.
         tests.append(test(f"{target.label}: identity",
-                          [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&plc=generic&name=@identity&debug=3"]))
+                          [exe("get_identity"),
+                           f"--tag=protocol=ab_eip&gateway={gw}&path={path}&plc=generic&name=@identity&debug=3"]))
         tests.append(test(f"{target.label}: tag listing and UDT definitions",
                           [exe("list_tags_logix"), gw, path]))
         # Raw CIP is what exercises the library's own EIP and CPF framing.  List Tag Instances

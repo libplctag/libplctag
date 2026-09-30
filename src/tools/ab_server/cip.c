@@ -46,6 +46,7 @@
 
 
 /* tag commands */
+#define CIP_SRV_GET_ATTRIBUTES_ALL ((uint8_t)0x01)
 #define CIP_SRV_MULTI ((uint8_t)0x0a)
 #define CIP_SRV_PCCC_EXECUTE ((uint8_t)0x4b)
 #define CIP_SRV_READ_NAMED_TAG ((uint8_t)0x4c)
@@ -79,6 +80,10 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 /* CIP Errors */
 
 #define CIP_OK ((uint8_t)0x00)
+/* the Identity object, class 1 instance 1, is what an @identity tag asks for. */
+#define CIP_CLASS_IDENTITY ((uint8_t)0x01)
+#define CIP_IDENTITY_INSTANCE ((uint8_t)0x01)
+
 #define CIP_ERR_EXT_ERR ((uint8_t)0x01)
 #define CIP_ERR_INVALID_PARAM ((uint8_t)0x03)
 #define CIP_ERR_PATH_SEGMENT ((uint8_t)0x04)
@@ -132,6 +137,7 @@ static slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path
                                    plc_s *plc);
 static slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                     plc_s *plc);
+static slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, slice_s output, plc_s *plc);
 static slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                     plc_s *plc);
 
@@ -174,6 +180,13 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
             break;
 
         case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
+
+        /*
+         * An @identity tag with no path is not routed onward, so it arrives here as a plain
+         * CIP request rather than wrapped in an Unconnected Send.  A PCCC device answers this
+         * too: the Identity object is CIP even when the data plane is not.
+         */
+        case CIP_SRV_GET_ATTRIBUTES_ALL: return handle_identity_request(cip_service, cip_service_path, output, plc); break;
 
         case CIP_SRV_UNCONNECTED_SEND:
             /* we've stripped off the CM part, but there is a byte count of the remaining data that we need. */
@@ -224,6 +237,9 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
          */
         case CIP_SRV_PCCC_EXECUTE: return dispatch_pccc_request(input, output, plc); break;
 
+        /* an @identity tag with a path lands here, unwrapped from its Unconnected Send. */
+        case CIP_SRV_GET_ATTRIBUTES_ALL: return handle_identity_request(cip_service, cip_service_path, output, plc); break;
+
         case CIP_SRV_READ_NAMED_TAG:
         case CIP_SRV_READ_NAMED_TAG_FRAG:
             return handle_read_request(cip_service, cip_service_path, cip_service_payload, output, plc);
@@ -236,6 +252,125 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
 
         default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
     }
+}
+
+
+/*
+ * The Identity object's attributes, one set per emulated PLC.
+ *
+ * A real device reports these out of flash.  Here they only have to be plausible, distinct
+ * and stable: distinct so a test can tell one simulated PLC from another, stable so the
+ * expected values can be written down.  The MicroLogix entry matches the 1763-L16BWA on the
+ * bench, which makes the simulator and hardware cases directly comparable.
+ */
+typedef struct {
+    uint16_t vendor_id;
+    uint16_t device_type;
+    uint16_t product_code;
+    uint8_t revision_major;
+    uint8_t revision_minor;
+    uint16_t status;
+    uint32_t serial_number;
+    const char *product_name;
+} cip_identity_s;
+
+#define CIP_VENDOR_ROCKWELL ((uint16_t)0x0001)
+#define CIP_VENDOR_OMRON ((uint16_t)0x002F)
+#define CIP_DEVICE_TYPE_PLC ((uint16_t)0x000E)
+#define CIP_IDENTITY_STATUS_OWNED ((uint16_t)0x0060)
+
+/* the fixed attributes are 14 bytes; the product name follows as a SHORT_STRING. */
+#define CIP_IDENTITY_FIXED_SIZE ((size_t)14)
+
+/* indexed by plc_type_t. */
+static const cip_identity_s cip_identities[] = {
+    [PLC_CONTROL_LOGIX] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00A6, 31, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C01756,
+                           "1756-L81E/B"},
+    [PLC_MICRO800] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00C8, 12, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C02080,
+                      "2080-LC50-24QWB"},
+    [PLC_OMRON] = {CIP_VENDOR_OMRON, CIP_DEVICE_TYPE_PLC, 0x008E, 1, 3, CIP_IDENTITY_STATUS_OWNED, 0x00C00102,
+                   "NX102-9000"},
+    [PLC_PLC5] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0036, 6, 1, CIP_IDENTITY_STATUS_OWNED, 0x00C01785, "1785-L80E"},
+    [PLC_SLC] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0039, 10, 0, CIP_IDENTITY_STATUS_OWNED, 0x00C01747, "1747-L553"},
+    [PLC_MICROLOGIX] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0056, 2, 12, CIP_IDENTITY_STATUS_OWNED, 0x00C01763,
+                        "1763-L16BWA"},
+    /* a ControlLogix reached through the PCCC mapping is still a ControlLogix. */
+    [PLC_LGX_PCCC] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00A6, 31, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C01756,
+                      "1756-L81E/B"},
+};
+
+
+/*
+ * Handle Get_Attributes_All (service 0x01) on the Identity object.
+ *
+ * This is what an @identity tag asks for.  With no path the request arrives unrouted and is
+ * answered by whatever owns the gateway address; with a path it arrives wrapped in an
+ * Unconnected Send, which the caller has already unwrapped.  Both reach here, and the reply
+ * is the same either way -- the framing is the connection's business, not this object's.
+ */
+slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, slice_s output, plc_s *plc) {
+    const cip_identity_s *identity = NULL;
+    size_t name_len = 0;
+    size_t offset = 0;
+
+    /*
+     * The path is a logical class segment then a logical instance segment:
+     * 0x20 <class> 0x24 <instance>.  Only the Identity object is served here.
+     */
+    if(slice_len(cip_service_path) != 4 || slice_get_uint8(cip_service_path, 0) != 0x20
+       || slice_get_uint8(cip_service_path, 1) != CIP_CLASS_IDENTITY || slice_get_uint8(cip_service_path, 2) != 0x24
+       || slice_get_uint8(cip_service_path, 3) != CIP_IDENTITY_INSTANCE) {
+        log_info("Get_Attributes_All is only supported on the Identity object, class 1 instance 1!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
+    }
+
+    if((size_t)plc->plc_type >= (sizeof(cip_identities) / sizeof(cip_identities[0]))) {
+        log_info("No identity is defined for PLC type %d!", (int)plc->plc_type);
+        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+    }
+
+    identity = &cip_identities[plc->plc_type];
+    name_len = strlen(identity->product_name);
+
+    if(slice_len(output) < CIP_RESPONSE_HEADER_SIZE + CIP_IDENTITY_FIXED_SIZE + 1 + name_len) {
+        log_info("Insufficient space in the output buffer for the identity response!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+
+    slice_set_uint8(output, 0, (uint8_t)(cip_service | CIP_DONE));
+    slice_set_uint8(output, 1, 0);      /* reserved */
+    slice_set_uint8(output, 2, CIP_OK); /* status */
+    slice_set_uint8(output, 3, 0);      /* no extended error */
+
+    offset = CIP_RESPONSE_HEADER_SIZE;
+
+    slice_set_uint16_le(output, offset, identity->vendor_id);
+    offset += 2;
+    slice_set_uint16_le(output, offset, identity->device_type);
+    offset += 2;
+    slice_set_uint16_le(output, offset, identity->product_code);
+    offset += 2;
+    slice_set_uint8(output, offset, identity->revision_major);
+    offset++;
+    slice_set_uint8(output, offset, identity->revision_minor);
+    offset++;
+    slice_set_uint16_le(output, offset, identity->status);
+    offset += 2;
+    slice_set_uint32_le(output, offset, identity->serial_number);
+    offset += 4;
+
+    /* the product name is a SHORT_STRING: a one byte count, then that many bytes, no padding. */
+    slice_set_uint8(output, offset, (uint8_t)name_len);
+    offset++;
+
+    for(size_t i = 0; i < name_len; i++) { slice_set_uint8(output, offset + i, (uint8_t)identity->product_name[i]); }
+    offset += name_len;
+
+    log_info("Identity: vendor %u, product code %u, revision %u.%u, serial %08x, name \"%s\".",
+             (unsigned int)identity->vendor_id, (unsigned int)identity->product_code, (unsigned int)identity->revision_major,
+             (unsigned int)identity->revision_minor, (unsigned int)identity->serial_number, identity->product_name);
+
+    return slice_from_slice(output, 0, offset);
 }
 
 
