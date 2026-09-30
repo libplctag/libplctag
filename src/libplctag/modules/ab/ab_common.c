@@ -43,9 +43,7 @@
 #include <libplctag/modules/ab/connection_tag.h>
 #include <libplctag/modules/ab/eip_cip.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
-#include <libplctag/modules/ab/eip_plc5_dhp.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>
-#include <libplctag/modules/ab/eip_slc_dhp.h>
 #include <libplctag/modules/ab/eip_slc_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
@@ -364,11 +362,11 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
                 }
 
                 tag->use_connected_msg = 0;
-                tag->vtable = &plc5_vtable;
+                tag->vtable = &pccc_vtable;
             } else {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up PLC/5 via DH+ bridge tag.");
                 tag->use_connected_msg = 1;
-                tag->vtable = &eip_plc5_dhp_vtable;
+                tag->vtable = &pccc_vtable;
             }
 
             tag->byte_order = &plc5_tag_byte_order;
@@ -388,11 +386,11 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up SLC/MicroLogix tag.");
                 tag->use_connected_msg = 0;
-                tag->vtable = &slc_vtable;
+                tag->vtable = &pccc_vtable;
             } else {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Setting up SLC/MicroLogix via DH+ bridge tag.");
                 tag->use_connected_msg = 1;
-                tag->vtable = &eip_slc_dhp_vtable;
+                tag->vtable = &pccc_vtable;
             }
 
             tag->byte_order = &slc_tag_byte_order;

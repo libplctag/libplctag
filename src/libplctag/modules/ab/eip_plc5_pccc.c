@@ -34,17 +34,6 @@
 #include <libplctag/modules/ab/tag.h>
 
 
-struct tag_vtable_t plc5_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
-                                   .read = (tag_vtable_func)pccc_tag_read_start,
-                                   .status = (tag_vtable_func)pccc_tag_status,
-                                   .tickler = (tag_vtable_func)pccc_tag_tickler,
-                                   .write = (tag_vtable_func)pccc_tag_write_start,
-                                   .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
-
-                                   /* data accessors */
-                                   .attribs = ab_attribs};
-
-
 /* default string types used for PLC-5 PLCs. */
 tag_byte_order_t plc5_tag_byte_order = {.is_allocated = 0,
 

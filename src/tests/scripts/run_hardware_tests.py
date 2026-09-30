@@ -169,6 +169,15 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
               "--write=1", "--debug=4"],
              expect_failure=True),  # this write should NOT succeed
+        # A data file the PLC does not have. This is the only way to reach the PCCC
+        # remote-error path: the PLC answers with a PCCC status byte rather than data,
+        # so the response checkers must report the error AND clear the tag's
+        # in-progress flag. The DH+ case is the one that matters -- its checkers used
+        # to clear that flag only on success, leaving the tag pending forever.
+        test("missing data file Micrologix tag read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N250:0",
+              "--debug=4"],
+             expect_failure=True),  # N250 does not exist
         test("B data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0",
               "--debug=4", "--write=0"]),
@@ -181,6 +190,10 @@ def build_manifest() -> list[Test]:
         test("N bit data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1"]),
+        test("missing data file PLC5 tag read",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N250:0", "--debug=4"],
+             expect_failure=True),  # N250 does not exist
         # PCCC-mapped Logix tag (plc=lgxpccc): talks PCCC file-based addressing
         # (N7:0 etc.) to a ControlLogix CPU instead of native CIP tag names --
         # exercises eip_lgx_pccc.c, which no other test in this suite reaches.
@@ -198,6 +211,11 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=uint8",
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10",
               "--debug=4", "--write=0"]),
+        test("missing data file DH+ bridged tag read",
+             [exe("tag_rw2"), "--type=uint8",
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N250:0",
+              "--debug=4"],
+             expect_failure=True),  # N250 does not exist
         test("basic CIP bridging",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",

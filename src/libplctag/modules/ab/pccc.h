@@ -112,10 +112,10 @@ START_PACK typedef struct {
 _Static_assert(sizeof(cip_pccc_full_resp) == 15, "cip_pccc_full_resp wire size changed");
 
 
-/* PCCC over DH+ */
-extern int pccc_dhp_tag_status(ab_tag_p tag);
-extern int pccc_dhp_tag_tickler(ab_tag_p tag);
-extern int pccc_dhp_tag_read_start(ab_tag_p tag);
-extern int pccc_dhp_tag_write_start(ab_tag_p tag);
+/*
+ * One vtable for PLC/5, SLC and MicroLogix, plain or over a DH+ bridge.  The PLC family is
+ * in tag->plc_type and the bridge in tag->session->is_dhp; the functions above read both.
+ */
+extern struct tag_vtable_t pccc_vtable;
 
 #endif
