@@ -88,6 +88,30 @@ extern int pccc_tag_tickler(ab_tag_p tag);
 extern int pccc_tag_read_start(ab_tag_p tag);
 extern int pccc_tag_write_start(ab_tag_p tag);
 
+/*
+ * The whole PCCC reply as it arrives once the connection has stripped the EIP and CPF
+ * framing: the CIP reply header and PCCC matching info above, then the PCCC command trailer.
+ * This is pccc_resp from modules/cip/wire.h less its 40 bytes of framing.
+ */
+START_PACK typedef struct {
+    uint8_t reply_code;
+    uint8_t reserved;
+    uint8_t general_status;
+    uint8_t status_size;
+
+    uint8_t request_id_size;
+    uint16_le vendor_id;
+    uint32_le vendor_serial_number;
+
+    uint8_t pccc_command;
+    uint8_t pccc_status;
+    uint16_le pccc_seq_num;
+} END_PACK cip_pccc_full_resp;
+
+_Static_assert(sizeof(cip_pccc_full_resp) == sizeof(pccc_resp) - 40,
+               "cip_pccc_full_resp does not match pccc_resp less its framing");
+
+
 /* PCCC over DH+ */
 extern int pccc_dhp_tag_status(ab_tag_p tag);
 extern int pccc_dhp_tag_tickler(ab_tag_p tag);

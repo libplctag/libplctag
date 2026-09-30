@@ -244,7 +244,7 @@ int udt_tag_tickler(ab_tag_p tag) {
 
 int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -254,10 +254,10 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     /* if we got here then we have a response and it is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(cip_header);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -427,7 +427,6 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
 
 
 int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
     // tag_list_req *list_req = NULL;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
@@ -445,10 +444,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     }
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
+    data_start = data = req->data;
 
     /*
      * set up the embedded CIP UDT metadata request packet
@@ -516,34 +512,8 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
     /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)((int)sizeof(*cip) + (int)(data - data_start)), tag->allow_packing);
+    rc = cip_submit_payload(tag->session, req, (int)(data - data_start), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
         return rc;
@@ -572,7 +542,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
 
 int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -582,10 +552,10 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     /* the request is there and valid */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(cip_header);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -719,7 +689,6 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
 
 
 int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
@@ -749,10 +718,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     total_size = (total_size + 3) & (uint32_t)neg_4;
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(tag->req->data);
-
-    /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
+    data_start = data = tag->req->data;
 
     /*
      * set up the embedded CIP UDT metadata request packet
@@ -802,36 +768,10 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)(unsigned int)sizeof(tmp_u16));
     data += sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        tag->req = rc_dec(tag->req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
     tag->read_in_progress = 1;
 
     /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, tag->req, (int)((int)sizeof(*cip) + (int)(data - data_start)), tag->allow_packing);
+    rc = cip_submit_payload(tag->session, tag->req, (int)(data - data_start), tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
                plc_tag_decode_error(rc));

@@ -1484,100 +1484,6 @@ int check_tag_name(ab_tag_p tag, const char *name) {
 }
 
 
-/*
- * Validate the Common Packet Format header of a connected response.
- *
- * The caller has already checked that the response is long enough to hold this header.  Every
- * field below is chosen by the PLC and the handlers downstream use them to find the CIP data,
- * so a response that is merely long enough is not yet a response we can parse.
- *
- * The connection ID is the important one.  It is the only thing that says this data belongs to
- * our connection rather than to some other conversation on the same socket, and the tag layer
- * copies the payload straight into the tag buffer on the strength of it.
- */
-static int check_cpf_connected(ab_tag_p tag, ab_request_p request) {
-    eip_cip_co_resp *resp = (eip_cip_co_resp *)(request->data);
-    size_t data_item_start = 0;
-    size_t data_item_length = 0;
-
-    if(le2h16(resp->cpf_item_count) != 2) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Connected response has %u CPF items, expected 2!",
-               le2h16(resp->cpf_item_count));
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h16(resp->cpf_cai_item_type) != AB_EIP_ITEM_CAI || le2h16(resp->cpf_cdi_item_type) != AB_EIP_ITEM_CDI) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_cai_item_type), le2h16(resp->cpf_cdi_item_type), AB_EIP_ITEM_CAI, AB_EIP_ITEM_CDI);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    /*
-     * Only meaningful once ForwardOpen has actually negotiated a connection.  Until then
-     * orig_connection_id is just the local placeholder, we send connection ID zero on the
-     * wire, and the target echoes zero back -- there is no connection identity to check.
-     */
-    if(tag->session && tag->session->targ_connection_id != 0
-       && le2h32(resp->cpf_orig_conn_id) != tag->session->orig_connection_id) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected response is for connection %" PRIx32 " but ours is %" PRIx32 "!", le2h32(resp->cpf_orig_conn_id),
-               tag->session->orig_connection_id);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    /*
-     * The connected data item covers the connection sequence number and everything after it.
-     * Require it to match what we actually received rather than merely fit, otherwise the PLC
-     * can shorten the item and leave the handlers reading bytes it never sent.
-     */
-    data_item_start = (size_t)((uint8_t *)(&resp->cpf_conn_seq_num) - request->data);
-    data_item_length = (size_t)le2h16(resp->cpf_cdi_item_length);
-
-    if(data_item_start + data_item_length != (size_t)request->request_size) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Connected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, request->request_size, data_item_start);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/* As above, but for the unconnected CPF header.  There is no connection ID to check here. */
-static int check_cpf_unconnected(ab_tag_p tag, ab_request_p request) {
-    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(request->data);
-    size_t data_item_start = 0;
-    size_t data_item_length = 0;
-
-    if(le2h16(resp->cpf_item_count) != 2) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unconnected response has %u CPF items, expected 2!",
-               le2h16(resp->cpf_item_count));
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(le2h16(resp->cpf_nai_item_type) != AB_EIP_ITEM_NAI || le2h16(resp->cpf_udi_item_type) != AB_EIP_ITEM_UDI) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Unconnected response CPF item types are %04" PRIx16 "/%04" PRIx16 ", expected %04" PRIx16 "/%04" PRIx16 "!",
-               le2h16(resp->cpf_nai_item_type), le2h16(resp->cpf_udi_item_type), AB_EIP_ITEM_NAI, AB_EIP_ITEM_UDI);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    data_item_start = (size_t)((uint8_t *)(&resp->reply_service) - request->data);
-    data_item_length = (size_t)le2h16(resp->cpf_udi_item_length);
-
-    if(data_item_start + data_item_length != (size_t)request->request_size) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "Unconnected data item claims %zu bytes but the response is %d bytes with the item starting at %zu!",
-               data_item_length, request->request_size, data_item_start);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 /**
  * @brief Check the status of the request
  *
@@ -1594,7 +1500,6 @@ static int check_cpf_unconnected(ab_tag_p tag, ab_request_p request) {
 int check_request_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p request = NULL;
-    eip_encap *eip_header = NULL;
 
     /* check early for null pointers */
     if(!tag) {
@@ -1650,80 +1555,14 @@ int check_request_status(ab_tag_p tag) {
         /* if we failed above, punt out of the do/while loop. */
         if(rc != PLCTAG_STATUS_OK) { break; }
 
+
         /*
-         * A payload-only request holds just the CIP response.  The connection already
-         * checked the EIP status and the CPF layer and then stripped them, so there is
-         * no framing left here to look at.
+         * The connection has already checked the EIP status and the CPF layer and stripped
+         * them, so what is left here is the CIP reply and there is no framing to inspect.
+         * The tag's own status checker parses it from the first byte.
          */
-        if(request->payload_only) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received a %d byte CIP response.",
-                   request->request_size);
-            rc = PLCTAG_STATUS_OK;
-            break;
-        }
-
-        /* check the length */
-        if((request->request_size < 0) || (size_t)request->request_size < sizeof(*eip_header)) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Insufficient data returned for even an EIP header!");
-            rc = PLCTAG_ERR_TOO_SMALL;
-            break;
-        }
-
-        eip_header = (eip_encap *)(request->data);
-
-        if(le2h32(eip_header->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
-                   le2h32(eip_header->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        switch(le2h16(eip_header->encap_command)) {
-            case AB_EIP_CONNECTED_SEND:
-                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received a connected send EIP packet.");
-
-                /*
-                 * The response must hold the EIP header, the connected CPF header and at
-                 * least a minimal CIP response.  The handlers below cast the buffer to
-                 * this type and read its fields, so check the length here, once, before
-                 * any of them touch it.
-                 */
-                if((size_t)request->request_size < sizeof(eip_cip_co_resp)) {
-                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                           "Connected response of %d bytes is too short to hold a CIP response of %d bytes!",
-                           request->request_size, (int)sizeof(eip_cip_co_resp));
-                    rc = PLCTAG_ERR_TOO_SMALL;
-                    break;
-                }
-
-                rc = check_cpf_connected(tag, request);
-
-                break;
-            case AB_EIP_UNCONNECTED_SEND:
-                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received an unconnected send EIP packet.");
-
-                /* as above, but for the unconnected CPF header. */
-                if((size_t)request->request_size < sizeof(eip_cip_uc_resp)) {
-                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-                           "Unconnected response of %d bytes is too short to hold a CIP response of %d bytes!",
-                           request->request_size, (int)sizeof(eip_cip_uc_resp));
-                    rc = PLCTAG_ERR_TOO_SMALL;
-                    break;
-                }
-
-                rc = check_cpf_unconnected(tag, request);
-
-                break;
-            default:
-                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Request pointer %p, header pointer %p.", request,
-                       eip_header);
-                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Received an unknown EIP packet type %04" PRIx16 ".",
-                       le2h16(eip_header->encap_command));
-                pdebug_dump_bytes(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, request->data, request->request_size);
-
-                rc = PLCTAG_ERR_BAD_DATA;
-                break;
-        }
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Received a %d byte CIP response.",
+               request->request_size);
     } while(0);
 
     /* if this is still hanging around, release the reference */

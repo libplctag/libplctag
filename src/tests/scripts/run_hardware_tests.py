@@ -228,13 +228,10 @@ def build_manifest() -> list[Test]:
         test("tag listing", [exe("list_tags_logix"), logix_gw, logix_path]),
         test("generic CIP device identity query",
              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={logix_gw}&plc=generic&name=@identity&debug=3"]),
-        # An @identity tag on a ControlLogix uses connected messaging, unlike the plc=generic
-        # query above, which ab_common.c forces to unconnected.  Those are two different
-        # builders and two different status checkers, and only the unconnected pair was under
-        # test until this was added.
-        test("identity tag over connected messaging",
-             [exe("get_identity"),
-              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@identity&debug=3"]),
+        # There is deliberately no connected-messaging identity test.  ab_common.c recognises
+        # "@identity" only under the generic PLC type, which sets use_connected_msg to zero
+        # unconditionally, so a connected identity request is unreachable -- asking for one
+        # just reads a tag literally named "@identity" and gets "tag does not exist".
         # Several ordinary tags read together, so the requests are bundled into one Multiple
         # Service Packet and the reply budget decides how many fit.  The raw CIP bundling test
         # covers the assembly; this covers it for tags that carry a reply size.

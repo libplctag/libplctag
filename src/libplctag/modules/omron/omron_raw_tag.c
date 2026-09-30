@@ -51,10 +51,8 @@
 // static int raw_tag_read_start(omron_tag_p tag);
 static int raw_tag_tickler(omron_tag_p tag);
 static int raw_tag_write_start(omron_tag_p tag);
-static int raw_tag_check_write_status_connected(omron_tag_p tag);
-static int raw_tag_check_write_status_unconnected(omron_tag_p tag);
-static int raw_tag_build_write_request_connected(omron_tag_p tag);
-static int raw_tag_build_write_request_unconnected(omron_tag_p tag);
+static int raw_tag_check_write_status(omron_tag_p tag);
+static int raw_tag_build_write_request(omron_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
@@ -136,11 +134,7 @@ int raw_tag_tickler(omron_tag_p tag) {
     }
 
     if(tag->write_in_progress) {
-        if(tag->use_connected_msg) {
-            rc = raw_tag_check_write_status_connected(tag);
-        } else {
-            rc = raw_tag_check_write_status_unconnected(tag);
-        }
+        rc = raw_tag_check_write_status(tag);
 
         tag->status = (int8_t)rc;
 
@@ -188,11 +182,7 @@ int raw_tag_write_start(omron_tag_p tag) {
     /* the write is now in flight */
     tag->write_in_progress = 1;
 
-    if(tag->use_connected_msg) {
-        rc = raw_tag_build_write_request_connected(tag);
-    } else {
-        rc = raw_tag_build_write_request_unconnected(tag);
-    }
+    rc = raw_tag_build_write_request(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
@@ -208,53 +198,45 @@ int raw_tag_write_start(omron_tag_p tag) {
 
 
 /*
- * raw_tag_check_write_status_connected
+ * raw_tag_check_write_status
  *
  * This routine must be called with the tag mutex locked.  It checks the current
  * status of a write operation.  If the write is done, it triggers the clean up.
+ *
+ * The connection hands back the CIP response with the EIP and CPF framing already
+ * stripped, so nothing here depends on whether the request went out connected or
+ * unconnected.
  */
 
-static int raw_tag_check_write_status_connected(omron_tag_p tag) {
-    eip_cip_co_resp *cip_resp;
+static int raw_tag_check_write_status(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    int data_size = 0;
+    uint8_t *tag_data_buffer = NULL;
 
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
 
     /* write is done in one way or another. */
     tag->write_in_progress = 0;
 
-    if(rc == PLCTAG_STATUS_OK) {
-        /* copy the data into the tag. */
-        uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
-        uint8_t *data_end = tag->req->data + (tag->req->request_size);
+    data_size = tag->req->request_size;
 
-        if((intptr_t)data_end < (intptr_t)data_start) {
-            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
-            omron_tag_abort(tag);
-            return PLCTAG_ERR_TOO_SMALL;
-        }
+    if(data_size <= 0) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response carries no CIP data!");
+        omron_tag_abort(tag);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
 
-        int data_size = (int)(unsigned int)(data_end - data_start);
-        uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
+    /* hand the whole CIP response back to the caller. */
+    tag_data_buffer = mem_realloc(tag->data, data_size);
 
-        if(tag_data_buffer) {
-            tag->data = tag_data_buffer;
-            tag->size = data_size;
+    if(tag_data_buffer) {
+        tag->data = tag_data_buffer;
+        tag->size = data_size;
 
-            mem_copy(tag->data, data_start, data_size);
-        } else {
-            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
-            rc = PLCTAG_ERR_NO_MEM;
-        }
+        mem_copy(tag->data, tag->req->data, data_size);
     } else {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Write failed!");
-
-        tag->offset = 0;
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
+        rc = PLCTAG_ERR_NO_MEM;
     }
 
     /* clean up the request. */
@@ -267,72 +249,32 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
 
 
 /*
- * raw_tag_check_write_status_unconnected
- *
- * This routine must be called with the tag mutex locked.  It checks the current
- * status of a write operation.  If the write is done, it triggers the clean up.
+ * The caller supplies the entire CIP request in the tag's data buffer, so the request is
+ * that buffer verbatim and the connection adds the EIP and CPF framing.  That framing was
+ * the only thing that ever differed between the connected and unconnected forms of this
+ * function.
  */
 
-static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
-    eip_cip_uc_resp *cip_resp;
+int raw_tag_build_write_request(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    omron_request_p req = NULL;
+    int payload_size = tag->size;
+    int max_payload = 0;
 
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
 
-    /* the request reference is valid. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    /* write is done in one way or another. */
-    tag->write_in_progress = 0;
-
-    if(rc == PLCTAG_STATUS_OK) {
-        /* copy the data into the tag. */
-        uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
-        uint8_t *data_end = tag->req->data + tag->req->request_size;
-
-        if((intptr_t)data_end < (intptr_t)data_start) {
-            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
-            omron_tag_abort(tag);
-            return PLCTAG_ERR_TOO_SMALL;
-        }
-
-        int data_size = (int)(unsigned int)(data_end - data_start);
-        uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
-
-        if(tag_data_buffer) {
-            tag->data = tag_data_buffer;
-            tag->size = data_size;
-
-            mem_copy(tag->data, data_start, data_size);
-        } else {
-            pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
-            rc = PLCTAG_ERR_NO_MEM;
-        }
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Write failed!");
-
-        tag->offset = 0;
+    if(payload_size <= 0) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Raw tag has no CIP request to send!");
+        return PLCTAG_ERR_NO_DATA;
     }
 
-    /* clean up the request. */
-    omron_tag_abort(tag);
+    max_payload = cip_conn_max_cip_payload(tag->session);
 
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-
-int raw_tag_build_write_request_connected(omron_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_req *cip = NULL;
-    uint8_t *data = NULL;
-    omron_request_p req = NULL;
-    size_t required_space = 0;
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
+    if(payload_size > max_payload) {
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
+               "Request of %d bytes exceeds the %d bytes this connection can carry!", payload_size, max_payload);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &req);
@@ -341,192 +283,16 @@ int raw_tag_build_write_request_connected(omron_tag_p tag) {
         return rc;
     }
 
-    /* how much space do we need? */
-    required_space = (size_t)tag->size + sizeof(*cip);
+    mem_copy(req->data, tag->data, payload_size);
 
-    if(required_space > (size_t)req->request_capacity) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
-               "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, req->request_capacity);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_co_req);
-
-    /*
-     * set up the embedded CIP request packet.  The user/client needs
-     * to set up the entire CIP request.   We just copy it here.
-     */
-
-    /* copy the tag data into the request */
-    mem_copy(data, tag->data, tag->size);
-    data += tag->size;
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(OMRON_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(OMRON_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);                /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(OMRON_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
-
-    /* check the payload against what the connection has left before committing the request */
-    int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
+    /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
+
     /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
+    rc = cip_submit_payload(tag->session, req, payload_size, tag->allow_packing);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int raw_tag_build_write_request_unconnected(omron_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_req *cip = NULL;
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    uint8_t *embed_end = NULL;
-    omron_request_p req = NULL;
-    size_t required_space = 0;
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
-
-    /* how much space do we need? */
-    required_space = (size_t)tag->size + sizeof(eip_cip_uc_req) + (size_t)tag->session->conn_path_size;
-
-    if(required_space > (size_t)req->request_capacity) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
-               "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, req->request_capacity);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    cip = (eip_cip_uc_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_uc_req);
-
-    embed_start = data;
-
-    /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * data type to write
-     * uint16_t # of elements to write
-     * data to write
-     */
-
-    /*
-     * set up the embedded CIP request packet.  The user/client needs
-     * to set up the entire CIP request.   We just copy it here.
-     */
-
-    /* copy the tag data into the request */
-    mem_copy(data, tag->data, tag->size);
-    data += tag->size;
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* mark the end of the embedded packet */
-    embed_end = data;
-
-    /*
-     * after the embedded packet, we need to tell the message router
-     * how to get to the target device.
-     */
-
-    /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
-    data++;
-    *data = 0;
-    data++; /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* encap fields */
-    cip->encap_command = h2le16(OMRON_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);                /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
-
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = OMRON_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                             /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                            /* class */
-    cip->cm_req_path[1] = 0x06;                            /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                            /* instance */
-    cip->cm_req_path[3] = 0x01;                            /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = OMRON_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = OMRON_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
-
-    /* check the payload against what the connection has left before committing the request */
-    int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    tag->size = 0;
-    /* hand the finished request to the connection. */
-    rc = cip_submit_request(tag->session, req, (int)(data - (req->data)), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
+               plc_tag_decode_error(rc));
         return rc;
     }
 

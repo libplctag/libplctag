@@ -712,9 +712,9 @@ def build_manifest() -> Manifest:
     # layer ever sees it; short_cip is connected-only, so it reaches the read response instead.
     corrupt_test(sec, "AB ForwardOpen reply too short", "short_cpf", egw, ab_corrupt_tag,
                  r"Forward Open response of \d+ bytes is too short", plc_args=ab_corrupt_args)
-    # The AB CIP tags carry only the CIP message now, so this length check sits in the transport
-    # (validate_response_cpf) rather than in ab_common.c, which no longer sees the framing.  The
-    # Omron copy below still hits the tag-layer check, hence the different wording there.
+    # The CIP tags carry only the CIP message now, so this length check sits in the transport
+    # (validate_response_cpf) rather than in ab_common.c / omron_common.c, neither of which sees
+    # the framing any more.  The Omron copy of this test reads the same for the same reason.
     corrupt_test(sec, "AB connected response too short for a CIP reply", "short_cip", egw, ab_corrupt_tag,
                  r"Connected response of \d+ bytes is too short for a CIP response", plc_args=ab_corrupt_args)
     corrupt_test(sec, "AB wrong EIP command in reply", "eip_cmd", egw, ab_corrupt_tag,
@@ -902,7 +902,7 @@ def build_manifest() -> Manifest:
     corrupt_test(sec, "Omron ForwardOpen reply too short", "short_cpf", ogw, omron_corrupt_tag,
                  r"Forward Open response of \d+ bytes is too short", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron connected response too short for a CIP reply", "short_cip", ogw, omron_corrupt_tag,
-                 r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=omron_corrupt_args)
+                 r"Connected response of \d+ bytes is too short for a CIP response", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong EIP command in reply", "eip_cmd", ogw, omron_corrupt_tag,
                  r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong EIP session handle", "session", ogw, omron_corrupt_tag,

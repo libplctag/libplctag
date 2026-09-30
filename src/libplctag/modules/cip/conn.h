@@ -56,8 +56,15 @@
 #include <utils/vector.h>
 
 
-/* bytes of encap header and CPF connected header ahead of the CIP payload */
-#define EIP_CIP_PREFIX_SIZE (44)
+/*
+ * The most framing the transport ever puts around a CIP message: the unconnected form, which
+ * is the largest, plus a route path.  conn_path_size is a uint8_t, so 255 bounds it, and the
+ * two extra bytes are the path's own size and pad bytes.
+ *
+ * Only the connection's assembled-packet buffer needs this.  A request holds its CIP message
+ * alone and is sized from the payload.
+ */
+#define CIP_MAX_FRAMING_SIZE ((int)sizeof(eip_cip_uc_req) + 2 + 255)
 
 /* connection retry backoff */
 #define RETRY_WAIT_INITIAL_MS (100)
@@ -345,11 +352,14 @@ struct cip_request_t {
     int first_read;
 
     /*
-     * When true, data holds only the CIP message and the transport adds the EIP
-     * encapsulation and CPF framing on the way out and strips it on the way back.
-     * When false, the builder wrote the whole framed packet itself.
+     * A request holds only the CIP message; the transport adds the EIP encapsulation and CPF
+     * framing on the way out and strips it on the way back.
+     *
+     * True when that message is addressed to the device at the gateway itself rather than
+     * routed onward, so the CPF carries it directly with no Unconnected Send wrapper and no
+     * route path.  PCCC and the Identity object are addressed this way.
      */
-    bool payload_only;
+    bool unrouted;
 
     uint8_t *data;
 };
@@ -427,6 +437,13 @@ extern int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_si
  * request and returns non-OK if the payload does not fit or cannot be queued.
  */
 extern int cip_submit_payload(cip_conn_p conn, cip_request_p req, int payload_size, bool allow_packing);
+
+/*
+ * Submit a payload-only request addressed to the device at the gateway rather than routed
+ * onward -- no Unconnected Send wrapper and no route path.  Never packed: the services that
+ * use this (PCCC, Identity) are single-request by nature.
+ */
+extern int cip_submit_unrouted_payload(cip_conn_p conn, cip_request_p req, int payload_size);
 extern int64_t calc_retry_time(unsigned int retry_count);
 extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
 extern int session_register(cip_conn_p conn);
