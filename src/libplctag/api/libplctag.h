@@ -322,9 +322,15 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
  * call this function before unloading the library or terminating. Most OSes cleanly
  * recover all system resources when a process terminates, so this may not be necessary.
  *
- * @warning THIS IS NOT THREAD SAFE! Do not call this if multiple threads are running
- *          against the library. Close all tags first with plc_tag_destroy() and ensure
- *          that nothing can call any library functions until this function returns.
+ * This function is safe to call at any time, including concurrently with other library
+ * calls and concurrently with itself.  Closing the library is atomic: exactly one caller
+ * performs the shutdown and any other returns immediately.  A library call racing it
+ * either completes normally or returns PLCTAG_ERR_NOT_FOUND.  It may block for a short
+ * time while in-flight operations are aborted and the tickler thread is joined.
+ *
+ * @note A plc_tag_create() racing this function either completes normally, in which case
+ *       its tag is destroyed here like any other, or fails with PLCTAG_ERR_NOT_ALLOWED.
+ *       No tag outlives shutdown either way.  See test_create_shutdown_race.
  *
  * @note Normally you do not need to call this function. This is only for certain
  *       wrappers or operating environments that prevent normal exit handlers from working.
@@ -394,9 +400,17 @@ typedef enum {
  * @warning When the callback is called with PLCTAG_EVENT_DESTROYED, do not call
  *          any tag functions as they are not guaranteed to work and may hang or fail.
  *
- * @param tag_id The tag ID handle returned by plc_tag_create().
+ * @note The callback stops being called when it is removed, by either
+ *       plc_tag_unregister_callback() or plc_tag_destroy().  Both guarantee, on returning
+ *       PLCTAG_STATUS_OK, that the callback will not be called again and that any callback
+ *       already running on another thread has returned.  See those functions.
+ *
+ * @param tag_id The tag ID handle returned by plc_tag_create() or plc_tag_create_ex().
  * @param tag_callback_func Callback function pointer.
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_DUPLICATE if a callback is already registered.
+ *         A tag created with plc_tag_create_ex() already has the callback passed there, so
+ *         registering another without plc_tag_unregister_callback() first is the duplicate
+ *         case.  A tag created with plc_tag_create() has no callback and cannot hit it.
  */
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
@@ -411,6 +425,10 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * @param tag_callback_func Callback function pointer.
  * @param userdata User-supplied data pointer passed to callback.
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_DUPLICATE if a callback is already registered.
+ *
+ * @note The library holds the userdata pointer until the callback is removed.  It is safe
+ *       to free it once plc_tag_unregister_callback() or plc_tag_destroy() has returned
+ *       PLCTAG_STATUS_OK, and not before.
  *
  * @see plc_tag_register_callback()
  */
@@ -429,6 +447,13 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id,
  *
  * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
  * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ *
+ * Callback lifetime:
+ *
+ * On returning PLCTAG_STATUS_OK, the callback will not be called again and the userdata
+ * pointer will not be used again.  A callback already running on another thread has
+ * returned before this function returns.  See plc_tag_destroy() for the same guarantee at
+ * tag teardown.
  */
 
 LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
@@ -518,6 +543,22 @@ LIB_EXPORT int plc_tag_abort(int32_t tag);
  *
  * This frees all resources associated with the tag.  Internally, it may result in closed
  * connections etc.   This calls through to a protocol-specific function.
+ *
+ * Callback lifetime:
+ *
+ * On returning PLCTAG_STATUS_OK, any callback registered with plc_tag_register_callback()
+ * or plc_tag_register_callback_ex() will not be called again, and the userdata pointer
+ * will not be used again.  A callback already running on another thread has returned
+ * before this function returns.  Memory or a pinned object handle used by the callback can
+ * therefore be freed once this function has returned OK.
+ *
+ * The callback IS called during this function: PLCTAG_EVENT_DESTROYED is delivered on the
+ * calling thread before it returns.  Do not free anything the callback needs before
+ * calling this function.
+ *
+ * No other return value carries this guarantee.  PLCTAG_ERR_NOT_FOUND in particular is
+ * returned without touching the callback when the library is shutting down, and
+ * plc_tag_shutdown() may not have reached this tag yet.
  *
  * This is a function provided by the underlying protocol implementation.
  */

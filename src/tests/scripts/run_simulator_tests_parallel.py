@@ -300,7 +300,8 @@ def kill_stray_servers() -> None:
 
 
 REQUIRED_EXECUTABLES = [
-    "ab_server", "modbus_server", "list_tags_logix", "get_identity", "string_non_standard_udt", "string_standard",
+    "ab_server", "modbus_server", "list_tags_logix", "get_identity", "test_create_shutdown_race",
+    "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
@@ -752,6 +753,11 @@ def build_manifest() -> Manifest:
     # ERR_WAIT needs a port nothing is listening on; async/sync manage their
     # own ab_server internally (they take the ab_server path + port as argv).
     sec = m.section("standalone")
+    # Races plc_tag_create() against plc_tag_shutdown().  Needs no server: the creates are
+    # meant to fail to connect, and what is counted is whether every tag created during the
+    # shutdown got its DESTROYED event.
+    sec.test("create racing shutdown leaves no tag behind",
+              [exe("test_create_shutdown_race")], F, server=None, ports_needed=0)
     sec.test("@connection tag ERR_WAIT on unreachable host (no server running)",
               [exe("test_connection_tag"),
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",

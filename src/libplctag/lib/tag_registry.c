@@ -58,6 +58,20 @@ struct tag_registry_t {
     mutex_p tag_lookup_mutex;
     cond_p tag_tickler_wait;
     thread_p tag_tickler_thread;
+
+    /*
+     * Set under tag_lookup_mutex by tag_registry_destroy_all_tags() before it starts
+     * sweeping, and checked by add_tag_lookup() under the same mutex.  Closing the gate in
+     * tag_registry_close() is not enough on its own: a create that passed the gate before
+     * it closed is still running and will publish its tag when it finishes, and if that
+     * lands after the sweep has already walked that bucket the tag is never destroyed.
+     *
+     * Serialising both on this mutex leaves only two orderings, and both are safe.  An
+     * insert that takes the mutex first completes before the flag is set, so the tag is in
+     * the table before iteration begins and the sweep finds it.  An insert that takes the
+     * mutex afterwards sees the flag and is refused, so the tag is never published at all.
+     */
+    bool shutting_down;
 };
 
 static THREAD_LOCAL vector_p active_tags = NULL;
@@ -125,6 +139,17 @@ int add_tag_lookup(plc_tag_p tag) {
 
     critical_block(tag->instance->tag_lookup_mutex) {
         int attempts = 0;
+
+        /*
+         * The library is being torn down and the tag table has already been swept, so
+         * publishing here would leave a tag that nothing will ever destroy.  See the
+         * comment on tag_registry_t.shutting_down.
+         */
+        if(tag->instance->shutting_down) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, refusing to register the tag.");
+            rc = PLCTAG_ERR_NOT_ALLOWED;
+            break;
+        }
 
         /* only get this when we hold the mutex. */
         new_id = next_tag_id;
@@ -303,6 +328,9 @@ int tag_registry_init(void) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to allocate library instance!");
         return PLCTAG_ERR_NO_MEM;
     }
+
+    /* rc_alloc() does not promise zeroed memory, so do not rely on it for the gate. */
+    inst->shutting_down = false;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable.");
     if((inst->tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
@@ -543,7 +571,14 @@ void tag_registry_destroy_all_tags(tag_registry_p registry) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Closing all tags.");
 
-    critical_block(registry->tag_lookup_mutex) { tag_table_entries = hashtable_capacity(registry->tags); }
+    /*
+     * Shut the door before walking the table, so no create still in flight can publish a
+     * tag into a bucket this sweep has already passed.
+     */
+    critical_block(registry->tag_lookup_mutex) {
+        registry->shutting_down = true;
+        tag_table_entries = hashtable_capacity(registry->tags);
+    }
 
     for(int i = 0; i < tag_table_entries; i++) {
         plc_tag_p tag = NULL;
