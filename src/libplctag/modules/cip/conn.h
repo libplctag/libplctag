@@ -189,8 +189,6 @@ typedef struct {
 #define CIP_EIP_CONN_PARAM_EX ((uint32_t)0x42000000)
 #define CIP_EIP_PLC5_PARAM ((uint16_t)0x4302)
 #define CIP_EIP_RPI (1000000) /* in microseconds */
-#define CIP_EIP_SECS_PER_TICK (0x0A)
-#define CIP_EIP_TIMEOUT_TICKS (0x0E)
 #define CIP_EIP_TIMEOUT_MULTIPLIER (0x03)
 #define CIP_EIP_TRANSPORT_CLASS_T3 ((uint8_t)0xA3)
 #define CIP_EIP_VENDOR_ID (0xF33D)      /* tres 1337 */

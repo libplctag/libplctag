@@ -565,6 +565,38 @@ int recv_eip_response(cip_conn_p conn, int timeout) {
 }
 
 
+/*
+ * Encode a route timeout as the priority/tick and tick-count pair an Unconnected Send and a
+ * Forward Open carry.
+ *
+ * The low nibble of the tick byte gives the tick size as 2^n milliseconds and the count byte
+ * says how many, so the pair expresses timeout_ms as tick * count.  Pick the smallest tick
+ * whose 255-count maximum still reaches the timeout, then round the count up so the encoded
+ * value is never shorter than asked for.
+ *
+ * Callers pass CIP_EIP_CONN_TIMEOUT_MS, so an unconnected request gives the route the same
+ * budget a connected one gives the connection -- RPI x 4 x 2^multiplier, 32 seconds as
+ * configured here, which encodes exactly as 2^7 x 250.  The two messaging modes should not
+ * disagree about how long the far end has to answer.
+ *
+ * This replaces a hardcoded 0x0A/0x0E, which is 1024 ms x 14, about 14.3 seconds -- neither
+ * the connection timeout nor anything else in the library.
+ */
+static void cip_encode_route_timeout(int timeout_ms, uint8_t *secs_per_tick, uint8_t *timeout_ticks) {
+    uint8_t tick_exponent = 0;
+
+    if(timeout_ms < 1) { timeout_ms = 1; }
+
+    /* 2^tick_exponent milliseconds per tick, at most 255 ticks. */
+    while(tick_exponent < 15 && ((int64_t)1 << tick_exponent) * 255 < (int64_t)timeout_ms) { tick_exponent++; }
+
+    *secs_per_tick = tick_exponent;
+    *timeout_ticks = (uint8_t)(((int64_t)timeout_ms + ((int64_t)1 << tick_exponent) - 1) >> tick_exponent);
+
+    if(*timeout_ticks == 0) { *timeout_ticks = 1; }
+}
+
+
 int send_extended_forward_open_request(cip_conn_p conn) {
     eip_forward_open_request_ex_t *fo = NULL;
     uint8_t *data;
@@ -610,8 +642,7 @@ int send_extended_forward_open_request(cip_conn_p conn) {
     fo->cm_req_path[3] = 0x01;                        /* instance 1 */
 
     /* Forward Open Params */
-    fo->secs_per_tick = CIP_EIP_SECS_PER_TICK; /* seconds per tick, no used? */
-    fo->timeout_ticks = CIP_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    cip_encode_route_timeout(CIP_EIP_CONN_TIMEOUT_MS, &fo->secs_per_tick, &fo->timeout_ticks);
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(conn->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
@@ -685,8 +716,7 @@ int send_old_forward_open_request(cip_conn_p conn) {
     fo->cm_req_path[3] = 0x01;                     /* instance 1 */
 
     /* Forward Open Params */
-    fo->secs_per_tick = CIP_EIP_SECS_PER_TICK; /* seconds per tick, no used? */
-    fo->timeout_ticks = CIP_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    cip_encode_route_timeout(CIP_EIP_CONN_TIMEOUT_MS, &fo->secs_per_tick, &fo->timeout_ticks);
     fo->orig_to_targ_conn_id = h2le32(0);     /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(conn->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
@@ -809,8 +839,7 @@ int send_forward_close_req(cip_conn_p conn) {
     fc->cm_req_path[3] = 0x01;                      /* instance 1 */
 
     /* Forward Open Params */
-    fc->secs_per_tick = CIP_EIP_SECS_PER_TICK;                     /* seconds per tick, no used? */
-    fc->timeout_ticks = CIP_EIP_TIMEOUT_TICKS;                     /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    cip_encode_route_timeout(CIP_EIP_CONN_TIMEOUT_MS, &fc->secs_per_tick, &fc->timeout_ticks);
     fc->conn_serial_number = h2le16(conn->conn_serial_number); /* our connection SEQUENCE number. */
     fc->orig_vendor_id = h2le16(CIP_EIP_VENDOR_ID);                /* our unique :-) vendor ID */
     fc->orig_serial_number = h2le32(CIP_EIP_VENDOR_SN);            /* our serial number. */
@@ -1161,7 +1190,14 @@ static int write_request_framing(cip_conn_p conn, int payload_size, bool unroute
         eip_cip_co_req *cip = (eip_cip_co_req *)(conn->data);
 
         cip->encap_command = h2le16(CIP_EIP_CONNECTED_SEND);
-        cip->router_timeout = h2le16(1);
+
+        /*
+         * Zero on a connected send.  The field is the timeout a routing device applies while
+         * it forwards a request, and a connected send is not forwarded -- it rides a
+         * connection whose own timeout already bounds it.  This was 1, which hardware
+         * tolerates because nothing consumes the field on this path.
+         */
+        cip->router_timeout = h2le16(0);
 
         cip->cpf_item_count = h2le16(2);
         cip->cpf_cai_item_type = h2le16(CIP_EIP_ITEM_CAI);
@@ -1199,8 +1235,8 @@ static int write_request_framing(cip_conn_p conn, int payload_size, bool unroute
         cip->cm_req_path[2] = 0x24; /* instance */
         cip->cm_req_path[3] = 0x01; /* instance 1 */
 
-        cip->secs_per_tick = CIP_EIP_SECS_PER_TICK;
-        cip->timeout_ticks = CIP_EIP_TIMEOUT_TICKS;
+        /* the route timeout should match how long this end is actually willing to wait. */
+        cip_encode_route_timeout(CIP_EIP_CONN_TIMEOUT_MS, &cip->secs_per_tick, &cip->timeout_ticks);
 
         cip->uc_cmd_length = h2le16((uint16_t)payload_size);
     }

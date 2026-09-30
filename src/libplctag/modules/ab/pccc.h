@@ -108,8 +108,8 @@ START_PACK typedef struct {
     uint16_le pccc_seq_num;
 } END_PACK cip_pccc_full_resp;
 
-_Static_assert(sizeof(cip_pccc_full_resp) == sizeof(pccc_resp) - 40,
-               "cip_pccc_full_resp does not match pccc_resp less its framing");
+/* four byte CIP reply header, seven bytes of PCCC matching info, four byte PCCC command. */
+_Static_assert(sizeof(cip_pccc_full_resp) == 15, "cip_pccc_full_resp wire size changed");
 
 
 /* PCCC over DH+ */

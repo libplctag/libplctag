@@ -49,6 +49,42 @@
  */
 
 
+/*
+ * The EtherNet/IP encapsulation header, the interface handle and router timeout that follow
+ * it, and the unconnected Common Packet Format items.  Every framed message repeats some run
+ * of these, so they are written once here and pasted in by name.
+ *
+ * These are field lists rather than nested structs on purpose: a nested struct would change
+ * how the fields are spelled at every use and raises a question about how packing applies
+ * through it, while a macro cannot change the layout at all.  The _Static_assert block at the
+ * end of this file is what proves that.  It is the same idiom CIP_CONN_BASE_STRUCT uses in
+ * conn.h.
+ */
+
+/* clang-format off */
+#define CIP_EIP_ENCAP_FIELDS                                                            \
+    uint16_le encap_command;        /* the EIP command */                               \
+    uint16_le encap_length;         /* packet size in bytes, less this 24-byte header */ \
+    uint32_le encap_session_handle; /* from session registration */                     \
+    uint32_le encap_status;         /* always sent as zero */                           \
+    uint64_le encap_sender_context; /* echoed back, so a reply can be matched to its request */ \
+    uint32_le encap_options         /* reserved, zero */
+
+/* Addressed to the CIP object interface, which for everything here is interface zero. */
+#define CIP_EIP_INTERFACE_FIELDS                                                        \
+    uint32_le interface_handle; /* ALWAYS 0 */                                          \
+    uint16_le router_timeout    /* in seconds */
+
+/* CPF carrying a null address item and an unconnected data item. */
+#define CIP_CPF_UNCONNECTED_FIELDS                                                      \
+    uint16_le cpf_item_count;      /* ALWAYS 2 */                                       \
+    uint16_le cpf_nai_item_type;   /* ALWAYS 0, null address item */                    \
+    uint16_le cpf_nai_item_length; /* ALWAYS 0 */                                       \
+    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2, unconnected data item */           \
+    uint16_le cpf_udi_item_length  /* length of everything after this field */
+/* clang-format on */
+
+
 START_PACK typedef struct {
     uint8_t reply_service;    /* 0x?? CIP reply */
     uint8_t reserved;         /* 0x00 in reply */
@@ -77,26 +113,12 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    uint16_le encap_command;
-    uint16_le encap_length;
-    uint32_le encap_session_handle;
-    uint32_le encap_status;
-    uint64_le encap_sender_context;
-    uint32_le encap_options;
+    CIP_EIP_ENCAP_FIELDS;
 } END_PACK eip_encap;
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x0065 Register Session*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
     /* session registration request */
     uint16_le eip_version;
@@ -105,22 +127,9 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-} END_PACK cpf_unconnected_addr_item;
-
-
-START_PACK typedef struct {
     uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
     uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
 } END_PACK cpf_unconnected_data_item;
-
-
-START_PACK typedef struct {
-    uint16_le cpf_cai_item_type;   /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length; /* ALWAYS 4 */
-    uint32_le cpf_targ_conn_id;    /* the connection id from Forward Open */
-} END_PACK cpf_connected_addr_item;
 
 
 START_PACK typedef struct {
@@ -133,79 +142,20 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    uint16_le encap_command;        /* EIP command*/
-    uint16_le encap_length;         /* payload size in bytes */
-    uint32_le encap_session_handle; /* session handle */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 } END_PACK eip_cpf_uc_header;
 
 
 START_PACK typedef struct {
-    uint16_le encap_command;        /* EIP command*/
-    uint16_le encap_length;         /* payload size in bytes */
-    uint32_le encap_session_handle; /* session handle */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_cai_item_type;   /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length; /* ALWAYS 4 */
-    uint32_le cpf_targ_conn_id;    /* the connection id from Forward Open */
-    uint16_le cpf_cdi_item_type;   /* ALWAYS 0x00B1, Connected Data Item type */
-    uint16_le cpf_cdi_item_length; /* length in bytes of the rest of the packet */
-
-    /* Connection sequence number */
-    uint16_le cpf_conn_seq_num; /* connection sequence ID,*/
-} END_PACK eip_cpf_co_header;
-
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
-
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* CM Service Request - Connection Manager */
     uint8_t cm_service_code;  /* ALWAYS 0x54 Forward Open Request */
@@ -244,27 +194,11 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* CM Service Request - Connection Manager */
     uint8_t cm_service_code;  /* ALWAYS 0x5B Extended Forward Open Request */
@@ -303,27 +237,11 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;              /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* Forward Open Reply */
     uint8_t resp_service_code;      /* returned as 0xD4 or 0xDB */
@@ -344,27 +262,11 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* CM Service Request - Connection Manager */
     uint8_t cm_service_code;  /* ALWAYS 0x4E Forward Close Request */
@@ -384,27 +286,11 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds */
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* Forward Close Response */
     uint8_t resp_service_code;    /* returned as 0xCE */
@@ -421,141 +307,9 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;         /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;              /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, zero for Connected Sends! */
-
-    /* Common Packet Format - CPF Connected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_cai_item_type;   /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length; /* ALWAYS 2 ? */
-    uint32_le cpf_targ_conn_id;    /* the connection id from Forward Open */
-    uint16_le cpf_cdi_item_type;   /* ALWAYS 0x00B1, Connected Data Item type */
-    uint16_le cpf_cdi_item_length; /* length in bytes of the rest of the packet */
-
-    /* Connection sequence number */
-    uint16_le cpf_conn_seq_num; /* connection sequence ID, inc for each message */
-} END_PACK eip_cip_co_generic_response;
-
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;         /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;              /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, zero for Connected Sends! */
-
-    /* Common Packet Format - CPF Connected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_cai_item_type;   /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length; /* ALWAYS 2 ? */
-    uint32_le cpf_targ_conn_id;    /* the connection id from Forward Open */
-    uint16_le cpf_cdi_item_type;   /* ALWAYS 0x00B1, Connected Data Item type */
-    uint16_le cpf_cdi_item_length; /* length in bytes of the rest of the packet */
-
-    /* Connection sequence number */
-    uint16_le cpf_conn_seq_num; /* connection sequence ID, inc for each message */
-
-    /* PCCC Command Req Routing */
-    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
-    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
-    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
-    uint8_t request_id_size;        /* ALWAYS 7 */
-    uint16_le vendor_id;            /* Our CIP Vendor ID */
-    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
-
-    /* PCCC Command */
-    uint8_t pccc_command;         /* CMD read, write etc. */
-    uint8_t pccc_status;          /* STS 0x00 in request */
-    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
-    uint8_t pccc_function;        /* FNC sub-function of command */
-    uint16_le pccc_offset;        /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words requested */
-    // uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
-} END_PACK eip_pccc_req_old;
-
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;         /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;              /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, zero for Connected Sends! */
-
-    /* Common Packet Format - CPF Connected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_cai_item_type;   /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length; /* ALWAYS 2 ? */
-    uint32_le cpf_targ_conn_id;    /* the connection id from Forward Open */
-    uint16_le cpf_cdi_item_type;   /* ALWAYS 0x00B1, Connected Data Item type */
-    uint16_le cpf_cdi_item_length; /* length in bytes of the rest of the packet */
-
-    /* connection ID from request */
-    uint16_le cpf_conn_seq_num; /* connection sequence ID, inc for each message */
-
-    /* PCCC Reply */
-    uint8_t reply_service;  /* 0xCB Execute PCCC Reply */
-    uint8_t reserved;       /* 0x00 in reply */
-    uint8_t general_status; /* 0x00 for success */
-    uint8_t status_size;    /* number of 16-bit words of extra status, 0 if success */
-
-    /* PCCC Command Req Routing */
-    uint8_t request_id_size;        /* ALWAYS 7 */
-    uint16_le vendor_id;            /* Our CIP Vendor ID */
-    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
-
-    /* PCCC Command */
-    uint8_t pccc_command;   /* CMD read, write etc. */
-    uint8_t pccc_status;    /* STS 0x00 in request */
-    uint16_le pccc_seq_num; /* TNSW transaction/connection sequence number */
-    // uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
-} END_PACK eip_pccc_resp_old;
-
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;         /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;              /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, zero for Connected Sends! */
+    CIP_EIP_INTERFACE_FIELDS;
 
     /* Common Packet Format - CPF Connected */
     uint16_le cpf_item_count;      /* ALWAYS 2 */
@@ -576,20 +330,9 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;         /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;              /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, zero for Connected Sends! */
+    CIP_EIP_INTERFACE_FIELDS;
 
     /* Common Packet Format - CPF Connected */
     uint16_le cpf_item_count;      /* ALWAYS 2 */
@@ -614,27 +357,11 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, 5 or 10 seems to be good.*/
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* CM Service Request - Connection Manager */
     /* NOTE, we overlay the following if this is PCCC */
@@ -656,27 +383,11 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
+    CIP_EIP_ENCAP_FIELDS;
 
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, 5 or 10 seems to be good.*/
+    CIP_EIP_INTERFACE_FIELDS;
 
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
+    CIP_CPF_UNCONNECTED_FIELDS;
 
     /* CIP read/write response, embedded packet */
     uint8_t reply_service;    /*  */
@@ -686,144 +397,6 @@ START_PACK typedef struct {
 
 } END_PACK eip_cip_uc_resp;
 
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, 5 or 10 seems to be good.*/
-
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
-
-    /* PCCC Reply */
-    uint8_t reply_code;     /* 0xCB Execute PCCC Reply */
-    uint8_t reserved;       /* 0x00 in reply */
-    uint8_t general_status; /* 0x00 for success */
-    uint8_t status_size;    /* number of 16-bit words of extra status, 0 if success */
-
-    /* PCCC Command Req Routing */
-    uint8_t request_id_size;        /* ALWAYS 7 counting*/
-    uint16_le vendor_id;            /* Our CIP Vendor ID */
-    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
-
-    /* PCCC Command */
-    uint8_t pccc_command;   /* CMD read, write etc. */
-    uint8_t pccc_status;    /* STS 0x00 in request */
-    uint16_le pccc_seq_num; /* TNSW transaction/connection sequence number */
-    // uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC response. */
-} END_PACK pccc_resp;
-
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, 5 or 10 seems to be good.*/
-
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
-
-    /* CM Service Request - Connection Manager */
-    /* NOTE, we overlay the following if this is PCCC */
-    uint8_t cm_service_code;  /* ALWAYS 0x52 Unconnected Send */
-    uint8_t cm_req_path_size; /* ALWAYS 2, size in words of path, next field */
-    uint8_t cm_req_path[6];   /* ALWAYS 0x20,0x06,0x24,0x01 for CM, instance 1*/
-
-    /* Unconnected send */
-    uint8_t secs_per_tick; /* seconds per tick */
-    uint8_t timeout_ticks; /* timeout = src_secs_per_tick * src_timeout_ticks */
-
-    /* size ? */
-    uint16_le uc_cmd_length; /* length of embedded packet */
-
-    /* needed when talking to PLC5 over DH+ */
-    uint16_le dest_link;
-    uint16_le dest_node;
-    uint16_le src_link;
-    uint16_le src_node;
-
-    /* PCCC Command */
-    uint8_t pccc_command;         /* CMD read, write etc. */
-    uint8_t pccc_status;          /* STS 0x00 in request */
-    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
-    uint8_t pccc_function;        /* FNC sub-function of command */
-    uint16_le pccc_offset;        /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words requested */
-    // uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
-
-    /* IOI path to DHRIO */
-} END_PACK pccc_dhp_req;
-
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, 5 or 10 seems to be good.*/
-
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
-
-    /* PCCC Reply */
-    uint8_t reply_code;     /* 0xCB Execute PCCC Reply */
-    uint8_t reserved;       /* 0x00 in reply */
-    uint8_t general_status; /* 0x00 for success */
-    uint8_t status_size;    /* number of 16-bit words of extra status, 0 if success */
-
-    /* PCCC Command Req Routing */
-    uint8_t request_id_size;        /* ALWAYS 7 */
-    uint16_le vendor_id;            /* Our CIP Vendor ID */
-    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
-
-    /* PCCC Command */
-    uint8_t pccc_command;   /* CMD read, write etc. */
-    uint8_t pccc_status;    /* STS 0x00 in request */
-    uint16_le pccc_seq_num; /* TNSW transaction/connection sequence number */
-    // uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC response. */
-} END_PACK pccc_dhp_resp;
 
 /*
  * Wire-layout guards.  These structures are the on-the-wire format, so a change to
@@ -839,16 +412,10 @@ _Static_assert(sizeof(cip_multi_req_header) == 8, "cip_multi_req_header wire siz
 _Static_assert(offsetof(cip_multi_req_header, request_offsets) == 8, "cip_multi_req_header layout changed");
 _Static_assert(sizeof(cip_multi_resp_header) == 6, "cip_multi_resp_header wire size changed");
 _Static_assert(offsetof(cip_multi_resp_header, request_offsets) == 6, "cip_multi_resp_header layout changed");
-_Static_assert(sizeof(cpf_connected_addr_item) == 8, "cpf_connected_addr_item wire size changed");
-_Static_assert(offsetof(cpf_connected_addr_item, cpf_targ_conn_id) == 4, "cpf_connected_addr_item layout changed");
 _Static_assert(sizeof(cpf_connected_data_item) == 6, "cpf_connected_data_item wire size changed");
 _Static_assert(offsetof(cpf_connected_data_item, cpf_conn_seq_num) == 4, "cpf_connected_data_item layout changed");
-_Static_assert(sizeof(cpf_unconnected_addr_item) == 4, "cpf_unconnected_addr_item wire size changed");
-_Static_assert(offsetof(cpf_unconnected_addr_item, cpf_nai_item_length) == 2, "cpf_unconnected_addr_item layout changed");
 _Static_assert(sizeof(cpf_unconnected_data_item) == 4, "cpf_unconnected_data_item wire size changed");
 _Static_assert(offsetof(cpf_unconnected_data_item, cpf_udi_item_length) == 2, "cpf_unconnected_data_item layout changed");
-_Static_assert(sizeof(eip_cip_co_generic_response) == 46, "eip_cip_co_generic_response wire size changed");
-_Static_assert(offsetof(eip_cip_co_generic_response, cpf_conn_seq_num) == 44, "eip_cip_co_generic_response layout changed");
 _Static_assert(sizeof(eip_cip_co_req) == 46, "eip_cip_co_req wire size changed");
 _Static_assert(offsetof(eip_cip_co_req, cpf_conn_seq_num) == 44, "eip_cip_co_req layout changed");
 _Static_assert(sizeof(eip_cip_co_resp) == 50, "eip_cip_co_resp wire size changed");
@@ -857,8 +424,6 @@ _Static_assert(sizeof(eip_cip_uc_req) == 50, "eip_cip_uc_req wire size changed")
 _Static_assert(offsetof(eip_cip_uc_req, uc_cmd_length) == 48, "eip_cip_uc_req layout changed");
 _Static_assert(sizeof(eip_cip_uc_resp) == 44, "eip_cip_uc_resp wire size changed");
 _Static_assert(offsetof(eip_cip_uc_resp, num_status_words) == 43, "eip_cip_uc_resp layout changed");
-_Static_assert(sizeof(eip_cpf_co_header) == 46, "eip_cpf_co_header wire size changed");
-_Static_assert(offsetof(eip_cpf_co_header, cpf_conn_seq_num) == 44, "eip_cpf_co_header layout changed");
 _Static_assert(sizeof(eip_cpf_uc_header) == 40, "eip_cpf_uc_header wire size changed");
 _Static_assert(offsetof(eip_cpf_uc_header, cpf_udi_item_length) == 38, "eip_cpf_uc_header layout changed");
 _Static_assert(sizeof(eip_encap) == 24, "eip_encap wire size changed");
@@ -873,15 +438,5 @@ _Static_assert(sizeof(eip_forward_open_request_t) == 82, "eip_forward_open_reque
 _Static_assert(offsetof(eip_forward_open_request_t, path_size) == 81, "eip_forward_open_request_t layout changed");
 _Static_assert(sizeof(eip_forward_open_response_t) == 70, "eip_forward_open_response_t wire size changed");
 _Static_assert(offsetof(eip_forward_open_response_t, reserved2) == 69, "eip_forward_open_response_t layout changed");
-_Static_assert(sizeof(eip_pccc_req_old) == 68, "eip_pccc_req_old wire size changed");
-_Static_assert(offsetof(eip_pccc_req_old, pccc_transfer_size) == 66, "eip_pccc_req_old layout changed");
-_Static_assert(sizeof(eip_pccc_resp_old) == 61, "eip_pccc_resp_old wire size changed");
-_Static_assert(offsetof(eip_pccc_resp_old, pccc_seq_num) == 59, "eip_pccc_resp_old layout changed");
 _Static_assert(sizeof(eip_session_reg_req) == 28, "eip_session_reg_req wire size changed");
 _Static_assert(offsetof(eip_session_reg_req, option_flags) == 26, "eip_session_reg_req layout changed");
-_Static_assert(sizeof(pccc_dhp_req) == 69, "pccc_dhp_req wire size changed");
-_Static_assert(offsetof(pccc_dhp_req, pccc_transfer_size) == 67, "pccc_dhp_req layout changed");
-_Static_assert(sizeof(pccc_dhp_resp) == 55, "pccc_dhp_resp wire size changed");
-_Static_assert(offsetof(pccc_dhp_resp, pccc_seq_num) == 53, "pccc_dhp_resp layout changed");
-_Static_assert(sizeof(pccc_resp) == 55, "pccc_resp wire size changed");
-_Static_assert(offsetof(pccc_resp, pccc_seq_num) == 53, "pccc_resp layout changed");
