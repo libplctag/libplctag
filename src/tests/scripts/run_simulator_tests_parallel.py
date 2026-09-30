@@ -998,15 +998,22 @@ def build_manifest() -> Manifest:
     sec.test("B data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--debug=4"], F)
     sec.test("B bit data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=1", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0", "--write=42", "--debug=4"], F)
     sec.test("N bit data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=1", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=1", "--check=1", "--debug=4"], F)
+    # Clearing matters as much as setting: a mask that turns on too much still passes a
+    # write-1 check.  The SLC masked write carries a mask word then a data word, and getting
+    # that layout wrong was accepted here while a real MicroLogix rejected it.
+    sec.test("B bit data file Micrologix tag clear",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=0", "--check=0", "--debug=4"], F)
+    sec.test("N bit data file Micrologix tag clear",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=0", "--check=0", "--debug=4"], F)
     sec.test("L data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0", "--write=0,1,2,3", "--debug=4"], F)
     sec.test("L bit data file Micrologix tag read",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--check=0", "--debug=4"], F)
     sec.test("L bit data file Micrologix tag write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--write=1", "--debug=4"],
               F, expect_failure=True)  # this write should NOT succeed
@@ -1095,7 +1102,7 @@ def build_manifest() -> Manifest:
     sec.test("B data file PCCC-mapped Logix tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--debug=4"], F)
     sec.test("B bit data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag={lgx_pccc_tag}&name=B3:0/6", "--write=1", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag={lgx_pccc_tag}&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file PCCC-mapped Logix tag read/write",
               [exe("tag_rw2"), "--type=sint16", f"--tag={lgx_pccc_tag}&name=N7:0", "--write=42", "--debug=4"], F)
     sec.test("L data file PCCC-mapped Logix tag read/write",
@@ -1153,11 +1160,14 @@ def build_manifest() -> Manifest:
     sec.test("B data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0"], F)
     sec.test("B bit data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=1"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=1", "--check=1"], F)
+    # The PLC/5 read-modify-write: an AND mask and an OR mask, one element each.
+    sec.test("B bit data file PLC5 tag clear",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=0", "--check=0"], F)
     sec.test("N data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0"], F)
     sec.test("N bit data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1", "--check=1"], F)
     # These two are the reason the PLC/5 word-count fix matters: both files are wider than the
     # two bytes that B3 and N7 use, so both used to be rejected outright by the simulator.
     plc5_st_test = sec.test("ST string data file PLC5 tag read/write",
