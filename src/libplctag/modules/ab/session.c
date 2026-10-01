@@ -33,13 +33,15 @@
 
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_watch.h>
+#include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/cip/error_codes.h>
-#include <libplctag/lib/conn_watch.h>
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -102,21 +104,21 @@ static cip_conn_list_t conn_list = {0};
  */
 static const cip_conn_profile_t ab_conn_profiles[] = {
     /*                                       capacity                  fo_size                    fo_ex_size                   old_fo  min payload            dh+    unconn */
-    {AB_PLC_PLC5,     "PLC/5",               MAX_CIP_PLC5_MSG_SIZE,    MAX_CIP_PLC5_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
-    {AB_PLC_SLC,      "SLC 500",             MAX_CIP_SLC_MSG_SIZE,     MAX_CIP_SLC_MSG_SIZE,      0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
-    {AB_PLC_MLGX,     "MicroLogix",          MAX_CIP_MLGX_MSG_SIZE,    MAX_CIP_MLGX_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
-    {AB_PLC_LGX_PCCC, "*Logix PCCC",         MAX_CIP_LGX_PCCC_MSG_SIZE, MAX_CIP_LGX_PCCC_MSG_SIZE, 0,                          true,   MIN_PAYLOAD_SIZE_PCCC, false, false},
-    {AB_PLC_LGX,      "*Logix",              MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false, false},
-    {AB_PLC_MICRO800, "Micro800",            MAX_CIP_MICRO800_MSG_SIZE_EX, MAX_CIP_MICRO800_MSG_SIZE, MAX_CIP_MICRO800_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false, false},
+    {CIP_PLC_PLC5,     "PLC/5",               MAX_CIP_PLC5_MSG_SIZE,    MAX_CIP_PLC5_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
+    {CIP_PLC_SLC,      "SLC 500",             MAX_CIP_SLC_MSG_SIZE,     MAX_CIP_SLC_MSG_SIZE,      0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
+    {CIP_PLC_MLGX,     "MicroLogix",          MAX_CIP_MLGX_MSG_SIZE,    MAX_CIP_MLGX_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
+    {CIP_PLC_LGX_PCCC, "*Logix PCCC",         MAX_CIP_LGX_PCCC_MSG_SIZE, MAX_CIP_LGX_PCCC_MSG_SIZE, 0,                          true,   MIN_PAYLOAD_SIZE_PCCC, false, false},
+    {CIP_PLC_LGX,      "*Logix",              MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false, false},
+    {CIP_PLC_MICRO800, "Micro800",            MAX_CIP_MICRO800_MSG_SIZE_EX, MAX_CIP_MICRO800_MSG_SIZE, MAX_CIP_MICRO800_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false, false},
 
     /* generic CIP is *Logix sizing, but stateless: it never uses connected messaging */
-    {AB_PLC_GENERIC,  "generic CIP device",  MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false, true},
+    {CIP_PLC_GENERIC,  "generic CIP device",  MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false, true},
 };
 
 
-static const cip_conn_profile_t *ab_conn_profile(ab_plc_type_t plc_type) {
+static const cip_conn_profile_t *ab_conn_profile(cip_plc_type_t plc_type) {
     for(size_t i = 0; i < (sizeof(ab_conn_profiles) / sizeof(ab_conn_profiles[0])); i++) {
-        if(ab_conn_profiles[i].plc_type == (int32_t)plc_type) { return &ab_conn_profiles[i]; }
+        if(ab_conn_profiles[i].plc_type == plc_type) { return &ab_conn_profiles[i]; }
     }
 
     return NULL;
@@ -127,7 +129,7 @@ int session_startup(void) { return session_list_init(&conn_list); }
 
 
 void session_teardown(void) { session_list_teardown(&conn_list, DEBUG_MODULE_AB_SESSION); }
-int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_session) {
+int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_session) {
     const cip_conn_profile_t *profile = ab_conn_profile(get_plc_type(attribs));
 
     if(!profile) {

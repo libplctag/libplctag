@@ -38,10 +38,10 @@
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/ab/eip_cip.h> /* for the Logix decode types. */
-#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
@@ -60,14 +60,14 @@
  ******************************************************************/
 
 /* identity tag functions */
-static int identity_tag_read_start(ab_tag_p tag);
-static int identity_tag_tickler(ab_tag_p tag);
-static int identity_tag_check_read_status_unconnected(ab_tag_p tag);
-static int identity_tag_build_read_request_unconnected(ab_tag_p tag);
+static int identity_tag_read_start(cip_tag_p tag);
+static int identity_tag_tickler(cip_tag_p tag);
+static int identity_tag_check_read_status_unconnected(cip_tag_p tag);
+static int identity_tag_build_read_request_unconnected(cip_tag_p tag);
 
 
 /* define the vtable for identity tag type. */
-static struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request,
+static struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)cip_tag_abort_request,
                                                   .read = (tag_vtable_func)identity_tag_read_start,
                                                   .status = (tag_vtable_func)ab_tag_status,
                                                   .tickler = (tag_vtable_func)identity_tag_tickler,
@@ -78,7 +78,7 @@ static struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)ab_t
                                                   .attribs = ab_attribs};
 
 
-int setup_identity_tag(ab_tag_p tag) {
+int setup_identity_tag(cip_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     /* set up identity tag */
@@ -99,7 +99,7 @@ int setup_identity_tag(ab_tag_p tag) {
 }
 
 
-int identity_tag_read_start(ab_tag_p tag) {
+int identity_tag_read_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -136,18 +136,18 @@ int identity_tag_read_start(ab_tag_p tag) {
 }
 
 
-int identity_tag_tickler(ab_tag_p tag) {
+int identity_tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->write_in_progress) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Write attempted on identity tag. Not supported!");
 
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         tag->write_complete = 1;
 
         return PLCTAG_ERR_UNSUPPORTED;
@@ -183,9 +183,9 @@ int identity_tag_tickler(ab_tag_p tag) {
  * gateway itself and the CPF carries it directly.  Both framings live in the transport now,
  * so all this has to do is say which.
  */
-int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
+int identity_tag_build_read_request_unconnected(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint8_t *data = NULL;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
@@ -244,7 +244,7 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
 }
 
 
-int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
+int identity_tag_check_read_status_unconnected(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *cip_response = tag->req->data;
     uint8_t *data_end = tag->req->data + tag->req->request_size;
@@ -263,7 +263,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
      */
     if((data_end - cip_response) < 4) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for a CIP reply!");
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -275,7 +275,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         if(cip_status != AB_CIP_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unconnected Send CIP status is not OK: 0x%02x",
                    cip_status);
-            ab_tag_abort_request(tag);
+            cip_tag_abort_request(tag);
             return PLCTAG_ERR_REMOTE_ERR;
         }
 
@@ -285,7 +285,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         if((data_end - cip_response) < 4) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Identity response is too short for the embedded CIP reply!");
-            ab_tag_abort_request(tag);
+            cip_tag_abort_request(tag);
             return PLCTAG_ERR_TOO_SMALL;
         }
 
@@ -296,7 +296,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "CIP response service unexpected: 0x%02x (expected 0x%02x)", reply_service,
                (unsigned int)(AB_CIP_GET_ATTRIBUTES_ALL | AB_EIP_CMD_CIP_OK));
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -304,7 +304,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
 
     if(cip_status != AB_CIP_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_status);
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -314,7 +314,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
 
     if(data_size <= 0) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response carries no data!");
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -332,7 +332,7 @@ int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
     }
 
     /* clean up the request */
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
 

@@ -129,7 +129,7 @@ struct modbus_plc_t {
     atomic_int32_t tag_count;
 
     /* connection status and event ring - what connection tags observe */
-    conn_watch_t watch;
+    conn_event_ring_t watch;
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
     int64_t disconnect_at_time_ms; /* Calculated deadline for disconnection based on inactivity timeout */
@@ -381,7 +381,6 @@ static int mb_wake_plc(plc_tag_p p_tag);
 /* data accessors */
 static uint16_t next_seq_id(uint16_t current);
 static struct tag_vtable_t modbus_vtable;
-
 
 
 /****** main entry point *******/
@@ -1613,7 +1612,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
          * Only one request is queued per tickle call because request_ready is a
          * single-entry buffer; pipelining happens across successive main-loop iterations.
          */
-        if(!atomic_get_bool(&plc->flags.request_ready) && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
+        if(!atomic_get_bool(&plc->flags.request_ready)
+           && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight) {
             for(int i = 0; i < active_count; i++) {
                 modbus_tag_p candidate = vector_get(plc->active_tags, i);
                 if(!candidate) { continue; }
@@ -1689,9 +1689,9 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
              * while we were outside the mutex.
              */
             if(atomic_get_bool(&plc->flags.response_ready) && response_tag->pending_transaction_id != 0) {
-                uint16_t resp_tid = (uint16_t)((plc->read_data_len >= 2)
-                                                  ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
-                                                  : 0);
+                uint16_t resp_tid =
+                    (uint16_t)((plc->read_data_len >= 2) ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) :
+                                                           0);
 
                 /* Did the tag get aborted before we cause it here? */
                 if(resp_tid == response_tag->pending_transaction_id) {
@@ -1748,9 +1748,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         mutex_lock(deferred_response_tag->api_mutex);
 
         if(atomic_get_bool(&plc->flags.response_ready) && deferred_response_tag->pending_transaction_id != 0) {
-            uint16_t resp_tid = (uint16_t)((plc->read_data_len >= 2)
-                                              ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8))
-                                              : 0);
+            uint16_t resp_tid =
+                (uint16_t)((plc->read_data_len >= 2) ? ((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0);
 
             if(resp_tid == deferred_response_tag->pending_transaction_id) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Deferred: processing response TID %u for tag %" PRId32 ".",
@@ -1773,7 +1772,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         } else {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0,
                    "Deferred response no longer valid for tag %" PRId32 " (response_ready=%d, pending_tid=%u); discarding.",
-                   deferred_response_tag->tag_id, atomic_get_bool(&plc->flags.response_ready), deferred_response_tag->pending_transaction_id);
+                   deferred_response_tag->tag_id, atomic_get_bool(&plc->flags.response_ready),
+                   deferred_response_tag->pending_transaction_id);
             if(atomic_get_bool(&plc->flags.response_ready)) {
                 atomic_set_bool(&plc->flags.response_ready, false);
                 plc->read_data_len = 0;
@@ -1793,8 +1793,8 @@ static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
      * to avoid spinning when all active tags have future op_times.
      */
     critical_block(plc->mutex) {
-        if(!atomic_get_bool(&plc->flags.response_ready) && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight
-           && has_due_request_pending) {
+        if(!atomic_get_bool(&plc->flags.response_ready)
+           && atomic_get_int32(&plc->pending_request_count) < plc->max_requests_in_flight && has_due_request_pending) {
             min_wait_time = 0;
         }
     }
@@ -3847,7 +3847,9 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
     critical_block(plc->mutex) {
         int32_t old_status = atomic_get_int32(&plc->watch.status);
         atomic_set_int32(&plc->watch.status, new_status);
-        if(old_status != new_status) { conn_watch_publish(&plc->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+        if(old_status != new_status) {
+            conn_watch_publish(&plc->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
+        }
     }
 }
 
@@ -3855,9 +3857,8 @@ static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
 static plc_tag_p mb_connection_tag_create(attr attribs,
                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                           void *userdata, plc_tag_p src_tag) {
-    connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_MB_CONNECTION,
-                                  .debug_module = DEBUG_MODULE_MB_CONNECTION,
-                                  .conn_rc = PLCTAG_STATUS_OK};
+    connection_tag_args_t args = {
+        .protocol_type = TAG_PROTOCOL_MB_CONNECTION, .debug_module = DEBUG_MODULE_MB_CONNECTION, .conn_rc = PLCTAG_STATUS_OK};
     modbus_plc_p plc = NULL;
 
     pdebug(DEBUG_MODULE_MB_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
@@ -3891,7 +3892,6 @@ static plc_tag_p mb_connection_tag_create(attr attribs,
 
     return connection_tag_create(attribs, &args, tag_callback_func, userdata);
 }
-
 
 
 /****** Library level functions. *******/

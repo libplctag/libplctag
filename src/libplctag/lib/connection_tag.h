@@ -55,12 +55,12 @@
 typedef struct {
     TAG_BASE_STRUCT;
 
-    void *conn;                 /* the connection object, held by refcount; NULL if creation failed */
-    conn_watch_t *watch;        /* &conn->watch */
-    int32_t last_conn_state;    /* last state delivered to the callback */
-    int32_t ring_read_idx;      /* last ring entry this tag has processed */
-    int32_t io_events;          /* 1 = report connection reads and writes, 0 = suppress */
-    bool first_tickler_run;     /* true until the first post-CREATED tickler */
+    void *conn;               /* the connection object, held by refcount; NULL if creation failed */
+    conn_event_ring_t *watch; /* &conn->watch */
+    int32_t last_conn_state;  /* last state delivered to the callback */
+    int32_t ring_read_idx;    /* last ring entry this tag has processed */
+    int32_t io_events;        /* 1 = report connection reads and writes, 0 = suppress */
+    bool first_tickler_run;   /* true until the first post-CREATED tickler */
     debug_module_t debug_module;
 } connection_tag_t;
 
@@ -72,11 +72,11 @@ typedef struct {
     tag_protocol_t protocol_type;
     debug_module_t debug_module;
 
-    void *conn;          /* rc-held connection object, or NULL if it could not be obtained */
-    conn_watch_t *watch; /* &conn->watch; unused when conn is NULL */
-    mutex_p conn_mutex;  /* the connection's own mutex; unused when conn is NULL */
-    bool conn_is_new;    /* true when this call created the connection rather than joining one */
-    int32_t conn_rc;     /* the failure that left conn NULL */
+    void *conn;               /* rc-held connection object, or NULL if it could not be obtained */
+    conn_event_ring_t *watch; /* &conn->watch; unused when conn is NULL */
+    mutex_p conn_mutex;       /* the connection's own mutex; unused when conn is NULL */
+    bool conn_is_new;         /* true when this call created the connection rather than joining one */
+    int32_t conn_rc;          /* the failure that left conn NULL */
 } connection_tag_args_t;
 
 

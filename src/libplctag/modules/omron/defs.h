@@ -199,18 +199,7 @@
 #define OMRON_EIP_ITEM_UDI ((uint16_t)0x00B2) /* Unconnected data item */
 
 
-/* Types of AB protocols */
-// #define OMRON_PLC_PLC         (1)
-// #define OMRON_PLC_MLGX        (2)
-// #define OMRON_PLC_LGX         (3)
-// #define OMRON_PLC_MICRO800     (4)
-// #define OMRON_PLC_LGX_PCCC    (5)
-
-typedef enum {
-    OMRON_PLC_NONE = 0,
-    OMRON_PLC_OMRON_NJNX = 7,
-    OMRON_PLC_TYPE_LAST,
-} omron_plc_type_t;
+/* Types of OMRON protocols: see cip_plc_type_t in modules/cip/tag.h. */
 
 
 /*********************************************************************

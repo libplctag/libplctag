@@ -37,7 +37,7 @@
  * error -- and it implements no fragmented read service, so there is no request that could ask
  * for the rest of one.  The client therefore treats any status but zero as an error.
  *
- * It used to accept 0x06 and try to continue, which it cannot do: omron_tag_abort_request()
+ * It used to accept 0x06 and try to continue, which it cannot do: cip_tag_abort_request()
  * zeroes tag->offset before the continuation runs, so the client re-read the same bytes into
  * the same place forever.  A PLC answering every read that way -- a hostile or MITM'd one,
  * since CIP has no authentication -- drove tens of thousands of round trips per second and a

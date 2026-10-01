@@ -33,14 +33,8 @@
 
 #pragma once
 
-#include <stdbool.h>
-
 #include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/omron/defs.h>
-#include <libplctag/modules/omron/omron_common.h>
-#include <utils/atomic_utils.h>
-#include <utils/rc.h>
-#include <utils/vector.h>
+#include <utils/attr.h>
 
 /* #define MAX_CONN_HOST    (128) */
 
@@ -64,13 +58,13 @@
 
 
 
-uint64_t session_get_new_seq_id_unsafe(omron_conn_p sess);
-uint64_t session_get_new_seq_id(omron_conn_p sess);
+uint64_t session_get_new_seq_id_unsafe(cip_conn_p sess);
+uint64_t session_get_new_seq_id(cip_conn_p sess);
 
 extern int conn_startup(void);
 extern void conn_teardown(void);
 
-extern int conn_find_or_create(omron_conn_p *conn, attr attribs, int *is_new_conn);
-extern int session_get_available_cip_payload_space(omron_conn_p conn);
-extern int session_create_request(omron_conn_p conn, int tag_id, omron_request_p *request);
-extern int session_add_request(omron_conn_p sess, omron_request_p req);
+extern int conn_find_or_create(cip_conn_p *conn, attr attribs, int *is_new_conn);
+extern int session_get_available_cip_payload_space(cip_conn_p conn);
+extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *request);
+extern int session_add_request(cip_conn_p sess, cip_request_p req);

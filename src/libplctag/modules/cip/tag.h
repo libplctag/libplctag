@@ -34,6 +34,8 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip/plc_type.h>
 #include <stdint.h>
 
 /*
@@ -45,9 +47,8 @@
  *
  * NOTE: expanding this into two family structs makes their layouts identical by
  * construction.  That is deliberate, but nothing may cast one family's tag to
- * another's -- the fields past this macro differ, and the pointee of `session`
- * differs.  ab_common.c used to rely on the layouts happening to match; that was
- * a bug, not an interface.
+ * another's -- the fields past this macro differ.  ab_common.c used to rely on
+ * the layouts happening to match; that was a bug, not an interface.
  */
 
 /* the longest encoded tag name, and the longest encoded type info, in bytes. */
@@ -84,11 +85,8 @@ typedef enum {
 /*
  * The state every CIP tag carries, whatever the family.
  *
- * Four things are deliberately NOT here because they are still family typed:
- *   plc_type  - until modules/cip owns family classification
- *   req       - until the operation engine replaces the per-request object
- *   session   - the pointee differs until the connection layer is shared
- *   the PCCC fields (file_type, req_pccc_seq_num), which belong to PCCC tags only
+ * One thing is deliberately NOT here: the PCCC fields (file_type,
+ * req_pccc_seq_num), which belong to PCCC tags only.
  */
 #define CIP_TAG_BASE_STRUCT                                                                \
     TAG_BASE_STRUCT;                                                                       \
@@ -133,4 +131,74 @@ typedef enum {
     int allow_packing;                                                                     \
                                                                                            \
     int read_in_progress;                                                                  \
-    int write_in_progress
+    int write_in_progress;                                                                 \
+                                                                                           \
+    /* how do we talk to this device? */                                                   \
+    cip_plc_type_t plc_type;                                                               \
+                                                                                           \
+    /* pointer back to the connection */                                                   \
+    cip_conn_p session;                                                                    \
+                                                                                           \
+    /* the in-flight request object */                                                     \
+    cip_request_p req
+
+
+/* The PCCC data file a tag addresses.  PCCC rides inside CIP, so this lives here. */
+typedef enum {
+    PCCC_FILE_UNKNOWN = 0x00, /* UNKNOWN! */
+    PCCC_FILE_ASCII = 0x8e,
+    PCCC_FILE_BCD = 0x8f,
+    PCCC_FILE_BIT = 0x85,
+    PCCC_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
+    PCCC_FILE_CONTROL = 0x88,
+    PCCC_FILE_COUNTER = 0x87,
+    PCCC_FILE_FLOAT = 0x8a,
+    PCCC_FILE_INPUT = 0x83,
+    PCCC_FILE_INT = 0x89,
+    PCCC_FILE_LONG_INT = 0x91,
+    PCCC_FILE_MESSAGE = 0x92,
+    PCCC_FILE_OUTPUT = 0x82,
+    PCCC_FILE_PID = 0x93,
+    PCCC_FILE_SFC = 0x00, /* UNKNOWN! */
+    PCCC_FILE_STATUS = 0x84,
+    PCCC_FILE_STRING = 0x8d,
+    PCCC_FILE_TIMER = 0x86
+} pccc_file_t;
+
+
+/*
+ * The one tag struct every CIP family uses.
+ *
+ * The PCCC members are only meaningful to PCCC tags; the few bytes they cost a
+ * Logix or OMRON tag are cheaper than a second struct that has to be kept in step.
+ */
+struct cip_tag_t {
+    CIP_TAG_BASE_STRUCT;
+
+    /* PCCC only: the data file this tag addresses. */
+    pccc_file_t file_type;
+
+    /*
+     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
+     * the same one, otherwise a late reply to a request that already timed out gets
+     * applied to whatever operation is in flight now.
+     */
+    uint16_t req_pccc_seq_num;
+};
+
+typedef struct cip_tag_t *cip_tag_p;
+
+
+/*
+ * Abort the request this tag has in flight, if any, and leave the tag idle.
+ * The _only form keeps tag->offset, so a fragmented transfer can resume; the other
+ * resets it, discarding the partial transfer.
+ */
+extern int cip_tag_abort_request_only(cip_tag_p tag);
+extern int cip_tag_abort_request(cip_tag_p tag);
+
+/* true when a status code is a failure rather than OK or PENDING. */
+#define rc_is_error(rc) ((rc) < PLCTAG_STATUS_OK)
+
+/* Collect the result of the tag's in-flight request; PENDING while it is still out. */
+extern int cip_check_request_status(cip_tag_p tag);

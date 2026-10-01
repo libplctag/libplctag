@@ -43,12 +43,11 @@
  *
  * NOTE: expanding this into two dialect structs makes their common prefix
  * identical by construction.  That is deliberate, but nothing may cast one
- * dialect's connection to another's -- the fields past this macro differ, and
- * so does the meaning of plc_type, which each dialect declares itself with its
- * own enum.
+ * dialect's connection to another's -- the fields past this macro differ.
  */
 
 #include <libplctag/lib/conn_watch.h>
+#include <libplctag/modules/cip/plc_type.h>
 #include <platform.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -73,9 +72,6 @@
 
 /* how long to block in one socket read or write before checking for shutdown */
 #define SOCKET_WAIT_TIMEOUT_MS (20)
-
-/* default timeout for a connection-level exchange such as Register or Forward Open */
-#define SESSION_DEFAULT_TIMEOUT (2000)
 
 
 /* EtherNet/IP encapsulation and Forward Open constants, common to every CIP dialect. */
@@ -111,6 +107,18 @@
  */
 #define CIP_EIP_CONN_TIMEOUT_MS ((CIP_EIP_RPI * 4 * (1 << CIP_EIP_TIMEOUT_MULTIPLIER)) / 1000)
 #define SESSION_DISCONNECT_TIMEOUT (CIP_EIP_CONN_TIMEOUT_MS - 1000)
+
+/*
+ * How long to wait for the answer to a connection-level exchange: Register Session,
+ * Forward Open, and the request path.
+ *
+ * The same budget we give the PLC.  CIP_EIP_CONN_TIMEOUT_MS is what goes on the wire as
+ * the Unconnected Send route timeout and what the connection is negotiated with, so
+ * waiting any less means giving up before the deadline we ourselves granted -- a slow but
+ * healthy PLC gets abandoned while it is still entitled to answer.  This was 2000 ms
+ * against a 32000 ms budget.
+ */
+#define SESSION_DEFAULT_TIMEOUT (CIP_EIP_CONN_TIMEOUT_MS)
 
 
 /* how long teardown waits for connections and then handler threads to finish */
@@ -158,8 +166,8 @@ typedef enum {
  * there is no dispatch to extend and no constructor to write.
  */
 typedef struct {
-    int32_t plc_type;  /* the dialect's own enum value, stored opaquely on the connection */
-    const char *name;  /* for logging only */
+    cip_plc_type_t plc_type; /* the PLC family this row describes */
+    const char *name; /* for logging only */
 
     int max_payload_capacity; /* sizes the connection's receive buffer */
     int fo_conn_size;         /* payload to ask for in a plain Forward Open */
@@ -191,8 +199,8 @@ typedef struct {
 #define CIP_EIP_RPI (1000000) /* in microseconds */
 #define CIP_EIP_TIMEOUT_MULTIPLIER (0x03)
 #define CIP_EIP_TRANSPORT_CLASS_T3 ((uint8_t)0xA3)
-#define CIP_EIP_VENDOR_ID (0xF33D)      /* tres 1337 */
-#define CIP_EIP_VENDOR_SN (0x21504345)  /* the string !PCE */
+#define CIP_EIP_VENDOR_ID (0xF33D)     /* tres 1337 */
+#define CIP_EIP_VENDOR_SN (0x21504345) /* the string !PCE */
 
 
 /*
@@ -218,91 +226,91 @@ typedef struct {
 } cip_conn_list_t;
 
 
-#define CIP_CONN_BASE_STRUCT                                                                        \
-    int on_list;                                                                                    \
-    cip_conn_list_t *owner_list; /* the module list this connection belongs to */                   \
-                                                                                                    \
-    /* gateway connection related info */                                                           \
-    char *host;                                                                                     \
-    int port;                                                                                       \
-    char *path;                                                                                     \
-    sock_p sock;                                                                                    \
-                                                                                                    \
-    /* connection variables. */                                                                     \
-    bool use_connected_msg;                                                                         \
-    bool only_use_old_forward_open;                                                                 \
-    int fo_conn_size;    /* old FO max connection size */                                           \
-    int fo_ex_conn_size; /* extended FO max connection size */                                      \
-    uint16_t max_payload_guess;                                                                     \
-    uint16_t max_payload_size;                                                                      \
-                                                                                                    \
-    uint32_t orig_connection_id;                                                                    \
-    uint32_t targ_connection_id;                                                                    \
-    uint16_t conn_seq_num;                                                                          \
-    uint16_t conn_serial_number;                                                                    \
-                                                                                                    \
-    uint8_t *conn_path;                                                                             \
-    uint8_t conn_path_size;                                                                         \
-    uint16_t dhp_dest;                                                                              \
-    int is_dhp;                                                                                     \
-                                                                                                    \
-    int connection_group_id;                                                                        \
-                                                                                                    \
-    /*                                                                                              \
-     * What the dialect's PLC family implies, derived by the dialect's constructor.                 \
-     * The shared code reads these rather than the dialect's own plc_type enum, so it never         \
-     * has to know which family this is -- see cip_encode_path()'s CIP_PLC_KIND_* for the same      \
-     * idea applied to path encoding.                                                               \
-     */                                                                                             \
-    uint16_t min_payload_size; /* smallest payload worth negotiating down to */                     \
-    bool dhp_capable;          /* family can bridge to DH+ */                                       \
-                                                                                                    \
-    /*                                                                                              \
-     * The dialect's own PLC family enum, stored opaquely.  Shared code must never                  \
-     * interpret it: the two dialects' enums are deliberately distinct types (see A2), and          \
-     * only the dialect that wrote this value may cast it back.  It is here so a tag created        \
-     * from an @connection tag can inherit the family from the connection.                          \
-     */                                                                                             \
-    int32_t plc_type;                                                                               \
-                                                                                                    \
-    /* EIP session handle, from RegisterSession */                                                  \
-    uint32_t session_handle;                                                                        \
-                                                                                                    \
-    /* sequence ID for requests */                                                                  \
-    uint64_t session_seq_id;                                                                        \
-                                                                                                    \
-    /* list of outstanding requests for this connection */                                          \
-    vector_p requests;                                                                              \
-                                                                                                    \
-    uint64_t resp_seq_id;                                                                           \
-                                                                                                    \
-    /*                                                                                              \
-     * What we last put on the wire.  The response has to be an answer to the request we            \
-     * actually sent, so these are snapshotted from the outgoing packet in send_eip_request()       \
-     * and checked against the incoming one in recv_eip_response().                                 \
-     */                                                                                             \
-    uint16_t req_encap_command;                                                                     \
-    uint64_t req_seq_id;                                                                            \
-    bool req_sent;                                                                                  \
-                                                                                                    \
-    /* data for receiving messages */                                                               \
-    uint32_t data_offset;                                                                           \
-    uint32_t data_capacity;                                                                         \
-    uint32_t data_size;                                                                             \
-    uint8_t *data;                                                                                  \
-    bool data_buffer_is_static;                                                                     \
-                                                                                                    \
-    uint64_t packet_count;                                                                          \
-                                                                                                    \
-    thread_p handler_thread;                                                                        \
-    atomic_int32_t terminating;                                                                     \
-    mutex_p session_mutex;                                                                          \
-    cond_p session_wait_cond;                                                                       \
-                                                                                                    \
-    /* connection status and event ring - what connection tags observe */                           \
-    conn_watch_t watch;                                                                             \
-                                                                                                    \
-    /* connection inactivity timeout - readable/writable by tags via atomics */                     \
+#define CIP_CONN_BASE_STRUCT                                                                   \
+    int on_list;                                                                               \
+    cip_conn_list_t *owner_list; /* the module list this connection belongs to */              \
+                                                                                               \
+    /* gateway connection related info */                                                      \
+    char *host;                                                                                \
+    int port;                                                                                  \
+    char *path;                                                                                \
+    sock_p sock;                                                                               \
+                                                                                               \
+    /* connection variables. */                                                                \
+    bool use_connected_msg;                                                                    \
+    bool only_use_old_forward_open;                                                            \
+    int fo_conn_size;    /* old FO max connection size */                                      \
+    int fo_ex_conn_size; /* extended FO max connection size */                                 \
+    uint16_t max_payload_guess;                                                                \
+    uint16_t max_payload_size;                                                                 \
+                                                                                               \
+    uint32_t orig_connection_id;                                                               \
+    uint32_t targ_connection_id;                                                               \
+    uint16_t conn_seq_num;                                                                     \
+    uint16_t conn_serial_number;                                                               \
+                                                                                               \
+    uint8_t *conn_path;                                                                        \
+    uint8_t conn_path_size;                                                                    \
+    uint16_t dhp_dest;                                                                         \
+    int is_dhp;                                                                                \
+                                                                                               \
+    int connection_group_id;                                                                   \
+                                                                                               \
+    /*                                                                                         \
+     * What the PLC family implies, derived by the dialect's constructor.  The shared      \
+     * code reads these rather than plc_type, so it never has to know which family this    \
+     * is -- see cip_encode_path()'s CIP_PLC_KIND_* for the same idea applied to path      \
+     * encoding.                                                                           \
+     */                                                                                        \
+    uint16_t min_payload_size; /* smallest payload worth negotiating down to */                \
+    bool dhp_capable;          /* family can bridge to DH+ */                                  \
+                                                                                               \
+    /*                                                                                         \
+     * The PLC family this connection talks to.  It is here so a tag created from an           \
+     * @connection tag can inherit the family from the connection.  Shared code should         \
+     * still prefer the derived fields above, which say what the family implies rather         \
+     * than which family it is.                                                                \
+     */                                                                                        \
+    cip_plc_type_t plc_type;                                                                   \
+                                                                                               \
+    /* EIP session handle, from RegisterSession */                                             \
+    uint32_t session_handle;                                                                   \
+                                                                                               \
+    /* sequence ID for requests */                                                             \
+    uint64_t session_seq_id;                                                                   \
+                                                                                               \
+    /* list of outstanding requests for this connection */                                     \
+    vector_p requests;                                                                         \
+                                                                                               \
+    uint64_t resp_seq_id;                                                                      \
+                                                                                               \
+    /*                                                                                         \
+     * What we last put on the wire.  The response has to be an answer to the request we       \
+     * actually sent, so these are snapshotted from the outgoing packet in send_eip_request()  \
+     * and checked against the incoming one in recv_eip_response().                            \
+     */                                                                                        \
+    uint16_t req_encap_command;                                                                \
+    uint64_t req_seq_id;                                                                       \
+    bool req_sent;                                                                             \
+                                                                                               \
+    /* data for receiving messages */                                                          \
+    uint32_t data_offset;                                                                      \
+    uint32_t data_capacity;                                                                    \
+    uint32_t data_size;                                                                        \
+    uint8_t *data;                                                                             \
+    bool data_buffer_is_static;                                                                \
+                                                                                               \
+    uint64_t packet_count;                                                                     \
+                                                                                               \
+    thread_p handler_thread;                                                                   \
+    atomic_int32_t terminating;                                                                \
+    mutex_p session_mutex;                                                                     \
+    cond_p session_wait_cond;                                                                  \
+                                                                                               \
+    /* connection status and event ring - what connection tags observe */                      \
+    conn_event_ring_t watch;                                                                   \
+                                                                                               \
+    /* connection inactivity timeout - readable/writable by tags via atomics */                \
     atomic_int32_t connection_inactivity_timeout_ms /* milliseconds */
 
 
@@ -370,8 +378,9 @@ typedef cip_request_t *cip_request_p;
  * The negotiated payload for this connection: what the PLC agreed to, else
  * what the Forward Open asked for.
  */
-#define GET_MAX_PAYLOAD_SIZE(conn) \
-    (((conn)->max_payload_size > 0) ? (conn)->max_payload_size : (((conn)->fo_conn_size > 0) ? (conn)->fo_conn_size : (conn)->fo_ex_conn_size))
+#define GET_MAX_PAYLOAD_SIZE(conn)                               \
+    (((conn)->max_payload_size > 0) ? (conn)->max_payload_size : \
+                                      (((conn)->fo_conn_size > 0) ? (conn)->fo_conn_size : (conn)->fo_ex_conn_size))
 
 
 /* shared connection handling, see modules/cip/conn.c */
@@ -406,8 +415,6 @@ extern int cip_conn_max_cip_payload(cip_conn_p conn);
 
 extern int send_eip_request(cip_conn_p conn, int timeout);
 extern int recv_eip_response(cip_conn_p conn, int timeout);
-extern int send_extended_forward_open_request(cip_conn_p conn);
-extern int send_old_forward_open_request(cip_conn_p conn);
 extern int send_forward_open_request(cip_conn_p conn);
 extern int send_forward_close_req(cip_conn_p conn);
 extern int recv_forward_close_resp(cip_conn_p conn);
@@ -466,6 +473,6 @@ extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);
 
 extern cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_profile_t *profile, const char *host,
                                               const char *path, int *use_connected_msg, int connection_group_id);
-extern int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, attr attribs,
-                                   cip_conn_p *tag_conn, int *is_new_conn);
+extern int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, attr attribs, cip_conn_p *tag_conn,
+                                   int *is_new_conn);
 extern void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);

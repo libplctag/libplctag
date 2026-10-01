@@ -38,25 +38,25 @@
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/ab/eip_cip.h> /* for the Logix decode types. */
-#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
 
 /* raw tag functions */
-// static int raw_tag_read_start(ab_tag_p tag);
-static int raw_tag_tickler(ab_tag_p tag);
-static int raw_tag_write_start(ab_tag_p tag);
-static int raw_tag_check_write_status(ab_tag_p tag);
-static int raw_tag_build_write_request(ab_tag_p tag);
+// static int raw_tag_read_start(cip_tag_p tag);
+static int raw_tag_tickler(cip_tag_p tag);
+static int raw_tag_write_start(cip_tag_p tag);
+static int raw_tag_check_write_status(cip_tag_p tag);
+static int raw_tag_build_write_request(cip_tag_p tag);
 
 /* define the vtable for raw tag type. */
 static struct tag_vtable_t raw_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .abort = (tag_vtable_func)cip_tag_abort_request,
     .read = NULL,
     .status = (tag_vtable_func)ab_tag_status,
     .tickler = (tag_vtable_func)raw_tag_tickler,
@@ -76,7 +76,7 @@ static struct tag_vtable_t raw_tag_vtable = {
 /* Raw tag functions */
 
 
-int setup_raw_tag(ab_tag_p tag) {
+int setup_raw_tag(cip_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     /* set up raw tag. */
@@ -97,19 +97,19 @@ int setup_raw_tag(ab_tag_p tag) {
 }
 
 
-int raw_tag_tickler(ab_tag_p tag) {
+int raw_tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Something started a read on a raw tag.  This is not supported!");
 
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
 
         /* fire the event anyway */
         tag->read_complete = 1;
@@ -150,7 +150,7 @@ int raw_tag_tickler(ab_tag_p tag) {
  * The routine starts the process of writing to a tag.
  */
 
-int raw_tag_write_start(ab_tag_p tag) {
+int raw_tag_write_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -194,7 +194,7 @@ int raw_tag_write_start(ab_tag_p tag) {
  * connected or unconnected.
  */
 
-int raw_tag_check_write_status(ab_tag_p tag) {
+int raw_tag_check_write_status(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
     uint8_t *tag_data_buffer = NULL;
@@ -206,7 +206,7 @@ int raw_tag_check_write_status(ab_tag_p tag) {
 
     if(data_size <= 0) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response carries no CIP data!");
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -224,7 +224,7 @@ int raw_tag_check_write_status(ab_tag_p tag) {
     }
 
     /* clean up regardless */
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
 
@@ -239,7 +239,7 @@ int raw_tag_check_write_status(ab_tag_p tag) {
  * unconnected forms of this function.
  */
 
-int raw_tag_build_write_request(ab_tag_p tag) {
+int raw_tag_build_write_request(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int payload_size = tag->size;
     int max_payload = 0;

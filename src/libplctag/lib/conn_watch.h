@@ -36,7 +36,7 @@
 /*
  * The part of a connection object that a connection-status tag observes.
  *
- * Embedded in ab_session_t, omron_conn_t and modbus_plc_t so that one
+ * Embedded in cip_conn_t and modbus_plc_t so that one
  * connection-tag implementation can watch any of them.
  *
  * The ring is single-writer / multiple-reader: the connection's handler thread
@@ -64,23 +64,23 @@ typedef struct {
      */
     tag_conn_event_t ring[CONN_EVENT_RING_SIZE];
     atomic_int32_t ring_write_idx;
-} conn_watch_t;
+} conn_event_ring_t;
 
 
 /* seed the watch with its initial status.  Call before the handler thread starts. */
-extern void conn_watch_init(conn_watch_t *watch, int32_t initial_status);
+extern void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status);
 
 /*
  * Publish an event.  Single writer only: the connection's handler thread.
  * Repeating the last entry's event_type and status is dropped.
  */
-extern void conn_watch_publish(conn_watch_t *watch, int32_t event_type, int32_t status);
+extern void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t status);
 
 /*
  * Consume the next event after *read_idx, advancing it.  Returns false when the
  * reader has caught up.  Each reader owns its own read_idx.
  */
-extern bool conn_watch_next(conn_watch_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status);
+extern bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status);
 
 /* index a newly created reader should start from to see only future events. */
-extern int32_t conn_watch_read_idx(conn_watch_t *watch);
+extern int32_t conn_watch_read_idx(conn_event_ring_t *watch);

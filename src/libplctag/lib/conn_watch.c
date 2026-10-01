@@ -39,7 +39,7 @@
 #include <utils/debug.h>
 
 
-void conn_watch_init(conn_watch_t *watch, int32_t initial_status) {
+void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status) {
     mem_set(watch, 0, (int)sizeof(*watch));
 
     atomic_init_int32(&watch->status, initial_status);
@@ -56,7 +56,7 @@ void conn_watch_init(conn_watch_t *watch, int32_t initial_status) {
 }
 
 
-void conn_watch_publish(conn_watch_t *watch, int32_t event_type, int32_t status) {
+void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t status) {
     int32_t write_idx = atomic_get_int32(&watch->ring_write_idx);
 
     /* drop a repeat of the last entry */
@@ -75,7 +75,7 @@ void conn_watch_publish(conn_watch_t *watch, int32_t event_type, int32_t status)
 }
 
 
-bool conn_watch_next(conn_watch_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status) {
+bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status) {
     /* the atomic load is the acquire point, pairing with the store in conn_watch_publish() */
     int32_t write_idx = atomic_get_int32(&watch->ring_write_idx);
 
@@ -89,4 +89,4 @@ bool conn_watch_next(conn_watch_t *watch, int32_t *read_idx, int32_t *event_type
 }
 
 
-int32_t conn_watch_read_idx(conn_watch_t *watch) { return atomic_get_int32(&watch->ring_write_idx); }
+int32_t conn_watch_read_idx(conn_event_ring_t *watch) { return atomic_get_int32(&watch->ring_write_idx); }

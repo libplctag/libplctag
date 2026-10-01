@@ -33,14 +33,8 @@
 
 #pragma once
 
-#include <stdbool.h>
-
 #include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/defs.h>
-#include <utils/atomic_utils.h>
-#include <utils/rc.h>
-#include <utils/vector.h>
+#include <utils/attr.h>
 
 /* #define MAX_SESSION_HOST    (128) */
 
@@ -63,14 +57,14 @@
 
 
 
-uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
-uint64_t session_get_new_seq_id(ab_session_p sess);
+uint64_t session_get_new_seq_id_unsafe(cip_conn_p sess);
+uint64_t session_get_new_seq_id(cip_conn_p sess);
 
 extern int session_startup(void);
 extern void session_teardown(void);
 
-extern int session_find_or_create(ab_session_p *session, attr attribs, int *is_new_session);
-extern int session_get_available_cip_payload_space(ab_session_p session);
-extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
-extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
-extern int session_add_request(ab_session_p sess, ab_request_p req);
+extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
+extern int session_get_available_cip_payload_space(cip_conn_p session);
+extern int session_create_request(cip_conn_p session, int tag_id, cip_request_p *request);
+extern int session_add_request_unsafe(cip_conn_p sess, cip_request_p req);
+extern int session_add_request(cip_conn_p sess, cip_request_p req);

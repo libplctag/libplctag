@@ -36,14 +36,17 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/ab/session.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
 #include <limits.h>
 #include <platform.h>
 #include <stddef.h>
 #include <string.h>
 #include <utils/debug.h>
+#include <utils/rc.h>
 
 
 START_PACK typedef struct {
@@ -148,10 +151,10 @@ static void encode_data(uint8_t *data, int *index, int val);
 // static int encode_file_type(pccc_file_t file_type);
 
 
-static int pccc_check_read_status(ab_tag_p tag);
-static int pccc_check_write_status(ab_tag_p tag);
-static int plc5_tag_write_bit_start(ab_tag_p tag);
-static int slc_tag_write_bit_start(ab_tag_p tag);
+static int pccc_check_read_status(cip_tag_p tag);
+static int pccc_check_write_status(cip_tag_p tag);
+static int plc5_tag_write_bit_start(cip_tag_p tag);
+static int slc_tag_write_bit_start(cip_tag_p tag);
 
 
 
@@ -1285,10 +1288,10 @@ void encode_data(uint8_t *data, int *index, int val) {
  */
 
 /* the response handlers and the bit writers are reached only through the vtable entries below. */
-static int pccc_check_read_status(ab_tag_p tag);
-static int pccc_check_write_status(ab_tag_p tag);
-static int plc5_tag_write_bit_start(ab_tag_p tag);
-static int slc_tag_write_bit_start(ab_tag_p tag);
+static int pccc_check_read_status(cip_tag_p tag);
+static int pccc_check_write_status(cip_tag_p tag);
+static int plc5_tag_write_bit_start(cip_tag_p tag);
+static int slc_tag_write_bit_start(cip_tag_p tag);
 
 
 /*
@@ -1318,7 +1321,7 @@ static int pccc_response_overhead(bool is_dhp) {
  * The connection adds the EIP and CPF framing, so a request buffer starts at the CIP message
  * and the prefix is the front of that message.
  */
-static uint8_t *pccc_write_prefix(ab_tag_p tag, ab_request_p req, bool is_dhp) {
+static uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp) {
     if(is_dhp) {
         pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(req->data);
 
@@ -1354,7 +1357,7 @@ static uint8_t *pccc_write_prefix(ab_tag_p tag, ab_request_p req, bool is_dhp) {
  * Both reply shapes end with the same PCCC command response, so the data that follows always
  * starts one pccc_cmd_resp past what this returns.
  */
-static pccc_cmd_resp *pccc_response_cmd(ab_tag_p tag, bool is_dhp) {
+static pccc_cmd_resp *pccc_response_cmd(cip_tag_p tag, bool is_dhp) {
     return (pccc_cmd_resp *)(tag->req->data + pccc_response_overhead(is_dhp) - (int)sizeof(pccc_cmd_resp));
 }
 
@@ -1366,7 +1369,7 @@ static pccc_cmd_resp *pccc_response_cmd(ab_tag_p tag, bool is_dhp) {
  * response, so it can be smaller than our overhead.  Compare before subtracting: the
  * difference is unsigned, so an underflow would wrap to a huge value that passes every check.
  */
-static int pccc_check_payload_space(ab_tag_p tag, size_t overhead, size_t payload) {
+static int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload) {
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
     if(session_payload_space <= 0) {
@@ -1400,7 +1403,7 @@ static int pccc_check_payload_space(ab_tag_p tag, size_t overhead, size_t payloa
  * A DH+ one rides a connection to the bridge, and ab_common.c sets use_connected_msg for
  * those, so cip_submit_payload() picks the connected framing for them.
  */
-static int pccc_submit(ab_tag_p tag, ab_request_p req, uint8_t *data_end, bool is_dhp) {
+static int pccc_submit(cip_tag_p tag, cip_request_p req, uint8_t *data_end, bool is_dhp) {
     int cip_request_size = (int)(data_end - req->data);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "%sPCCC request, %d bytes:", (is_dhp ? "DH+ " : ""),
@@ -1418,7 +1421,7 @@ static int pccc_submit(ab_tag_p tag, ab_request_p req, uint8_t *data_end, bool i
  * On failure the caller's request has already been released by cip_submit_*() when the submit
  * itself failed, so req is NULL in that case and only the tag state needs unwinding.
  */
-static int pccc_finish_request(ab_tag_p tag, ab_request_p req, int rc, bool is_write) {
+static int pccc_finish_request(cip_tag_p tag, cip_request_p req, int rc, bool is_write) {
     if(rc == PLCTAG_STATUS_OK) {
         critical_block(tag->api_mutex) {
             if(tag->req) {
@@ -1445,7 +1448,7 @@ static int pccc_finish_request(ab_tag_p tag, ab_request_p req, int rc, bool is_w
         tag->read_in_progress = 0;
     }
 
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     return rc;
 }
@@ -1455,7 +1458,7 @@ static int pccc_finish_request(ab_tag_p tag, ab_request_p req, int rc, bool is_w
  * pccc_check_response_header
  *
  * Every PCCC response handler casts the request buffer to a chain of headers and
- * then reads fields out of it.  The generic check in check_request_status() only
+ * then reads fields out of it.  The generic check in cip_check_request_status() only
  * knows about the CIP response headers, so validate the PCCC-specific chain here,
  * in one place, before any handler dereferences it.
  *
@@ -1466,7 +1469,7 @@ static int pccc_finish_request(ab_tag_p tag, ab_request_p req, int rc, bool is_w
  * gateway multiplexes several PLCs over one CIP connection, so without the node
  * check any of them can answer for any other.
  */
-int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
+int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
     pccc_cmd_resp *pccc_cmd = NULL;
     int min_size = pccc_response_overhead(is_dhp);
 
@@ -1562,7 +1565,7 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
  *
  * get the tag status.
  */
-int pccc_tag_status(ab_tag_p tag) {
+int pccc_tag_status(cip_tag_p tag) {
     if(!tag->session) {
         /* this is not OK.  This is fatal! */
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Returning PLCTAG_ERR_CREATE, no session!");
@@ -1577,12 +1580,12 @@ int pccc_tag_status(ab_tag_p tag) {
 }
 
 
-int pccc_tag_tickler(ab_tag_p tag) {
+int pccc_tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
@@ -1632,11 +1635,11 @@ int pccc_tag_tickler(ab_tag_p tag) {
  *
  * Start a PCCC tag read (PLC5 or SLC, plain or over a DH+ bridge).
  */
-int pccc_tag_read_start(ab_tag_p tag) {
+int pccc_tag_read_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     bool is_dhp = tag->session->is_dhp;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint8_t *data = NULL;
     size_t overhead = 0;
 
@@ -1664,7 +1667,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
          * size of the data asked for.
          */
         overhead = (size_t)pccc_prefix_size(is_dhp)
-                   + (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_read_cmd_req) : sizeof(slc_pccc_read_cmd_req))
+                   + (tag->plc_type == CIP_PLC_PLC5 ? sizeof(plc5_pccc_read_cmd_req) : sizeof(slc_pccc_read_cmd_req))
                    + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
         rc = pccc_check_payload_space(tag, overhead, 0);
@@ -1686,7 +1689,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
 
         data = pccc_write_prefix(tag, req, is_dhp);
 
-        if(tag->plc_type == AB_PLC_PLC5) {
+        if(tag->plc_type == CIP_PLC_PLC5) {
             plc5_pccc_read_cmd_req *pccc_cmd = (plc5_pccc_read_cmd_req *)data;
 
             pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -1713,7 +1716,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         mem_copy(data, tag->encoded_name, tag->encoded_name_size);
         data += tag->encoded_name_size;
 
-        if(tag->plc_type == AB_PLC_PLC5) {
+        if(tag->plc_type == CIP_PLC_PLC5) {
             /* add the data size byte */
             *data = (uint8_t)(tag->size);
             data++;
@@ -1744,7 +1747,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
  * NOTE that we can have only one outstanding request because PCCC
  * does not support fragments.
  */
-static int pccc_check_read_status(ab_tag_p tag) {
+static int pccc_check_read_status(cip_tag_p tag) {
     bool is_dhp = tag->session->is_dhp;
     pccc_cmd_resp *pccc_cmd = NULL;
     uint8_t *data = NULL;
@@ -1790,7 +1793,7 @@ static int pccc_check_read_status(ab_tag_p tag) {
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     /* the read is over whether it succeeded or failed. */
     tag->read_in_progress = 0;
@@ -1802,10 +1805,10 @@ static int pccc_check_read_status(ab_tag_p tag) {
 }
 
 
-int pccc_tag_write_start(ab_tag_p tag) {
+int pccc_tag_write_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     bool is_dhp = tag->session->is_dhp;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     size_t overhead = 0;
@@ -1816,7 +1819,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
     if(tag->is_bit) {
-        return (tag->plc_type == AB_PLC_PLC5) ? plc5_tag_write_bit_start(tag) : slc_tag_write_bit_start(tag);
+        return (tag->plc_type == CIP_PLC_PLC5) ? plc5_tag_write_bit_start(tag) : slc_tag_write_bit_start(tag);
     }
 
     do {
@@ -1830,7 +1833,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         overhead = (size_t)pccc_prefix_size(is_dhp)
-                   + (tag->plc_type == AB_PLC_PLC5 ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
+                   + (tag->plc_type == CIP_PLC_PLC5 ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
                    + (size_t)(unsigned int)tag->encoded_name_size + 1;
 
         /* the whole tag has to go out in one request: PCCC has no fragmentation. */
@@ -1846,7 +1849,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
 
         data = pccc_write_prefix(tag, req, is_dhp);
 
-        if(tag->plc_type == AB_PLC_PLC5) {
+        if(tag->plc_type == CIP_PLC_PLC5) {
             plc5_pccc_write_cmd_req *pccc_cmd = (plc5_pccc_write_cmd_req *)data;
 
             pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -1905,10 +1908,10 @@ int pccc_tag_write_start(ab_tag_p tag) {
  * set, so a bit is cleared by dropping it from the AND mask and set by adding it to the OR
  * mask.
  */
-static int plc5_tag_write_bit_start(ab_tag_p tag) {
+static int plc5_tag_write_bit_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     bool is_dhp = tag->session->is_dhp;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     size_t overhead = 0;
@@ -2010,10 +2013,10 @@ static int plc5_tag_write_bit_start(ab_tag_p tag) {
  * The SLC masked write takes one mask marking which bits the write may change, followed by
  * the data itself.  The mask is a single 16-bit word, so this only works on a two-byte tag.
  */
-static int slc_tag_write_bit_start(ab_tag_p tag) {
+static int slc_tag_write_bit_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     bool is_dhp = tag->session->is_dhp;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     size_t overhead = 0;
@@ -2124,7 +2127,7 @@ static int slc_tag_write_bit_start(ab_tag_p tag) {
  *
  * Fragments are not supported.
  */
-static int pccc_check_write_status(ab_tag_p tag) {
+static int pccc_check_write_status(cip_tag_p tag) {
     bool is_dhp = tag->session->is_dhp;
     pccc_cmd_resp *pccc_cmd = NULL;
     uint8_t *data_end = NULL;
@@ -2151,7 +2154,7 @@ static int pccc_check_write_status(ab_tag_p tag) {
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     /* the write is over whether it succeeded or failed. */
     tag->write_in_progress = 0;
@@ -2168,7 +2171,7 @@ static int pccc_check_write_status(ab_tag_p tag) {
  * shows in tag->plc_type and the bridge in tag->session->is_dhp, and the functions above read
  * both.  The byte orders still differ, and those live with each family.
  */
-struct tag_vtable_t pccc_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request,
+struct tag_vtable_t pccc_vtable = {.abort = (tag_vtable_func)cip_tag_abort_request,
                                    .read = (tag_vtable_func)pccc_tag_read_start,
                                    .status = (tag_vtable_func)pccc_tag_status,
                                    .tickler = (tag_vtable_func)pccc_tag_tickler,

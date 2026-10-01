@@ -38,10 +38,10 @@
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/ab/eip_cip.h> /* for the Logix decode types. */
-#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
@@ -51,17 +51,17 @@
 #define UDT_METADATA_HANDLE_OFFSET (28)
 
 /* UDT tag functions. */
-static int udt_tag_read_start(ab_tag_p tag);
-static int udt_tag_tickler(ab_tag_p tag);
-// static int listing_tag_write_start(ab_tag_p tag);
-static int udt_tag_check_read_metadata_status_connected(ab_tag_p tag);
-static int udt_tag_build_read_metadata_request_connected(ab_tag_p tag);
-static int udt_tag_check_read_fields_status_connected(ab_tag_p tag);
-static int udt_tag_build_read_fields_request_connected(ab_tag_p tag);
+static int udt_tag_read_start(cip_tag_p tag);
+static int udt_tag_tickler(cip_tag_p tag);
+// static int listing_tag_write_start(cip_tag_p tag);
+static int udt_tag_check_read_metadata_status_connected(cip_tag_p tag);
+static int udt_tag_build_read_metadata_request_connected(cip_tag_p tag);
+static int udt_tag_check_read_fields_status_connected(cip_tag_p tag);
+static int udt_tag_build_read_fields_request_connected(cip_tag_p tag);
 
 /* define the vtable for udt tag type. */
 static struct tag_vtable_t udt_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .abort = (tag_vtable_func)cip_tag_abort_request,
     .read = (tag_vtable_func)udt_tag_read_start,
     .status = (tag_vtable_func)ab_tag_status,
     .tickler = (tag_vtable_func)udt_tag_tickler,
@@ -102,7 +102,7 @@ static tag_byte_order_t udt_tag_logix_byte_order = {.is_allocated = 0,
  * Handle UDT tag set up.
  */
 
-int setup_udt_tag(ab_tag_p tag, const char *name) {
+int setup_udt_tag(cip_tag_p tag, const char *name) {
     int rc = PLCTAG_STATUS_OK;
     const char *tag_id_str = name + str_length("@udt/");
     int tag_id = 0;
@@ -148,7 +148,7 @@ int setup_udt_tag(ab_tag_p tag, const char *name) {
  * The function starts the process of getting UDT data from the PLC.
  */
 
-int udt_tag_read_start(ab_tag_p tag) {
+int udt_tag_read_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -186,19 +186,19 @@ int udt_tag_read_start(ab_tag_p tag) {
 }
 
 
-int udt_tag_tickler(ab_tag_p tag) {
+int udt_tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->write_in_progress) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Something started a write on a UDT tag.   This is not supported!");
 
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
 
         /* fire the event anyway. */
         tag->write_complete = 1;
@@ -242,7 +242,7 @@ int udt_tag_tickler(ab_tag_p tag) {
  * locked!
  */
 
-int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
+int udt_tag_check_read_metadata_status_connected(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -374,7 +374,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* the old request is done */
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -417,7 +417,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
         tag->udt_get_fields = 0;
 
         /* clean up everything in case we managed to create a request before failing. */
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -426,9 +426,9 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
 }
 
 
-int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
+int udt_tag_build_read_metadata_request_connected(cip_tag_p tag) {
     // tag_list_req *list_req = NULL;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
@@ -540,7 +540,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
  * locked!
  */
 
-int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
+int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -635,7 +635,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* get rid of the old request. we are done with it. */
-    ab_tag_abort_request_only(tag);
+    cip_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -679,7 +679,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
         tag->udt_get_fields = 0;
 
         /* clean up everything. */
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -688,7 +688,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
 }
 
 
-int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
+int udt_tag_build_read_fields_request_connected(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
@@ -703,7 +703,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     rc = session_create_request(tag->session, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
         return rc;
     }
 

@@ -35,42 +35,37 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/ab/defs.h>
-#include <utils/vector.h>
+#include <libplctag/modules/cip/plc_type.h>
+#include <libplctag/modules/cip/tag.h>
+#include <utils/attr.h>
 
-typedef struct ab_tag_t *ab_tag_p;
-#define AB_TAG_NULL ((ab_tag_p)NULL)
 
-typedef cip_conn_t ab_session_t;
-typedef cip_conn_p ab_session_p;
-#define AB_SESSION_NULL ((ab_session_p)NULL)
 
-typedef cip_request_t ab_request_t;
-typedef cip_request_p ab_request_p;
-#define AB_REQUEST_NULL ((ab_request_p)NULL)
 
-extern int ab_tag_abort_request_only(ab_tag_p tag);
-extern int ab_tag_abort_request(ab_tag_p tag);
-extern int ab_tag_abort(ab_tag_p tag);
-extern int ab_tag_status(ab_tag_p tag);
+extern int ab_tag_abort(cip_tag_p tag);
+extern int ab_tag_status(cip_tag_p tag);
 
 
 /* Runtime attributes shared by every AB tag type. */
 extern const attr_def_t ab_attribs[];
 
-extern ab_plc_type_t get_plc_type(attr attribs);
-extern int check_cpu(ab_tag_p tag, attr attribs);
-extern int check_tag_name(ab_tag_p tag, const char *name);
+extern cip_plc_type_t get_plc_type(attr attribs);
+extern int check_cpu(cip_tag_p tag, attr attribs);
+extern int check_tag_name(cip_tag_p tag, const char *name);
 
 /* special tag setup, see raw_tag.c, listing_tag.c, udt_tag.c and identity_tag.c */
-extern int setup_raw_tag(ab_tag_p tag);
-extern int setup_tag_listing_tag(ab_tag_p tag, const char *name);
-extern int setup_udt_tag(ab_tag_p tag, const char *name);
-extern int setup_identity_tag(ab_tag_p tag);
+extern int setup_raw_tag(cip_tag_p tag);
+extern int setup_tag_listing_tag(cip_tag_p tag, const char *name);
+extern int setup_udt_tag(cip_tag_p tag, const char *name);
+extern int setup_identity_tag(cip_tag_p tag);
 
 
 /* helpers for checking request status. */
-extern int check_request_status(ab_tag_p tag);
 
-#define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
+
+/* per-family string and integer layouts, used when setting a tag up. */
+extern tag_byte_order_t logix_tag_byte_order;
+extern tag_byte_order_t micro800_tag_byte_order;
+extern tag_byte_order_t logix_tag_listing_byte_order;
+
+extern struct tag_vtable_t cip_standard_tag_vtable_ab;

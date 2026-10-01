@@ -31,7 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/modules/ab/ab_common.h>
+#include <libplctag/modules/ab/pccc.h>
+#include <libplctag/modules/ab/session.h>
+#include <libplctag/modules/cip/tag.h>
 
 
 /* default string types used for PLC-5 PLCs. */

@@ -41,6 +41,6 @@
 
 
 //~ char *cip_decode_status(int status);
-extern int cip_encode_tag_name(ab_tag_p tag, const char *name);
+extern int cip_encode_tag_name(cip_tag_p tag, const char *name);
 
 #endif

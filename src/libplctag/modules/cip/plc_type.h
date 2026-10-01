@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,17 +33,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_EIP_CIP_H__
-#define __LIBPLCTAG_AB_EIP_CIP_H__
-
-#include <libplctag/modules/ab/ab_common.h>
-
-extern struct tag_vtable_t eip_cip_vtable;
-extern tag_byte_order_t logix_tag_byte_order;
-// extern tag_byte_order_t omron_njnx_tag_byte_order;
-extern tag_byte_order_t micro800_tag_byte_order;
-
-extern tag_byte_order_t logix_tag_listing_byte_order;
-
-
-#endif
+/*
+ * Which PLC family a tag talks to.
+ *
+ * One list covers every CIP family the library speaks, Rockwell and OMRON alike,
+ * so that code shared between them can branch on the same value.  A module only
+ * ever sets the members its own attribute parser accepts.
+ */
+typedef enum {
+    CIP_PLC_NONE = 0,
+    CIP_PLC_PLC5 = 1,
+    CIP_PLC_SLC,
+    CIP_PLC_MLGX,
+    CIP_PLC_LGX,
+    CIP_PLC_LGX_PCCC,
+    CIP_PLC_MICRO800,
+    CIP_PLC_OMRON_NJNX,
+    CIP_PLC_GENERIC, /* Generic CIP device access (no PLC-specific protocol) */
+    CIP_PLC_TYPE_LAST,
+} cip_plc_type_t;

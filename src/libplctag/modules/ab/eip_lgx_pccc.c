@@ -38,16 +38,16 @@ extern "C"
 */
 
 
-#include <stddef.h>
-
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
-#include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
+#include <stddef.h>
 #include <utils/debug.h>
 
 
@@ -69,13 +69,13 @@ START_PACK typedef struct {
 } END_PACK embedded_pccc;
 
 
-static int tag_read_start(ab_tag_p tag);
-static int tag_status(ab_tag_p tag);
-static int tag_tickler(ab_tag_p tag);
-static int tag_write_start(ab_tag_p tag);
+static int tag_read_start(cip_tag_p tag);
+static int tag_status(cip_tag_p tag);
+static int tag_tickler(cip_tag_p tag);
+static int tag_write_start(cip_tag_p tag);
 
 struct tag_vtable_t lgx_pccc_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .abort = (tag_vtable_func)cip_tag_abort_request,
     .read = (tag_vtable_func)tag_read_start,
     .status = (tag_vtable_func)tag_status,
     .tickler = (tag_vtable_func)tag_tickler,
@@ -87,15 +87,15 @@ struct tag_vtable_t lgx_pccc_vtable = {
     .attribs = ab_attribs,
 };
 
-static int check_read_status(ab_tag_p tag);
-static int check_write_status(ab_tag_p tag);
+static int check_read_status(cip_tag_p tag);
+static int check_write_status(cip_tag_p tag);
 
 /*
  * tag_status
  *
  * CIP/PCCC-specific status.
  */
-int tag_status(ab_tag_p tag) {
+int tag_status(cip_tag_p tag) {
     if(!tag->session) {
         /* this is not OK.  This is fatal! */
         return PLCTAG_ERR_CREATE;
@@ -109,12 +109,12 @@ int tag_status(ab_tag_p tag) {
 }
 
 
-int tag_tickler(ab_tag_p tag) {
+int tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
@@ -159,9 +159,9 @@ int tag_tickler(ab_tag_p tag) {
  * Start a PCCC tag read (PLC5, SLC).
  */
 
-int tag_read_start(ab_tag_p tag) {
+int tag_read_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
@@ -257,7 +257,7 @@ int tag_read_start(ab_tag_p tag) {
  */
 
 
-static int check_read_status(ab_tag_p tag) {
+static int check_read_status(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
@@ -356,12 +356,12 @@ static int check_read_status(ab_tag_p tag) {
         mem_copy(tag->encoded_type_info, type_start, tag->encoded_type_info_size);
 
         // /* have the IO thread take care of the request buffers */
-        // ab_tag_abort_request(tag);
+        // cip_tag_abort_request(tag);
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     /* if this is a pre-read for a write, then pass off the the write routine */
     if(rc == PLCTAG_STATUS_OK && tag->pre_write_read) {
@@ -377,9 +377,9 @@ static int check_read_status(ab_tag_p tag) {
 }
 
 
-int tag_write_start(ab_tag_p tag) {
+int tag_write_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     uint8_t *embed_start = NULL;
@@ -484,7 +484,7 @@ int tag_write_start(ab_tag_p tag) {
  *
  * Fragments are not supported.
  */
-static int check_write_status(ab_tag_p tag) {
+static int check_write_status(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Starting");
@@ -516,7 +516,7 @@ static int check_write_status(ab_tag_p tag) {
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    ab_tag_abort_request(tag);
+    cip_tag_abort_request(tag);
 
     pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 

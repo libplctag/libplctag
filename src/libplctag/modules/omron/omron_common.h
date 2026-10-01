@@ -35,27 +35,16 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/omron/defs.h>
-#include <utils/vector.h>
-
-typedef struct omron_tag_t *omron_tag_p;
-#define OMRON_TAG_NULL ((omron_tag_p)NULL)
-
-typedef cip_conn_t omron_conn_t;
-typedef cip_conn_p omron_conn_p;
-#define OMRON_CONN_NULL ((omron_conn_p)NULL)
-
-typedef cip_request_t omron_request_t;
-typedef cip_request_p omron_request_p;
-#define OMRON_REQUEST_NULL ((omron_request_p)NULL)
+#include <libplctag/modules/cip/tag.h>
+#include <utils/attr.h>
 
 
-extern int omron_tag_abort(omron_tag_p tag);
-extern int omron_tag_status(omron_tag_p tag);
 
-extern int omron_tag_abort_request(omron_tag_p tag);
-extern int omron_tag_abort_request_only(omron_tag_p tag);
+
+
+extern int omron_tag_abort(cip_tag_p tag);
+extern int omron_tag_status(cip_tag_p tag);
+
 
 /* Runtime attributes shared by every Omron tag type. */
 extern const attr_def_t omron_attribs[];
@@ -64,6 +53,9 @@ extern const attr_def_t omron_attribs[];
 // THREAD_FUNC(request_handler_func);
 
 /* helpers for checking request status. */
-extern int omron_check_request_status(omron_tag_p tag);
 
-#define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
+
+/* the string and integer layout of an OMRON NJ/NX tag. */
+extern tag_byte_order_t omron_njnx_tag_byte_order;
+
+extern struct tag_vtable_t cip_standard_tag_vtable_omron;

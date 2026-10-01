@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,38 +33,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+/*
+ * The read/write engine for ordinary (symbolic, named) CIP tags.
+ *
+ * One implementation serves every CIP family.  The request shapes are the same CIP tag
+ * services everywhere; what differs is which of them a family implements, and that is a
+ * branch on the tag's plc_type, not a separate engine.
+ *
+ * Each family exports its own vtable because the abort entry point still differs.
+ */
 
-/* do these first */
-
-/* they are used in some of these includes */
-#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/ab/session.h>
 
-
-struct ab_tag_t {
-    CIP_TAG_BASE_STRUCT;
-
-    /* how do we talk to this device? */
-    ab_plc_type_t plc_type;
-
-    /* pointer back to the session */
-    ab_session_p session;
-
-    /* the in-flight request object */
-    ab_request_p req;
-
-    /* PCCC only: the data file this tag addresses. */
-    pccc_file_t file_type;
-
-    /*
-     * PCCC only: TNS of the request we last put on the wire.  The response has to carry
-     * the same one, otherwise a late reply to a request that already timed out gets
-     * applied to whatever operation is in flight now.
-     */
-    uint16_t req_pccc_seq_num;
-};
+/*
+ * The three vtable entry points.  Each family builds its own vtable around these, because
+ * the abort entry point and the attribute table are still the family's own.
+ */
+extern int cip_standard_tag_read_start(plc_tag_p tag_arg);
+extern int cip_standard_tag_write_start(plc_tag_p tag_arg);
+extern int cip_standard_tag_tickler(plc_tag_p tag_arg);

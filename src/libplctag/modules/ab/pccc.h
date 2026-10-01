@@ -35,31 +35,13 @@
 #define __LIBPLCTAG_AB_PCCC_H__
 
 
-#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <stdbool.h>
-
-typedef enum {
-    PCCC_FILE_UNKNOWN = 0x00, /* UNKNOWN! */
-    PCCC_FILE_ASCII = 0x8e,
-    PCCC_FILE_BCD = 0x8f,
-    PCCC_FILE_BIT = 0x85,
-    PCCC_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
-    PCCC_FILE_CONTROL = 0x88,
-    PCCC_FILE_COUNTER = 0x87,
-    PCCC_FILE_FLOAT = 0x8a,
-    PCCC_FILE_INPUT = 0x83,
-    PCCC_FILE_INT = 0x89,
-    PCCC_FILE_LONG_INT = 0x91,
-    PCCC_FILE_MESSAGE = 0x92,
-    PCCC_FILE_OUTPUT = 0x82,
-    PCCC_FILE_PID = 0x93,
-    PCCC_FILE_SFC = 0x00, /* UNKNOWN! */
-    PCCC_FILE_STATUS = 0x84,
-    PCCC_FILE_STRING = 0x8d,
-    PCCC_FILE_TIMER = 0x86
-} pccc_file_t;
+#include <stddef.h>
+#include <stdint.h>
+#include <utils/byteorder.h>
 
 typedef struct {
     pccc_file_t file_type;
@@ -82,11 +64,11 @@ extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_
 extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
 
 /* generic direct ethernet tag functions */
-extern int pccc_check_response_header(ab_tag_p tag, bool is_dhp);
-extern int pccc_tag_status(ab_tag_p tag);
-extern int pccc_tag_tickler(ab_tag_p tag);
-extern int pccc_tag_read_start(ab_tag_p tag);
-extern int pccc_tag_write_start(ab_tag_p tag);
+extern int pccc_check_response_header(cip_tag_p tag, bool is_dhp);
+extern int pccc_tag_status(cip_tag_p tag);
+extern int pccc_tag_tickler(cip_tag_p tag);
+extern int pccc_tag_read_start(cip_tag_p tag);
+extern int pccc_tag_write_start(cip_tag_p tag);
 
 /*
  * The whole PCCC reply as it arrives once the connection has stripped the EIP and CPF

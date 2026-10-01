@@ -38,7 +38,10 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/ab/ab_common.h>
+#include <libplctag/modules/ab/pccc.h>
+#include <libplctag/modules/ab/session.h>
+#include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
@@ -50,14 +53,14 @@ plc_tag_p ab_connection_tag_create(attr attribs,
     connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_AB_CONNECTION,
                                   .debug_module = DEBUG_MODULE_AB_CONNECTION,
                                   .conn_rc = PLCTAG_STATUS_OK};
-    ab_session_p session = NULL;
+    cip_conn_p session = NULL;
 
     pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
 
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: session = rc_inc(((ab_tag_p)src_tag)->session); break;
+            case TAG_PROTOCOL_OMRON: session = rc_inc(((cip_tag_p)src_tag)->session); break;
 
             case TAG_PROTOCOL_AB_CONNECTION: session = rc_inc(((connection_tag_p)src_tag)->conn); break;
 

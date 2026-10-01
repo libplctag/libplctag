@@ -33,11 +33,12 @@
 
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
 #include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
-#include <libplctag/modules/omron/tag.h>
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -68,13 +69,13 @@ static cip_conn_list_t conn_list = {0};
 /* Omron speaks one dialect, so the table has one row. */
 static const cip_conn_profile_t omron_conn_profiles[] = {
     /*                                         capacity                   fo_size                 fo_ex_size                 old_fo  min payload           dh+    unconn */
-    {OMRON_PLC_OMRON_NJNX, "Omron NJ/NX", MAX_CIP_OMRON_MSG_SIZE_EX, MAX_CIP_OMRON_MSG_SIZE, MAX_CIP_OMRON_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false, false},
+    {CIP_PLC_OMRON_NJNX, "Omron NJ/NX", MAX_CIP_OMRON_MSG_SIZE_EX, MAX_CIP_OMRON_MSG_SIZE, MAX_CIP_OMRON_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false, false},
 };
 
 
-static const cip_conn_profile_t *omron_conn_profile(omron_plc_type_t plc_type) {
+static const cip_conn_profile_t *omron_conn_profile(cip_plc_type_t plc_type) {
     for(size_t i = 0; i < (sizeof(omron_conn_profiles) / sizeof(omron_conn_profiles[0])); i++) {
-        if(omron_conn_profiles[i].plc_type == (int32_t)plc_type) { return &omron_conn_profiles[i]; }
+        if(omron_conn_profiles[i].plc_type == plc_type) { return &omron_conn_profiles[i]; }
     }
 
     return NULL;
@@ -85,8 +86,8 @@ int conn_startup(void) { return session_list_init(&conn_list); }
 
 
 void conn_teardown(void) { session_list_teardown(&conn_list, DEBUG_MODULE_OMRON_CONN); }
-int conn_find_or_create(omron_conn_p *tag_conn, attr attribs, int *is_new_conn) {
-    const cip_conn_profile_t *profile = omron_conn_profile(OMRON_PLC_OMRON_NJNX);
+int conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
+    const cip_conn_profile_t *profile = omron_conn_profile(CIP_PLC_OMRON_NJNX);
 
     if(!profile) {
         pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "No connection profile for Omron NJ/NX!");

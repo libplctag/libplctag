@@ -37,8 +37,9 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/tag.h>
+#include <libplctag/modules/omron/omron_common.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
@@ -50,13 +51,13 @@ plc_tag_p omron_connection_tag_create(attr attribs,
     connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_OMRON_CONNECTION,
                                   .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
                                   .conn_rc = PLCTAG_STATUS_OK};
-    omron_conn_p conn = NULL;
+    cip_conn_p conn = NULL;
 
     pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
 
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_OMRON: conn = rc_inc(((omron_tag_p)src_tag)->session); break;
+            case TAG_PROTOCOL_OMRON: conn = rc_inc(((cip_tag_p)src_tag)->session); break;
 
             case TAG_PROTOCOL_OMRON_CONNECTION: conn = rc_inc(((connection_tag_p)src_tag)->conn); break;
 

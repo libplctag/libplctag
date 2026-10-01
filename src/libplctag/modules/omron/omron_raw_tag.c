@@ -35,24 +35,23 @@
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
 #include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <libplctag/modules/omron/omron_raw_tag.h>
-#include <libplctag/modules/omron/omron_standard_tag.h> /* for the Logix decode types. */
-#include <libplctag/modules/omron/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
 
 /* raw tag functions */
-// static int raw_tag_read_start(omron_tag_p tag);
-static int raw_tag_tickler(omron_tag_p tag);
-static int raw_tag_write_start(omron_tag_p tag);
-static int raw_tag_check_write_status(omron_tag_p tag);
-static int raw_tag_build_write_request(omron_tag_p tag);
+// static int raw_tag_read_start(cip_tag_p tag);
+static int raw_tag_tickler(cip_tag_p tag);
+static int raw_tag_write_start(cip_tag_p tag);
+static int raw_tag_check_write_status(cip_tag_p tag);
+static int raw_tag_build_write_request(cip_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
@@ -96,7 +95,7 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
  ************************************************************************/
 
 
-int omron_setup_raw_tag(omron_tag_p tag) {
+int omron_setup_raw_tag(cip_tag_p tag) {
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     /* set up raw tag. */
@@ -117,12 +116,12 @@ int omron_setup_raw_tag(omron_tag_p tag) {
 }
 
 
-int raw_tag_tickler(omron_tag_p tag) {
+int raw_tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = omron_check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
@@ -164,7 +163,7 @@ int raw_tag_tickler(omron_tag_p tag) {
  * The routine starts the process of writing to a tag.
  */
 
-int raw_tag_write_start(omron_tag_p tag) {
+int raw_tag_write_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_INFO, tag->tag_id, "Starting");
@@ -208,7 +207,7 @@ int raw_tag_write_start(omron_tag_p tag) {
  * unconnected.
  */
 
-static int raw_tag_check_write_status(omron_tag_p tag) {
+static int raw_tag_check_write_status(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
     uint8_t *tag_data_buffer = NULL;
@@ -255,9 +254,9 @@ static int raw_tag_check_write_status(omron_tag_p tag) {
  * function.
  */
 
-int raw_tag_build_write_request(omron_tag_p tag) {
+int raw_tag_build_write_request(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    omron_request_p req = NULL;
+    cip_request_p req = NULL;
     int payload_size = tag->size;
     int max_payload = 0;
 

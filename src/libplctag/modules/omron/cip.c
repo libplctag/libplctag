@@ -34,33 +34,20 @@
 #include <ctype.h>
 #include <errno.h>
 #include <libplctag/api/libplctag.h>
-#include <libplctag/modules/cip/path.h>
+#include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/omron/cip.h>
+#include <libplctag/modules/omron/conn.h>
 #include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
-#include <libplctag/modules/omron/tag.h>
 #include <platform.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <utils/debug.h>
-
-
-static int omron_encode_tag_name(omron_tag_p tag, const char *name);
-
-
-/* public access point */
-cip_generic_t CIP = {
-    .encode_path = cip_encode_path,
-    .encode_tag_name = omron_encode_tag_name,
-    .lookup_data_element_size = cip_lookup_data_element_size,
-    .lookup_encoded_type_size = cip_lookup_encoded_type_size,
-    .decode_cip_error_code = decode_cip_error_code,
-    .decode_cip_error_long = decode_cip_error_long,
-    .decode_cip_error_short = decode_cip_error_short,
-};
 
 
 // #define MAX_IP_ADDR_SEG_LEN (16)
@@ -105,7 +92,7 @@ cip_generic_t CIP = {
  * A bit segment is simply an integer from 0 to 63 (inclusive). */
 
 
-int omron_encode_tag_name(omron_tag_p tag, const char *name) {
+int32_t omron_encode_tag_name(cip_tag_p tag, const char *name) {
     cip_name_t ctx = {.tag_id = tag->tag_id,
                       .elem_count = tag->elem_count,
                       .encoded_name = &tag->encoded_name[0],
@@ -113,7 +100,7 @@ int omron_encode_tag_name(omron_tag_p tag, const char *name) {
                       .encoded_name_size = 0,
                       .bit = tag->bit,
                       .is_bit = (tag->is_bit ? true : false)};
-    int rc = cip_encode_name(&ctx, name);
+    int32_t rc = (int32_t)cip_encode_name(&ctx, name);
 
     /* copy the outputs back; is_bit is a bitfield, so it cannot be written through a pointer. */
     tag->encoded_name_size = ctx.encoded_name_size;

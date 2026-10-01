@@ -38,10 +38,10 @@
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/ab/eip_cip.h> /* for the Logix decode types. */
-#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
@@ -57,15 +57,15 @@ START_PACK typedef struct {
 } END_PACK tag_list_entry;
 
 /* listing tag functions. */
-static int listing_tag_read_start(ab_tag_p tag);
-static int listing_tag_tickler(ab_tag_p tag);
-// static int listing_tag_write_start(ab_tag_p tag);
-static int listing_tag_check_read_status_connected(ab_tag_p tag);
-static int listing_tag_build_read_request_connected(ab_tag_p tag);
+static int listing_tag_read_start(cip_tag_p tag);
+static int listing_tag_tickler(cip_tag_p tag);
+// static int listing_tag_write_start(cip_tag_p tag);
+static int listing_tag_check_read_status_connected(cip_tag_p tag);
+static int listing_tag_build_read_request_connected(cip_tag_p tag);
 
 /* define the vtable for listing tag type. */
 static struct tag_vtable_t listing_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
+    .abort = (tag_vtable_func)cip_tag_abort_request,
     .read = (tag_vtable_func)listing_tag_read_start,
     .status = (tag_vtable_func)ab_tag_status,
     .tickler = (tag_vtable_func)listing_tag_tickler,
@@ -109,7 +109,7 @@ static tag_byte_order_t listing_tag_logix_byte_order = {.is_allocated = 0,
  * We know that we got here because the string "@tags" was in the name.
  */
 
-int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
+int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
     int rc = PLCTAG_STATUS_OK;
     char **tag_parts = NULL;
 
@@ -212,7 +212,7 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
  * The function starts the process of getting tag data from the PLC.
  */
 
-int listing_tag_read_start(ab_tag_p tag) {
+int listing_tag_read_start(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
@@ -247,19 +247,19 @@ int listing_tag_read_start(ab_tag_p tag) {
 }
 
 
-int listing_tag_tickler(ab_tag_p tag) {
+int listing_tag_tickler(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    rc = check_request_status(tag);
+    rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->write_in_progress) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "Something started a write on a listing tag.   This is not supported!");
 
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
 
         /* fire the event anyway. */
         tag->write_complete = 1;
@@ -300,7 +300,7 @@ int listing_tag_tickler(ab_tag_p tag) {
  * locked!
  */
 
-int listing_tag_check_read_status_connected(ab_tag_p tag) {
+int listing_tag_check_read_status_connected(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -450,7 +450,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* clean up the request as we are done with it. */
-    ab_tag_abort_request_only(tag);
+    cip_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -493,7 +493,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         tag->next_id = 0;
 
         /* clean up everything in case we left something dangling. */
-        ab_tag_abort_request(tag);
+        cip_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -502,9 +502,9 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 }
 
 
-int listing_tag_build_read_request_connected(ab_tag_p tag) {
+int listing_tag_build_read_request_connected(cip_tag_p tag) {
     // tag_list_req *list_req = NULL;
-    ab_request_p req = NULL;
+    cip_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;

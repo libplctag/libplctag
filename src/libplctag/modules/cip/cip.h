@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,27 +33,42 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+/*
+ * Connection Manager packet encoding and decoding: Forward Open, Extended Forward Open and
+ * Forward Close.
+ *
+ * These touch no socket.  An encoder fills conn->data and sets conn->data_size; a decoder
+ * reads conn->data over conn->data_size bytes and updates the connection fields the reply
+ * carries.  Sending, receiving, retrying and the connection state machine are conn.c's.
+ */
 
-/* do these first */
+#include <libplctag/modules/cip/conn.h>
+#include <stdint.h>
 
-/* they are used in some of these includes */
-#include <libplctag/api/libplctag.h>
-#include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/omron_common.h>
+/*
+ * Encode a CIP route timeout as the priority/tick and tick-count pair the Connection
+ * Manager expects.  The low nibble of the tick byte gives the tick size as 2^n
+ * milliseconds and the count byte says how many ticks.  The smallest tick whose 255-count
+ * maximum reaches the timeout is chosen and the count rounded up, so the encoded value is
+ * never shorter than asked for.
+ */
+extern void cip_encode_route_timeout(int timeout_ms, uint8_t *secs_per_tick, uint8_t *timeout_ticks);
 
+/* Build an Extended Forward Open (service 0x5B) request into conn->data. */
+extern int cip_encode_forward_open_ex(cip_conn_p conn);
 
-struct omron_tag_t {
-    CIP_TAG_BASE_STRUCT;
+/* Build a Forward Open (service 0x54) request into conn->data. */
+extern int cip_encode_forward_open_old(cip_conn_p conn);
 
-    /* how do we talk to this device? */
-    omron_plc_type_t plc_type;
+/* Build a Forward Close (service 0x4E) request into conn->data. */
+extern int cip_encode_forward_close(cip_conn_p conn);
 
-    /* pointer back to the session */
-    omron_conn_p session;
+/*
+ * Decode a Forward Open reply.  On success the negotiated connection IDs and payload size
+ * are stored on the connection.  A size rejection comes back as PLCTAG_ERR_TOO_LARGE with
+ * conn->max_payload_guess lowered to what the PLC offered, so the caller can retry.
+ */
+extern int cip_decode_forward_open_response(cip_conn_p conn);
 
-    /* the in-flight request object */
-    omron_request_p req;
-};
+/* Decode a Forward Close reply. */
+extern int cip_decode_forward_close_response(cip_conn_p conn);

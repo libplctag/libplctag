@@ -10,8 +10,6 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/defs.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/connection_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/connection_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/identity_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/listing_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/raw_tag.c"
@@ -26,6 +24,5 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/session.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/session.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/tag.h"
                     PARENT_SCOPE
 )

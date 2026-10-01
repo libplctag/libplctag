@@ -34,11 +34,14 @@
 #include <ctype.h>
 #include <errno.h>
 #include <libplctag/api/libplctag.h>
-#include <libplctag/modules/cip/path.h>
+#include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/ab/pccc.h>
+#include <libplctag/modules/ab/session.h>
+#include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -89,7 +92,7 @@
  * A bit segment is simply an integer from 0 to 63 (inclusive). */
 
 
-int cip_encode_tag_name(ab_tag_p tag, const char *name) {
+int cip_encode_tag_name(cip_tag_p tag, const char *name) {
     cip_name_t ctx = {.tag_id = tag->tag_id,
                       .elem_count = tag->elem_count,
                       .encoded_name = &tag->encoded_name[0],
