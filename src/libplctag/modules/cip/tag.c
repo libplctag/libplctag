@@ -43,7 +43,10 @@
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/tag.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
@@ -210,6 +213,31 @@ int cip_check_request_status(cip_tag_p tag) {
     // tag->status = (int8_t)rc;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, tag->tag_id, "Done with tag status %s.", plc_tag_decode_error(rc));
+
+    return rc;
+}
+
+
+/*
+ * Encode a tag's symbolic name into tag->encoded_name as a CIP path.
+ *
+ * The grammar and the encoding are cip_encode_name()'s; this only moves the tag's fields
+ * in and the results back out.  is_bit is a bitfield, so it cannot be written through a
+ * pointer and has to be copied by hand.
+ */
+int cip_encode_tag_name(cip_tag_p tag, const char *name) {
+    cip_name_t ctx = {.tag_id = tag->tag_id,
+                      .elem_count = tag->elem_count,
+                      .encoded_name = &tag->encoded_name[0],
+                      .encoded_name_capacity = (int)sizeof(tag->encoded_name),
+                      .encoded_name_size = 0,
+                      .bit = tag->bit,
+                      .is_bit = (tag->is_bit ? true : false)};
+    int rc = cip_encode_name(&ctx, name);
+
+    tag->encoded_name_size = ctx.encoded_name_size;
+    tag->bit = ctx.bit;
+    tag->is_bit = (ctx.is_bit ? (uint8_t)1 : (uint8_t)0);
 
     return rc;
 }

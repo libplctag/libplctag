@@ -65,11 +65,6 @@
  */
 #define CIP_MAX_FRAMING_SIZE ((int)sizeof(eip_cip_uc_req) + 2 + 255)
 
-/* connection retry backoff */
-#define RETRY_WAIT_INITIAL_MS (100)
-#define RETRY_WAIT_MAX_MS (10000)
-
-
 /* how long to block in one socket read or write before checking for shutdown */
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 
@@ -119,6 +114,22 @@
  * against a 32000 ms budget.
  */
 #define SESSION_DEFAULT_TIMEOUT (CIP_EIP_CONN_TIMEOUT_MS)
+
+
+/*
+ * Connection retry backoff.
+ *
+ * The cap is the same budget we give the PLC for a connection-level exchange: there is no
+ * point retrying faster than the deadline we ourselves grant, and none in waiting longer.
+ * CIP_EIP_CONN_TIMEOUT_MS works out to 32000 ms.
+ *
+ * RETRY_WAIT_MAX_SHIFT is the first shift whose delay reaches the cap: 100 << 8 is 25600 ms,
+ * still under it, and 100 << 9 is 51200 ms, over it.  Past that shift the base cannot change,
+ * so calc_retry_time() stops being called -- see SESSION_START_RETRY.
+ */
+#define RETRY_WAIT_INITIAL_MS (100)
+#define RETRY_WAIT_MAX_MS (SESSION_DEFAULT_TIMEOUT)
+#define RETRY_WAIT_MAX_SHIFT ((uint32_t)9)
 
 
 /* how long teardown waits for connections and then handler threads to finish */
@@ -449,7 +460,6 @@ extern int cip_submit_payload(cip_conn_p conn, cip_request_p req, int payload_si
  * use this (PCCC, Identity) are single-request by nature.
  */
 extern int cip_submit_unrouted_payload(cip_conn_p conn, cip_request_p req, int payload_size);
-extern int64_t calc_retry_time(unsigned int retry_count);
 extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
 extern int session_register(cip_conn_p conn);
 extern void session_destroy(void *conn_arg);

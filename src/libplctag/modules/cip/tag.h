@@ -202,3 +202,6 @@ extern int cip_tag_abort_request(cip_tag_p tag);
 
 /* Collect the result of the tag's in-flight request; PENDING while it is still out. */
 extern int cip_check_request_status(cip_tag_p tag);
+
+/* Encode a tag's symbolic name into tag->encoded_name as a CIP path. */
+extern int cip_encode_tag_name(cip_tag_p tag, const char *name);

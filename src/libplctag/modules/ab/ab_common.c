@@ -39,7 +39,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/connection_tag.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>

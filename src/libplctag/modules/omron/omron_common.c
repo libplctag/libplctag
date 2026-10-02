@@ -40,7 +40,6 @@
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
-#include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
 #include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/omron/omron_common.h>
@@ -1024,7 +1023,7 @@ int check_tag_name(cip_tag_p tag, const char *name) {
     }
 
     /* attempt to parse the tag name */
-    if((rc = omron_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
+    if((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "parse of CIP-style tag name %s failed!", name);
 
         return rc;

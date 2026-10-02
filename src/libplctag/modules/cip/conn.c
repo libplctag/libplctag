@@ -1039,16 +1039,24 @@ int cip_submit_unrouted_payload(cip_conn_p conn, cip_request_p req, int payload_
 }
 
 
-int64_t calc_retry_time(unsigned int retry_count) {
+/*
+ * The backoff base for an attempt count.  Deterministic and saturating: no jitter here, the
+ * caller re-rolls that on every attempt so that clients which failed together do not march
+ * back in step.
+ */
+static int64_t calc_retry_time(uint32_t retry_count) {
     int64_t result = 0;
-    result = RETRY_WAIT_INITIAL_MS * (int64_t)(1 << retry_count);
+
+    /*
+     * The caller stops calling once the base saturates, so retry_count cannot normally reach
+     * here large enough to matter.  Clamp anyway: a shift of 31 or more bits is undefined
+     * behavior, and this guard holds even if the constants are later retuned.
+     */
+    if(retry_count > RETRY_WAIT_MAX_SHIFT) { retry_count = RETRY_WAIT_MAX_SHIFT; }
+
+    result = RETRY_WAIT_INITIAL_MS * ((int64_t)1 << retry_count);
 
     if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
-
-    result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Retry count %u for retry time delay of %" PRId64 "ms.", retry_count,
-           result);
 
     return result;
 }
@@ -1695,7 +1703,9 @@ THREAD_FUNC(session_handler) {
     int64_t wait_until_time = 0;
     int32_t inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
     int64_t auto_disconnect_time = time_ms() + inactivity_timeout_ms;
-    unsigned int retry_count = 0;
+    uint32_t retry_count = 0;
+    int64_t retry_wait_base_ms = 0;
+    int64_t retry_wait_ms = 0;
     int auto_disconnect = 0;
 
 
@@ -1740,8 +1750,6 @@ THREAD_FUNC(session_handler) {
                                "Connect complete immediately, going to state SESSION_REGISTER.");
 
                         state = SESSION_REGISTER;
-
-                        retry_count = 0;
                     } else {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                                "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
@@ -1793,6 +1801,13 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session registration failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_CLOSE_SOCKET;
                 } else {
+                    /*
+                     * The session is up.  Restart the backoff here and not at socket connect:
+                     * both the immediate and the asynchronous connect paths pass through this
+                     * state, and a socket that opens but will not register is still a failure.
+                     */
+                    retry_count = 0;
+                    retry_wait_base_ms = 0;
 
                     if(conn->use_connected_msg) {
                         state = SESSION_SEND_FORWARD_OPEN;
@@ -1955,14 +1970,34 @@ THREAD_FUNC(session_handler) {
             case SESSION_START_RETRY:
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
 
-                /* FIXME - make this a tag attribute. */
-                int64_t retry_wait_ms = calc_retry_time(retry_count);
+                /*
+                 * FIXME - make the backoff bounds tag attributes.
+                 *
+                 * Keep counting attempts, but stop recomputing the base once it saturates.
+                 * Shifting by an ever-larger count is what overflowed and collapsed the wait
+                 * to nothing.  retry_count is unsigned, so its eventual wrap is defined -- and
+                 * harmless, because a wrapped count no longer feeds the base.  At 32 seconds
+                 * an attempt that wrap is some four thousand years out.
+                 */
+                if(retry_count <= RETRY_WAIT_MAX_SHIFT) { retry_wait_base_ms = calc_retry_time(retry_count); }
+
+                /*
+                 * Equal jitter, re-rolled every attempt: wait half the base plus a random
+                 * share of the other half.  The randomness has to be drawn here rather than
+                 * folded into the base, because a base computed once and held would hold its
+                 * one random sample forever -- and a fleet of clients knocked off by the same
+                 * PLC reboot would then retry on a fixed offset from each other for as long as
+                 * the outage lasted.  Drawing each time spreads them over the whole upper half
+                 * of the interval on every round.
+                 */
+                retry_wait_ms = (retry_wait_base_ms / 2) + (int64_t)random_u64((uint64_t)(retry_wait_base_ms / 2));
 
                 timeout_time = now + retry_wait_ms;
                 retry_count++;
 
-                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Waiting %" PRId64 "ms before trying to reconnect.",
-                       retry_wait_ms);
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                       "Retry %" PRIu32 ", waiting %" PRId64 "ms of a possible %" PRId64 "ms before reconnecting.",
+                       retry_count, retry_wait_ms, retry_wait_base_ms);
 
                 /* start waiting. */
                 state = SESSION_WAIT_ERR_RETRY;

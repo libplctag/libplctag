@@ -36,7 +36,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
-#include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <limits.h>

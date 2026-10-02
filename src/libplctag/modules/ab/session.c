@@ -36,7 +36,6 @@
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
