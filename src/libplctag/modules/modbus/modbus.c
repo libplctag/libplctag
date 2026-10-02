@@ -43,13 +43,17 @@
 #include <stdlib.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
+#include <utils/backoff.h>
 #include <utils/debug.h>
-#include <utils/random_utils.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
 
 /* data definitions */
 
+/*
+ * Connection retry backoff bounds.  The growth and jitter are backoff_wait_ms()'s, so
+ * these are only the ends of the range.
+ */
 #define PLC_SOCKET_ERR_MAX_DELAY (5000)
 #define PLC_SOCKET_ERR_START_DELAY (50)
 #define PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT (10)
@@ -1010,22 +1014,17 @@ static int reset_plc(modbus_plc_p plc) {
 }
 
 
-#define UPDATE_ERR_DELAY()                                                                 \
-    do {                                                                                   \
-        err_delay = err_delay * 2;                                                         \
-        if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; } \
-        err_delay_until = (int64_t)random_u64((uint64_t)err_delay) + time_ms();            \
-    } while(0)
-
-
 THREAD_FUNC(modbus_plc_handler) {
     int rc = PLCTAG_STATUS_OK;
     modbus_plc_p plc = (modbus_plc_p)arg;
-    int64_t err_delay = PLC_SOCKET_ERR_START_DELAY;
+    backoff_t err_backoff;
+    int64_t err_delay = 0;
     int64_t err_delay_until = 0;
     int sock_events = SOCK_EVENT_NONE;
     int waitable_events = SOCK_EVENT_NONE;
     int32_t timeout_ms = 0;
+
+    backoff_init(&err_backoff, PLC_SOCKET_ERR_START_DELAY, PLC_SOCKET_ERR_MAX_DELAY);
 
     /* where PLC_CLOSE_SOCKET goes once the socket is down; set by whoever enters it */
     modbus_plc_state_t state_after_close = PLC_CONNECT_START;
@@ -1094,8 +1093,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Successfully connected to the PLC.  Going to PLC_READY state.");
 
-                    /* reset err_delay */
-                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    backoff_reset(&err_backoff);
 
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
@@ -1113,7 +1111,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            plc_tag_decode_error(rc));
 
                     /* exponential increase with jitter. */
-                    UPDATE_ERR_DELAY();
+                    err_delay = backoff_wait_ms(&err_backoff);
+                    err_delay_until = time_ms() + err_delay;
 
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
@@ -1141,8 +1140,7 @@ THREAD_FUNC(modbus_plc_handler) {
                            " (connection established in PLC_CONNECT_WAIT).",
                            plc->last_packet_time_ms, plc->disconnect_at_time_ms);
 
-                    /* reset err_delay */
-                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    backoff_reset(&err_backoff);
 
                     plc->state = PLC_READY;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
@@ -1154,7 +1152,8 @@ THREAD_FUNC(modbus_plc_handler) {
                            plc_tag_decode_error(rc));
 
                     /* exponential increase with jitter. */
-                    UPDATE_ERR_DELAY();
+                    err_delay = backoff_wait_ms(&err_backoff);
+                    err_delay_until = time_ms() + err_delay;
 
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
                            "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",

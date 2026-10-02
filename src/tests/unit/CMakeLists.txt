@@ -69,6 +69,20 @@ target_include_directories(test_tag_name_bounds PRIVATE
 
 target_link_libraries(test_tag_name_bounds PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_backoff: tests the shared connection retry backoff. Pure computation -- no socket,
+# no PLC, no threads -- so it runs anywhere and in milliseconds. It is also the UB check
+# for the retry path: the sanitizer build traps a bad shift inside backoff_wait_ms().
+add_executable(test_backoff test_backoff.c)
+
+target_include_directories(test_backoff PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_backoff PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_eip_response_validation: checks that a response whose EIP header does not answer the
 # request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
 # because the library's own socket shim is internal, so it is skipped on Windows.
@@ -113,10 +127,11 @@ endif()
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
+add_test(NAME unit_test_backoff COMMAND test_backoff)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

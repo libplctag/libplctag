@@ -50,6 +50,7 @@
 #include <limits.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
+#include <utils/backoff.h>
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 #include <utils/rc.h>
@@ -1039,29 +1040,6 @@ int cip_submit_unrouted_payload(cip_conn_p conn, cip_request_p req, int payload_
 }
 
 
-/*
- * The backoff base for an attempt count.  Deterministic and saturating: no jitter here, the
- * caller re-rolls that on every attempt so that clients which failed together do not march
- * back in step.
- */
-static int64_t calc_retry_time(uint32_t retry_count) {
-    int64_t result = 0;
-
-    /*
-     * The caller stops calling once the base saturates, so retry_count cannot normally reach
-     * here large enough to matter.  Clamp anyway: a shift of 31 or more bits is undefined
-     * behavior, and this guard holds even if the constants are later retuned.
-     */
-    if(retry_count > RETRY_WAIT_MAX_SHIFT) { retry_count = RETRY_WAIT_MAX_SHIFT; }
-
-    result = RETRY_WAIT_INITIAL_MS * ((int64_t)1 << retry_count);
-
-    if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
-
-    return result;
-}
-
-
 int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req) {
     int rc = PLCTAG_STATUS_OK;
     cip_request_p res;
@@ -1703,11 +1681,12 @@ THREAD_FUNC(session_handler) {
     int64_t wait_until_time = 0;
     int32_t inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
     int64_t auto_disconnect_time = time_ms() + inactivity_timeout_ms;
-    uint32_t retry_count = 0;
-    int64_t retry_wait_base_ms = 0;
+    backoff_t retry_backoff;
     int64_t retry_wait_ms = 0;
     int auto_disconnect = 0;
 
+
+    backoff_init(&retry_backoff, RETRY_WAIT_INITIAL_MS, RETRY_WAIT_MAX_MS);
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting thread for session %p", conn);
 
@@ -1806,8 +1785,7 @@ THREAD_FUNC(session_handler) {
                      * both the immediate and the asynchronous connect paths pass through this
                      * state, and a socket that opens but will not register is still a failure.
                      */
-                    retry_count = 0;
-                    retry_wait_base_ms = 0;
+                    backoff_reset(&retry_backoff);
 
                     if(conn->use_connected_msg) {
                         state = SESSION_SEND_FORWARD_OPEN;
@@ -1970,34 +1948,14 @@ THREAD_FUNC(session_handler) {
             case SESSION_START_RETRY:
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
 
-                /*
-                 * FIXME - make the backoff bounds tag attributes.
-                 *
-                 * Keep counting attempts, but stop recomputing the base once it saturates.
-                 * Shifting by an ever-larger count is what overflowed and collapsed the wait
-                 * to nothing.  retry_count is unsigned, so its eventual wrap is defined -- and
-                 * harmless, because a wrapped count no longer feeds the base.  At 32 seconds
-                 * an attempt that wrap is some four thousand years out.
-                 */
-                if(retry_count <= RETRY_WAIT_MAX_SHIFT) { retry_wait_base_ms = calc_retry_time(retry_count); }
-
-                /*
-                 * Equal jitter, re-rolled every attempt: wait half the base plus a random
-                 * share of the other half.  The randomness has to be drawn here rather than
-                 * folded into the base, because a base computed once and held would hold its
-                 * one random sample forever -- and a fleet of clients knocked off by the same
-                 * PLC reboot would then retry on a fixed offset from each other for as long as
-                 * the outage lasted.  Drawing each time spreads them over the whole upper half
-                 * of the interval on every round.
-                 */
-                retry_wait_ms = (retry_wait_base_ms / 2) + (int64_t)random_u64((uint64_t)(retry_wait_base_ms / 2));
+                /* FIXME - make the backoff bounds tag attributes. */
+                retry_wait_ms = backoff_wait_ms(&retry_backoff);
 
                 timeout_time = now + retry_wait_ms;
-                retry_count++;
 
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                       "Retry %" PRIu32 ", waiting %" PRId64 "ms of a possible %" PRId64 "ms before reconnecting.",
-                       retry_count, retry_wait_ms, retry_wait_base_ms);
+                       "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.", retry_backoff.attempts,
+                       retry_wait_ms);
 
                 /* start waiting. */
                 state = SESSION_WAIT_ERR_RETRY;
