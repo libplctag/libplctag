@@ -35,9 +35,10 @@
 #define __LIBPLCTAG_AB_CIP_H__
 
 #include <libplctag/api/libplctag.h>
-#include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/defs.h>
+#include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/wire.h>
+#include <utils/byteorder.h>
 
 
 //~ char *cip_decode_status(int status);

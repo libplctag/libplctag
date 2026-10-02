@@ -37,15 +37,26 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
-#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <platform.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
+
+
+/*
+ * Rockwell's tag listing.  This is not a CIP service: it is a Rockwell service code
+ * reading a Rockwell object class.  OMRON lists tags a different way (service 0x5F),
+ * which this library does not implement.
+ */
+#define AB_CIP_SVC_LIST_TAGS ((uint8_t)0x55)
+#define AB_CIP_CLASS_SYMBOL ((uint8_t)0x6B)
 
 START_PACK typedef struct {
     uint32_le instance_id;    /* monotonically increasing but not contiguous */
@@ -324,14 +335,14 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (AB_CIP_SVC_LIST_TAGS | CIP_SVC_REPLY)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -343,7 +354,7 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -357,10 +368,10 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
             int new_size = (int)payload_size + tag->offset;
 
             /* a PLC can keep returning fragments forever.  Do not grow without bound. */
-            if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+            if((payload_size + tag->offset) > (ptrdiff_t)CIP_MAX_TAG_DATA_SIZE) {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                        "Tag list data size of %d bytes is larger than the maximum of %d bytes!",
-                       (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                       (int)(payload_size + tag->offset), CIP_MAX_TAG_DATA_SIZE);
                 rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
@@ -455,7 +466,7 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         /* keep going if we are not done yet, unless we are getting nowhere. */
-        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+        if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
@@ -524,7 +535,7 @@ int listing_tag_build_read_request_connected(cip_tag_p tag) {
 
     /*
      * set up the embedded CIP tag list request packet
-        uint8_t request_service;    AB_EIP_CMD_CIP_LIST_TAGS=0x55
+        uint8_t request_service;    AB_CIP_SVC_LIST_TAGS=0x55
         uint8_t request_path_size;  3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6B    tag info/symbol class
@@ -540,7 +551,7 @@ int listing_tag_build_read_request_connected(cip_tag_p tag) {
                                                 0x01    attribute #1 - symbol name
     */
 
-    *data = AB_EIP_CMD_CIP_LIST_TAGS;
+    *data = AB_CIP_SVC_LIST_TAGS;
     data++;
 
     /* request path size, in 16-bit words */
@@ -557,7 +568,7 @@ int listing_tag_build_read_request_connected(cip_tag_p tag) {
 
     /* first the fixed part. */
     data[0] = 0x20; /* class type */
-    data[1] = 0x6B; /* tag info/symbol class */
+    data[1] = AB_CIP_CLASS_SYMBOL;
     data[2] = 0x25; /* 16-bit instance ID type */
     data[3] = 0x00; /* padding */
     data += 4;

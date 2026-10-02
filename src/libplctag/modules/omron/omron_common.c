@@ -39,9 +39,9 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <libplctag/modules/omron/omron_connection_tag.h>
@@ -50,6 +50,7 @@
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 #include <utils/vector.h>

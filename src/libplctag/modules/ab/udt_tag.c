@@ -37,15 +37,25 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
-#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <platform.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
+
+
+/*
+ * Rockwell's UDT (template) object class.  Get_Attribute_List is a real CIP service,
+ * but the class it is aimed at here is Rockwell's own, so the code lives with the
+ * Rockwell module.
+ */
+#define AB_CIP_CLASS_TEMPLATE ((uint8_t)0x6C)
 
 /* byte offset of the UDT handle/type attribute within a Get_Attributes_List response payload */
 #define UDT_METADATA_HANDLE_OFFSET (28)
@@ -266,14 +276,14 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_GET_ATTR_LIST | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (CIP_SVC_GET_ATTR_LIST | CIP_SVC_REPLY)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -285,7 +295,7 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -379,7 +389,7 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag) {
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         /* keep going if we are not done yet, unless we are getting nowhere. */
-        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+        if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
@@ -448,7 +458,7 @@ int udt_tag_build_read_metadata_request_connected(cip_tag_p tag) {
 
     /*
      * set up the embedded CIP UDT metadata request packet
-        uint8_t request_service;    AB_EIP_CMD_CIP_GET_ATTR_LIST=0x03
+        uint8_t request_service;    CIP_SVC_GET_ATTR_LIST=0x03
         uint8_t request_path_size;  3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6C    UDT class
@@ -464,7 +474,7 @@ int udt_tag_build_read_metadata_request_connected(cip_tag_p tag) {
                                                 0x01    attribute #1 - Handle/type of structure.
     */
 
-    *data = AB_EIP_CMD_CIP_GET_ATTR_LIST;
+    *data = CIP_SVC_GET_ATTR_LIST;
     data++;
 
     /* request path size, in 16-bit words */
@@ -475,7 +485,7 @@ int udt_tag_build_read_metadata_request_connected(cip_tag_p tag) {
 
     /* first the fixed part. */
     data[0] = 0x20; /* class type */
-    data[1] = 0x6C; /* UDT class */
+    data[1] = AB_CIP_CLASS_TEMPLATE;
     data[2] = 0x25; /* 16-bit instance ID type */
     data[3] = 0x00; /* padding */
     data += 4;
@@ -564,14 +574,14 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (CIP_SVC_READ | CIP_SVC_REPLY)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -583,7 +593,7 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -597,10 +607,10 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
             int new_size = (int)(tag->size) + (int)payload_size;
 
             /* a PLC can keep returning fragments forever.  Do not grow without bound. */
-            if(((ptrdiff_t)tag->size + payload_size) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+            if(((ptrdiff_t)tag->size + payload_size) > (ptrdiff_t)CIP_MAX_TAG_DATA_SIZE) {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                        "UDT field data size of %d bytes is larger than the maximum of %d bytes!",
-                       (int)((ptrdiff_t)tag->size + payload_size), AB_MAX_TAG_DATA_SIZE);
+                       (int)((ptrdiff_t)tag->size + payload_size), CIP_MAX_TAG_DATA_SIZE);
                 rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
@@ -640,7 +650,7 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         /* keep going if we are not done yet, unless we are getting nowhere. */
-        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+        if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
@@ -722,7 +732,7 @@ int udt_tag_build_read_fields_request_connected(cip_tag_p tag) {
 
     /*
      * set up the embedded CIP UDT metadata request packet
-        uint8_t request_service;        AB_EIP_CMD_CIP_READ=0x4C
+        uint8_t request_service;        CIP_SVC_READ=0x4C
         uint8_t request_path_size;      3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6C    UDT class
@@ -734,7 +744,7 @@ int udt_tag_build_read_fields_request_connected(cip_tag_p tag) {
         uint16_t total_size;            Total size of request in bytes.
     */
 
-    *data = AB_EIP_CMD_CIP_READ;
+    *data = CIP_SVC_READ;
     data++;
 
     /* request path size, in 16-bit words */
@@ -745,7 +755,7 @@ int udt_tag_build_read_fields_request_connected(cip_tag_p tag) {
 
     /* first the fixed part. */
     data[0] = 0x20; /* class type */
-    data[1] = 0x6C; /* UDT class */
+    data[1] = AB_CIP_CLASS_TEMPLATE;
     data[2] = 0x25; /* 16-bit instance ID type */
     data[3] = 0x00; /* padding */
     data += 4;

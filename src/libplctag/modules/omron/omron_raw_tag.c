@@ -36,13 +36,14 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <libplctag/modules/omron/omron_raw_tag.h>
 #include <platform.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
 

@@ -52,6 +52,13 @@
 #define CIP_SVC_WRITE_FRAG ((uint8_t)0x53)
 #define CIP_SVC_RMW ((uint8_t)0x4E)
 #define CIP_SVC_MULTI ((uint8_t)0x0A)
+#define CIP_SVC_GET_ATTR_LIST ((uint8_t)0x03)
+
+/*
+ * Listing a PLC's tags or UDTs is not a CIP service.  Each vendor invented its own --
+ * Rockwell reads its symbol and template classes, OMRON uses a service of its own --
+ * so those codes belong to the vendor's module, not here.
+ */
 
 /* OR'd into the service code in a reply. */
 #define CIP_SVC_REPLY ((uint8_t)0x80)

@@ -7,7 +7,6 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/ab_common.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/cip.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/cip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/defs.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/connection_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/connection_tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/identity_tag.c"

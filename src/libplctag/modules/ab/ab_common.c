@@ -41,18 +41,20 @@
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
 #include <libplctag/modules/ab/connection_tag.h>
-#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>
 #include <libplctag/modules/ab/eip_slc_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
@@ -539,10 +541,10 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
              * checking the result afterwards -- by then the damage is already done and the
              * wrapped value looks like a perfectly reasonable size.
              */
-            if(tag->elem_count > AB_MAX_TAG_DATA_SIZE / tag->elem_size) {
+            if(tag->elem_count > CIP_MAX_TAG_DATA_SIZE / tag->elem_size) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0,
                        "Tag of %d elements of %d bytes each is larger than the maximum tag size of %d bytes!",
-                       tag->elem_count, tag->elem_size, AB_MAX_TAG_DATA_SIZE);
+                       tag->elem_count, tag->elem_size, CIP_MAX_TAG_DATA_SIZE);
                 tag->status = PLCTAG_ERR_TOO_LARGE;
                 return (plc_tag_p)tag;
             }

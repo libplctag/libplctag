@@ -38,15 +38,16 @@
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/cip.h>
 #include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/defs.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <platform.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 
 

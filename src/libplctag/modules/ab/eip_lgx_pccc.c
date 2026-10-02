@@ -41,13 +41,14 @@ extern "C"
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <stddef.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 
 
@@ -212,8 +213,8 @@ int tag_read_start(cip_tag_p tag) {
         embed_pccc->req_path[2] = 0x24;
         embed_pccc->req_path[3] = 0x01;
         embed_pccc->request_id_size = 7;
-        embed_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        embed_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        embed_pccc->vendor_id = h2le16(CIP_EIP_VENDOR_ID);
+        embed_pccc->vendor_serial_number = h2le32(CIP_EIP_VENDOR_SN);
         embed_pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
         embed_pccc->pccc_status = 0;
         embed_pccc->pccc_seq_num = h2le16(conn_seq_id);
@@ -285,7 +286,7 @@ static int check_read_status(cip_tag_p tag) {
         data_end = tag->req->data + tag->req->request_size;
 
 
-        if(pccc->general_status != AB_EIP_OK) {
+        if(pccc->general_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
                    pccc->general_status,
                    decode_cip_error_long((uint8_t *)&(pccc->general_status),
@@ -294,7 +295,7 @@ static int check_read_status(cip_tag_p tag) {
             break;
         }
 
-        if(pccc->pccc_status != AB_EIP_OK) {
+        if(pccc->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -440,8 +441,8 @@ int tag_write_start(cip_tag_p tag) {
         embed_pccc->req_path[2] = 0x24;
         embed_pccc->req_path[3] = 0x01;
         embed_pccc->request_id_size = 7;
-        embed_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        embed_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        embed_pccc->vendor_id = h2le16(CIP_EIP_VENDOR_ID);
+        embed_pccc->vendor_serial_number = h2le32(CIP_EIP_VENDOR_SN);
         embed_pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
         embed_pccc->pccc_status = 0;
         embed_pccc->pccc_seq_num = h2le16(conn_seq_id);
@@ -499,14 +500,14 @@ static int check_write_status(cip_tag_p tag) {
 
         uint8_t *data_end = tag->req->data + tag->req->request_size;
 
-        if(pccc->general_status != AB_EIP_OK) {
+        if(pccc->general_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d",
                    pccc->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        if(pccc->pccc_status != AB_EIP_OK) {
+        if(pccc->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
             rc = PLCTAG_ERR_REMOTE_ERR;

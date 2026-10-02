@@ -36,15 +36,17 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <limits.h>
 #include <platform.h>
 #include <stddef.h>
 #include <string.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 
@@ -1343,8 +1345,8 @@ static uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp)
         /* the requester ID is how a PCCC target tells one client from another. */
         cip_pccc->request_id_size =
             (uint8_t)(sizeof(cip_pccc->request_id_size) + sizeof(cip_pccc->vendor_id) + sizeof(cip_pccc->vendor_serial_number));
-        cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
-        cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
+        cip_pccc->vendor_id = h2le16(CIP_EIP_VENDOR_ID);
+        cip_pccc->vendor_serial_number = h2le32(CIP_EIP_VENDOR_SN);
     }
 
     return req->data + pccc_prefix_size(is_dhp);
@@ -1498,13 +1500,13 @@ int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
          * it shifts if the target answered a different service, so check it before the fields
          * that follow are read.
          */
-        if(cip_pccc->reply_code != (AB_EIP_CMD_PCCC_EXECUTE | AB_EIP_CMD_CIP_OK)) {
+        if(cip_pccc->reply_code != (AB_EIP_CMD_PCCC_EXECUTE | CIP_SVC_REPLY)) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected PCCC reply code %02x, expected %02x!",
-                   (unsigned int)cip_pccc->reply_code, (unsigned int)(AB_EIP_CMD_PCCC_EXECUTE | AB_EIP_CMD_CIP_OK));
+                   (unsigned int)cip_pccc->reply_code, (unsigned int)(AB_EIP_CMD_PCCC_EXECUTE | CIP_SVC_REPLY));
             return PLCTAG_ERR_BAD_DATA;
         }
 
-        if(cip_pccc->general_status != AB_EIP_OK) {
+        if(cip_pccc->general_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, CIP status: (%d) %s",
                    cip_pccc->general_status,
                    decode_cip_error_long((uint8_t *)&(cip_pccc->general_status),
@@ -1539,8 +1541,8 @@ int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
          * The requester ID is echoed verbatim from our request.  It is how a PCCC target tells
          * one requester from another, so a reply carrying somebody else's is not ours.
          */
-        if(cip_pccc->request_id_size != 7 || le2h16(cip_pccc->vendor_id) != AB_EIP_VENDOR_ID
-           || le2h32(cip_pccc->vendor_serial_number) != AB_EIP_VENDOR_SN) {
+        if(cip_pccc->request_id_size != 7 || le2h16(cip_pccc->vendor_id) != CIP_EIP_VENDOR_ID
+           || le2h32(cip_pccc->vendor_serial_number) != CIP_EIP_VENDOR_SN) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC response requester ID (%u, %04x, %08x) is not ours!",
                    (unsigned int)cip_pccc->request_id_size, (unsigned int)le2h16(cip_pccc->vendor_id),
                    (unsigned int)le2h32(cip_pccc->vendor_serial_number));
@@ -1765,7 +1767,7 @@ static int pccc_check_read_status(cip_tag_p tag) {
         data = (uint8_t *)(pccc_cmd + 1);
         data_end = tag->req->data + tag->req->request_size;
 
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
+        if(pccc_cmd->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
@@ -2143,7 +2145,7 @@ static int pccc_check_write_status(cip_tag_p tag) {
         pccc_cmd = pccc_response_cmd(tag, is_dhp);
         data_end = tag->req->data + tag->req->request_size;
 
-        if(pccc_cmd->pccc_status != AB_EIP_OK) {
+        if(pccc_cmd->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));

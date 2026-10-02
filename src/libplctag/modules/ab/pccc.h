@@ -101,3 +101,25 @@ _Static_assert(sizeof(cip_pccc_full_resp) == 15, "cip_pccc_full_resp wire size c
 extern struct tag_vtable_t pccc_vtable;
 
 #endif
+
+
+/*
+ * PCCC command and function codes.
+ *
+ * PCCC is Rockwell's own protocol, carried inside CIP by the Execute PCCC service.  These
+ * are its codes, not CIP's.
+ */
+#define AB_EIP_CMD_PCCC_EXECUTE ((uint8_t)0x4B) /* the CIP service that carries a PCCC message */
+
+#define AB_EIP_PCCC_TYPED_CMD ((uint8_t)0x0F)
+#define AB_EIP_PLC5_RANGE_READ_FUNC ((uint8_t)0x01)
+#define AB_EIP_PLC5_RANGE_WRITE_FUNC ((uint8_t)0x00)
+#define AB_EIP_PLC5_RMW_FUNC ((uint8_t)0x26)
+#define AB_EIP_PCCCLGX_TYPED_READ_FUNC ((uint8_t)0x68)
+#define AB_EIP_PCCCLGX_TYPED_WRITE_FUNC ((uint8_t)0x67)
+#define AB_EIP_SLC_RANGE_READ_FUNC ((uint8_t)0xA2)
+#define AB_EIP_SLC_RANGE_WRITE_FUNC ((uint8_t)0xAA)
+#define AB_EIP_SLC_RANGE_WRITE_MASK_FUNC ((uint8_t)0xAB)
+
+/* PCCC data file types, as they appear in a typed read or write. */
+#define AB_PCCC_DATA_ARRAY 9

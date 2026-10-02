@@ -37,13 +37,15 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/cip.h>
-#include <libplctag/modules/ab/defs.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <platform.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
 
@@ -269,10 +271,10 @@ int identity_tag_check_read_status_unconnected(cip_tag_p tag) {
 
     reply_service = cip_response[0];
 
-    if(reply_service == (uint8_t)(AB_EIP_CMD_UNCONNECTED_SEND | AB_EIP_CMD_CIP_OK)) {
+    if(reply_service == (uint8_t)(CIP_EIP_CMD_UNCONNECTED_SEND | CIP_SVC_REPLY)) {
         cip_status = cip_response[2];
 
-        if(cip_status != AB_CIP_STATUS_OK) {
+        if(cip_status != CIP_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unconnected Send CIP status is not OK: 0x%02x",
                    cip_status);
             cip_tag_abort_request(tag);
@@ -292,17 +294,17 @@ int identity_tag_check_read_status_unconnected(cip_tag_p tag) {
         reply_service = cip_response[0];
     }
 
-    if(reply_service != (uint8_t)(AB_CIP_GET_ATTRIBUTES_ALL | AB_EIP_CMD_CIP_OK)) {
+    if(reply_service != (uint8_t)(AB_CIP_GET_ATTRIBUTES_ALL | CIP_SVC_REPLY)) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                "CIP response service unexpected: 0x%02x (expected 0x%02x)", reply_service,
-               (unsigned int)(AB_CIP_GET_ATTRIBUTES_ALL | AB_EIP_CMD_CIP_OK));
+               (unsigned int)(AB_CIP_GET_ATTRIBUTES_ALL | CIP_SVC_REPLY));
         cip_tag_abort_request(tag);
         return PLCTAG_ERR_BAD_DATA;
     }
 
     cip_status = cip_response[2];
 
-    if(cip_status != AB_CIP_STATUS_OK) {
+    if(cip_status != CIP_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_status);
         cip_tag_abort_request(tag);
         return PLCTAG_ERR_REMOTE_ERR;
