@@ -36,6 +36,7 @@
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/connection_tag.h>
+#include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab.h>
 #include <libplctag/modules/ab/ab_common.h>
@@ -970,50 +971,22 @@ static int32_t ab_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
 static int32_t ab_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    /* no session means the tag is not connected, which is a state and not an error. */
-    *result = (tag->session ? atomic_get_int32(&tag->session->watch.status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
-
-    return PLCTAG_STATUS_OK;
+    return conn_get_status(tag->session ? &tag->session->watch.status : NULL, result);
 }
 
 
 static int32_t ab_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    /* no session means the session that will be created uses the default. */
-    *result = (tag->session ? atomic_get_int32(&tag->session->connection_inactivity_timeout_ms)
-                            : (int32_t)SESSION_DISCONNECT_TIMEOUT);
-
-    return PLCTAG_STATUS_OK;
+    return conn_get_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, result);
 }
 
 
 static int32_t ab_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
-    int32_t clamped_value = value;
-    int32_t rc = PLCTAG_STATUS_OK;
 
-    /* Clamp to valid range: 100ms minimum, SESSION_DISCONNECT_TIMEOUT (31000ms) maximum */
-    if(clamped_value < 100) {
-        clamped_value = 100;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
-    } else if(clamped_value > SESSION_DISCONNECT_TIMEOUT) {
-        clamped_value = SESSION_DISCONNECT_TIMEOUT;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, SESSION_DISCONNECT_TIMEOUT);
-    }
-
-    if(!tag->session) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no session exists.");
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-
-    atomic_set_int32(&tag->session->connection_inactivity_timeout_ms, clamped_value);
-
-    return rc;
+    return conn_set_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, value,
+                                          tag->tag_id, DEBUG_MODULE_AB_COMMON);
 }
 
 

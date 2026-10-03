@@ -34,66 +34,17 @@
  ***************************************************************************/
 
 /*
- * The part of a connection object that a connection-status tag observes.
+ * The library's connection idle timeout, in milliseconds.
  *
- * Embedded in cip_conn_t and modbus_plc_t so that one
- * connection-tag implementation can watch any of them.
+ * This is the value the library promises, and everything else is derived from it.  A
+ * protocol that can tell the device how long to hold a connection open rounds *up* from
+ * this, so the device always grants at least this much; a protocol with no such mechanism
+ * -- Modbus, whose devices have no built-in idle disconnect -- simply uses it.  Either way
+ * the library closes first, by CONN_CLOSE_FIRST_MARGIN_MS.
  *
- * The ring is single-writer / multiple-reader: the connection's handler thread
- * is the only publisher, and each watching tag holds its own read index.
+ * These are plain integer literals on purpose: cip/conn.h picks its EtherNet/IP timeout
+ * multiplier with a preprocessor ladder, which cannot evaluate anything else.
  */
-
-#include <libplctag/lib/tag.h>
-#include <platform.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <utils/atomic_utils.h>
-
-
-#define CONN_EVENT_RING_SIZE (64)
-#define CONN_EVENT_RING_MASK (CONN_EVENT_RING_SIZE - 1)
-
-
-typedef struct {
-    atomic_int32_t status; /* plc_tag_conn_status_t values */
-
-    /*
-     * ring_write_idx is the index of the last entry written, not the next free
-     * slot.  A freshly initialized watch therefore holds one real entry at
-     * index 0 describing the current state, so a tag created later can seed
-     * itself from it.
-     */
-    tag_conn_event_t ring[CONN_EVENT_RING_SIZE];
-    atomic_int32_t ring_write_idx;
-} conn_event_ring_t;
-
-
-/* seed the watch with its initial status.  Call before the handler thread starts. */
-extern void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status);
-
-/*
- * Publish an event.  Single writer only: the connection's handler thread.
- * Repeating the last entry's event_type and status is dropped.
- */
-extern void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t status);
-
-/*
- * Set the connection status and publish the change, under the connection's own mutex.
- *
- * The status and the ring publish have to move together: connection_tag_create() takes a
- * paired snapshot of watch.status and watch.ring_write_idx to seed a new tag, and must not
- * see one from before this transition and the other from after it.  Repeating the current
- * status publishes nothing.
- *
- * Single writer only, like conn_watch_publish(): the connection's handler thread.
- */
-extern void conn_watch_set_status(conn_event_ring_t *watch, mutex_p mutex, int32_t new_status);
-
-/*
- * Consume the next event after *read_idx, advancing it.  Returns false when the
- * reader has caught up.  Each reader owns its own read_idx.
- */
-extern bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status);
-
-/* index a newly created reader should start from to see only future events. */
-extern int32_t conn_watch_read_idx(conn_event_ring_t *watch);
+#define CONN_INACTIVITY_TIMEOUT_MAX_MS (31000)
+#define CONN_INACTIVITY_TIMEOUT_MIN_MS (100)
+#define CONN_CLOSE_FIRST_MARGIN_MS (1000)

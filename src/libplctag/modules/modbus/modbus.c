@@ -35,6 +35,8 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_attribs.h>
+#include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/connection_tag.h>
 #include <libplctag/modules/modbus/modbus.h>
@@ -70,7 +72,6 @@
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 #define MAX_MODBUS_PDU_PAYLOAD (253) /* everything after the server address */
-#define MODBUS_INACTIVITY_TIMEOUT (30000)
 #define SOCKET_READ_TIMEOUT (20)       /* read timeout in milliseconds */
 #define SOCKET_WRITE_TIMEOUT (20)      /* write timeout in milliseconds */
 #define SOCKET_CONNECT_TIMEOUT (20)    /* connect timeout step in milliseconds */
@@ -629,7 +630,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     int server_id = attr_get_int(attribs, "path", -1);
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int max_requests_in_flight = attr_get_int(attribs, "max_requests_in_flight", 1);
-    int connection_inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT;
+    int connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
@@ -649,12 +650,12 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
         max_requests_in_flight = 1;
     }
 
-    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", MODBUS_INACTIVITY_TIMEOUT);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > MODBUS_INACTIVITY_TIMEOUT) {
+    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_INACTIVITY_TIMEOUT_MAX_MS);
+    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_INACTIVITY_TIMEOUT_MAX_MS) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
                "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, MODBUS_INACTIVITY_TIMEOUT, MODBUS_INACTIVITY_TIMEOUT);
-        connection_inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT;
+               connection_inactivity_timeout_ms, CONN_INACTIVITY_TIMEOUT_MAX_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS);
+        connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);
@@ -3689,49 +3690,22 @@ static int32_t mb_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
 static int32_t mb_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
 
-    /* no PLC means the tag is not connected, which is a state and not an error. */
-    *result = (tag->plc ? atomic_get_int32(&tag->plc->watch.status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
-
-    return PLCTAG_STATUS_OK;
+    return conn_get_status(tag->plc ? &tag->plc->watch.status : NULL, result);
 }
 
 
 static int32_t mb_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
 
-    /* no PLC means the PLC that will be created uses the default. */
-    *result = (tag->plc ? atomic_get_int32(&tag->plc->connection_inactivity_timeout_ms) : (int32_t)MODBUS_INACTIVITY_TIMEOUT);
-
-    return PLCTAG_STATUS_OK;
+    return conn_get_inactivity_timeout_ms(tag->plc ? &tag->plc->connection_inactivity_timeout_ms : NULL, result);
 }
 
 
 static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
-    int32_t clamped_value = value;
-    int32_t rc = PLCTAG_STATUS_OK;
 
-    /* Clamp to valid range: 100ms minimum, MODBUS_INACTIVITY_TIMEOUT (30000ms) maximum */
-    if(clamped_value < 100) {
-        clamped_value = 100;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to minimum 100ms.", (int)value);
-    } else if(clamped_value > MODBUS_INACTIVITY_TIMEOUT) {
-        clamped_value = MODBUS_INACTIVITY_TIMEOUT;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-               "connection_inactivity_timeout_ms value %d clamped to maximum %d ms.", (int)value, MODBUS_INACTIVITY_TIMEOUT);
-    }
-
-    if(!tag->plc) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Cannot set connection_inactivity_timeout_ms: no PLC exists.");
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-
-    atomic_set_int32(&tag->plc->connection_inactivity_timeout_ms, clamped_value);
-
-    return rc;
+    return conn_set_inactivity_timeout_ms(tag->plc ? &tag->plc->connection_inactivity_timeout_ms : NULL, value, tag->tag_id,
+                                          DEBUG_MODULE_MODBUS);
 }
 
 
@@ -3838,18 +3812,7 @@ static struct tag_vtable_t modbus_vtable = {
 
 
 static void mb_plc_set_conn_status(modbus_plc_p plc, int32_t new_status) {
-    /* watch.status and the ring publish must change together under plc->mutex:
-     * connection_tag_create() takes a paired snapshot of both (watch.ring_write_idx
-     * and watch.status) to seed a freshly created connection tag, and needs the
-     * same mutex to avoid reading one from before this transition and the other from
-     * after it -- see the comment there. */
-    critical_block(plc->mutex) {
-        int32_t old_status = atomic_get_int32(&plc->watch.status);
-        atomic_set_int32(&plc->watch.status, new_status);
-        if(old_status != new_status) {
-            conn_watch_publish(&plc->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
-        }
-    }
+    conn_watch_set_status(&plc->watch, plc->mutex, new_status);
 }
 
 

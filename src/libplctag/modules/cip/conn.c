@@ -41,6 +41,8 @@
 
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_timeouts.h>
+#include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/cip.h>
 #include <libplctag/modules/cip/conn.h>
@@ -1660,15 +1662,7 @@ int process_requests(cip_conn_p conn) {
     return rc;
 }
 void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
-    critical_block(conn->session_mutex) {
-        int32_t old_status = atomic_get_int32(&conn->watch.status);
-
-        atomic_set_int32(&conn->watch.status, new_status);
-
-        if(old_status != new_status) {
-            conn_watch_publish(&conn->watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
-        }
-    }
+    conn_watch_set_status(&conn->watch, conn->session_mutex, new_status);
 }
 
 
@@ -2266,7 +2260,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
      */
     int shared_session = attr_get_int(attribs, "share_session", attr_get_int(attribs, "share_conn", 1));
     int rc = PLCTAG_STATUS_OK;
-    int connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+    int connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
@@ -2283,12 +2277,12 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
                "The attribute \"share_conn\" is deprecated and will be removed.  Use \"connection_group_id\" instead.");
     }
 
-    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", SESSION_DISCONNECT_TIMEOUT);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > SESSION_DISCONNECT_TIMEOUT) {
+    connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_INACTIVITY_TIMEOUT_MAX_MS);
+    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_INACTIVITY_TIMEOUT_MAX_MS) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, SESSION_DISCONNECT_TIMEOUT, SESSION_DISCONNECT_TIMEOUT);
-        connection_inactivity_timeout_ms = SESSION_DISCONNECT_TIMEOUT;
+               connection_inactivity_timeout_ms, CONN_INACTIVITY_TIMEOUT_MAX_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS);
+        connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
     } else {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);

@@ -33,8 +33,10 @@
 
 /* Shared connection-event ring.  See conn_watch.h for the concurrency contract. */
 
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
+#include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
@@ -90,3 +92,14 @@ bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event
 
 
 int32_t conn_watch_read_idx(conn_event_ring_t *watch) { return atomic_get_int32(&watch->ring_write_idx); }
+
+
+void conn_watch_set_status(conn_event_ring_t *watch, mutex_p mutex, int32_t new_status) {
+    critical_block(mutex) {
+        int32_t old_status = atomic_get_int32(&watch->status);
+
+        atomic_set_int32(&watch->status, new_status);
+
+        if(old_status != new_status) { conn_watch_publish(watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+    }
+}

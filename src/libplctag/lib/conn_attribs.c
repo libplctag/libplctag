@@ -1,5 +1,3 @@
-#pragma once
-
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -33,67 +31,57 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/*
- * The part of a connection object that a connection-status tag observes.
- *
- * Embedded in cip_conn_t and modbus_plc_t so that one
- * connection-tag implementation can watch any of them.
- *
- * The ring is single-writer / multiple-reader: the connection's handler thread
- * is the only publisher, and each watching tag holds its own read index.
- */
+/* Shared connection attribute accessors.  See conn_attribs.h for the NULL contract. */
 
-#include <libplctag/lib/tag.h>
-#include <platform.h>
-#include <stdbool.h>
+#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_attribs.h>
+#include <libplctag/lib/conn_timeouts.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
+#include <utils/debug.h>
 
 
-#define CONN_EVENT_RING_SIZE (64)
-#define CONN_EVENT_RING_MASK (CONN_EVENT_RING_SIZE - 1)
+int32_t conn_get_status(atomic_int32_t *status, int32_t *result) {
+    /* no connection means the tag is not connected, which is a state and not an error. */
+    *result = (status ? atomic_get_int32(status) : (int32_t)PLCTAG_CONN_STATUS_DOWN);
+
+    return PLCTAG_STATUS_OK;
+}
 
 
-typedef struct {
-    atomic_int32_t status; /* plc_tag_conn_status_t values */
+int32_t conn_get_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_t *result) {
+    /* no connection means the one that will be created uses the default. */
+    *result = (timeout_ms ? atomic_get_int32(timeout_ms) : (int32_t)CONN_INACTIVITY_TIMEOUT_MAX_MS);
 
-    /*
-     * ring_write_idx is the index of the last entry written, not the next free
-     * slot.  A freshly initialized watch therefore holds one real entry at
-     * index 0 describing the current state, so a tag created later can seed
-     * itself from it.
-     */
-    tag_conn_event_t ring[CONN_EVENT_RING_SIZE];
-    atomic_int32_t ring_write_idx;
-} conn_event_ring_t;
+    return PLCTAG_STATUS_OK;
+}
 
 
-/* seed the watch with its initial status.  Call before the handler thread starts. */
-extern void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status);
+int32_t conn_set_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_t value, int32_t tag_id,
+                                       debug_module_t debug_module) {
+    int32_t clamped_value = value;
+    int32_t rc = PLCTAG_STATUS_OK;
 
-/*
- * Publish an event.  Single writer only: the connection's handler thread.
- * Repeating the last entry's event_type and status is dropped.
- */
-extern void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t status);
+    if(clamped_value < CONN_INACTIVITY_TIMEOUT_MIN_MS) {
+        clamped_value = CONN_INACTIVITY_TIMEOUT_MIN_MS;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_inactivity_timeout_ms value %" PRId32 " clamped to minimum %d ms.",
+               value, CONN_INACTIVITY_TIMEOUT_MIN_MS);
+    } else if(clamped_value > CONN_INACTIVITY_TIMEOUT_MAX_MS) {
+        clamped_value = CONN_INACTIVITY_TIMEOUT_MAX_MS;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_inactivity_timeout_ms value %" PRId32 " clamped to maximum %d ms.",
+               value, CONN_INACTIVITY_TIMEOUT_MAX_MS);
+    }
 
-/*
- * Set the connection status and publish the change, under the connection's own mutex.
- *
- * The status and the ring publish have to move together: connection_tag_create() takes a
- * paired snapshot of watch.status and watch.ring_write_idx to seed a new tag, and must not
- * see one from before this transition and the other from after it.  Repeating the current
- * status publishes nothing.
- *
- * Single writer only, like conn_watch_publish(): the connection's handler thread.
- */
-extern void conn_watch_set_status(conn_event_ring_t *watch, mutex_p mutex, int32_t new_status);
+    /* clamp first, then report the missing connection: the caller learns both problems. */
+    if(!timeout_ms) {
+        pdebug(debug_module, DEBUG_WARN, tag_id, "Cannot set connection_inactivity_timeout_ms: no connection exists.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
 
-/*
- * Consume the next event after *read_idx, advancing it.  Returns false when the
- * reader has caught up.  Each reader owns its own read_idx.
- */
-extern bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status);
+    atomic_set_int32(timeout_ms, clamped_value);
 
-/* index a newly created reader should start from to see only future events. */
-extern int32_t conn_watch_read_idx(conn_event_ring_t *watch);
+    return rc;
+}

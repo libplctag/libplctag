@@ -46,6 +46,7 @@
  * dialect's connection to another's -- the fields past this macro differ.
  */
 
+#include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/modules/cip/plc_type.h>
 #include <platform.h>
@@ -97,11 +98,46 @@
 
 
 /*
- * How long a connection may sit idle before it is dropped.  One second less
- * than the timeout we negotiate with the PLC, so we close first.
+ * What we ask the PLC to hold the connection open for.
+ *
+ * Derived from the library's own idle timeout, not the other way around.  EtherNet/IP
+ * expresses the connection timeout as RPI x 4 x 2^multiplier, and the multiplier is a
+ * three-bit field on the wire, so the grantable values are coarse.  Pick the smallest one
+ * that covers the library's idle timeout plus the margin we close within; rounding is
+ * upward by construction, since the next multiplier down would not reach the required
+ * value.  The library therefore always hangs up before the PLC does, whatever
+ * CONN_INACTIVITY_TIMEOUT_MAX_MS is set to.
+ *
+ * RPI is defined here rather than with the other EtherNet/IP constants below because the
+ * #if ladder is evaluated where it stands.
  */
-#define CIP_EIP_CONN_TIMEOUT_MS ((CIP_EIP_RPI * 4 * (1 << CIP_EIP_TIMEOUT_MULTIPLIER)) / 1000)
-#define SESSION_DISCONNECT_TIMEOUT (CIP_EIP_CONN_TIMEOUT_MS - 1000)
+#define CIP_EIP_RPI (1000000) /* in microseconds */
+#define CIP_EIP_RPI_MS (CIP_EIP_RPI / 1000)
+
+#define CIP_EIP_CONN_TIMEOUT_REQUIRED_MS (CONN_INACTIVITY_TIMEOUT_MAX_MS + CONN_CLOSE_FIRST_MARGIN_MS)
+
+#if (CIP_EIP_RPI_MS * 4) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (0)
+#elif (CIP_EIP_RPI_MS * 8) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (1)
+#elif (CIP_EIP_RPI_MS * 16) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (2)
+#elif (CIP_EIP_RPI_MS * 32) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (3)
+#elif (CIP_EIP_RPI_MS * 64) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (4)
+#elif (CIP_EIP_RPI_MS * 128) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (5)
+#elif (CIP_EIP_RPI_MS * 256) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (6)
+#elif (CIP_EIP_RPI_MS * 512) >= CIP_EIP_CONN_TIMEOUT_REQUIRED_MS
+#    define CIP_EIP_TIMEOUT_MULTIPLIER (7)
+#else
+#    error "CONN_INACTIVITY_TIMEOUT_MAX_MS is longer than an EtherNet/IP connection timeout can express.  Lower it or raise CIP_EIP_RPI."
+#endif
+
+/* what the PLC actually grants: the required value rounded up to the chosen multiplier. */
+#define CIP_EIP_CONN_TIMEOUT_MS (CIP_EIP_RPI_MS * 4 * (1 << CIP_EIP_TIMEOUT_MULTIPLIER))
 
 /*
  * How long to wait for the answer to a connection-level exchange: Register Session,
@@ -202,8 +238,6 @@ typedef struct {
 #define CIP_EIP_CONN_PARAM ((uint16_t)0x4200)
 #define CIP_EIP_CONN_PARAM_EX ((uint32_t)0x42000000)
 #define CIP_EIP_PLC5_PARAM ((uint16_t)0x4302)
-#define CIP_EIP_RPI (1000000) /* in microseconds */
-#define CIP_EIP_TIMEOUT_MULTIPLIER (0x03)
 #define CIP_EIP_TRANSPORT_CLASS_T3 ((uint8_t)0xA3)
 #define CIP_EIP_VENDOR_ID (0xF33D)     /* tres 1337 */
 #define CIP_EIP_VENDOR_SN (0x21504345) /* the string !PCE */
