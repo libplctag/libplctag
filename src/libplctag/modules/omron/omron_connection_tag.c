@@ -31,56 +31,27 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/* Omron's wrapper around the shared connection tag.  See lib/connection_tag.c. */
+/* OMRON's wrapper around the shared CIP connection tag.  See cip/connection_tag.c. */
 
-#include "omron_connection_tag.h"
 #include <libplctag/api/libplctag.h>
-#include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/connection_tag.h>
 #include <libplctag/modules/omron/conn.h>
-#include <libplctag/modules/omron/omron_common.h>
+#include <libplctag/modules/omron/omron_connection_tag.h>
+#include <stdint.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
-#include <utils/rc.h>
 
 
 plc_tag_p omron_connection_tag_create(attr attribs,
                                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                       void *userdata, plc_tag_p src_tag) {
-    connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_OMRON_CONNECTION,
-                                  .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
-                                  .conn_rc = PLCTAG_STATUS_OK};
-    cip_conn_p conn = NULL;
+    /* OMRON adopts a connection only from its own data tags, and reports the real error. */
+    static const cip_connection_tag_ops_t ops = {.connection_protocol = TAG_PROTOCOL_OMRON_CONNECTION,
+                                                 .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
+                                                 .source_protocols = {TAG_PROTOCOL_OMRON, TAG_PROTOCOL_UNKNOWN},
+                                                 .find_or_create = conn_find_or_create,
+                                                 .create_failure_rc = PLCTAG_STATUS_OK};
 
-    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
-
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_OMRON: conn = rc_inc(((cip_tag_p)src_tag)->session); break;
-
-            case TAG_PROTOCOL_OMRON_CONNECTION: conn = rc_inc(((connection_tag_p)src_tag)->conn); break;
-
-            default: conn = NULL; break;
-        }
-
-        args.conn_rc = (conn ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED);
-    } else {
-        int new_conn = 0;
-
-        args.conn_rc = conn_find_or_create(&conn, attribs, &new_conn);
-        if(args.conn_rc != PLCTAG_STATUS_OK) { conn = NULL; }
-
-        args.conn_is_new = (new_conn != 0);
-    }
-
-    if(conn) {
-        args.conn = conn;
-        args.watch = &conn->watch;
-        args.conn_mutex = conn->session_mutex;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_CONNECTION, DEBUG_DETAIL, 0, "Done.");
-
-    return connection_tag_create(attribs, &args, tag_callback_func, userdata);
+    return cip_connection_tag_create(attribs, &ops, tag_callback_func, userdata, src_tag);
 }

@@ -205,3 +205,11 @@ extern int cip_check_request_status(cip_tag_p tag);
 
 /* Encode a tag's symbolic name into tag->encoded_name as a CIP path. */
 extern int cip_encode_tag_name(cip_tag_p tag, const char *name);
+
+/*
+ * Set up one of the single-element special tags (@raw, @identity).  They differ only in
+ * the element type, the byte order and the vtable; everything else about them is the same
+ * one-byte, one-element, no-name shape.
+ */
+extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_order_t *byte_order,
+                                 tag_vtable_p vtable, debug_module_t debug_module);

@@ -80,23 +80,7 @@ static struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)cip_
 
 
 int setup_identity_tag(cip_tag_p tag) {
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Starting.");
-
-    /* set up identity tag */
-    tag->special_tag = 1;
-    tag->elem_type = CIP_TYPE_TAG_IDENTITY;
-    tag->elem_count = 1;
-    tag->elem_size = 1;
-
-    tag->byte_order = &logix_tag_byte_order;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", &identity_tag_vtable);
-
-    tag->vtable = &identity_tag_vtable;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    return cip_setup_special_tag(tag, CIP_TYPE_TAG_IDENTITY, &logix_tag_byte_order, &identity_tag_vtable, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
 }
 
 

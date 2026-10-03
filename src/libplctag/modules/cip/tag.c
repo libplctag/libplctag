@@ -241,3 +241,24 @@ int cip_encode_tag_name(cip_tag_p tag, const char *name) {
 
     return rc;
 }
+
+
+int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_order_t *byte_order, tag_vtable_p vtable,
+                          debug_module_t debug_module) {
+    pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Starting.");
+
+    tag->special_tag = 1;
+    tag->elem_type = elem_type;
+    tag->elem_count = 1;
+    tag->elem_size = 1;
+
+    tag->byte_order = byte_order;
+
+    pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", vtable);
+
+    tag->vtable = vtable;
+
+    pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}

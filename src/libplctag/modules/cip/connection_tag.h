@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,16 +33,44 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
-#include <libplctag/modules/cip/conn.h>
-#include <utils/attr.h>
-
 /*
- * This module's own connection lifecycle.  Everything else about a connection --
- * sequence numbers, payload space, requests -- is declared by cip/conn.h, which every
- * user of this header already includes.
+ * The @connection tag body shared by the CIP families.
+ *
+ * AB and OMRON differ only in which protocol constants they answer to and which
+ * find-or-create they call, so those are parameters rather than a second copy of the
+ * function.  Each family keeps its own entry point so that its debug module ID -- which
+ * is public API that callers filter on -- stays its own.
  */
-extern int conn_startup(void);
-extern void conn_teardown(void);
-extern int conn_find_or_create(cip_conn_p *conn, attr attribs, int *is_new_conn);
+
+#include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/conn.h>
+#include <stdint.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+
+
+typedef struct {
+    tag_protocol_t connection_protocol; /* this family's @connection protocol */
+    debug_module_t debug_module;
+
+    /*
+     * Data-tag protocols this family will adopt a connection from.  AB accepts an OMRON
+     * tag as well as its own, since both hang a cip_conn_p off the same field; OMRON
+     * accepts only its own.  TAG_PROTOCOL_UNKNOWN pads an unused slot.
+     */
+    tag_protocol_t source_protocols[2];
+
+    int (*find_or_create)(cip_conn_p *conn, attr attribs, int *is_new);
+
+    /*
+     * What to report when find_or_create() fails.  AB reports PLCTAG_ERR_BAD_GATEWAY
+     * whatever went wrong; OMRON passes the underlying error through.  Left as
+     * PLCTAG_STATUS_OK to pass through.
+     */
+    int32_t create_failure_rc;
+} cip_connection_tag_ops_t;
+
+
+extern plc_tag_p cip_connection_tag_create(attr attribs, const cip_connection_tag_ops_t *ops,
+                                           void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                           void *userdata, plc_tag_p src_tag);

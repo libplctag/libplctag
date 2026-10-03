@@ -36,35 +36,11 @@
 #include <libplctag/modules/cip/conn.h>
 #include <utils/attr.h>
 
-/* #define MAX_SESSION_HOST    (128) */
-
-
-#define MAX_PACKET_SIZE_EX (44 + 4002)
-
-
-
 /*
- * Longest gateway string we will copy into a session, NUL included.
- *
- * The attribute is "host[:port]" and is stored whole -- session_open_socket() splits it at
- * connect time rather than at create time.  A DNS name is at most 253 characters in dotted
- * form (the familiar 255 is the wire encoding, which adds a length byte per label and a
- * terminating zero), so 253 + ":65535" + NUL is 260.  Rounded up to keep the following
- * fields aligned.
+ * This module's own connection lifecycle.  Everything else about a connection --
+ * sequence numbers, payload space, requests -- is declared by cip/conn.h, which every
+ * user of this header already includes.
  */
-
-
-
-
-
-uint64_t session_get_new_seq_id_unsafe(cip_conn_p sess);
-uint64_t session_get_new_seq_id(cip_conn_p sess);
-
 extern int session_startup(void);
 extern void session_teardown(void);
-
 extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
-extern int session_get_available_cip_payload_space(cip_conn_p session);
-extern int session_create_request(cip_conn_p session, int tag_id, cip_request_p *request);
-extern int session_add_request_unsafe(cip_conn_p sess, cip_request_p req);
-extern int session_add_request(cip_conn_p sess, cip_request_p req);

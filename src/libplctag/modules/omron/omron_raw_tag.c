@@ -96,23 +96,7 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
 
 
 int omron_setup_raw_tag(cip_tag_p tag) {
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "Starting.");
-
-    /* set up raw tag. */
-    tag->special_tag = 1;
-    tag->elem_type = CIP_TYPE_TAG_RAW;
-    tag->elem_count = 1;
-    tag->elem_size = 1;
-
-    tag->byte_order = &omron_njnx_tag_byte_order;
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", &omron_raw_tag_vtable);
-
-    tag->vtable = &omron_raw_tag_vtable;
-
-    pdebug(DEBUG_MODULE_OMRON_RAW_TAG, DEBUG_DETAIL, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    return cip_setup_special_tag(tag, CIP_TYPE_TAG_RAW, &omron_njnx_tag_byte_order, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG);
 }
 
 

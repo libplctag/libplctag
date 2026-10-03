@@ -31,62 +31,32 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/* AB's wrapper around the shared connection tag.  See lib/connection_tag.c. */
+/* AB's wrapper around the shared CIP connection tag.  See cip/connection_tag.c. */
 
-#include "connection_tag.h"
-#include "session.h"
 #include <libplctag/api/libplctag.h>
-#include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/pccc.h>
+#include <libplctag/modules/ab/connection_tag.h>
 #include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/connection_tag.h>
+#include <stdint.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
-#include <utils/rc.h>
 
 
 plc_tag_p ab_connection_tag_create(attr attribs,
                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                    void *userdata, plc_tag_p src_tag) {
-    connection_tag_args_t args = {.protocol_type = TAG_PROTOCOL_AB_CONNECTION,
-                                  .debug_module = DEBUG_MODULE_AB_CONNECTION,
-                                  .conn_rc = PLCTAG_STATUS_OK};
-    cip_conn_p session = NULL;
+    /*
+     * AB adopts a connection from an OMRON tag as well as its own: both families hang the
+     * same cip_conn_p off the same field, and a user who already has one should not be
+     * made to open a second.  The BAD_GATEWAY override is long-standing behaviour -- AB
+     * reports it for any find-or-create failure, where OMRON passes the real error up.
+     */
+    static const cip_connection_tag_ops_t ops = {.connection_protocol = TAG_PROTOCOL_AB_CONNECTION,
+                                                 .debug_module = DEBUG_MODULE_AB_CONNECTION,
+                                                 .source_protocols = {TAG_PROTOCOL_AB, TAG_PROTOCOL_OMRON},
+                                                 .find_or_create = session_find_or_create,
+                                                 .create_failure_rc = PLCTAG_ERR_BAD_GATEWAY};
 
-    pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "Starting.");
-
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: session = rc_inc(((cip_tag_p)src_tag)->session); break;
-
-            case TAG_PROTOCOL_AB_CONNECTION: session = rc_inc(((connection_tag_p)src_tag)->conn); break;
-
-            default: session = NULL; break;
-        }
-
-        args.conn_rc = (session ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED);
-    } else {
-        int new_session = 0;
-
-        args.conn_rc = session_find_or_create(&session, attribs, &new_session);
-        if(args.conn_rc != PLCTAG_STATUS_OK) {
-            session = NULL;
-            args.conn_rc = PLCTAG_ERR_BAD_GATEWAY;
-        }
-
-        args.conn_is_new = (new_session != 0);
-    }
-
-    if(session) {
-        args.conn = session;
-        args.watch = &session->watch;
-        args.conn_mutex = session->session_mutex;
-    }
-
-    pdebug(DEBUG_MODULE_AB_CONNECTION, DEBUG_DETAIL, 0, "Done.");
-
-    return connection_tag_create(attribs, &args, tag_callback_func, userdata);
+    return cip_connection_tag_create(attribs, &ops, tag_callback_func, userdata, src_tag);
 }
