@@ -933,29 +933,26 @@ int calculate_write_data_per_packet(cip_tag_p tag) {
                + 4                           /* byte offset, 32-bit int */
                + 8;                          /* MAGIC fudge factor */
 
-    if(tag->plc_type == CIP_PLC_OMRON_NJNX) {
-        /*
-         * This is wrong and is kept only because no OMRON hardware is available to prove
-         * the correction safe.  session_get_available_cip_payload_space() has already
-         * subtracted the route path for an unconnected session, and an OMRON connection is
-         * always connected, so there is no route path in this packet at all.  Counting it
-         * again only makes the write packets smaller than they need to be, which is why it
-         * has never shown up as a failure.
-         *
-         * The right answer is the Rockwell branch below: nothing extra when connected, and
-         * CIP_EIP_UC_SEND_OVERHEAD when not.
-         */
-        overhead += tag->session->conn_path_size + 2;
-    } else if(!tag->use_connected_msg) {
+    /*
+     * An unconnected request is wrapped in an Unconnected Send by the connection, and that
+     * wrapper has to come out of the same budget.  A connected request has no wrapper.
+     *
+     * This no longer asks which family the tag belongs to.  OMRON used to add its route
+     * path here, which was wrong twice over: session_get_available_cip_payload_space() has
+     * already subtracted the route path for an unconnected session, and this library only
+     * ever opens connected sessions to an OMRON PLC, so there was no route path in the
+     * packet at all.  It only made OMRON write packets smaller than they needed to be,
+     * which is why it never surfaced as a failure.
+     *
+     * OMRON hardware does support unconnected messaging, identically to Rockwell; this
+     * library has simply never implemented it.  When it does, this calculation already
+     * covers it, because the question asked here is whether the request is connected and
+     * not who built the PLC.
+     */
+    if(!tag->use_connected_msg) {
         pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Unconnected tag.");
 
-        /* the Unconnected Send wrapper the connection will put around this request. */
-        overhead += 1  /* CIP service Unconnected Send */
-                    + 1 /* path size */
-                    + 4 /* Connection Manager 20 06 24 1 */
-                    + 1 /* seconds per tick */
-                    + 1 /* timeout ticks */
-                    + 2; /* Embedded payload size */
+        overhead += CIP_EIP_UC_SEND_OVERHEAD;
     } else {
         pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Connected tag.");
     }
@@ -991,20 +988,18 @@ int calculate_write_data_per_packet(cip_tag_p tag) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
-    8 bytes as the unit */
-    if(tag->elem_size < 8) {
-        elements_per_packet = data_per_packet / tag->elem_size;
-        data_per_packet = elements_per_packet * tag->elem_size;
-        element_size = tag->elem_size;
-        pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Using tag size %d bytes for element size.", element_size);
-    } else {
-        /* round down to the nearest multiple of 8 bytes */
-        elements_per_packet = data_per_packet / 8;
-        data_per_packet = elements_per_packet * 8;
-        element_size = 8;
-        pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Using element size %d bytes.", element_size);
-    }
+    /*
+     * Round the chunk down to something we may legally split on.  An element may be split
+     * internally, but never inside one of its atomic members, and the largest CIP atomic
+     * is 8 bytes (LINT, LREAL) -- so anything bigger than that splits on 8, and anything
+     * smaller splits on itself.
+     */
+    element_size = (tag->elem_size < CIP_MAX_ATOMIC_SIZE) ? tag->elem_size : CIP_MAX_ATOMIC_SIZE;
+
+    elements_per_packet = data_per_packet / element_size;
+    data_per_packet = elements_per_packet * element_size;
+
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Splitting on %d byte boundaries.", element_size);
 
     if(elements_per_packet < 1) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id,
