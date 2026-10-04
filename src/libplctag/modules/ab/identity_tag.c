@@ -80,7 +80,14 @@ static struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)cip_
 
 
 int setup_identity_tag(cip_tag_p tag) {
-    return cip_setup_special_tag(tag, CIP_TYPE_TAG_IDENTITY, &logix_tag_byte_order, &identity_tag_vtable, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
+    /*
+     * The Identity object's product name is a CIP SHORT_STRING.  This used to borrow the
+     * Logix STRING UDT's byte order, whose four-byte count word made plc_tag_get_string()
+     * read a length of hundreds of millions and fail the range check -- the name was only
+     * ever readable by picking it apart a byte at a time.
+     */
+    return cip_setup_special_tag(tag, CIP_TYPE_TAG_IDENTITY, &cip_short_string_byte_order, &identity_tag_vtable,
+                                 DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
 }
 
 

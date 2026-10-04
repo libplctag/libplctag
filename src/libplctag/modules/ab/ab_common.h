@@ -65,7 +65,6 @@ extern int setup_identity_tag(cip_tag_p tag);
 
 /* per-family string and integer layouts, used when setting a tag up. */
 extern tag_byte_order_t logix_tag_byte_order;
-extern tag_byte_order_t micro800_tag_byte_order;
 extern tag_byte_order_t logix_tag_listing_byte_order;
 
 extern struct tag_vtable_t cip_standard_tag_vtable_ab;

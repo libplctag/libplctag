@@ -446,7 +446,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             /* if we did not fill in the byte order elsewhere, fill it in now. */
             if(!tag->byte_order) {
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Using default Micro8x0 byte order.");
-                tag->byte_order = &micro800_tag_byte_order;
+                tag->byte_order = &cip_short_string_byte_order;
             }
 
             /* if this was not filled in elsewhere default to generic *Logix */
@@ -1428,37 +1428,6 @@ tag_byte_order_t logix_tag_byte_order = {.is_allocated = 0,
                                          .str_max_capacity = 82,
                                          .str_total_length = 88,
                                          .str_pad_bytes = 2};
-
-
-/*
- * Micro800 strings are CIP SHORT_STRING: a one-byte count followed by exactly that many
- * characters, with no terminator and no padding out to a capacity, so the encoded size varies
- * with the content.  That is a different shape from the Logix STRING UDT (a four-byte count,
- * 82 characters and two pad bytes, 88 bytes however short the text), which this PLC family
- * used to borrow -- a wrong count word width misreads even a single string, not just an array.
- *
- * The one-byte count puts the hard ceiling at 255 characters.  The controller's own limit is
- * lower and undocumented, so nothing here can bound it more tightly.
- */
-tag_byte_order_t micro800_tag_byte_order = {.is_allocated = 0,
-
-                                            .int16_order = {0, 1},
-                                            .int32_order = {0, 1, 2, 3},
-                                            .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-                                            .float32_order = {0, 1, 2, 3},
-                                            .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-
-                                            .str_is_defined = 1,
-                                            .str_is_counted = 1,
-                                            .str_is_fixed_length = 0,
-                                            .str_is_zero_terminated = 0,
-                                            .str_is_byte_swapped = 0,
-
-                                            .str_pad_to_multiple_bytes = 1,
-                                            .str_count_word_bytes = 1,
-                                            .str_max_capacity = 255,
-                                            .str_total_length = 0,
-                                            .str_pad_bytes = 0};
 
 
 tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,

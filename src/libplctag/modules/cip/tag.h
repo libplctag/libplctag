@@ -211,5 +211,17 @@ extern int cip_encode_tag_name(cip_tag_p tag, const char *name);
  * the element type, the byte order and the vtable; everything else about them is the same
  * one-byte, one-element, no-name shape.
  */
+/*
+ * CIP SHORT_STRING: a one-byte count followed by exactly that many characters, with no
+ * terminator and no padding out to a capacity, so the encoded size varies with the content.
+ * The one-byte count puts the hard ceiling at 255 characters.
+ *
+ * This is the CIP type, not a PLC family's idea of a string.  Micro800 tags use it, and so
+ * does the product name in an Identity object reply.  It is emphatically not the Logix
+ * STRING UDT -- a four-byte count, 82 characters and two pad bytes, 88 bytes however short
+ * the text -- and reading one as the other misdecodes even a single string.
+ */
+extern tag_byte_order_t cip_short_string_byte_order;
+
 extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_order_t *byte_order,
                                  tag_vtable_p vtable, debug_module_t debug_module);

@@ -53,6 +53,27 @@
 #include <utils/rc.h>
 #include <utils/vector.h>
 
+/* Default byte order for short strings */
+tag_byte_order_t cip_short_string_byte_order = {.is_allocated = 0,
+
+                                                .int16_order = {0, 1},
+                                                .int32_order = {0, 1, 2, 3},
+                                                .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+                                                .float32_order = {0, 1, 2, 3},
+                                                .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
+
+                                                .str_is_defined = 1,
+                                                .str_is_counted = 1,
+                                                .str_is_fixed_length = 0,
+                                                .str_is_zero_terminated = 0,
+                                                .str_is_byte_swapped = 0,
+
+                                                .str_pad_to_multiple_bytes = 1,
+                                                .str_count_word_bytes = 1,
+                                                .str_max_capacity = 255,
+                                                .str_total_length = 0,
+                                                .str_pad_bytes = 0};
+
 
 /*
  * Abort the request this tag has in flight, if any, and leave the tag idle.
@@ -60,6 +81,7 @@
  * tag->offset is deliberately untouched: a fragmented transfer calls this between
  * fragments and has to keep its place.  cip_tag_abort_request() is the one that resets it.
  */
+
 int cip_tag_abort_request_only(cip_tag_p tag) {
     if(!tag) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Called with a null tag pointer.");
@@ -195,8 +217,7 @@ int cip_check_request_status(cip_tag_p tag) {
          * them, so what is left here is the CIP reply and there is no framing to inspect.
          * The tag's own status checker parses it from the first byte.
          */
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Received a %d byte CIP response.",
-               request->request_size);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Received a %d byte CIP response.", request->request_size);
     } while(0);
 
     /* if this is still hanging around, release the reference */

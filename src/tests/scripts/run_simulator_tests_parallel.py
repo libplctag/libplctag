@@ -813,7 +813,7 @@ def build_manifest() -> Manifest:
                "--write=42", "--debug=4"], F)
     # A real Micro800 packs its strings: a one-byte count and exactly that many characters, no
     # terminator, no padding to a capacity, so an array of them has no element stride.
-    # VSHORTSTRING is the simulator's version of that, and micro800_tag_byte_order is what lets
+    # VSHORTSTRING is the simulator's version of that, and cip_short_string_byte_order is what lets
     # the library read it with no string attributes given at all -- the defaults used to be the
     # Logix STRING UDT's, whose four-byte count misreads even a single string.  Element i holds
     # i+1 copies of 'a'+i, so a client that assumes a stride reads the wrong bytes.
