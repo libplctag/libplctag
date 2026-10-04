@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,32 +33,36 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/* OMRON's wrapper around the shared @raw tag.  See cip/raw_tag.c. */
+/*
+ * The @raw tag body, shared by the CIP families.
+ *
+ * A raw tag is a CIP request the application built itself.  The library copies it onto
+ * the wire verbatim, adds the EIP and CPF framing, and hands the whole CIP response back.
+ * Nothing in that is family-specific, so nothing here is.
+ *
+ * Each family still owns its vtable: the abort entry point and the attribute table are
+ * its own, and so is the debug module ID callers filter on.
+ */
 
-#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/tag.h>
-#include <libplctag/modules/omron/omron_common.h>
-#include <libplctag/modules/omron/omron_raw_tag.h>
 #include <utils/debug.h>
 
 
-/* define the vtable for raw tag type. */
-static struct tag_vtable_t omron_raw_tag_vtable = {
-    .abort = (tag_vtable_func)cip_tag_abort,
-    .read = NULL,
-    .status = (tag_vtable_func)cip_tag_status,
-    .tickler = (tag_vtable_func)cip_raw_tag_tickler,
-    .write = (tag_vtable_func)cip_raw_tag_write_start,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
-
-    /* attribute accessors */
-    .attribs = omron_attribs,
-};
+/*
+ * A raw tag's byte order.
+ *
+ * Plain CIP: little-endian throughout, and no string definition at all.  The payload is
+ * whatever the application put there, so the library has no business claiming to know how
+ * a string inside it is shaped.  An application that does know says so with the str_*
+ * attributes, which lib.c applies over this.
+ */
+extern tag_byte_order_t cip_raw_tag_byte_order;
 
 
-int omron_setup_raw_tag(cip_tag_p tag) {
-    return cip_raw_tag_setup(tag, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG);
-}
+/* the two vtable entry points; the family supplies the rest of its vtable. */
+extern int cip_raw_tag_tickler(cip_tag_p tag);
+extern int cip_raw_tag_write_start(cip_tag_p tag);
+
+/* set a freshly created tag up as a raw tag of this family. */
+extern int cip_raw_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module);

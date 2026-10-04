@@ -70,7 +70,7 @@ static int identity_tag_build_read_request_unconnected(cip_tag_p tag);
 /* define the vtable for identity tag type. */
 static struct tag_vtable_t identity_tag_vtable = {.abort = (tag_vtable_func)cip_tag_abort_request,
                                                   .read = (tag_vtable_func)identity_tag_read_start,
-                                                  .status = (tag_vtable_func)ab_tag_status,
+                                                  .status = (tag_vtable_func)cip_tag_status,
                                                   .tickler = (tag_vtable_func)identity_tag_tickler,
                                                   .write = (tag_vtable_func)NULL,
                                                   .wake_plc = (tag_vtable_func)NULL,

@@ -82,15 +82,15 @@
 #define CIP_MAX_TAG_DATA_SIZE (8 * 1024 * 1024)
 
 /*
- * How many fragment replies carrying no payload we tolerate in a row.
- *
- * Zero bytes with a partial status is legitimate once -- a packed reply can leave a later
- * request nothing but a header -- but forever means the transfer is not advancing.
- */
-/*
  * The largest atomic CIP data type, LINT and LREAL.  A transfer may be split inside an
  * element but never inside one of these, so this bounds the split granularity.
  */
 #define CIP_MAX_ATOMIC_SIZE (8)
 
+/*
+ * How many fragment replies carrying no payload we tolerate in a row.
+ *
+ * Zero bytes with a partial status is legitimate once -- a packed reply can leave a later
+ * request nothing but a header -- but forever means the transfer is not advancing.
+ */
 #define CIP_MAX_FRAGMENT_RETRIES (100)

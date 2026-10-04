@@ -72,7 +72,7 @@ static int udt_tag_build_read_fields_request_connected(cip_tag_p tag);
 static struct tag_vtable_t udt_tag_vtable = {
     .abort = (tag_vtable_func)cip_tag_abort_request,
     .read = (tag_vtable_func)udt_tag_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
+    .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)udt_tag_tickler,
     .write = NULL,
     .wake_plc = NULL,

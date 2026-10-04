@@ -34,6 +34,7 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
+#include <utils/debug.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/plc_type.h>
 #include <stdint.h>
@@ -82,6 +83,10 @@ typedef enum {
 } cip_elem_type_t;
 
 
+/* defined in cip/standard_tag.h; only ever held here as a pointer. */
+struct cip_standard_tag_ops_t;
+
+
 /*
  * The state every CIP tag carries, whatever the family.
  *
@@ -109,6 +114,18 @@ typedef enum {
                                                                                            \
     /* standard tags: how much data may one packet carry? */                               \
     int write_data_per_packet;                                                             \
+                                                                                           \
+    /*                                                                                     \
+     * What this tag's family can do, set once at creation.  The shared engines read this  \
+     * instead of asking what plc_type is.  See cip/standard_tag.h.                        \
+     */                                                                                    \
+    const struct cip_standard_tag_ops_t *std_ops;                                          \
+                                                                                           \
+    /*                                                                                     \
+     * The module ID this tag's work is logged under.  Callers filter on these, so a       \
+     * shared engine still has to log as the family it is serving.  Set at creation.       \
+     */                                                                                    \
+    debug_module_t debug_module;                                                           \
                                                                                            \
     uint32_t next_id;       /* listing tags */                                             \
     uint8_t udt_get_fields; /* UDT tags */                                                 \
@@ -196,6 +213,46 @@ typedef struct cip_tag_t *cip_tag_p;
  */
 extern int cip_tag_abort_request_only(cip_tag_p tag);
 extern int cip_tag_abort_request(cip_tag_p tag);
+
+
+/*
+ * The vtable entries a tag carries until its family fills in its own.  Each returns
+ * PLCTAG_ERR_NOT_IMPLEMENTED and logs; reaching one is a bug in that family's tag_create.
+ */
+extern int cip_tag_unimplemented_abort(plc_tag_p tag);
+extern int cip_tag_unimplemented_read(plc_tag_p tag);
+extern int cip_tag_unimplemented_status(plc_tag_p tag);
+extern int cip_tag_unimplemented_tickler(plc_tag_p tag);
+extern int cip_tag_unimplemented_write(plc_tag_p tag);
+
+/* the vtable's status entry: PENDING while an operation is in flight, else tag->status. */
+extern int cip_tag_status(cip_tag_p tag);
+
+/*
+ * The vtable's abort entry: stop anything in flight and leave the tag at
+ * PLCTAG_ERR_ABORT.  Unlike cip_tag_abort_request() it also sets tag->status, and it
+ * aborts even with no request in flight.
+ */
+extern int cip_tag_abort(cip_tag_p tag);
+
+/*
+ * The tag attributes every CIP family answers identically.  A family's attr_def_t table
+ * points straight at these; only the attributes whose meaning really differs by family
+ * stay in that family's own file.
+ */
+extern int32_t cip_tag_get_elem_size(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_elem_count(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_connection_status(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value);
+extern int32_t cip_tag_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_allow_packing(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length);
+extern int32_t cip_tag_get_gateway_size(plc_tag_p raw_tag);
+extern int32_t cip_tag_get_gateway_port(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length);
+extern int32_t cip_tag_get_path_size(plc_tag_p raw_tag);
+extern int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result);
 
 /* true when a status code is a failure rather than OK or PENDING. */
 #define rc_is_error(rc) ((rc) < PLCTAG_STATUS_OK)

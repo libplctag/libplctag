@@ -44,6 +44,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/path.h>
+#include <libplctag/lib/conn_attribs.h>
 #include <libplctag/modules/cip/tag.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -268,6 +269,7 @@ int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_ord
                           debug_module_t debug_module) {
     pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
+    tag->debug_module = debug_module;
     tag->special_tag = 1;
     tag->elem_type = elem_type;
     tag->elem_count = 1;
@@ -280,6 +282,227 @@ int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_ord
     tag->vtable = vtable;
 
     pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * The vtable a tag gets before its family has filled one in.  Reaching one of these means
+ * a tag type was created without its own implementation, which is a bug in that family's
+ * tag_create rather than anything the caller did.
+ */
+int cip_tag_unimplemented_abort(plc_tag_p tag) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
+
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
+}
+
+
+int cip_tag_unimplemented_read(plc_tag_p tag) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
+
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
+}
+
+
+int cip_tag_unimplemented_status(plc_tag_p tag) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
+
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
+}
+
+
+int cip_tag_unimplemented_tickler(plc_tag_p tag) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
+
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
+}
+
+
+int cip_tag_unimplemented_write(plc_tag_p tag) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
+
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
+}
+
+
+int cip_tag_status(cip_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+
+    if(tag->read_in_progress || tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
+
+    rc = tag->status;
+
+    return rc;
+}
+
+
+/*
+ * The tag vtable's abort entry point: stop whatever is in flight and leave the tag
+ * reporting PLCTAG_ERR_ABORT.
+ *
+ * Distinct from the two internal helpers above.  cip_tag_abort_request_only() drops the
+ * in-flight request and clears the direction flags; cip_tag_abort_request() also rewinds
+ * the transfer offset; this one is what a caller's plc_tag_abort() reaches, and it is the
+ * only one that touches tag->status.
+ *
+ * It aborts even when no request is in flight.  A tag can be left with a direction flag
+ * set and nothing on the wire -- that is exactly the state an abort exists to clear -- so
+ * returning early would leave the caller unable to recover it.
+ */
+int cip_tag_abort(cip_tag_p tag) {
+    cip_request_p req = NULL;
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Called with a null tag pointer.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Starting.");
+
+    critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+
+    if(req) {
+        spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
+
+        cip_tag_abort_request(tag);
+
+        req = rc_dec(req);
+    } else {
+        cip_tag_abort_request(tag);
+    }
+
+    tag->status = PLCTAG_ERR_ABORT;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+    return tag->status;
+}
+
+
+/*
+ * The tag attributes every CIP family answers the same way.  They all read a cip_tag_t
+ * and the cip_conn_t behind it, so there is nothing family-specific left in them; each
+ * family's attribute table points straight at these.
+ */
+int32_t cip_tag_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    *result = (int32_t)tag->elem_size;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t cip_tag_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    *result = (int32_t)tag->elem_count;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t cip_tag_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    return conn_get_status(tag->session ? &tag->session->watch.status : NULL, result);
+}
+
+
+int32_t cip_tag_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    return conn_get_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, result);
+}
+
+
+int32_t cip_tag_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    return conn_set_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, value,
+                                          tag->tag_id, DEBUG_MODULE_CIP);
+}
+
+
+
+
+int32_t cip_tag_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    *result = (int32_t)tag->use_connected_msg;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t cip_tag_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    *result = (int32_t)tag->allow_packing;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t cip_tag_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_copy_string(tag->session->host, buffer, buffer_length);
+}
+
+
+int32_t cip_tag_get_gateway_size(plc_tag_p raw_tag) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return attr_string_size(tag->session->host);
+}
+
+
+int32_t cip_tag_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->session->port;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t cip_tag_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    if((int32_t)tag->session->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+
+    mem_copy((void *)buffer, (void *)tag->session->conn_path, (int)tag->session->conn_path_size);
+
+    return (int32_t)tag->session->conn_path_size;
+}
+
+
+int32_t cip_tag_get_path_size(plc_tag_p raw_tag) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    return (int32_t)tag->session->conn_path_size;
+}
+
+
+int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+
+    *result = (int32_t)tag->session->only_use_old_forward_open;
 
     return PLCTAG_STATUS_OK;
 }

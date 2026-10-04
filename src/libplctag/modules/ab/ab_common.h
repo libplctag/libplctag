@@ -35,6 +35,7 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -42,8 +43,6 @@
 
 
 
-extern int ab_tag_abort(cip_tag_p tag);
-extern int ab_tag_status(cip_tag_p tag);
 
 
 /* Runtime attributes shared by every AB tag type. */
@@ -60,11 +59,10 @@ extern int setup_udt_tag(cip_tag_p tag, const char *name);
 extern int setup_identity_tag(cip_tag_p tag);
 
 
-/* helpers for checking request status. */
-
-
 /* per-family string and integer layouts, used when setting a tag up. */
 extern tag_byte_order_t logix_tag_byte_order;
 extern tag_byte_order_t logix_tag_listing_byte_order;
 
+/* what Rockwell can do, and the vtable built around it, for the shared standard-tag engine. */
+extern const cip_standard_tag_ops_t cip_standard_tag_ops_ab;
 extern struct tag_vtable_t cip_standard_tag_vtable_ab;

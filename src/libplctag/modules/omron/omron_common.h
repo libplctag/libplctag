@@ -35,6 +35,7 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
 
@@ -42,8 +43,6 @@
 
 
 
-extern int omron_tag_abort(cip_tag_p tag);
-extern int omron_tag_status(cip_tag_p tag);
 
 
 /* Runtime attributes shared by every Omron tag type. */
@@ -52,10 +51,9 @@ extern const attr_def_t omron_attribs[];
 
 // THREAD_FUNC(request_handler_func);
 
-/* helpers for checking request status. */
-
-
 /* the string and integer layout of an OMRON NJ/NX tag. */
 extern tag_byte_order_t omron_njnx_tag_byte_order;
 
+/* what OMRON can do, and the vtable built around it, for the shared standard-tag engine. */
+extern const cip_standard_tag_ops_t cip_standard_tag_ops_omron;
 extern struct tag_vtable_t cip_standard_tag_vtable_omron;

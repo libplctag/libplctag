@@ -37,11 +37,13 @@
  * One implementation for every CIP family.  The services are the same wire requests
  * everywhere -- Read Tag, Read Tag Fragmented, Write Tag, Write Tag Fragmented and
  * Read-Modify-Write -- so what used to be two files differed only in which of them the
- * family implements.  That is a branch, not a second engine.
+ * family implements and how much it can move at once.
  *
- * OMRON NJ/NX is the one family here that has no fragmented services: it answers a whole
- * tag or it refuses, and it never returns a partial status.  tag_supports_fragments()
- * names that, and the three places it matters read it.
+ * Nothing here asks which family a tag belongs to.  Each family states what it can do in
+ * a cip_standard_tag_ops_t and hangs it off the tag; this file reads the answers.  A
+ * family limited to one packet per transfer -- OMRON NJ/NX today, which answers a whole
+ * tag or refuses and never returns a partial status -- falls out of that as a limit of
+ * one rather than as a special case.
  */
 
 #include <libplctag/api/libplctag.h>
@@ -49,7 +51,6 @@
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/path.h>
-#include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
@@ -70,7 +71,7 @@ static int check_write_status(cip_tag_p tag);
 static int calculate_write_data_per_packet(cip_tag_p tag);
 
 
-static bool tag_supports_fragments(cip_tag_p tag);
+static bool tag_can_split_transfer(cip_tag_p tag);
 static bool tag_elements_are_variable(cip_tag_p tag);
 static uint16_t read_request_elem_count(cip_tag_p tag);
 static debug_module_t tag_debug_module(cip_tag_p tag);
@@ -83,8 +84,24 @@ static debug_module_t tag_debug_module(cip_tag_p tag);
  * so merging the two files must not merge their logging: an OMRON tag still logs under
  * OMRON_STANDARD_TAG and a Rockwell tag still logs under AB_EIP_CIP.
  */
-static debug_module_t tag_debug_module(cip_tag_p tag) {
-    return (tag->plc_type == CIP_PLC_OMRON_NJNX) ? DEBUG_MODULE_OMRON_STANDARD_TAG : DEBUG_MODULE_AB_EIP_CIP;
+static debug_module_t tag_debug_module(cip_tag_p tag) { return tag->debug_module; }
+
+
+int32_t cip_encode_offset_u32(uint8_t *dest, int32_t capacity, int32_t byte_offset) {
+    if(capacity < (int32_t)sizeof(uint32_le)) { return PLCTAG_ERR_TOO_SMALL; }
+
+    *((uint32_le *)dest) = h2le32((uint32_t)byte_offset);
+
+    return (int32_t)sizeof(uint32_le);
+}
+
+
+int32_t cip_encode_no_offset(uint8_t *dest, int32_t capacity, int32_t byte_offset) {
+    (void)dest;
+    (void)capacity;
+    (void)byte_offset;
+
+    return 0;
 }
 
 
@@ -95,7 +112,13 @@ static debug_module_t tag_debug_module(cip_tag_p tag) {
  * 0x06, so a transfer that will not fit in one request cannot be split and has to be
  * refused up front.
  */
-static bool tag_supports_fragments(cip_tag_p tag) { return tag->plc_type != CIP_PLC_OMRON_NJNX; }
+/*
+ * Whether a transfer may span packets at all.  This is the one fact behind every place
+ * that used to ask whether the family "supports fragments": a family limited to a single
+ * packet cannot continue a transfer, so it never sends a fragmented service, never splits
+ * a write, and must treat a partial-transfer status as an error rather than follow it.
+ */
+static bool tag_can_split_transfer(cip_tag_p tag) { return tag->std_ops->max_transfer_packets > CIP_TRANSFER_SINGLE_PACKET; }
 
 
 /*
@@ -328,11 +351,7 @@ int build_read_request(cip_tag_p tag, int byte_offset) {
      * replies.  A family without the fragmented service gets the plain one and never
      * splits a transfer.
      */
-    if(tag_supports_fragments(tag)) {
-        *data = CIP_SVC_READ_FRAG;
-    } else {
-        *data = CIP_SVC_READ;
-    }
+    *data = tag->std_ops->read_service;
     data++;
 
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
@@ -341,9 +360,16 @@ int build_read_request(cip_tag_p tag, int byte_offset) {
     *((uint16_le *)data) = h2le16(read_request_elem_count(tag));
     data += sizeof(uint16_le);
 
-    if(tag_supports_fragments(tag)) {
-        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
-        data += sizeof(uint32_le);
+    {
+        int32_t offset_size =
+            tag->std_ops->encode_read_offset(data, (int32_t)(req->request_capacity - (int)(data - req->data)), byte_offset);
+
+        if(offset_size < 0) {
+            pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to encode the read offset!");
+            return (int)offset_size;
+        }
+
+        data += offset_size;
     }
 
     /*
@@ -501,8 +527,8 @@ int build_write_request(cip_tag_p tag, int byte_offset) {
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
 
-    /* a family with no fragmented write cannot split the transfer, so it has to refuse it. */
-    if(multiple_requests && !tag_supports_fragments(tag)) {
+    /* a family limited to one packet cannot split the transfer, so it has to refuse it. */
+    if(multiple_requests && !tag_can_split_transfer(tag)) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Tag too large for an unfragmented write on this PLC!");
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -539,7 +565,7 @@ int build_write_request(cip_tag_p tag, int byte_offset) {
      * a single boolean have been seen not to work, and a single boolean always fits, so this
      * is not merely an optimisation.
      */
-    *data = (multiple_requests) ? CIP_SVC_WRITE_FRAG : CIP_SVC_WRITE;
+    *data = (multiple_requests) ? tag->std_ops->write_service_split : tag->std_ops->write_service;
     data++;
 
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
@@ -623,8 +649,8 @@ static int check_read_status(cip_tag_p tag) {
         ptrdiff_t payload_size = 0;
 
         /* check the status */
-        if(cip_resp->reply_service != (CIP_SVC_READ_FRAG | CIP_SVC_REPLY)
-           && cip_resp->reply_service != (CIP_SVC_READ | CIP_SVC_REPLY)) {
+        /* the only read reply this family can legitimately receive is to the service it sent. */
+        if(cip_resp->reply_service != (tag->std_ops->read_service | CIP_SVC_REPLY)) {
             pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -636,7 +662,7 @@ static int check_read_status(cip_tag_p tag) {
          * does not fit, and there is no second request that could finish it.
          */
         if(cip_resp->status != CIP_STATUS_OK
-           && !(cip_resp->status == CIP_STATUS_FRAG && tag_supports_fragments(tag))) {
+           && !(cip_resp->status == CIP_STATUS_FRAG && tag_can_split_transfer(tag))) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
@@ -649,7 +675,7 @@ static int check_read_status(cip_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == CIP_STATUS_FRAG && tag_supports_fragments(tag));
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG && tag_can_split_transfer(tag));
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -872,8 +898,8 @@ static int check_write_status(cip_tag_p tag) {
     cip_resp = (cip_header *)(tag->req->data);
 
     do {
-        if(cip_resp->reply_service != (CIP_SVC_WRITE_FRAG | CIP_SVC_REPLY)
-           && cip_resp->reply_service != (CIP_SVC_WRITE | CIP_SVC_REPLY)
+        if(cip_resp->reply_service != (tag->std_ops->write_service_split | CIP_SVC_REPLY)
+           && cip_resp->reply_service != (tag->std_ops->write_service | CIP_SVC_REPLY)
            && cip_resp->reply_service != (CIP_SVC_RMW | CIP_SVC_REPLY)) {
             pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -881,7 +907,7 @@ static int check_write_status(cip_tag_p tag) {
         }
 
         if(cip_resp->status != CIP_STATUS_OK
-           && !(cip_resp->status == CIP_STATUS_FRAG && tag_supports_fragments(tag))) {
+           && !(cip_resp->status == CIP_STATUS_FRAG && tag_can_split_transfer(tag))) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
 
             pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP write failed with status: 0x%x %s", cip_resp->status,

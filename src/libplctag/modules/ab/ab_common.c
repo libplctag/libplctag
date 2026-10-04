@@ -48,6 +48,7 @@
 #include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
+#include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/omron.h>
@@ -91,20 +92,15 @@ volatile int ab_protocol_terminating = 0;
 static int get_tag_data_type(cip_tag_p tag, attr attribs);
 
 static void ab_tag_destroy(cip_tag_p tag);
-static int default_abort(plc_tag_p tag);
-static int default_read(plc_tag_p tag);
-static int default_status(plc_tag_p tag);
-static int default_tickler(plc_tag_p tag);
-static int default_write(plc_tag_p tag);
 
 
 /* vtables for different kinds of tags */
 struct tag_vtable_t default_vtable = {
-    .abort = default_abort,
-    .read = default_read,
-    .status = default_status,
-    .tickler = default_tickler,
-    .write = default_write,
+    .abort = cip_tag_unimplemented_abort,
+    .read = cip_tag_unimplemented_read,
+    .status = cip_tag_unimplemented_status,
+    .tickler = cip_tag_unimplemented_tickler,
+    .write = cip_tag_unimplemented_write,
     .wake_plc = NULL,
     .tag_data_written = NULL,
 
@@ -346,6 +342,14 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         tag->status = (int8_t)rc;
         return (plc_tag_p)tag;
     }
+
+    /*
+     * Everything Rockwell shares one answer about fragmentation and services, so set it
+     * once here rather than in each arm below.  Tags that use one of the special-purpose
+     * engines instead never read it.
+     */
+    tag->std_ops = &cip_standard_tag_ops_ab;
+    tag->debug_module = DEBUG_MODULE_AB_EIP_CIP;
 
     /* set up PLC-specific information. */
     switch(tag->plc_type) {
@@ -762,50 +766,8 @@ int get_tag_data_type(cip_tag_p tag, attr attribs) {
 }
 
 
-int default_abort(plc_tag_p tag) {
-    (void)tag;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
 
 
-int default_read(plc_tag_p tag) {
-    (void)tag;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
-
-int default_status(plc_tag_p tag) {
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    if(tag) {
-        return tag->status;
-    } else {
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-}
-
-
-int default_tickler(plc_tag_p tag) {
-    (void)tag;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int default_write(plc_tag_p tag) {
-    (void)tag;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
 
 /*
  * cip_tag_abort_request_only
@@ -821,57 +783,12 @@ int default_write(plc_tag_p tag) {
  * that locks the tag's mutex or only from a single thread.
  */
 
-int ab_tag_abort(cip_tag_p tag) {
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag ? tag->tag_id : 0, "Starting.");
-
-    if(tag) {
-        cip_request_p req = NULL;
-
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
-
-        if(req) {
-            spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
-
-            /* do a real abort */
-            cip_tag_abort_request(tag);
-
-            req = rc_dec(req);
-
-            tag->status = PLCTAG_ERR_ABORT;
-            return tag->status;
-        } else {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag ? tag->tag_id : 0, "Called with a null tag pointer.");
-        }
-    }
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag ? tag->tag_id : 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
 
 /*
- * ab_tag_status
+ * cip_tag_status
  *
  * Generic status checker.   May be overridden by individual PLC types.
  */
-int ab_tag_status(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->session) {
-        rc = tag->status;
-    } else {
-        /* this is not OK.  This is fatal! */
-        rc = PLCTAG_ERR_CREATE;
-    }
-
-    return rc;
-}
-
 
 /*
  * ab_tag_destroy
@@ -894,7 +811,7 @@ void ab_tag_destroy(cip_tag_p tag) {
     }
 
     /* abort anything in flight */
-    ab_tag_abort(tag);
+    cip_tag_abort(tag);
 
     session = tag->session;
 
@@ -949,46 +866,6 @@ void ab_tag_destroy(cip_tag_p tag) {
 
 /* Attribute accessors for the table below.  An accessor returns a status, or for a byte
  * array the number of bytes copied, and never touches tag->status -- the core records it. */
-
-static int32_t ab_get_elem_size(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    *result = (int32_t)tag->elem_size;
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static int32_t ab_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    *result = (int32_t)tag->elem_count;
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static int32_t ab_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    return conn_get_status(tag->session ? &tag->session->watch.status : NULL, result);
-}
-
-
-static int32_t ab_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    return conn_get_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, result);
-}
-
-
-static int32_t ab_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    return conn_set_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, value,
-                                          tag->tag_id, DEBUG_MODULE_AB_COMMON);
-}
-
 
 static int32_t ab_get_elem_type(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
@@ -1072,6 +949,7 @@ static const char *ab_plc_type_name(cip_plc_type_t plc_type) {
 }
 
 
+/* The PLC family name is this module's own, so these two stay here. */
 static int32_t ab_get_plc(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
@@ -1086,97 +964,18 @@ static int32_t ab_get_plc_size(plc_tag_p raw_tag) {
 }
 
 
-static int32_t ab_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    *result = (int32_t)tag->use_connected_msg;
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static int32_t ab_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    *result = (int32_t)tag->allow_packing;
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static int32_t ab_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
-
-    return attr_copy_string(tag->session->host, buffer, buffer_length);
-}
-
-
-static int32_t ab_get_gateway_size(plc_tag_p raw_tag) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
-
-    return attr_string_size(tag->session->host);
-}
-
-
-static int32_t ab_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
-
-    *result = (int32_t)tag->session->port;
-
-    return PLCTAG_STATUS_OK;
-}
-
 
 /* The encoded CIP path, not the "1,0" text it was built from. */
-static int32_t ab_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
-
-    if((int32_t)tag->session->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
-
-    mem_copy((void *)buffer, (void *)tag->session->conn_path, (int)tag->session->conn_path_size);
-
-    return (int32_t)tag->session->conn_path_size;
-}
-
-
-static int32_t ab_get_path_size(plc_tag_p raw_tag) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
-
-    return (int32_t)tag->session->conn_path_size;
-}
-
-
-static int32_t ab_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
-    cip_tag_p tag = (cip_tag_p)raw_tag;
-
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
-
-    *result = (int32_t)tag->session->only_use_old_forward_open;
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 const attr_def_t ab_attribs[] = {
     {.name = "elem_size",
      .type = ATTR_TYPE_INT,
      .description = "The size in bytes of a single element of this tag.",
-     .get_int = ab_get_elem_size},
+     .get_int = cip_tag_get_elem_size},
 
     {.name = "elem_count",
      .type = ATTR_TYPE_INT,
      .description = "The number of elements this tag holds.",
-     .get_int = ab_get_elem_count},
+     .get_int = cip_tag_get_elem_count},
 
     {.name = "elem_type",
      .type = ATTR_TYPE_INT,
@@ -1186,13 +985,13 @@ const attr_def_t ab_attribs[] = {
     {.name = "connection_status",
      .type = ATTR_TYPE_INT,
      .description = "The state of the session or connection this tag uses, as a plc_tag_conn_status_t.",
-     .get_int = ab_get_connection_status},
+     .get_int = cip_tag_get_connection_status},
 
     {.name = "connection_inactivity_timeout_ms",
      .type = ATTR_TYPE_INT,
      .description = "Disconnect the session after this many milliseconds without traffic.",
-     .get_int = ab_get_connection_inactivity_timeout_ms,
-     .set_int = ab_set_connection_inactivity_timeout_ms},
+     .get_int = cip_tag_get_connection_inactivity_timeout_ms,
+     .set_int = cip_tag_set_connection_inactivity_timeout_ms},
 
     {.name = "raw_tag_type_bytes",
      .type = ATTR_TYPE_BYTES,
@@ -1218,34 +1017,34 @@ const attr_def_t ab_attribs[] = {
     {.name = "use_connected_msg",
      .type = ATTR_TYPE_INT,
      .description = "This tag uses CIP connected messaging.",
-     .get_int = ab_get_use_connected_msg},
+     .get_int = cip_tag_get_use_connected_msg},
 
     {.name = "allow_packing",
      .type = ATTR_TYPE_INT,
      .description = "This tag's requests may be packed with others into one CIP request.",
-     .get_int = ab_get_allow_packing},
+     .get_int = cip_tag_get_allow_packing},
 
     {.name = "gateway",
      .type = ATTR_TYPE_STRING,
      .description = "The host name or address of the gateway this tag's session connects to.",
-     .get_bytes = ab_get_gateway,
-     .get_bytes_size = ab_get_gateway_size},
+     .get_bytes = cip_tag_get_gateway,
+     .get_bytes_size = cip_tag_get_gateway_size},
 
     {.name = "gateway_port",
      .type = ATTR_TYPE_INT,
      .description = "The TCP port this tag's session connects to.",
-     .get_int = ab_get_gateway_port},
+     .get_int = cip_tag_get_gateway_port},
 
     {.name = "path",
      .type = ATTR_TYPE_BYTES,
      .description = "The encoded CIP path from the gateway to the PLC.",
-     .get_bytes = ab_get_path,
-     .get_bytes_size = ab_get_path_size},
+     .get_bytes = cip_tag_get_path,
+     .get_bytes_size = cip_tag_get_path_size},
 
     {.name = "conn_only_use_old_forward_open",
      .type = ATTR_TYPE_INT,
      .description = "This tag's session uses the original Forward Open only, never the large one.",
-     .get_int = ab_get_conn_only_use_old_forward_open},
+     .get_int = cip_tag_get_conn_only_use_old_forward_open},
 
     {.name = NULL},
 };
@@ -1451,11 +1250,27 @@ tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,
                                                  .str_pad_bytes = 0};
 
 
+/*
+ * What a Rockwell CIP PLC can do, for the shared standard-tag engine.
+ *
+ * The fragmented read is used whatever the offset: the plain Read Tag service carries no
+ * offset, so it cannot continue a transfer the PLC split across replies, and the PLC
+ * decides to split by answering CIP_STATUS_FRAG rather than by being asked.
+ */
+const cip_standard_tag_ops_t cip_standard_tag_ops_ab = {.read_service = CIP_SVC_READ_FRAG,
+                                                        .write_service = CIP_SVC_WRITE,
+                                                        .write_service_split = CIP_SVC_WRITE_FRAG,
+
+                                                        .max_transfer_packets = CIP_TRANSFER_PACKETS_UNLIMITED,
+
+                                                        .encode_read_offset = cip_encode_offset_u32};
+
+
 /* the standard (symbolic, named) tag type.  The engine is shared; see modules/cip/standard_tag.c. */
 struct tag_vtable_t cip_standard_tag_vtable_ab = {
     .abort = (tag_vtable_func)cip_tag_abort_request,
     .read = (tag_vtable_func)cip_standard_tag_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
+    .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)cip_standard_tag_tickler,
     .write = (tag_vtable_func)cip_standard_tag_write_start,
     .wake_plc = NULL,
