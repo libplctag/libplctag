@@ -108,7 +108,7 @@ bool fault_fires(plc_s *plc, fault_kind_t kind) {
      * of one must not both decide to fire.  atomic_dec_int32() returns the value from before
      * the decrement, so a value above zero means this caller won.
      *
-     * ponytail: like reject_fo_count this keeps counting down past zero once exhausted, which
+     * ponytail: like dup_conn_id_tries this keeps counting down past zero once exhausted, which
      * is harmless for a test tool at any plausible request rate.
      */
     remaining = atomic_dec_int32(plc->fault_counts[kind]);

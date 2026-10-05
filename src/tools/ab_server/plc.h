@@ -114,7 +114,7 @@ typedef uint16_t tag_type_t;
 
 /*
  * Deliberate corruption of outgoing responses, so the client's response-validation code can be
- * tested.  The other fault-injection flags (--reject_fo, --reject_size, --empty_frag, --delay)
+ * tested.  The other fault-injection flags (--dup-conn-id-tries, --reject_size, --empty_frag, --delay)
  * all send well-formed responses that merely say "no"; these send malformed ones.  The
  * machinery that arms and fires them lives in fault.c; the enum is here because plc_s below
  * needs one counter per kind.
@@ -239,7 +239,7 @@ typedef struct plc_s {
      * new TCP session on every retry, instead of resetting to the original
      * CLI value each time.
      */
-    atomic_int32_t *reject_fo_count;
+    atomic_int32_t *dup_conn_id_tries;
 
     /*
      * As above: shared across every connection's copy of this struct.

@@ -227,6 +227,42 @@ typedef struct {
 
 #define CIP_ERR_UNSUPPORTED_SERVICE ((uint8_t)0x08)
 #define CIP_ERR_PARTIAL_ERROR ((uint8_t)0x1e)
+
+/*
+ * The general and extended status codes a Forward Open can fail with, from the CIP
+ * specification's Connection Manager object.  They are what decides whether a failure is
+ * worth another attempt, so they are named rather than written as numbers at the use site.
+ */
+#define CIP_ERR_CONN_FAILURE ((uint8_t)0x01)
+#define CIP_ERR_RESOURCE_UNAVAILABLE ((uint8_t)0x02)
+
+#define CIP_EXT_ERR_DUPLICATE_CONN ((uint16_t)0x0100)
+#define CIP_EXT_ERR_BAD_SIZE ((uint16_t)0x0109)
+#define CIP_EXT_ERR_CONN_LIMIT ((uint16_t)0x0113)
+#define CIP_EXT_ERR_UNCONNECTED_TIMEOUT ((uint16_t)0x0203)
+#define CIP_EXT_ERR_CONN_TIMEOUT ((uint16_t)0x0204)
+#define CIP_EXT_ERR_BAD_PORT ((uint16_t)0x0311)
+#define CIP_EXT_ERR_BAD_LINK_ADDR ((uint16_t)0x0312)
+#define CIP_EXT_ERR_BAD_SEGMENT ((uint16_t)0x0315)
+#define CIP_EXT_ERR_BAD_OT_SIZE ((uint16_t)0x0127)
+#define CIP_EXT_ERR_BAD_TO_SIZE ((uint16_t)0x0128)
+
+/* matches whatever extended status came back, including none at all */
+#define CIP_EXT_STATUS_ANY ((uint16_t)0xFFFF)
+
+/*
+ * The largest connection a plain Forward Open can carry.  Above this the extended service
+ * is required, so the size the negotiation settles on decides which service is used.
+ */
+#define CIP_FO_PLAIN_MAX_SIZE ((uint16_t)504)
+
+/*
+ * How many times to retry a Forward Open the PLC rejected for a duplicate connection ID.
+ * Each attempt uses a fresh serial number, so a few are enough to clear a stale connection
+ * the PLC has not timed out yet; past that the PLC is refusing for some other reason and
+ * retrying at full speed only makes it worse.
+ */
+#define CIP_FO_MAX_DUP_RETRIES (5)
 #define CIP_EIP_VERSION ((uint16_t)0x0001)
 #define CIP_EIP_CMD_CIP_MULTI ((uint8_t)0x0A)
 #define CIP_EIP_CMD_CIP_OK ((uint8_t)0x80)
@@ -278,11 +314,25 @@ typedef struct {
                                                                                                \
     /* connection variables. */                                                                \
     bool use_connected_msg;                                                                    \
+                                                                                               \
+    /*                                                                                         \
+     * Which Forward Open service to use.  It starts at what the family's row says and         \
+     * the negotiation can change it, so unlike everything else the row supplies, this is      \
+     * state and not a constant.                                                               \
+     */                                                                                        \
     bool only_use_old_forward_open;                                                            \
-    int fo_conn_size;    /* old FO max connection size */                                      \
-    int fo_ex_conn_size; /* extended FO max connection size */                                 \
+                                                                                               \
     uint16_t max_payload_guess;                                                                \
     uint16_t max_payload_size;                                                                 \
+                                                                                               \
+    /*                                                                                         \
+     * Where the Forward Open negotiation has got to.  The opening ask comes from the          \
+     * family's own sizes above; these track the retries after it is refused.                  \
+     */                                                                                        \
+    uint16_t fo_offered_size; /* size the PLC named as supported, 0 if it named none */        \
+    int32_t fo_ladder_idx;    /* rung of the fallback size ladder, -1 before the first step */ \
+    uint32_t fo_dup_retries;  /* duplicate connection ID retries spent */                      \
+    bool fo_tried_plain;      /* the plain Forward Open has already been refused */            \
                                                                                                \
     uint32_t orig_connection_id;                                                               \
     uint32_t targ_connection_id;                                                               \
@@ -297,21 +347,15 @@ typedef struct {
     int connection_group_id;                                                                   \
                                                                                                \
     /*                                                                                         \
-     * What the PLC family implies, derived by the dialect's constructor.  The shared      \
-     * code reads these rather than plc_type, so it never has to know which family this    \
-     * is -- see cip_encode_path()'s CIP_PLC_KIND_* for the same idea applied to path      \
-     * encoding.                                                                           \
+     * The family's row, owned by the dialect that declared it.  Rows are static constants     \
+     * with program lifetime, so this is never dangling and never written through.             \
+     *                                                                                         \
+     * Shared code reads what the family implies -- min_payload_size, dhp_capable -- rather    \
+     * than plc_type, so it never has to know which family this is.  See cip_encode_path()'s   \
+     * CIP_PLC_KIND_* for the same idea applied to path encoding.  plc_type is here only so    \
+     * a tag created from an @connection tag can inherit the family from the connection.       \
      */                                                                                        \
-    uint16_t min_payload_size; /* smallest payload worth negotiating down to */                \
-    bool dhp_capable;          /* family can bridge to DH+ */                                  \
-                                                                                               \
-    /*                                                                                         \
-     * The PLC family this connection talks to.  It is here so a tag created from an           \
-     * @connection tag can inherit the family from the connection.  Shared code should         \
-     * still prefer the derived fields above, which say what the family implies rather         \
-     * than which family it is.                                                                \
-     */                                                                                        \
-    cip_plc_type_t plc_type;                                                                   \
+    const cip_conn_profile_t *profile;                                                         \
                                                                                                \
     /* EIP session handle, from RegisterSession */                                             \
     uint32_t session_handle;                                                                   \
@@ -418,9 +462,10 @@ typedef cip_request_t *cip_request_p;
  * The negotiated payload for this connection: what the PLC agreed to, else
  * what the Forward Open asked for.
  */
-#define GET_MAX_PAYLOAD_SIZE(conn)                               \
-    (((conn)->max_payload_size > 0) ? (conn)->max_payload_size : \
-                                      (((conn)->fo_conn_size > 0) ? (conn)->fo_conn_size : (conn)->fo_ex_conn_size))
+#define GET_MAX_PAYLOAD_SIZE(conn)    \
+    (((conn)->max_payload_size > 0) ? \
+         (conn)->max_payload_size :   \
+         (((conn)->profile->fo_conn_size > 0) ? (conn)->profile->fo_conn_size : (conn)->profile->fo_ex_conn_size))
 
 
 /* shared connection handling, see modules/cip/conn.c */

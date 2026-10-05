@@ -214,7 +214,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
 
             case TAG_PROTOCOL_OMRON_CONNECTION: {
                 cip_conn_p src_conn = (cip_conn_p)((connection_tag_p)src_tag)->conn;
-                tag->plc_type = src_conn ? src_conn->plc_type : CIP_PLC_NONE;
+                tag->plc_type = src_conn ? src_conn->profile->plc_type : CIP_PLC_NONE;
                 break;
             }
 

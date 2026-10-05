@@ -170,7 +170,7 @@ int session_get_available_cip_payload_space(cip_conn_p conn) {
 
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               conn->max_payload_size, conn->fo_conn_size, conn->fo_ex_conn_size, max_payload_size);
+               conn->max_payload_size, conn->profile->fo_conn_size, conn->profile->fo_ex_conn_size, max_payload_size);
 
         // Account for CPF data item overhead
         if(conn->use_connected_msg) {
@@ -569,6 +569,101 @@ int recv_eip_response(cip_conn_p conn, int timeout) {
 }
 
 
+/*
+ * Connection sizes to fall back to, largest first.
+ *
+ * These are not the opening ask -- that comes from the PLC family's own row, which is what
+ * has been negotiating successfully all along.  This is only where to go after the PLC
+ * refuses, so every rung is a size some real device is known to accept.
+ *
+ * 4002 is the measured Logix ceiling: 4082 comes back as an invalid connection size and
+ * 4002 succeeds.  504 and 500 are the pre-extended-Forward-Open sizes, 500 being what
+ * bridging through ControlNet leaves.  244 is PCCC embedded in CIP and 92 is PCCC on the
+ * older SLC and MicroLogix.  1900 is for the OMRON models that sit between.
+ *
+ * Anything above CIP_FO_PLAIN_MAX_SIZE needs the extended Forward Open, so dropping past
+ * that rung is also what decides to stop using it.
+ */
+static const uint16_t forward_open_size_ladder[] = {4002, 1900, 504, 500, 244, 92};
+
+#define FORWARD_OPEN_LADDER_LEN ((int32_t)(sizeof(forward_open_size_ladder) / sizeof(forward_open_size_ladder[0])))
+
+
+/* the largest rung at or below limit, or -1 when the ladder has none that small. */
+static int32_t forward_open_rung_at_or_below(uint16_t limit) {
+    for(int32_t idx = 0; idx < FORWARD_OPEN_LADDER_LEN; idx++) {
+        if(forward_open_size_ladder[idx] <= limit) { return idx; }
+    }
+
+    return -1;
+}
+
+
+/*
+ * Drop to the next connection size worth asking for.  Returns false when there is none,
+ * which is the end of the negotiation rather than another round trip.
+ */
+static bool forward_open_step_size_down(cip_conn_p conn) {
+    uint16_t limit = (conn->max_payload_guess > 0 ? (uint16_t)(conn->max_payload_guess - 1) : 0);
+    int32_t next_idx = 0;
+
+    /*
+     * A PLC that names a size it supports saves several round trips, but it cannot be
+     * taken at its word: Logix firmware v32 and later has been seen naming 4002 and then
+     * refusing a request for exactly 4002.  Treat it as a ceiling rather than an answer
+     * and land on a rung at or below it, so the next refusal still has somewhere to go.
+     */
+    if(conn->fo_offered_size > 0 && conn->fo_offered_size < limit) { limit = conn->fo_offered_size; }
+
+    next_idx = forward_open_rung_at_or_below(limit);
+
+    if(next_idx < 0 || forward_open_size_ladder[next_idx] < conn->profile->min_payload_size) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+               "No connection size left to try at or below %u bytes that still clears the %u bytes this protocol needs "
+               "for a single request!",
+               limit, conn->profile->min_payload_size);
+        return false;
+    }
+
+    conn->fo_ladder_idx = next_idx;
+
+    critical_block(conn->session_mutex) { conn->max_payload_guess = forward_open_size_ladder[next_idx]; }
+
+    /* the size decides the service: only the extended Forward Open can carry a large one. */
+    if(forward_open_size_ladder[next_idx] <= CIP_FO_PLAIN_MAX_SIZE) { conn->only_use_old_forward_open = true; }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Retrying the Forward Open at %u bytes using the %s service.",
+           conn->max_payload_guess, (conn->only_use_old_forward_open ? "plain" : "extended"));
+
+    return true;
+}
+
+
+/*
+ * Errors no further attempt can get past.  A wrong route or a device that does not do
+ * connected messaging needs a person, not another round trip.
+ *
+ * PLCTAG_ERR_TOO_SMALL is deliberately not one of them.  Running out of connection sizes
+ * to offer says what the PLC answered this time, not what it is configured to do, and a
+ * device that refuses every size while it is busy starting up will accept one later.
+ */
+static bool forward_open_error_is_configuration(int rc) {
+    return (rc == PLCTAG_ERR_BAD_DEVICE || rc == PLCTAG_ERR_BAD_PARAM || rc == PLCTAG_ERR_UNSUPPORTED);
+}
+
+
+/*
+ * Start the negotiation over.  The size the PLC agreed to last time is kept -- the device
+ * at the far end is almost always the same one -- but every count of how hard we had to
+ * work to get there is cleared, so a reconnect gets a full set of retries.
+ */
+static void forward_open_reset_negotiation(cip_conn_p conn) {
+    conn->fo_offered_size = 0;
+    conn->fo_dup_retries = 0;
+    conn->fo_tried_plain = false;
+}
+
+
 int send_forward_open_request(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t max_payload;
@@ -578,7 +673,7 @@ int send_forward_open_request(cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Flag prohibiting use of extended ForwardOpen is %d.",
            conn->only_use_old_forward_open);
 
-    max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->fo_conn_size : conn->fo_ex_conn_size);
+    max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->profile->fo_conn_size : conn->profile->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
     critical_block(conn->session_mutex) {
@@ -1774,14 +1869,10 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session registration failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_CLOSE_SOCKET;
                 } else {
-                    /*
-                     * The session is up.  Restart the backoff here and not at socket connect:
-                     * both the immediate and the asynchronous connect paths pass through this
-                     * state, and a socket that opens but will not register is still a failure.
-                     */
-                    backoff_reset(&retry_backoff);
-
                     if(conn->use_connected_msg) {
+                        /* a fresh session gets a fresh set of Forward Open retries. */
+                        forward_open_reset_negotiation(conn);
+
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else {
                         state = SESSION_IDLE;
@@ -1810,36 +1901,97 @@ THREAD_FUNC(session_handler) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_RECEIVE_FORWARD_OPEN state.");
                 session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
 
-                if((rc = receive_forward_open_response(conn)) != PLCTAG_STATUS_OK) {
-                    if(rc == PLCTAG_ERR_DUPLICATE) {
+                rc = receive_forward_open_response(conn);
+
+                if(rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Forward Open succeeded, going to SESSION_IDLE state.");
+
+                    state = SESSION_IDLE;
+                    cond_signal(conn->session_wait_cond);
+                    break;
+                }
+
+                /*
+                 * A refusal is not always the end of the attempt.  The status code says what
+                 * the PLC objected to and the negotiation state says whether anything about
+                 * the request can still be changed; only both together decide.  Retries stay
+                 * inside the session -- the socket and the registration are already up, and a
+                 * PLC that will not grant one connection size may well grant another.
+                 */
+                state = SESSION_UNREGISTER;
+
+                if(rc == PLCTAG_ERR_DUPLICATE) {
+                    conn->fo_dup_retries++;
+
+                    if(conn->fo_dup_retries <= CIP_FO_MAX_DUP_RETRIES) {
+                        /* the serial number is redrawn on every encode, so simply asking again is enough. */
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                               "Duplicate connection error received, trying again with different connection ID.");
-                        state = SESSION_SEND_FORWARD_OPEN;
-                    } else if(rc == PLCTAG_ERR_TOO_LARGE) {
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                               "Requested packet size too large, retrying with smaller size.");
-                        state = SESSION_SEND_FORWARD_OPEN;
-                    } else if(rc == PLCTAG_ERR_UNSUPPORTED && !conn->only_use_old_forward_open) {
-                        /* if we got an unsupported error and we are trying with ForwardOpenEx, then try the old command. */
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                               "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
-                        conn->only_use_old_forward_open = 1;
+                               "Duplicate connection ID, retry %" PRIu32 " of %d with a new one.", conn->fo_dup_retries,
+                               CIP_FO_MAX_DUP_RETRIES);
+
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else {
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Receive Forward Open failed %s!",
-                               plc_tag_decode_error(rc));
-                        state = SESSION_UNREGISTER;
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                               "The PLC refused %d connection IDs in a row; it has no connection to give us.",
+                               CIP_FO_MAX_DUP_RETRIES);
+
+                        rc = PLCTAG_ERR_NO_RESOURCES;
                     }
-                } else {
-                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Send Forward Open succeeded, going to SESSION_IDLE state.");
-                    state = SESSION_IDLE;
+                } else if(rc == PLCTAG_ERR_TOO_LARGE || rc == PLCTAG_ERR_NO_RESOURCES) {
+                    /*
+                     * Both answers get a smaller request.  A size refusal obviously does.
+                     * "No resources" does because some firmware answers that to an oversized
+                     * request instead of naming a size, and because a device at its connection
+                     * limit can still have room for a small connection.
+                     */
+                    if(forward_open_step_size_down(conn)) {
+                        state = SESSION_SEND_FORWARD_OPEN;
+                    } else {
+                        rc = PLCTAG_ERR_TOO_SMALL;
+                    }
+                } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
+                    if(!conn->only_use_old_forward_open) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                               "PLC does not support the extended Forward Open, trying the plain one.");
+
+                        conn->only_use_old_forward_open = true;
+                        conn->fo_tried_plain = true;
+
+                        state = SESSION_SEND_FORWARD_OPEN;
+                    } else {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0,
+                               "The PLC refused both Forward Open services, so it does not support connected messaging.  "
+                               "Set the use_connected_msg attribute to 0 for this device.");
+                    }
                 }
+
+                if(state == SESSION_UNREGISTER) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward Open failed, %s.", plc_tag_decode_error(rc));
+
+                    /*
+                     * Nothing the library can vary will fix a wrong route or a device that does
+                     * not do connected messaging, so stop hammering it: saturate the backoff and
+                     * reconnect at its slowest rate.  Still not permanent -- a route can come
+                     * back and an empty slot can be filled.
+                     */
+                    if(forward_open_error_is_configuration(rc)) { backoff_saturate(&retry_backoff); }
+                }
+
                 cond_signal(conn->session_wait_cond);
                 break;
 
             case SESSION_IDLE:
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_IDLE state.");
                 session_set_connection_status(conn, PLCTAG_CONN_STATUS_UP);
+
+                /*
+                 * Reaching this state is the only thing that counts as a successful connect,
+                 * so it is the only place the backoff restarts.  Every earlier step -- the
+                 * socket, the registration, the Forward Open -- can succeed and still leave a
+                 * session that cannot carry a request, and resetting at one of those makes the
+                 * next step's failure retry at the floor rate for as long as it keeps failing.
+                 */
+                backoff_reset(&retry_backoff);
 
                 /* make sure that our timeout period has not changed */
                 if(inactivity_timeout_ms != atomic_get_int32(&conn->connection_inactivity_timeout_ms)) {
@@ -2196,14 +2348,16 @@ cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_pro
 
     /* fix up the rest of teh fields */
     conn->owner_list = list;
-    conn->plc_type = profile->plc_type;
-    conn->min_payload_size = profile->min_payload_size;
-    conn->dhp_capable = profile->dhp_capable;
+    conn->profile = profile;
 
-    /* what the family will negotiate for, straight off the row */
+    /* the one value off the row the negotiation is allowed to change */
     conn->only_use_old_forward_open = profile->only_use_old_forward_open;
-    conn->fo_conn_size = profile->fo_conn_size;
-    conn->fo_ex_conn_size = profile->fo_ex_conn_size;
+
+    /* the opening ask comes from the row above, so the fallback ladder has not been touched yet. */
+    conn->fo_ladder_idx = -1;
+    conn->fo_offered_size = 0;
+    conn->fo_dup_retries = 0;
+    conn->fo_tried_plain = false;
     conn->max_payload_size = (uint16_t)profile->fo_conn_size;
     conn->use_connected_msg = *use_connected_msg;
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);

@@ -71,6 +71,17 @@ extern void backoff_init(backoff_t *backoff, int64_t initial_ms, int64_t max_ms)
 extern void backoff_reset(backoff_t *backoff);
 
 /**
+ * @brief Jump straight to the longest delay.
+ *
+ * For a failure that retrying faster cannot fix -- a route to nothing, a device that
+ * will not do what was asked.  The attempt is still made, just at the slowest rate, so
+ * a condition that does clear is still picked up without the caller tracking it.
+ *
+ * @param backoff The state to saturate.
+ */
+extern void backoff_saturate(backoff_t *backoff);
+
+/**
  * @brief How long to wait before the next attempt, and advance the backoff.
  *
  * The result is drawn fresh on every call: half the current delay plus a random share

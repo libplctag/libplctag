@@ -193,7 +193,7 @@ int cip_encode_forward_open_old(cip_conn_p conn) {
     fo->orig_to_targ_rpi = h2le32(CIP_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if(conn->dhp_capable && conn->is_dhp) {
+    if(conn->profile->dhp_capable && conn->is_dhp) {
         fo->orig_to_targ_conn_params = h2le16(CIP_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(
@@ -203,7 +203,7 @@ int cip_encode_forward_open_old(cip_conn_p conn) {
     fo->targ_to_orig_rpi = h2le32(CIP_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if(conn->dhp_capable && conn->is_dhp) {
+    if(conn->profile->dhp_capable && conn->is_dhp) {
         fo->targ_to_orig_conn_params = h2le16(CIP_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(
@@ -321,71 +321,28 @@ int cip_decode_forward_open_response(cip_conn_p conn) {
         }
 
         if(fo_resp->general_status != CIP_EIP_OK) {
-            size_t general_status_size = cip_error_data_size(&fo_resp->general_status, conn->data + conn->data_size);
+            uint8_t *status = &fo_resp->general_status;
+            size_t status_size = cip_error_data_size(status, conn->data + conn->data_size);
+            uint16_t extended_status = cip_extended_status_word(status, status_size, 0);
 
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward Open command failed, response code: %s (%d)",
-                   decode_cip_error_short(&fo_resp->general_status, general_status_size), fo_resp->general_status);
-            if(fo_resp->general_status == CIP_ERR_UNSUPPORTED_SERVICE) {
-                /* this type of command is not supported! */
-                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Received CIP command unsupported error from the PLC!");
-                rc = PLCTAG_ERR_UNSUPPORTED;
-            } else {
-                rc = PLCTAG_ERR_REMOTE_ERR;
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward Open failed: %s (0x%02x/0x%04x) -- %s",
+                   decode_cip_error_short(status, status_size), fo_resp->general_status, extended_status,
+                   decode_cip_error_long(status, status_size));
 
-                /* comparing pointers directly is UB, so compare the integer values instead. */
-                if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2
-                   && (intptr_t)(&fo_resp->status_size + 5) <= (intptr_t)(conn->data + conn->data_size)) {
-                    /* we might have an error that tells us the actual size to use. */
-                    uint8_t *data = &fo_resp->status_size;
-                    int extended_status = data[1] | (data[2] << 8);
-                    uint16_t supported_size = (uint16_t)((uint16_t)data[3] | (uint16_t)((uint16_t)data[4] << (uint16_t)8));
+            rc = decode_cip_error_code(status, status_size);
 
-                    if(extended_status == 0x109) { /* MAGIC */
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-                               "Error from forward open request, unsupported size, but size %d is supported.", supported_size);
+            /*
+             * A size rejection may name a size the PLC does support.  Only newer firmware
+             * sends it, so zero here means "the PLC did not say" and the caller falls back
+             * to its own list of sizes to try.  It is recorded and not acted on here: what
+             * to do with it is the negotiation's decision, not the decoder's.
+             */
+            if(rc == PLCTAG_ERR_TOO_LARGE) {
+                conn->fo_offered_size = cip_extended_status_word(status, status_size, 1);
 
-                        /*
-                         * The PLC is telling us the size we asked for is unsupported and offering a size it
-                         * does support.  That offered size must not exceed what we asked for -- conn->data
-                         * was allocated based on our request, and a PLC claiming to "support" a larger size
-                         * than we asked for is a protocol disagreement, not a legitimate response.
-                         */
-                        if(supported_size < conn->min_payload_size) {
-                            /*
-                             * There is a floor as well as a ceiling.  Every protocol family has a
-                             * fixed per-request overhead, and a payload below that leaves no room
-                             * for a request at all -- the size arithmetic downstream then has an
-                             * overhead larger than the space, which is where the underflows live.
-                             * A PLC offering less than we can use is not a size we can negotiate to.
-                             */
-                            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-                                   "PLC reported a supported size of %u, below the %d bytes this protocol needs for a "
-                                   "single request!",
-                                   supported_size, conn->min_payload_size);
-                            rc = PLCTAG_ERR_TOO_SMALL;
-                        } else if(supported_size <= conn->max_payload_guess) {
-                            critical_block(conn->session_mutex) { conn->max_payload_guess = supported_size; }
-                            rc = PLCTAG_ERR_TOO_LARGE;
-                        } else {
-                            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-                                   "PLC reported a supported size, %u, larger than what we requested, %u! This is a "
-                                   "protocol disagreement and may indicate a malicious or misbehaving PLC; aborting.",
-                                   supported_size, conn->max_payload_guess);
-                            rc = PLCTAG_ERR_BAD_DATA;
-                        }
-                    } else if(extended_status == 0x100) { /* MAGIC */
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-                               "Error from forward open request, duplicate connection ID.  Need to try again.");
-                        rc = PLCTAG_ERR_DUPLICATE;
-                    } else {
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "CIP extended error %s (%s)!",
-                               decode_cip_error_short(&fo_resp->general_status, general_status_size),
-                               decode_cip_error_long(&fo_resp->general_status, general_status_size));
-                    }
-                } else {
-                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "CIP error code %s (%s)!",
-                           decode_cip_error_short(&fo_resp->general_status, general_status_size),
-                           decode_cip_error_long(&fo_resp->general_status, general_status_size));
+                if(conn->fo_offered_size > 0) {
+                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "PLC reports that it supports a connection size of %u bytes.",
+                           conn->fo_offered_size);
                 }
             }
 

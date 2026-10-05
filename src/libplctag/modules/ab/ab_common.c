@@ -222,7 +222,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             case TAG_PROTOCOL_AB_CONNECTION: {
                 cip_conn_p src_session = (cip_conn_p)((connection_tag_p)src_tag)->conn;
-                tag->plc_type = src_session ? src_session->plc_type : CIP_PLC_NONE;
+                tag->plc_type = src_session ? src_session->profile->plc_type : CIP_PLC_NONE;
                 break;
             }
 

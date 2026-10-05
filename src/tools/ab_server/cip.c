@@ -657,7 +657,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
         return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
     }
 
-    /* check to see how many refusals we should do. reject_fo_count is shared
+    /* check to see how many refusals we should do. dup_conn_id_tries is shared
      * (via pointer) across every connection's copy of this struct, so this
      * must be a single atomic op rather than a check-then-decrement -- two
      * connections racing in with the count at 1 must not both see ">0" and
@@ -680,7 +680,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
         }
     }
 
-    int32_t reject_remaining = atomic_dec_int32(plc->reject_fo_count);
+    int32_t reject_remaining = atomic_dec_int32(plc->dup_conn_id_tries);
     if(reject_remaining > 0) {
         log_info("Forward open request being bounced for debugging. %d to go.", reject_remaining - 1);
         return make_cip_log_error(output, cip_service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_DUPLICATE_CONN);

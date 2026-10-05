@@ -535,7 +535,7 @@ def build_manifest() -> Manifest:
     # special from ab_server -- a nonexistent tag name / out-of-bounds index /
     # oversized element count are naturally rejected by its own tag-path and
     # bounds validation. The rest use ab_server's two error-injection knobs
-    # (--reject_fo=N, --delay=Nms) on their own dedicated server instances.
+    # (--dup-conn-id-tries=N, --delay=Nms) on their own dedicated server instances.
     error_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
@@ -594,7 +594,7 @@ def build_manifest() -> Manifest:
     bad_attr(sec, "AB out-of-range numeric segment", f"{ab_lgx}&name=TestBigArray[4294967296]",
              r"Numeric segment must be less than or equal to")
 
-    # ab_server's --reject_fo=N used to have a bug (fixed): reject_fo_count
+    # ab_server's --dup-conn-id-tries=N used to have a bug (fixed): dup_conn_id_tries
     # lived in plc_s, which tcp_server.c copies fresh into every accepted TCP
     # connection, so the decrement never persisted across the client's
     # reconnect-per-retry behavior -- N>=1 rejected forever instead of N
@@ -605,25 +605,64 @@ def build_manifest() -> Manifest:
     # alone wouldn't catch a bug that skipped the rejection and "succeeded"
     # some other way, or one that rejected every time).
     #
-    # Note: the client still doesn't take the PLCTAG_ERR_DUPLICATE-specific
-    # retry branch in session.c:1498 for this rejection -- it recovers via a
-    # different, outer session-recreation retry instead, treating it as
-    # PLCTAG_ERR_REMOTE_ERR. That's a separate, still-open issue (see the
-    # proposed byte-layout investigation) independent of this counter fix.
-    reject_fo_server = ServerSpec(
+    # The client takes the PLCTAG_ERR_DUPLICATE branch for this and retries inside the
+    # session with a fresh connection serial number, which the next check asserts.  It used
+    # to treat the rejection as PLCTAG_ERR_REMOTE_ERR and recover only via an outer
+    # session-recreation retry, tearing down the socket to re-ask a question the PLC had
+    # already told it how to fix.
+    dup_conn_id_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
-                        "--tag=TestBigArray:DINT[2000]", "--reject_fo=1"],
+                        "--tag=TestBigArray:DINT[2000]", "--dup-conn-id-tries=1"],
         startup_wait_s=3,
     )
-    reject_fo_test = sec.test("ForwardOpen rejection persists across reconnect, then succeeds",
+    dup_conn_id_test = sec.test("ForwardOpen rejection persists across reconnect, then succeeds",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
-               "--debug=4"], T, server=reject_fo_server)
+               "--debug=4"], T, server=dup_conn_id_server)
     sec.test("check ForwardOpen was rejected exactly once before succeeding",
-              None, T, depends_on=reject_fo_test.id, ports_needed=0,
-              check=CheckSpec(log_file=reject_fo_test.log_file,
-                               pattern=r"Forward Open command failed", expected=1))
+              None, T, depends_on=dup_conn_id_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_conn_id_test.log_file,
+                               pattern=r"Forward Open failed:", expected=1))
+    # The recovery has to be the in-session retry and not the outer reconnect: one rejection
+    # spends exactly one of the five duplicate-ID retries, and the socket is never dropped.
+    sec.test("check the duplicate connection ID was retried in-session",
+              None, T, depends_on=dup_conn_id_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_conn_id_test.log_file,
+                               pattern=r"Duplicate connection ID, retry 1 of 5", expected=1))
+
+    # A PLC that refuses every connection ID is not going to be talked round, so the retries
+    # are budgeted.  Without the budget this is an unbounded loop at full speed: each refusal
+    # arrives immediately, the next request goes out immediately, and the handler thread spins
+    # for as long as the PLC keeps saying no.
+    #
+    # --dup-conn-id-tries keeps rejecting once its count is exhausted, so a count past any plausible
+    # number of attempts means every ForwardOpen in this test is refused.
+    dup_forever_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--dup-conn-id-tries=1000"],
+        startup_wait_s=1,
+    )
+    dup_forever_test = sec.test("ForwardOpen refused with a duplicate ID forever gives up",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=4"], F, server=dup_forever_server, expect_failure=True)
+    # The whole budget is spent before giving up -- retry 5 of 5 is the last one attempted.
+    # The session then backs off and starts over, so this can appear more than once.
+    sec.test("check every duplicate ID retry in the budget was used",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"Duplicate connection ID, retry 5 of 5", expected=1, at_least=True))
+    sec.test("check the duplicate ID retry budget was enforced",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"it has no connection to give us", expected=1, at_least=True))
+    # Past the budget it must stop asking, not keep going.
+    sec.test("check the duplicate ID retries stopped at the budget",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"Duplicate connection ID, retry 6 of 5", expected=0))
 
     # A partial-transfer status with no payload is legitimate -- packing several requests into
     # one packet leaves the later ones only a bare CIP header -- so a few in a row must be
@@ -682,7 +721,7 @@ def build_manifest() -> Manifest:
     sec.test("check the tiny connection size was rejected",
               None, T, depends_on=tiny_size_test.id, ports_needed=0,
               check=CheckSpec(log_file=tiny_size_test.log_file,
-                               pattern=r"below the \d+ bytes this protocol needs", expected=1))
+                               pattern=r"No connection size left to try", expected=1))
 
     # --corrupt=<kind>[:<count>] makes the server send deliberately malformed responses, which is
     # the only way to reach the library's response-validation checks: every other fault-injection

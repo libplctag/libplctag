@@ -58,12 +58,14 @@
 
 #define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
 /*
- * Micro800 supports the Extended Forward Open and can negotiate a comms buffer
- * as large as 60000 bytes.  This is the opening ask; a PLC that supports less
- * answers with its own size and receive_forward_open_response() retries at that
- * size, down to min_payload_size.
+ * Micro800 supports the Extended Forward Open.  It asks for the same size *Logix does:
+ * the only published figure for anything larger traces back to a single forum post and
+ * no Rockwell document states one, while 4002 is measured -- 4082 comes back as an
+ * invalid connection size and 4002 succeeds.  Asking higher costs a failed round trip on
+ * every connection and sizes the per-connection buffer to match, for a number nothing
+ * supports.  Raise it if a Micro800 is measured accepting more.
  */
-#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 60000)
+#define MAX_CIP_MICRO800_MSG_SIZE_EX MAX_CIP_LGX_MSG_SIZE_EX
 
 /* Omron is special */
 

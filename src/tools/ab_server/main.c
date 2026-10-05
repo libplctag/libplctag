@@ -68,11 +68,11 @@ static void parse_cip_tag(const char *tag, plc_s *plc);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
 /* tcp_server.c gives every accepted connection its own memcpy'd copy of the
- * plc_s context (see plc_s.reject_fo_count), so the ForwardOpen-rejection
+ * plc_s context (see plc_s.dup_conn_id_tries), so the ForwardOpen-rejection
  * countdown must live outside that struct to persist across the client
  * reconnecting with a new TCP session on every retry. Every copy's
- * reject_fo_count pointer points back at this one instance. */
-static atomic_int32_t g_reject_fo_count;
+ * dup_conn_id_tries pointer points back at this one instance. */
+static atomic_int32_t g_dup_conn_id_tries;
 static atomic_int32_t g_empty_frag_count;
 static atomic_int32_t g_reject_size_count;
 
@@ -165,8 +165,8 @@ int main(int argc, const char **argv) {
     // NOLINTNEXTLINE
     memset(&plc, 0, sizeof(plc));
 
-    /* shared across every connection's copy of plc -- see plc_s.reject_fo_count. */
-    plc.reject_fo_count = &g_reject_fo_count;
+    /* shared across every connection's copy of plc -- see plc_s.dup_conn_id_tries. */
+    plc.dup_conn_id_tries = &g_dup_conn_id_tries;
     plc.empty_frag_count = &g_empty_frag_count;
     plc.reject_size_count = &g_reject_size_count;
     for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
@@ -239,8 +239,9 @@ void usage(void) {
      */
     // NOLINTNEXTLINE
     fprintf(stderr, "    Fault injection, for testing client error handling:\n"
-                    "        --reject_fo=<n>        fail the next <n> ForwardOpen requests with a duplicate\n"
-                    "                               connection error.\n"
+                    "        --dup-conn-id-tries=<n>\n"
+                    "                               fail the next <n> ForwardOpen requests with a duplicate\n"
+                    "                               connection ID error.\n"
                     "        --reject_size=<n>      fail the next <n> ForwardOpen requests with extended status\n"
                     "                               0x0109, \"connection size not supported\", offering a smaller\n"
                     "                               size for the client to retry with.\n"
@@ -281,29 +282,69 @@ void usage(void) {
  * the chain did not.  Note that "tag" is ARGS_MULTIPLE -- everything else is once-only.
  */
 static const args_flag_def_t arg_flags[] = {
-    {"plc", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_ONCE, "plc",
+    {"plc",
+     ARGS_TYPE_STRING,
+     ARGS_REQUIRED,
+     ARGS_ONCE,
+     "plc",
      "PLC type to simulate: ControlLogix, Micro800, Omron, PLC/5, SLC500, Micrologix or LgxPccc",
      {.has_default = false}},
-    {"path", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "path",
-     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix and LgxPccc", {.has_default = false}},
-    {"port", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "port", "TCP port to listen on.  Defaults to 44818",
+    {"path",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "path",
+     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix and LgxPccc",
      {.has_default = false}},
-    {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated",
+    {"port",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "port",
+     "TCP port to listen on.  Defaults to 44818",
      {.has_default = false}},
+    {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated", {.has_default = false}},
     {"debug", ARGS_TYPE_BOOL, ARGS_OPTIONAL, ARGS_ONCE, "debug", "Turn on debug logging", {.has_default = false}},
-    {"reject_fo", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "reject_fo",
-     "Reject the first <count> ForwardOpen requests", {.has_default = true, .value.int_val = 0}},
-    {"empty_frag", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "empty_frag",
+    {"dup-conn-id-tries",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "dup-conn-id-tries",
+     "Reject the first <count> ForwardOpen requests",
+     {.has_default = true, .value.int_val = 0}},
+    {"empty_frag",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "empty_frag",
      "Answer the first <count> read requests with a partial-transfer status and no data",
      {.has_default = true, .value.int_val = 0}},
-    {"reject_size", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "reject_size",
+    {"reject_size",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "reject_size",
      "Reject the first <count> ForwardOpen requests with extended status 0x0109",
      {.has_default = true, .value.int_val = 0}},
-    {"supported_size", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "supported_size",
-     "Connection size to offer with a 0x0109 rejection", {.has_default = true, .value.int_val = 508}},
-    {"delay", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "delay", "Delay every response by <ms> milliseconds",
+    {"supported_size",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "supported_size",
+     "Connection size to offer with a 0x0109 rejection",
+     {.has_default = true, .value.int_val = 508}},
+    {"delay",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "delay",
+     "Delay every response by <ms> milliseconds",
      {.has_default = true, .value.int_val = 0}},
-    {"corrupt", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_MULTIPLE, "corrupt",
+    {"corrupt",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_MULTIPLE,
+     "corrupt",
      "Corrupt the next <count> responses in the named way, as <kind>[:<count>].  May be repeated",
      {.has_default = false}},
 };
@@ -320,7 +361,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     size_t num_corruptions = 0;
 
     /* make sure that the fault injection counts are zero. */
-    atomic_store_int32(plc->reject_fo_count, 0);
+    atomic_store_int32(plc->dup_conn_id_tries, 0);
     atomic_store_int32(plc->empty_frag_count, 0);
     atomic_store_int32(plc->reject_size_count, 0);
     for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
@@ -401,9 +442,10 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     /* fault injection. */
-    if(args_get_int(&args, "reject_fo") != 0) {
-        log_info("Setting reject ForwardOpen count to %d.", (int)args_get_int(&args, "reject_fo"));
-        atomic_store_int32(plc->reject_fo_count, (int32_t)args_get_int(&args, "reject_fo"));
+    if(args_get_int(&args, "dup-conn-id-tries") != 0) {
+        log_info("Failing the next %d ForwardOpen requests with a duplicate connection ID.",
+                 (int)args_get_int(&args, "dup-conn-id-tries"));
+        atomic_store_int32(plc->dup_conn_id_tries, (int32_t)args_get_int(&args, "dup-conn-id-tries"));
     }
 
     if(args_get_int(&args, "empty_frag") != 0) {
