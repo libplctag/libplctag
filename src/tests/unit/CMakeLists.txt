@@ -121,6 +121,24 @@ if(NOT WIN32)
     add_test(NAME unit_test_eip_forward_open_peer_close COMMAND test_eip_forward_open_peer_close)
 
     set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_eip_forward_open_peer_close)
+
+    # test_socket_high_fd: checks that the socket shim still works when every descriptor it
+    # opens is above FD_SETSIZE. It calls the shim directly, which is internal to the
+    # library, and the descriptor limit it manipulates is POSIX, so it is skipped on Windows.
+    add_executable(test_socket_high_fd test_socket_high_fd.c)
+
+    target_include_directories(test_socket_high_fd PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+        ${PLATFORM_SHIM_PATH}
+    )
+
+    target_link_libraries(test_socket_high_fd PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+    add_test(NAME unit_test_socket_high_fd COMMAND test_socket_high_fd)
+
+    set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_socket_high_fd)
 endif()
 
 # Register the unit tests with CTest

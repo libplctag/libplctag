@@ -45,6 +45,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <platform.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
@@ -655,6 +656,7 @@ struct sock_t {
 
 static int sock_create_event_wakeup_channel(sock_p sock);
 static void socket_set_cloexec(int fd);
+static int32_t wait_on_fds(struct pollfd *fds, nfds_t num_fds, int timeout_ms);
 
 #define MAX_IPS (8)
 
@@ -768,10 +770,10 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 #endif
 
     /* NOTE: We do NOT set SO_RCVTIMEO or SO_SNDTIMEO here because:
-     * 1. We use non-blocking mode with select() for timeout handling
-     * 2. SO_RCVTIMEO + non-blocking mode can cause select() to not report readability correctly
-     * 3. select() provides finer control over timeout behavior than SO_RCVTIMEO/SO_SNDTIMEO
-     * Instead, timeout handling is done via select() in socket_wait_event() and socket_read()
+     * 1. We use non-blocking mode with poll() for timeout handling
+     * 2. SO_RCVTIMEO + non-blocking mode can cause poll() to not report readability correctly
+     * 3. poll() provides finer control over timeout behavior than SO_RCVTIMEO/SO_SNDTIMEO
+     * Instead, timeout handling is done via poll() in socket_wait_event() and socket_read()
      */
 
     /* make the socket non-blocking. */
@@ -901,11 +903,69 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 }
 
 
+/*
+ * Wait for events on a small set of descriptors.
+ *
+ * poll() and not select(): a POSIX fd_set is a bitmap indexed by descriptor value, so
+ * FD_SET() with a descriptor at or above FD_SETSIZE writes past the object.  Each
+ * connection here holds three descriptors -- the socket and both ends of the wake
+ * channel -- so a host application with its own open files reaches that limit long
+ * before it has many PLCs.  poll() accepts descriptor values of any magnitude.
+ *
+ * A signal delivered to the calling thread is the host application's business and not
+ * an error in ours, so EINTR is retried against the original deadline.
+ *
+ * Returns the number of ready descriptors, zero on timeout, or a negative status code.
+ * poll() reports a bad descriptor as POLLNVAL in revents rather than as an error, so
+ * callers must check for it.
+ */
+static int32_t wait_on_fds(struct pollfd *fds, nfds_t num_fds, int timeout_ms) {
+    int64_t deadline = time_ms() + (int64_t)timeout_ms;
+
+    while(1) {
+        int32_t poll_rc = (int32_t)poll(fds, num_fds, timeout_ms);
+
+        if(poll_rc >= 0) { return poll_rc; }
+
+        if(errno == EINTR) {
+            int64_t remaining_ms = deadline - time_ms();
+
+            if(remaining_ms <= 0) {
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "poll() was interrupted by a signal and the timeout expired.");
+                return 0;
+            }
+
+            timeout_ms = (int)remaining_ms;
+
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "poll() was interrupted by a signal, retrying with %d ms left.",
+                   timeout_ms);
+            continue;
+        }
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "poll() failed with errno %d (%s)!", errno, strerror(errno));
+
+        switch(errno) {
+            /*
+             * EFAULT means the descriptor array is not in accessible address space and
+             * EINVAL means more descriptors than the process limit allows.  Both are
+             * programming errors here rather than anything the PLC did.
+             */
+            case EFAULT:
+            case EINVAL: return PLCTAG_ERR_BAD_PARAM;
+
+            /* no memory for the kernel's internal tables. */
+            case ENOMEM: return PLCTAG_ERR_NO_MEM;
+
+            default: return PLCTAG_ERR_BAD_STATUS;
+        }
+    }
+}
+
+
 int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
-    fd_set write_set;
-    struct timeval tv;
-    int select_rc = 0;
+    struct pollfd pfd;
+    int32_t poll_rc = 0;
     int sock_err = 0;
     socklen_t sock_err_len = (socklen_t)(sizeof(sock_err));
 
@@ -917,64 +977,37 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* wait for the socket to be ready. */
-    tv.tv_sec = (time_t)(timeout_ms / 1000);
-    tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+    /* a connect still in progress completes by making the socket writable. */
+    pfd.fd = sock->fd;
+    pfd.events = POLLOUT;
+    pfd.revents = 0;
 
-    FD_ZERO(&write_set);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: polling fd=%d with timeout_ms=%d", sock->fd,
+           timeout_ms);
 
-    FD_SET(sock->fd, &write_set);
+    poll_rc = wait_on_fds(&pfd, 1, timeout_ms);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d",
-           sock->fd, timeout_ms);
-    select_rc = select(sock->fd + 1, NULL, &write_set, NULL, &tv);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: poll() returned %" PRId32 ", revents=0x%x", poll_rc,
+           pfd.revents);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d",
-           select_rc, FD_ISSET(sock->fd, &write_set));
+    if(poll_rc < 0) { return (int)poll_rc; }
 
-    if(select_rc == 1) {
-        if(FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Socket is probably connected.");
-        } else {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned but socket is not connected!");
-            return PLCTAG_ERR_BAD_REPLY;
-        }
-    } else if(select_rc == 0) {
+    if(poll_rc == 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Socket connection not done yet.");
         return PLCTAG_ERR_TIMEOUT;
-    } else {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned status %d!", select_rc);
-
-        switch(errno) {
-            case EBADF: /* bad file descriptor */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Bad file descriptor used in select()!");
-                return PLCTAG_ERR_OPEN;
-                break;
-
-            case EINTR: /* signal was caught, this should not happen! */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "A signal was caught in select() and this should not happen!");
-                return PLCTAG_ERR_OPEN;
-                break;
-
-            case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(
-                    DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
-                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
-                return PLCTAG_ERR_OPEN;
-                break;
-
-            case ENOMEM: /* No mem for internal tables. */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Insufficient memory for select() to run!");
-                return PLCTAG_ERR_NO_MEM;
-                break;
-
-            default:
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unexpected socket err %d!", errno);
-                return PLCTAG_ERR_OPEN;
-                break;
-        }
     }
 
+    if(pfd.revents & POLLNVAL) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket fd=%d is not a valid descriptor!", sock->fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    /*
+     * A connect that failed sets POLLERR or POLLHUP, with or without POLLOUT.  Both cases
+     * are left to the SO_ERROR check below, which has the actual reason -- the caller needs
+     * that and not "the socket is not writable".
+     */
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Socket is ready, checking the connection result.");
     /* now make absolutely sure that the connection is ready. */
     /* Use getsockopt to check socket connection status (standard POSIX method) */
     rc = getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
@@ -1038,11 +1071,10 @@ static inline void log_event_bits(const char *prefix, int bits) {
 
 int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     int result = SOCK_EVENT_NONE;
-    fd_set read_set;
-    fd_set write_set;
-    fd_set err_set;
-    int max_fd = 0;
-    int num_sockets = 0;
+    struct pollfd pfds[2];
+    nfds_t num_fds = 0;
+    int32_t main_fd_idx = -1;
+    int32_t poll_rc = 0;
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Starting.");
 
@@ -1062,92 +1094,102 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* set up fd sets */
-    FD_ZERO(&read_set);
-    FD_ZERO(&write_set);
-    FD_ZERO(&err_set);
-
-    /* add the wake fd - defensive check for valid socket */
+    /*
+     * Index 0 is always the wake channel.  Index 1 is the main socket, and only when it
+     * is open -- it is closed and reopened across reconnects, and waiting on the wake
+     * channel alone is a valid state.
+     *
+     * POLLERR, POLLHUP and POLLNVAL are reported whether or not they were asked for, so
+     * there is no equivalent of the old error fd_set to set up.
+     */
     if(sock->wake_read_fd == INVALID_SOCKET) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Wake socket is invalid, cannot wait for events!");
         return PLCTAG_ERR_BAD_CONFIG;
     }
 
-    FD_SET(sock->wake_read_fd, &read_set);
+    pfds[0].fd = sock->wake_read_fd;
+    pfds[0].events = POLLIN;
+    pfds[0].revents = 0;
+    num_fds = 1;
 
-    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
     if(sock->fd != INVALID_SOCKET) {
-        /* calculate the maximum fd */
-        max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
+        pfds[1].fd = sock->fd;
+        pfds[1].events = 0;
+        pfds[1].revents = 0;
 
-        /* we always want to know about errors. */
-        FD_SET(sock->fd, &err_set);
-
-        /* add more depending on the mask. */
-        if(events & SOCK_EVENT_CAN_READ) {
-            FD_SET(sock->fd, &read_set);
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
+        /*
+         * POLLIN is requested for SOCK_EVENT_DISCONNECT as well as for SOCK_EVENT_CAN_READ.
+         * A peer that half-closes makes the socket readable at end of file without raising
+         * POLLHUP, so the zero-length read below is the only notice of it, and that read
+         * never happens unless POLLIN was asked for.  Reporting CAN_READ stays gated on the
+         * caller wanting it.
+         */
+        if(events & (SOCK_EVENT_CAN_READ | SOCK_EVENT_DISCONNECT)) {
+            pfds[1].events |= POLLIN;
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Polling sock->fd=%d for POLLIN.", sock->fd);
         }
 
         if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
-            FD_SET(sock->fd, &write_set);
+            pfds[1].events |= POLLOUT;
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0,
-                   "Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
+                   "Polling sock->fd=%d for POLLOUT for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
         }
 
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Main socket fd=%d is valid, max_fd=%d, wake_read_fd=%d", sock->fd, max_fd,
-               sock->wake_read_fd);
+        main_fd_idx = 1;
+        num_fds = 2;
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Main socket fd=%d is valid, wake_read_fd=%d", sock->fd, sock->wake_read_fd);
     } else {
         /* Main socket invalid or closed - only wake socket will be monitored (valid for reconnection/idle) */
-        max_fd = sock->wake_read_fd;
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Main socket is INVALID, using only wake_read_fd=%d", sock->wake_read_fd);
     }
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events,
-           max_fd, sock->fd, timeout_ms);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "events=0x%x, sock->fd=%d, timeout_ms=%d, calling poll()", events, sock->fd,
+           timeout_ms);
 
-    /* calculate the timeout. */
-    if(timeout_ms > 0) {
-        struct timeval tv;
+    poll_rc = wait_on_fds(&pfds[0], num_fds, timeout_ms);
 
-        tv.tv_sec = (time_t)(timeout_ms / 1000);
-        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "poll() returned %" PRId32 " for sock->fd=%d", poll_rc, sock->fd);
 
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
-    } else {
-        struct timeval tv = {0, 0};
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "calling select with zero timeout (poll)");
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
-    }
+    if(poll_rc < 0) { return (int)poll_rc; }
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "select() returned num_sockets=%d for sock->fd=%d", num_sockets, sock->fd);
-
-    if(num_sockets == 0) {
+    if(poll_rc == 0) {
         result |= (events & SOCK_EVENT_TIMEOUT);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "select() timed out, returning TIMEOUT event");
-    } else if(num_sockets > 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "num_sockets (%d) > 0, checking ready fds. sock->fd=%d, wake_read_fd=%d",
-               num_sockets, sock->fd, sock->wake_read_fd);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "poll() timed out, returning TIMEOUT event");
+    } else {
+        int16_t main_revents = (main_fd_idx >= 0 ? pfds[main_fd_idx].revents : (int16_t)0);
+
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "poll() reported %" PRId32 " ready, wake revents=0x%x, main revents=0x%x",
+               poll_rc, pfds[0].revents, main_revents);
 
         /* was there a wake up? */
-        int wake_isset = FD_ISSET(sock->wake_read_fd, &read_set);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "FD_ISSET(wake_read_fd=%d, read_set)=%d", sock->wake_read_fd, wake_isset);
-        if(wake_isset) {
+        if(pfds[0].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) {
             char buf[32];
+            int32_t bytes_read = 0;
 
-            /* empty the socket. */
-            while((int)read(sock->wake_read_fd, &buf[0], sizeof(buf)) > 0) {}
+            /* empty the channel. */
+            do { bytes_read = (int32_t)read(sock->wake_read_fd, &buf[0], sizeof(buf)); } while(bytes_read > 0);
 
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
+
+            /*
+             * Zero is end of file on the wake channel and not an empty one.  Once the write
+             * end is gone the read end stays readable forever, so swallowing the zero spins
+             * this thread at full speed on every call.  Report it and let the caller tear
+             * the socket down.
+             */
+            if(bytes_read == 0) {
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Wake channel closed (read returned 0)!");
+                result |= (events & SOCK_EVENT_DISCONNECT);
+            } else if(errno != EAGAIN && errno != EWOULDBLOCK) {
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Wake channel read error %d!", errno);
+                result |= (events & SOCK_EVENT_DISCONNECT);
+            }
         }
 
-        /* is read ready for the main fd? Guard against INVALID_SOCKET (-1) which causes undefined behavior in FD_ISSET */
-        int read_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &read_set) : 0;
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "FD_ISSET(sock->fd=%d, read_set)=%d", sock->fd, read_isset);
-
-        if(sock->fd != INVALID_SOCKET && read_isset) {
+        /* is read ready for the main fd? */
+        if(main_revents & POLLIN) {
             char buf;
             int byte_read = 0;
 
@@ -1169,20 +1211,28 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             }
         }
 
-        /* is write ready for the main fd? Guard against INVALID_SOCKET (-1) */
-        int write_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &write_set) : 0;
-
-        if(sock->fd != INVALID_SOCKET && write_isset) {
+        /* is write ready for the main fd? */
+        if(main_revents & POLLOUT) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
         }
 
-        /* is there an error? Guard against INVALID_SOCKET (-1) */
-        int err_isset = (sock->fd != INVALID_SOCKET) ? FD_ISSET(sock->fd, &err_set) : 0;
+        /*
+         * The peer closing is not an error.  poll() reports it as POLLHUP whether or not
+         * POLLIN was requested, so a caller waiting only for writability still learns of it.
+         */
+        if(main_revents & POLLHUP) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Peer hung up on fd=%d.", sock->fd);
+            result |= (events & SOCK_EVENT_DISCONNECT);
+        }
 
-        if(sock->fd != INVALID_SOCKET && err_isset) {
-            /* On some platforms, FD_ISSET on err_set can return true spuriously.
-             * Verify the error is real by checking SO_ERROR. */
+        if(main_revents & POLLNVAL) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket fd=%d is not a valid descriptor!", sock->fd);
+            result |= (events & SOCK_EVENT_ERROR);
+        }
+
+        if(main_revents & POLLERR) {
+            /* POLLERR can be set with no pending error, so SO_ERROR decides. */
             int sock_error = 0;
             socklen_t sock_error_len = sizeof(sock_error);
 
@@ -1192,9 +1242,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket has real error %d!", sock_error);
                     result |= (events & SOCK_EVENT_ERROR);
                 } else {
-                    /* FD_ISSET was spurious - there's no actual error */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0,
-                           "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                    /* POLLERR was spurious - there's no actual error */
+                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "POLLERR was set but SO_ERROR is 0 (spurious error flag).");
                 }
             } else {
                 /* Failed to get socket error state, assume there's an error */
@@ -1204,40 +1253,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         }
 
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "After all checks, result=0x%x", result);
-    } else {
-        /* error */
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned status %d!", num_sockets);
-
-        switch(errno) {
-            case EBADF: /* bad file descriptor */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Bad file descriptor used in select()!");
-                return PLCTAG_ERR_BAD_PARAM;
-                break;
-
-            case EINTR: /* signal was caught, this should not happen! */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "A signal was caught in select() and this should not happen!");
-                return PLCTAG_ERR_BAD_CONFIG;
-                break;
-
-            case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(
-                    DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
-                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
-                return PLCTAG_ERR_BAD_PARAM;
-                break;
-
-            case ENOMEM: /* No mem for internal tables. */
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Insufficient memory for select() to run!");
-                return PLCTAG_ERR_NO_MEM;
-                break;
-
-            default:
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unexpected socket err %d!", errno);
-                return PLCTAG_ERR_BAD_STATUS;
-                break;
-        }
     }
-
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Done.");
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0,
@@ -1271,7 +1287,7 @@ int socket_wake(sock_p sock) {
     }
 
     /* The wake pipe is independent of the TCP connection state.
-     * Write to the wake pipe to interrupt the handler thread's select() call.
+     * Write to the wake pipe to interrupt the handler thread's poll() call.
      * This works regardless of whether the TCP connection is open.
      * Check that the wake pipe is valid before writing to it. */
     if(sock->wake_write_fd == INVALID_SOCKET) {
@@ -1356,7 +1372,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             if(timeout_ms > 0) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "Would block, will wait for select() on fd=%d", s->fd);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "Would block, will wait for poll() on fd=%d", s->fd);
             } else {
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Read resulted in no data.");
             }
@@ -1378,61 +1394,31 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
     /* only wait if we have a timeout and no error and no data. */
     if(rc == 0 && timeout_ms > 0) {
-        fd_set read_set;
-        struct timeval tv;
-        int select_rc = 0;
+        struct pollfd pfd;
+        int32_t poll_rc = 0;
 
-        tv.tv_sec = (time_t)(timeout_ms / 1000);
-        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+        pfd.fd = s->fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
 
-        FD_ZERO(&read_set);
+        poll_rc = wait_on_fds(&pfd, 1, timeout_ms);
+        if(poll_rc < 0) { return (int)poll_rc; }
 
-        FD_SET(s->fd, &read_set);
-
-        select_rc = select(s->fd + 1, &read_set, NULL, NULL, &tv);
-        if(select_rc == 1) {
-            if(FD_ISSET(s->fd, &read_set)) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket can read data.");
-            } else {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned but socket is not ready to read data!");
-                return PLCTAG_ERR_BAD_REPLY;
-            }
-        } else if(select_rc == 0) {
+        if(poll_rc == 0) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket read timed out.");
             return PLCTAG_ERR_TIMEOUT;
-        } else {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned status %d!", select_rc);
-
-            switch(errno) {
-                case EBADF: /* bad file descriptor */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Bad file descriptor used in select()!");
-                    return PLCTAG_ERR_BAD_PARAM;
-                    break;
-
-                case EINTR: /* signal was caught, this should not happen! */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "A signal was caught in select() and this should not happen!");
-                    return PLCTAG_ERR_BAD_CONFIG;
-                    break;
-
-                case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(
-                        DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
-                        "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
-                    return PLCTAG_ERR_BAD_PARAM;
-                    break;
-
-                case ENOMEM: /* No mem for internal tables. */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Insufficient memory for select() to run!");
-                    return PLCTAG_ERR_NO_MEM;
-                    break;
-
-                default:
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unexpected socket err %d!", errno);
-                    return PLCTAG_ERR_BAD_STATUS;
-                    break;
-            }
         }
 
+        if(pfd.revents & POLLNVAL) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket fd=%d is not a valid descriptor!", s->fd);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        /*
+         * POLLERR and POLLHUP without POLLIN fall through to the read below.  The read
+         * reports the actual errno or the EOF, which is what the caller needs.
+         */
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket is ready to read, revents=0x%x.", pfd.revents);
         /* try to read again. */
         rc = (int)read(s->fd, buf, (size_t)size);
         if(rc < 0) {
@@ -1445,7 +1431,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
             }
         } else if(rc == 0) {
             /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer after select (read returned 0) on fd=%d",
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer after poll (read returned 0) on fd=%d",
                    s->fd);
             return PLCTAG_ERR_READ;
         }
@@ -1486,8 +1472,8 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
      * Try to write without waiting.
      *
      * In the case that we can immediately write, then we skip a
-     * system call to select().   If we cannot, then we will
-     * call select().
+     * system call to poll().   If we cannot, then we will
+     * call poll().
      */
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "About to write %d bytes on fd=%d", size, s->fd);
@@ -1518,89 +1504,57 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
     /* only wait if we have a timeout and no error and wrote no data. */
     if(rc == 0 && timeout_ms > 0) {
-        fd_set write_set;
-        struct timeval tv;
-        int select_rc = 0;
+        struct pollfd pfd;
+        int32_t poll_rc = 0;
 
-        tv.tv_sec = (time_t)(timeout_ms / 1000);
-        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+        pfd.fd = s->fd;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
 
-        FD_ZERO(&write_set);
+        poll_rc = wait_on_fds(&pfd, 1, timeout_ms);
+        if(poll_rc < 0) { return (int)poll_rc; }
 
-        FD_SET(s->fd, &write_set);
-
-        select_rc = select(s->fd + 1, NULL, &write_set, NULL, &tv);
-        if(select_rc == 1) {
-            if(FD_ISSET(s->fd, &write_set)) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket can write data.");
-            } else {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned but socket is not ready to write data!");
-                return PLCTAG_ERR_BAD_REPLY;
-            }
-        } else if(select_rc == 0) {
+        if(poll_rc == 0) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket write timed out.");
             return PLCTAG_ERR_TIMEOUT;
-        } else {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "select() returned status %d!", select_rc);
-
-            switch(errno) {
-                case EBADF: /* bad file descriptor */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Bad file descriptor used in select()!");
-                    return PLCTAG_ERR_BAD_PARAM;
-                    break;
-
-                case EINTR: /* signal was caught, this should not happen! */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "A signal was caught in select() and this should not happen!");
-                    return PLCTAG_ERR_BAD_CONFIG;
-                    break;
-
-                case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(
-                        DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
-                        "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
-                    return PLCTAG_ERR_BAD_PARAM;
-                    break;
-
-                case ENOMEM: /* No mem for internal tables. */
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Insufficient memory for select() to run!");
-                    return PLCTAG_ERR_NO_MEM;
-                    break;
-
-                default:
-                    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unexpected socket err %d!", errno);
-                    return PLCTAG_ERR_BAD_STATUS;
-                    break;
-            }
         }
 
-        /* select() passed and said we can write, so try. */
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "select() indicated fd=%d ready for write, attempting write", s->fd);
+        if(pfd.revents & POLLNVAL) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket fd=%d is not a valid descriptor!", s->fd);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        /*
+         * POLLERR and POLLHUP without POLLOUT fall through to the write below.  The write
+         * reports the actual errno, which is what the caller needs, and "not writable" is not.
+         */
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "poll() indicated fd=%d is ready for write, attempting write", s->fd);
 #ifdef BSD_OS_TYPE
         /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
         rc = (int)write(s->fd, buf, (size_t)size);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), write() returned %d for fd=%d (requested %d bytes)", rc,
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After poll(), write() returned %d for fd=%d (requested %d bytes)", rc,
                s->fd, size);
 #else
         /* on Linux, we use MSG_NOSIGNAL */
         rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), send() returned %d for fd=%d (requested %d bytes)", rc,
-               s->fd, size);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After poll(), send() returned %d for fd=%d (requested %d bytes)", rc, s->fd,
+               size);
 #endif
 
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "After select(), still would block on fd=%d", s->fd);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "After poll(), still would block on fd=%d", s->fd);
                 rc = 0;
             } else {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket write error after select: rc=%d, errno=%d (%s)", rc, errno,
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Socket write error after poll: rc=%d, errno=%d (%s)", rc, errno,
                        strerror(errno));
                 return PLCTAG_ERR_WRITE;
             }
         } else if(rc > 0 && rc < size) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), partial write on fd=%d: wrote %d of %d bytes", s->fd,
-                   rc, size);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After poll(), partial write on fd=%d: wrote %d of %d bytes", s->fd, rc,
+                   size);
         } else if(rc == size) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After select(), complete write on fd=%d: wrote all %d bytes", s->fd,
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "After poll(), complete write on fd=%d: wrote all %d bytes", s->fd,
                    size);
         }
     }
@@ -1682,7 +1636,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, 0, "Starting.");
 
     do {
-        /* open the pipe for waking the select wait. */
+        /* open the pipe for waking the poll wait. */
         // if(pipe(wake_fds)) {
 #ifdef SOCK_CLOEXEC
         if((rc = socketpair(PF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0, wake_fds))) {
