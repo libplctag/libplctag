@@ -395,7 +395,10 @@ typedef struct {
     conn_event_ring_t watch;                                                                   \
                                                                                                \
     /* connection inactivity timeout - readable/writable by tags via atomics */                \
-    atomic_int32_t connection_inactivity_timeout_ms /* milliseconds */
+    atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */                        \
+                                                                                               \
+    /* longest delay between reconnect attempts after an error - likewise live via atomics */  \
+    atomic_int32_t connection_retry_max_delay_ms /* milliseconds */
 
 
 /*

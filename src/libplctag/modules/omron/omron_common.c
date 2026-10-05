@@ -695,6 +695,13 @@ const attr_def_t omron_attribs[] = {
      .get_int = cip_tag_get_connection_inactivity_timeout_ms,
      .set_int = cip_tag_set_connection_inactivity_timeout_ms},
 
+    {.name = "connection_retry_max_delay_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "Longest delay between reconnect attempts after an error, in milliseconds.  Shared by every tag on "
+                    "this connection.  A change applies from the next retry; a wait already running is not cut short.",
+     .get_int = cip_tag_get_connection_retry_max_delay_ms,
+     .set_int = cip_tag_set_connection_retry_max_delay_ms},
+
     {.name = "raw_tag_type_bytes",
      .type = ATTR_TYPE_BYTES,
      .description = "The encoded CIP type information for this tag.",

@@ -322,13 +322,65 @@ static void test_saturate_jumps_to_the_ceiling(void **state) {
 }
 
 
+/*
+ * The ceiling is a live tag attribute, so it can move while the retries are running.
+ * Lowering it has to bring the delay already reached down with it, or the next wait honours
+ * the ceiling that was just removed.
+ */
+static void test_lowering_the_max_takes_the_current_delay_with_it(void **state) {
+    backoff_t backoff;
+    int32_t attempt = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    /* climb to the old ceiling. */
+    backoff_saturate(&backoff);
+    assert_in_range(backoff_wait_ms(&backoff), TEST_MAX_MS / 2, TEST_MAX_MS);
+
+    backoff_set_max_ms(&backoff, 1000);
+
+    /* the very next wait is under the new ceiling, not the old one. */
+    for(attempt = 0; attempt < 100; attempt++) { assert_in_range(backoff_wait_ms(&backoff), 1, 1000); }
+}
+
+
+static void test_raising_the_max_lets_growth_resume(void **state) {
+    backoff_t backoff;
+    int32_t attempt = 0;
+    int64_t wait_ms = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, 200);
+
+    /* saturated against the low ceiling. */
+    for(attempt = 0; attempt < 10; attempt++) { assert_in_range(backoff_wait_ms(&backoff), 1, 200); }
+
+    backoff_set_max_ms(&backoff, TEST_MAX_MS);
+
+    /* it climbs again rather than staying where the old ceiling left it. */
+    for(attempt = 0; attempt < 20; attempt++) { wait_ms = backoff_wait_ms(&backoff); }
+
+    assert_in_range(wait_ms, TEST_MAX_MS / 2, TEST_MAX_MS);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_saturate_jumps_to_the_ceiling), cmocka_unit_test(test_first_wait_is_near_initial),
-        cmocka_unit_test(test_base_saturates_at_max),         cmocka_unit_test(test_long_outage_never_collapses_or_overshoots),
-        cmocka_unit_test(test_reported_attempt_counts),       cmocka_unit_test(test_attempt_counter_wrap_is_harmless),
-        cmocka_unit_test(test_reset_returns_to_initial),      cmocka_unit_test(test_saturated_waits_still_vary),
-        cmocka_unit_test(test_degenerate_bounds_are_clamped), cmocka_unit_test(test_modbus_bounds_behave_the_same),
+        cmocka_unit_test(test_saturate_jumps_to_the_ceiling),
+        cmocka_unit_test(test_lowering_the_max_takes_the_current_delay_with_it),
+        cmocka_unit_test(test_raising_the_max_lets_growth_resume),
+        cmocka_unit_test(test_first_wait_is_near_initial),
+        cmocka_unit_test(test_base_saturates_at_max),
+        cmocka_unit_test(test_long_outage_never_collapses_or_overshoots),
+        cmocka_unit_test(test_reported_attempt_counts),
+        cmocka_unit_test(test_attempt_counter_wrap_is_harmless),
+        cmocka_unit_test(test_reset_returns_to_initial),
+        cmocka_unit_test(test_saturated_waits_still_vary),
+        cmocka_unit_test(test_degenerate_bounds_are_clamped),
+        cmocka_unit_test(test_modbus_bounds_behave_the_same),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

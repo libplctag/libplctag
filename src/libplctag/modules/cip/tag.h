@@ -245,6 +245,8 @@ extern int32_t cip_tag_get_elem_count(plc_tag_p raw_tag, int32_t *result);
 extern int32_t cip_tag_get_connection_status(plc_tag_p raw_tag, int32_t *result);
 extern int32_t cip_tag_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result);
 extern int32_t cip_tag_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value);
+extern int32_t cip_tag_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_set_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t value);
 extern int32_t cip_tag_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result);
 extern int32_t cip_tag_get_allow_packing(plc_tag_p raw_tag, int32_t *result);
 extern int32_t cip_tag_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length);

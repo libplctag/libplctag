@@ -60,3 +60,18 @@ extern int32_t conn_get_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_
  */
 extern int32_t conn_set_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_t value, int32_t tag_id,
                                               debug_module_t debug_module);
+
+/*
+ * The longest delay between reconnect attempts after an error.
+ *
+ * The default differs by protocol, so the getter cannot supply one: with no connection it
+ * reports the default the caller passes, which is the value the next connection will use.
+ */
+extern int32_t conn_get_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t default_ms, int32_t *result);
+
+/*
+ * Clamps to [CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS], returning
+ * PLCTAG_ERR_OUT_OF_BOUNDS if it had to.  Returns PLCTAG_ERR_NOT_FOUND, without storing
+ * anything, when there is no connection to set it on.
+ */
+extern int32_t conn_set_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t value, int32_t tag_id, debug_module_t debug_module);

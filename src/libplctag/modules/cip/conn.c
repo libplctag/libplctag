@@ -2095,6 +2095,9 @@ THREAD_FUNC(session_handler) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_START_RETRY state.");
 
                 /* FIXME - make the backoff bounds tag attributes. */
+                /* the maximum is a live tag attribute, so it is read fresh on every retry. */
+                backoff_set_max_ms(&retry_backoff, atomic_get_int32(&conn->connection_retry_max_delay_ms));
+
                 retry_wait_ms = backoff_wait_ms(&retry_backoff);
 
                 timeout_time = now + retry_wait_ms;
@@ -2415,6 +2418,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
     int shared_session = attr_get_int(attribs, "share_session", attr_get_int(attribs, "share_conn", 1));
     int rc = PLCTAG_STATUS_OK;
     int connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
+    int connection_retry_max_delay_ms = RETRY_WAIT_MAX_MS;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
@@ -2442,6 +2446,18 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
                connection_inactivity_timeout_ms);
     }
 
+    connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS);
+    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS
+       || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+               "Invalid connection_retry_max_delay_ms %d. Must be between %d and %d. Using default %d.",
+               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS, RETRY_WAIT_MAX_MS);
+        connection_retry_max_delay_ms = RETRY_WAIT_MAX_MS;
+    } else {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %dms.",
+               connection_retry_max_delay_ms);
+    }
+
     critical_block(list->mutex) {
         /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
@@ -2467,6 +2483,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
                 atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
+                atomic_init_int32(&session->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
 
                 /* see if we have an attribute set for forcing the use of the older ForwardOpen */
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
@@ -2479,6 +2496,22 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
             }
         } else {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Reusing existing session.");
+
+            /*
+             * These belong to the connection and the connection already exists, so the tag
+             * that created it set them.  Say so rather than silently dropping this tag's
+             * values, and name the way to change them that does work.
+             */
+            if(atomic_get_int32(&session->connection_inactivity_timeout_ms) != connection_inactivity_timeout_ms
+               || atomic_get_int32(&session->connection_retry_max_delay_ms) != connection_retry_max_delay_ms) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                       "This session already has connection_inactivity_timeout_ms=%" PRId32
+                       " and connection_retry_max_delay_ms=%" PRId32 "; this tag asked for %d and %d.  Use "
+                       "plc_tag_set_int_attribute() on a tag to change them.",
+                       atomic_get_int32(&session->connection_inactivity_timeout_ms),
+                       atomic_get_int32(&session->connection_retry_max_delay_ms), connection_inactivity_timeout_ms,
+                       connection_retry_max_delay_ms);
+            }
         }
     }
 

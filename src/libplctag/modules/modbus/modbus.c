@@ -190,6 +190,7 @@ struct modbus_plc_t {
 
     /* comms timeout/disconnect - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
+    atomic_int32_t connection_retry_max_delay_ms;    /* milliseconds */
 
     /* data */
     int read_data_len;
@@ -631,6 +632,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int max_requests_in_flight = attr_get_int(attribs, "max_requests_in_flight", 1);
     int connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
+    int connection_retry_max_delay_ms = PLC_SOCKET_ERR_MAX_DELAY;
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
@@ -659,6 +661,19 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     } else {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
                connection_inactivity_timeout_ms);
+    }
+
+    connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", PLC_SOCKET_ERR_MAX_DELAY);
+    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS
+       || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
+               "Invalid connection_retry_max_delay_ms %d. Must be between %d and %d. Using default %d.",
+               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS,
+               PLC_SOCKET_ERR_MAX_DELAY);
+        connection_retry_max_delay_ms = PLC_SOCKET_ERR_MAX_DELAY;
+    } else {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %dms.",
+               connection_retry_max_delay_ms);
     }
 
     if(server_id < 0 || server_id > 255) {
@@ -751,6 +766,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
                     atomic_init_int32(&(*plc)->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
+                    atomic_init_int32(&(*plc)->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
                     conn_watch_init(&(*plc)->watch, PLCTAG_CONN_STATUS_DOWN);
 
                     /* Calculate initial disconnect deadline */
@@ -1111,7 +1127,8 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while starting socket connection.",
                            plc_tag_decode_error(rc));
 
-                    /* exponential increase with jitter. */
+                    /* exponential increase with jitter, up to the live tag attribute's maximum. */
+                    backoff_set_max_ms(&err_backoff, atomic_get_int32(&plc->connection_retry_max_delay_ms));
                     err_delay = backoff_wait_ms(&err_backoff);
                     err_delay_until = time_ms() + err_delay;
 
@@ -1152,7 +1169,8 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while waiting for socket connection.",
                            plc_tag_decode_error(rc));
 
-                    /* exponential increase with jitter. */
+                    /* exponential increase with jitter, up to the live tag attribute's maximum. */
+                    backoff_set_max_ms(&err_backoff, atomic_get_int32(&plc->connection_retry_max_delay_ms));
                     err_delay = backoff_wait_ms(&err_backoff);
                     err_delay_until = time_ms() + err_delay;
 
@@ -3709,6 +3727,22 @@ static int32_t mb_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_
 }
 
 
+static int32_t mb_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *result) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    return conn_get_retry_max_delay_ms(tag->plc ? &tag->plc->connection_retry_max_delay_ms : NULL, PLC_SOCKET_ERR_MAX_DELAY,
+                                       result);
+}
+
+
+static int32_t mb_set_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t value) {
+    modbus_tag_p tag = (modbus_tag_p)raw_tag;
+
+    return conn_set_retry_max_delay_ms(tag->plc ? &tag->plc->connection_retry_max_delay_ms : NULL, value, tag->tag_id,
+                                       DEBUG_MODULE_MODBUS);
+}
+
+
 /* Read-only after creation.  These live on the shared PLC, so they report
  * PLCTAG_ERR_NOT_FOUND until it exists. */
 static int32_t mb_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
@@ -3773,6 +3807,13 @@ static const attr_def_t mb_attribs[] = {
      .description = "Disconnect from the PLC after this many milliseconds without traffic.",
      .get_int = mb_get_connection_inactivity_timeout_ms,
      .set_int = mb_set_connection_inactivity_timeout_ms},
+
+    {.name = "connection_retry_max_delay_ms",
+     .type = ATTR_TYPE_INT,
+     .description = "Longest delay between reconnect attempts after an error, in milliseconds.  Shared by every tag on "
+                    "this connection.  A change applies from the next retry; a wait already running is not cut short.",
+     .get_int = mb_get_connection_retry_max_delay_ms,
+     .set_int = mb_set_connection_retry_max_delay_ms},
 
     {.name = "gateway",
      .type = ATTR_TYPE_STRING,

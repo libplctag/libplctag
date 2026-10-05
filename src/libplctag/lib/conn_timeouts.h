@@ -48,3 +48,18 @@
 #define CONN_INACTIVITY_TIMEOUT_MAX_MS (31000)
 #define CONN_INACTIVITY_TIMEOUT_MIN_MS (100)
 #define CONN_CLOSE_FIRST_MARGIN_MS (1000)
+
+
+/*
+ * Bounds on the longest delay between reconnect attempts after an error.
+ *
+ * Only the bounds are shared.  Each protocol keeps its own default, because CIP's is
+ * derived from the deadline it grants the PLC on the wire and Modbus has no such deadline
+ * -- making them equal would leave one of them arbitrary.
+ *
+ * The floor is not cosmetic: a backoff only grows while its delay is under the maximum, so
+ * a maximum below the initial delay stops the growth instead of capping it.  100 ms clears
+ * the initial delay of every protocol here.
+ */
+#define CONN_RETRY_MAX_DELAY_MIN_MS (100)
+#define CONN_RETRY_MAX_DELAY_LIMIT_MS (300000)

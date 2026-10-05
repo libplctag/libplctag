@@ -426,6 +426,20 @@ int32_t cip_tag_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t 
 }
 
 
+int32_t cip_tag_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *result) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    return conn_get_retry_max_delay_ms(tag->session ? &tag->session->connection_retry_max_delay_ms : NULL, RETRY_WAIT_MAX_MS,
+                                       result);
+}
+
+
+int32_t cip_tag_set_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t value) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
+    return conn_set_retry_max_delay_ms(tag->session ? &tag->session->connection_retry_max_delay_ms : NULL, value, tag->tag_id,
+                                       DEBUG_MODULE_CIP);
+}
 
 
 int32_t cip_tag_get_use_connected_msg(plc_tag_p raw_tag, int32_t *result) {

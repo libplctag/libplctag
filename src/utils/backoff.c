@@ -58,6 +58,14 @@ void backoff_reset(backoff_t *backoff) {
 void backoff_saturate(backoff_t *backoff) { backoff->base_ms = backoff->max_ms; }
 
 
+void backoff_set_max_ms(backoff_t *backoff, int64_t max_ms) {
+    backoff->max_ms = max_ms;
+
+    /* a lowered ceiling applies to the delay already reached, not only to future growth. */
+    if(backoff->base_ms > max_ms) { backoff->base_ms = max_ms; }
+}
+
+
 int64_t backoff_wait_ms(backoff_t *backoff) {
     int64_t half = backoff->base_ms / 2;
     int64_t result = 0;

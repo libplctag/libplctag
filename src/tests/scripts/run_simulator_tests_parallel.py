@@ -671,6 +671,31 @@ def build_manifest() -> Manifest:
               check=CheckSpec(log_file=dup_forever_test.log_file,
                                pattern=r"waiting \d{4,}ms before reconnecting", expected=1, at_least=True))
 
+    # connection_retry_max_delay_ms caps that growth.  Same server and same endless refusal as
+    # above, so the only difference is the attribute: the test above reaches four-digit waits
+    # and this one must not.
+    capped_retry_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--dup-conn-id-tries=1000"],
+        startup_wait_s=1,
+    )
+    capped_retry_test = sec.test("connection_retry_max_delay_ms caps the reconnect backoff",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"
+               "&connection_retry_max_delay_ms=999",
+               "--debug=4"], F, server=capped_retry_server, expect_failure=True)
+    sec.test("check the capped backoff still retried",
+              None, T, depends_on=capped_retry_test.id, ports_needed=0,
+              check=CheckSpec(log_file=capped_retry_test.log_file,
+                               pattern=r"waiting \d+ms before reconnecting", expected=1, at_least=True))
+    # 999 and not a round number: the check is a regex over the log and cannot compare numbers,
+    # so the cap is chosen to make "over the cap" exactly "four or more digits".
+    sec.test("check the capped backoff never exceeded the attribute",
+              None, T, depends_on=capped_retry_test.id, ports_needed=0,
+              check=CheckSpec(log_file=capped_retry_test.log_file,
+                               pattern=r"waiting \d{4,}ms before reconnecting", expected=0))
+
     # A partial-transfer status with no payload is legitimate -- packing several requests into
     # one packet leaves the later ones only a bare CIP header -- so a few in a row must be
     # tolerated, but an endless run of them makes no forward progress and used to spin the

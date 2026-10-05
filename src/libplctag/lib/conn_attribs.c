@@ -85,3 +85,39 @@ int32_t conn_set_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_t value
 
     return rc;
 }
+
+
+int32_t conn_get_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t default_ms, int32_t *result) {
+    /* no connection means the one that will be created uses this protocol's default. */
+    *result = (delay_ms ? atomic_get_int32(delay_ms) : default_ms);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t conn_set_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t value, int32_t tag_id, debug_module_t debug_module) {
+    int32_t clamped_value = value;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    if(clamped_value < CONN_RETRY_MAX_DELAY_MIN_MS) {
+        clamped_value = CONN_RETRY_MAX_DELAY_MIN_MS;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_retry_max_delay_ms value %" PRId32 " clamped to minimum %d ms.",
+               value, CONN_RETRY_MAX_DELAY_MIN_MS);
+    } else if(clamped_value > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
+        clamped_value = CONN_RETRY_MAX_DELAY_LIMIT_MS;
+        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_retry_max_delay_ms value %" PRId32 " clamped to maximum %d ms.",
+               value, CONN_RETRY_MAX_DELAY_LIMIT_MS);
+    }
+
+    /* clamp first, then report the missing connection: the caller learns both problems. */
+    if(!delay_ms) {
+        pdebug(debug_module, DEBUG_WARN, tag_id, "Cannot set connection_retry_max_delay_ms: no connection exists.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    atomic_set_int32(delay_ms, clamped_value);
+
+    return rc;
+}

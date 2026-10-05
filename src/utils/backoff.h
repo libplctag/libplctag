@@ -82,6 +82,18 @@ extern void backoff_reset(backoff_t *backoff);
 extern void backoff_saturate(backoff_t *backoff);
 
 /**
+ * @brief Change the ceiling of an already-running backoff.
+ *
+ * For a maximum the application can set while the retries are happening.  Lowering it
+ * takes the current delay down with it, so the next wait honours the new ceiling rather
+ * than waiting out the old one first.
+ *
+ * @param backoff The state to change.
+ * @param max_ms The new ceiling.
+ */
+extern void backoff_set_max_ms(backoff_t *backoff, int64_t max_ms);
+
+/**
  * @brief How long to wait before the next attempt, and advance the backoff.
  *
  * The result is drawn fresh on every call: half the current delay plus a random share
