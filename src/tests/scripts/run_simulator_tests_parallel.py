@@ -663,6 +663,13 @@ def build_manifest() -> Manifest:
               None, T, depends_on=dup_forever_test.id, ports_needed=0,
               check=CheckSpec(log_file=dup_forever_test.log_file,
                                pattern=r"Duplicate connection ID, retry 6 of 5", expected=0))
+    # The backoff between give-ups has to grow.  It restarts only on reaching SESSION_IDLE, so a
+    # session that registers and then fails its ForwardOpen every time still backs off; resetting
+    # it any earlier pins the reconnect at the initial delay and spins the handler thread.
+    sec.test("check the reconnect backoff grows while the ForwardOpen keeps failing",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"waiting \d{4,}ms before reconnecting", expected=1, at_least=True))
 
     # A partial-transfer status with no payload is legitimate -- packing several requests into
     # one packet leaves the later ones only a bare CIP header -- so a few in a row must be

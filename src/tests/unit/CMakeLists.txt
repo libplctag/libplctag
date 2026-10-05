@@ -141,7 +141,21 @@ if(NOT WIN32)
     set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_socket_high_fd)
 endif()
 
+# test_cip_status: the CIP error status prefix parser and the status codes the Forward Open
+# negotiation branches on.  Pure functions over a byte buffer -- no socket and no PLC.
+add_executable(test_cip_status test_cip_status.c)
+
+target_include_directories(test_cip_status PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_cip_status PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # Register the unit tests with CTest
+add_test(NAME unit_test_cip_status COMMAND test_cip_status)
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
@@ -149,7 +163,7 @@ add_test(NAME unit_test_backoff COMMAND test_backoff)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_cip_status ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

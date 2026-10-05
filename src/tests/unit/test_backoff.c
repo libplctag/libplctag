@@ -298,17 +298,37 @@ static void test_modbus_bounds_behave_the_same(void **state) {
 }
 
 
+/*
+ * Saturating jumps to the ceiling without waiting out the climb.  The waits afterwards are
+ * the same ones a backoff that got there by failing repeatedly would produce -- there is no
+ * separate saturated state, just a larger base.
+ */
+static void test_saturate_jumps_to_the_ceiling(void **state) {
+    backoff_t backoff;
+    int32_t attempt = 0;
+
+    (void)state;
+
+    backoff_init(&backoff, TEST_INITIAL_MS, TEST_MAX_MS);
+
+    backoff_saturate(&backoff);
+
+    for(attempt = 0; attempt < 100; attempt++) { assert_in_range(backoff_wait_ms(&backoff), TEST_MAX_MS / 2, TEST_MAX_MS); }
+
+    /* and it is still only a base, so a reset still returns to the start. */
+    backoff_reset(&backoff);
+
+    assert_in_range(backoff_wait_ms(&backoff), TEST_INITIAL_MS / 2, TEST_INITIAL_MS);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_first_wait_is_near_initial),
-        cmocka_unit_test(test_base_saturates_at_max),
-        cmocka_unit_test(test_long_outage_never_collapses_or_overshoots),
-        cmocka_unit_test(test_reported_attempt_counts),
-        cmocka_unit_test(test_attempt_counter_wrap_is_harmless),
-        cmocka_unit_test(test_reset_returns_to_initial),
-        cmocka_unit_test(test_saturated_waits_still_vary),
-        cmocka_unit_test(test_degenerate_bounds_are_clamped),
-        cmocka_unit_test(test_modbus_bounds_behave_the_same),
+        cmocka_unit_test(test_saturate_jumps_to_the_ceiling), cmocka_unit_test(test_first_wait_is_near_initial),
+        cmocka_unit_test(test_base_saturates_at_max),         cmocka_unit_test(test_long_outage_never_collapses_or_overshoots),
+        cmocka_unit_test(test_reported_attempt_counts),       cmocka_unit_test(test_attempt_counter_wrap_is_harmless),
+        cmocka_unit_test(test_reset_returns_to_initial),      cmocka_unit_test(test_saturated_waits_still_vary),
+        cmocka_unit_test(test_degenerate_bounds_are_clamped), cmocka_unit_test(test_modbus_bounds_behave_the_same),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
