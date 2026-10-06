@@ -305,7 +305,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
-    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect",
+    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
     "test_reconnect_after_outage_sync", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
@@ -476,6 +476,8 @@ def build_manifest() -> Manifest:
                "--num-tags=200", "--test-duration-secs=10"], S)
     sec.test("idle disconnect and reconnect with runtime timeout change (AB ControlLogix)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], T)
+    sec.test("connection_retry_max_delay_ms read, written and clamped live (AB ControlLogix)",
+              [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], F)
     sec.test("hard library shutdown",
               [exe("test_shutdown"),
                f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
@@ -1003,6 +1005,8 @@ def build_manifest() -> Manifest:
               [exe("thread_stress"), "10", f"protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], S)
     sec.test("idle disconnect and reconnect with runtime timeout change (Omron)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], T)
+    sec.test("connection_retry_max_delay_ms read, written and clamped live (Omron)",
+              [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], F)
     sec.test("@connection tag connection state transitions (Omron)",
               [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&connection_inactivity_timeout_ms=5000&name=@connection"], T)
     sec.test("multiple simultaneous @connection tags on same session (Omron)",
@@ -1284,6 +1288,8 @@ def build_manifest() -> Manifest:
                "--idle-timeout-ms=5000"], T)
     sec.test("test idle disconnect with Modbus",
               [exe("test_idle_disconnect"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
+    sec.test("connection_retry_max_delay_ms read, written and clamped live (Modbus)",
+              [exe("test_retry_attr"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
     sec.test("thread stress Modbus",
               [exe("thread_stress"), "10", f"protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
     sec.test("connection stress (multiple connections) Modbus",
