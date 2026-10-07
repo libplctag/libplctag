@@ -42,10 +42,19 @@
  * yet, which is a state rather than an error for the getters.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
+
+/*
+ * attr_clamp_int32() plus the warning, which is the only part that needs to know the
+ * attribute's name and which module to log it under.  tag_id is 0 when the value comes
+ * from a tag string, since no tag exists yet to attribute it to.
+ */
+extern bool conn_clamp_ms_attrib(int32_t *value, int32_t min_ms, int32_t max_ms, const char *name, int32_t tag_id,
+                                 debug_module_t debug_module);
 
 /* PLCTAG_CONN_STATUS_DOWN when there is no connection. */
 extern int32_t conn_get_status(atomic_int32_t *status, int32_t *result);

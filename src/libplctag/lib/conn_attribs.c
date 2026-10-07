@@ -39,7 +39,21 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
+#include <utils/attr.h>
 #include <utils/debug.h>
+
+
+bool conn_clamp_ms_attrib(int32_t *value, int32_t min_ms, int32_t max_ms, const char *name, int32_t tag_id,
+                          debug_module_t debug_module) {
+    int32_t requested = *value;
+
+    if(!attr_clamp_int32(value, min_ms, max_ms)) { return false; }
+
+    pdebug(debug_module, DEBUG_WARN, tag_id, "%s value %" PRId32 " is outside %" PRId32 "-%" PRId32 " ms, using %" PRId32 ".",
+           name, requested, min_ms, max_ms, *value);
+
+    return true;
+}
 
 
 int32_t conn_get_status(atomic_int32_t *status, int32_t *result) {
@@ -61,19 +75,10 @@ int32_t conn_get_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_t *resu
 int32_t conn_set_inactivity_timeout_ms(atomic_int32_t *timeout_ms, int32_t value, int32_t tag_id,
                                        debug_module_t debug_module) {
     int32_t clamped_value = value;
-    int32_t rc = PLCTAG_STATUS_OK;
-
-    if(clamped_value < CONN_INACTIVITY_TIMEOUT_MIN_MS) {
-        clamped_value = CONN_INACTIVITY_TIMEOUT_MIN_MS;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_inactivity_timeout_ms value %" PRId32 " clamped to minimum %d ms.",
-               value, CONN_INACTIVITY_TIMEOUT_MIN_MS);
-    } else if(clamped_value > CONN_INACTIVITY_TIMEOUT_MAX_MS) {
-        clamped_value = CONN_INACTIVITY_TIMEOUT_MAX_MS;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_inactivity_timeout_ms value %" PRId32 " clamped to maximum %d ms.",
-               value, CONN_INACTIVITY_TIMEOUT_MAX_MS);
-    }
+    int32_t rc = (conn_clamp_ms_attrib(&clamped_value, CONN_INACTIVITY_TIMEOUT_MIN_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS,
+                                       "connection_inactivity_timeout_ms", tag_id, debug_module) ?
+                      PLCTAG_ERR_OUT_OF_BOUNDS :
+                      PLCTAG_STATUS_OK);
 
     /* clamp first, then report the missing connection: the caller learns both problems. */
     if(!timeout_ms) {
@@ -97,19 +102,10 @@ int32_t conn_get_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t default_ms
 
 int32_t conn_set_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t value, int32_t tag_id, debug_module_t debug_module) {
     int32_t clamped_value = value;
-    int32_t rc = PLCTAG_STATUS_OK;
-
-    if(clamped_value < CONN_RETRY_MAX_DELAY_MIN_MS) {
-        clamped_value = CONN_RETRY_MAX_DELAY_MIN_MS;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_retry_max_delay_ms value %" PRId32 " clamped to minimum %d ms.",
-               value, CONN_RETRY_MAX_DELAY_MIN_MS);
-    } else if(clamped_value > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        clamped_value = CONN_RETRY_MAX_DELAY_LIMIT_MS;
-        rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        pdebug(debug_module, DEBUG_WARN, tag_id, "connection_retry_max_delay_ms value %" PRId32 " clamped to maximum %d ms.",
-               value, CONN_RETRY_MAX_DELAY_LIMIT_MS);
-    }
+    int32_t rc = (conn_clamp_ms_attrib(&clamped_value, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS,
+                                       "connection_retry_max_delay_ms", tag_id, debug_module) ?
+                      PLCTAG_ERR_OUT_OF_BOUNDS :
+                      PLCTAG_STATUS_OK);
 
     /* clamp first, then report the missing connection: the caller learns both problems. */
     if(!delay_ms) {

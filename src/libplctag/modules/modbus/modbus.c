@@ -631,50 +631,39 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
     int server_id = attr_get_int(attribs, "path", -1);
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int max_requests_in_flight = attr_get_int(attribs, "max_requests_in_flight", 1);
-    int connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
-    int connection_retry_max_delay_ms = PLC_SOCKET_ERR_MAX_DELAY;
+    int32_t connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
+    int32_t connection_retry_max_delay_ms = PLC_SOCKET_ERR_MAX_DELAY;
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     /* clamp maximum requests in flight. */
-    if(max_requests_in_flight > MAX_MODBUS_REQUESTS) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-               "max_requests_in_flight set to %d which is higher than the Modbus limit of %d.", max_requests_in_flight,
-               MAX_MODBUS_REQUESTS);
-        max_requests_in_flight = MAX_MODBUS_REQUESTS;
-    }
+    {
+        int32_t requested_in_flight = (int32_t)max_requests_in_flight;
 
-    if(max_requests_in_flight < 1) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "max_requests_in_flight must be between 1 and %d, inclusive, was %d.",
-               MAX_MODBUS_REQUESTS, max_requests_in_flight);
-        max_requests_in_flight = 1;
+        if(attr_clamp_int32(&requested_in_flight, 1, MAX_MODBUS_REQUESTS)) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
+                   "max_requests_in_flight must be between 1 and %d, inclusive, was %d.  Using %" PRId32 ".", MAX_MODBUS_REQUESTS,
+                   max_requests_in_flight, requested_in_flight);
+        }
+
+        max_requests_in_flight = (int)requested_in_flight;
     }
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_INACTIVITY_TIMEOUT_MAX_MS);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_INACTIVITY_TIMEOUT_MAX_MS) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-               "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, CONN_INACTIVITY_TIMEOUT_MAX_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS);
-        connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
-    } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
-               connection_inactivity_timeout_ms);
-    }
+    conn_clamp_ms_attrib(&connection_inactivity_timeout_ms, CONN_INACTIVITY_TIMEOUT_MIN_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS,
+                         "connection_inactivity_timeout_ms", 0, DEBUG_MODULE_MODBUS);
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %" PRId32 "ms.",
+           connection_inactivity_timeout_ms);
 
     connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", PLC_SOCKET_ERR_MAX_DELAY);
-    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS
-       || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
-               "Invalid connection_retry_max_delay_ms %d. Must be between %d and %d. Using default %d.",
-               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS,
-               PLC_SOCKET_ERR_MAX_DELAY);
-        connection_retry_max_delay_ms = PLC_SOCKET_ERR_MAX_DELAY;
-    } else {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %dms.",
-               connection_retry_max_delay_ms);
-    }
+    conn_clamp_ms_attrib(&connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS,
+                         "connection_retry_max_delay_ms", 0, DEBUG_MODULE_MODBUS);
+
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %" PRId32 "ms.",
+           connection_retry_max_delay_ms);
 
     if(server_id < 0 || server_id > 255) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Server ID, %d, out of bounds or missing!", server_id);
@@ -2487,9 +2476,9 @@ static uint16_t next_seq_id(uint16_t current) {
 int create_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = 0;
-    int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
-    int base_register = tag->reg_base + (tag->request_num * registers_per_request);
-    int register_count = tag->elem_count - (tag->request_num * registers_per_request);
+    int32_t registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
+    int32_t base_register = tag->reg_base + (tag->request_num * registers_per_request);
+    int32_t register_count = tag->elem_count - (tag->request_num * registers_per_request);
 
     plc->seq_id = next_seq_id(plc->seq_id);
     seq_id = plc->seq_id;
@@ -2502,7 +2491,7 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, tag->tag_id, "register_count = %d", register_count);
 
     /* clamp the number of registers we ask for to what will fit. */
-    if(register_count > registers_per_request) { register_count = registers_per_request; }
+    attr_clamp_int32(&register_count, 0, registers_per_request);
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, tag->tag_id,
            "preparing read request for %d registers (of %d total) from base register %d.", register_count, tag->elem_count,
@@ -2758,12 +2747,12 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = 0;
-    int registers_per_request = (MAX_MODBUS_REQUEST_PAYLOAD * 8) / tag->elem_size;
-    int base_register = tag->reg_base + (tag->request_num * registers_per_request);
-    int register_count = tag->elem_count - (tag->request_num * registers_per_request);
-    int register_offset = (tag->request_num * registers_per_request);
-    int byte_offset = (register_offset * tag->elem_size) / 8;
-    int request_payload_size = 0;
+    int32_t registers_per_request = (MAX_MODBUS_REQUEST_PAYLOAD * 8) / tag->elem_size;
+    int32_t base_register = tag->reg_base + (tag->request_num * registers_per_request);
+    int32_t register_count = tag->elem_count - (tag->request_num * registers_per_request);
+    int32_t register_offset = (tag->request_num * registers_per_request);
+    int32_t byte_offset = (register_offset * tag->elem_size) / 8;
+    int32_t request_payload_size = 0;
 
     plc->seq_id = next_seq_id(plc->seq_id);
     seq_id = plc->seq_id;
@@ -2778,7 +2767,7 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, tag->tag_id, "byte_offset = %d", byte_offset);
 
     /* clamp the number of registers we ask for to what will fit. */
-    if(register_count > registers_per_request) { register_count = registers_per_request; }
+    attr_clamp_int32(&register_count, 0, registers_per_request);
 
     /* how many bytes, rounded up to the nearest byte. */
     request_payload_size = ((register_count * tag->elem_size) + 7) / 8;

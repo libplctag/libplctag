@@ -98,6 +98,52 @@ static void fail(int32_t tag, const char *what, int expected, int actual) {
 }
 
 
+/*
+ * Create a tag asking for delay_ms in its tag string and check the connection ended up with
+ * want_ms.  group_id puts it on a connection of its own so the value is not ignored.
+ */
+static int check_create_time_clamp(int delay_ms, int want_ms, int group_id) {
+    char tag_str[512];
+    int32_t tag = 0;
+    int got_ms = 0;
+    int rc = PLCTAG_STATUS_OK;
+
+    // NOLINTNEXTLINE
+    snprintf(tag_str, sizeof(tag_str), "%s&connection_group_id=%d&" ATTR_NAME "=%d", tag_string, group_id, delay_ms);
+
+    tag = plc_tag_create(tag_str, DATA_TIMEOUT_MS);
+    if(tag < 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: could not create tag asking for %d ms, %s!\n", delay_ms, plc_tag_decode_error(tag));
+        return 0;
+    }
+
+    rc = plc_tag_status(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: tag asking for %d ms is not ready, %s!\n", delay_ms, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 0;
+    }
+
+    got_ms = plc_tag_get_int_attribute(tag, ATTR_NAME, GET_FAILED);
+
+    plc_tag_destroy(tag);
+
+    if(got_ms != want_ms) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: tag string asked for %d ms.  Expected it clamped to %d ms, got %d ms.\n", delay_ms, want_ms,
+                got_ms);
+        return 0;
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Tag string value %d ms clamped to %d ms.\n", delay_ms, got_ms);
+
+    return 1;
+}
+
+
 int main(int argc, char **argv) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
@@ -202,9 +248,30 @@ int main(int argc, char **argv) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Clamped to %d ms and reported out of bounds.\n", delay_ms);
 
-    /* Test 4: the connection still works after all that, and the value is still the last one set. */
+    /*
+     * Test 4: the same clamping when the value arrives in the tag string.
+     *
+     * The value only reaches a connection that does not exist yet, so each of these needs a
+     * connection of its own -- reusing this test's would silently ignore it, which is the
+     * documented behaviour and not what is under test here.  connection_group_id is what
+     * forces a separate one.
+     */
     // NOLINTNEXTLINE
-    fprintf(stderr, "\n=== Test 4: the connection still works ===\n");
+    fprintf(stderr, "\n=== Test 4: out-of-range values in the tag string ===\n");
+
+    if(!check_create_time_clamp(1, CONN_RETRY_MAX_DELAY_MIN_MS, 1)) {
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+
+    if(!check_create_time_clamp(CONN_RETRY_MAX_DELAY_LIMIT_MS + 1, CONN_RETRY_MAX_DELAY_LIMIT_MS, 2)) {
+        plc_tag_destroy(tag);
+        exit(1);
+    }
+
+    /* Test 5: the connection still works after all that, and the value is still the last one set. */
+    // NOLINTNEXTLINE
+    fprintf(stderr, "\n=== Test 5: the connection still works ===\n");
 
     if((rc = plc_tag_read(tag, DATA_TIMEOUT_MS)) != PLCTAG_STATUS_OK) {
         fail(tag, "Read after changing " ATTR_NAME " failed", PLCTAG_STATUS_OK, rc);

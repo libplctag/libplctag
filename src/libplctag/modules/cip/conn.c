@@ -41,6 +41,7 @@
 
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
+#include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
@@ -2417,8 +2418,8 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
      */
     int shared_session = attr_get_int(attribs, "share_session", attr_get_int(attribs, "share_conn", 1));
     int rc = PLCTAG_STATUS_OK;
-    int connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
-    int connection_retry_max_delay_ms = RETRY_WAIT_MAX_MS;
+    int32_t connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
+    int32_t connection_retry_max_delay_ms = RETRY_WAIT_MAX_MS;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
@@ -2436,27 +2437,18 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
     }
 
     connection_inactivity_timeout_ms = attr_get_int(attribs, "connection_inactivity_timeout_ms", CONN_INACTIVITY_TIMEOUT_MAX_MS);
-    if(connection_inactivity_timeout_ms < 1 || connection_inactivity_timeout_ms > CONN_INACTIVITY_TIMEOUT_MAX_MS) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-               "Invalid connection_inactivity_timeout_ms %d. Must be between 1 and %d. Using default %d.",
-               connection_inactivity_timeout_ms, CONN_INACTIVITY_TIMEOUT_MAX_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS);
-        connection_inactivity_timeout_ms = CONN_INACTIVITY_TIMEOUT_MAX_MS;
-    } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %dms.",
-               connection_inactivity_timeout_ms);
-    }
+    conn_clamp_ms_attrib(&connection_inactivity_timeout_ms, CONN_INACTIVITY_TIMEOUT_MIN_MS, CONN_INACTIVITY_TIMEOUT_MAX_MS,
+                         "connection_inactivity_timeout_ms", 0, DEBUG_MODULE_CIP);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_inactivity_timeout_ms to %" PRId32 "ms.",
+           connection_inactivity_timeout_ms);
 
     connection_retry_max_delay_ms = attr_get_int(attribs, "connection_retry_max_delay_ms", RETRY_WAIT_MAX_MS);
-    if(connection_retry_max_delay_ms < CONN_RETRY_MAX_DELAY_MIN_MS
-       || connection_retry_max_delay_ms > CONN_RETRY_MAX_DELAY_LIMIT_MS) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-               "Invalid connection_retry_max_delay_ms %d. Must be between %d and %d. Using default %d.",
-               connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS, RETRY_WAIT_MAX_MS);
-        connection_retry_max_delay_ms = RETRY_WAIT_MAX_MS;
-    } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %dms.",
-               connection_retry_max_delay_ms);
-    }
+    conn_clamp_ms_attrib(&connection_retry_max_delay_ms, CONN_RETRY_MAX_DELAY_MIN_MS, CONN_RETRY_MAX_DELAY_LIMIT_MS,
+                         "connection_retry_max_delay_ms", 0, DEBUG_MODULE_CIP);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %" PRId32 "ms.",
+           connection_retry_max_delay_ms);
 
     critical_block(list->mutex) {
         /* if we are to share connections, then look for an existing one. */

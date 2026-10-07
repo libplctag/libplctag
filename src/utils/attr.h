@@ -33,6 +33,9 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 
 typedef struct attr_entry_t *attr_entry;
 typedef struct attr_t *attr;
@@ -45,3 +48,19 @@ extern int attr_set_int(attr attrs, const char *name, int val);
 extern const char *attr_get_str(attr attrs, const char *name, const char *def);
 extern int attr_get_int(attr attrs, const char *name, int def);
 extern void attr_destroy(attr attrs);
+
+/*
+ * Bring an attribute value inside its range.
+ *
+ * The value is passed by pointer and the result says whether it had to move, because every
+ * caller that clamps a value the application supplied also has to say something about it --
+ * log a warning, return PLCTAG_ERR_OUT_OF_BOUNDS, or both.  Returning the clamped value
+ * instead would make each of those callers compare it against what they passed in.
+ *
+ * This serves values from a tag string and values from plc_tag_set_int_attribute() alike,
+ * so it takes the value rather than the attribute set it may or may not have come from.
+ *
+ * A min_value above max_value is a caller error: the value ends up at max_value, so a bad
+ * range shows up as a clamped value rather than letting anything through.
+ */
+extern bool attr_clamp_int32(int32_t *value, int32_t min_value, int32_t max_value);

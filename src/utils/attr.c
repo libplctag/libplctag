@@ -330,3 +330,18 @@ extern void attr_destroy(attr a) {
 
     mem_free(a);
 }
+
+
+bool attr_clamp_int32(int32_t *value, int32_t min_value, int32_t max_value) {
+    if(*value < min_value) {
+        *value = min_value;
+        return true;
+    }
+
+    if(*value > max_value) {
+        *value = max_value;
+        return true;
+    }
+
+    return false;
+}
