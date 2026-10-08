@@ -89,6 +89,14 @@ struct run_args {
      * accepted and still change the wrong bit.  -1 means no check was asked for.
      */
     int check_val;
+
+    /*
+     * --check with no value asserts that every value read back after the write matches what
+     * --write asked for, for any type.  Without it a write is only checked for a non-error
+     * return, so a device that accepted the write and stored something else, or stored it at
+     * the wrong offset, still passes.
+     */
+    bool check_written;
 };
 
 #define REQUIRED_VERSION 2, 2, 1
@@ -102,6 +110,7 @@ static void parse_write_vals(char *write_vals, struct run_args *args);
 static void dump_values(struct run_args *args);
 static void cleanup(struct run_args *args);
 static void update_values(struct run_args *args);
+static int verify_values(struct run_args *args);
 
 
 int main(int argc, char **argv) {
@@ -199,7 +208,7 @@ int main(int argc, char **argv) {
             int actual = 0;
 
             if(args.element_type != TYPE_BIT) {
-                printf("ERROR: --check is only supported for --type=bit!\n");
+                printf("ERROR: --check=<bit> is only supported for --type=bit!  Use --check with no value.\n");
                 rc = 1;
                 break;
             }
@@ -214,6 +223,17 @@ int main(int argc, char **argv) {
 
             printf("Checked: bit value is %d as expected.\n", args.check_val);
         }
+
+        if(args.check_written) {
+            if(args.write_val_count <= 0) {
+                printf("ERROR: --check needs --write to have something to compare against!\n");
+                rc = 1;
+                break;
+            }
+
+            rc = verify_values(&args);
+            if(rc != PLCTAG_STATUS_OK) { break; }
+        }
     } while(0);
 
     cleanup(&args);
@@ -225,7 +245,8 @@ int main(int argc, char **argv) {
 void usage(void) {
     printf(
         "Usage:\n "
-        "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--check=<bit>] [--timeout=<timeout>] [--debug=<debug>] \n"
+        "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--check[=<bit>]] [--timeout=<timeout>] "
+        "[--debug=<debug>] \n"
         "\n"
         "  <type>    - type is one of 'bit', 'uint8', 'sint8', 'uint16', 'sint16', \n "
         "              'uint32', 'sint32', 'real32', 'real64', 'string', 'metadata', \n"
@@ -244,6 +265,10 @@ void usage(void) {
         "\n"
         "  <vals>    - The value(s) to write.  Must be formatted appropriately\n"
         "              for the data type.  Multiple values are comma separated. Optional.\n"
+        "\n"
+        "  --check   - With no value, assert that every value read back after the write matches\n"
+        "              what --write asked for, and exit non-zero if any does not.  Works for\n"
+        "              every type but 'raw' and 'identity'.  Requires --write.  Optional.\n"
         "\n"
         "  <bit>     - Assert that the bit reads back as this value, 0 or 1, and exit non-zero if\n"
         "              it does not.  Only valid with --type=bit.  Optional.\n"
@@ -328,6 +353,10 @@ void parse_args(int argc, char **argv, struct run_args *args) {
             }
 
             has_timeout = true;
+        } else if(strcmp(argv[i], "--check") == 0) {
+            args->check_written = true;
+
+            printf("Will check that the values read back match the values written.\n");
         } else if(strncmp(argv[i], "--check=", 8) == 0) {
             args->check_val = atoi(&(argv[i][8]));
 
@@ -1232,4 +1261,218 @@ void update_values(struct run_args *args) {
             item_index++;
         }
     }
+}
+
+
+/*
+ * Assert that everything --write asked for came back on the following read.
+ *
+ * Mirrors update_values()'s walk exactly, so a value written at one offset is compared at
+ * the same offset.  Any difference is reported rather than returned on the first mismatch:
+ * knowing that elements 3 through 9 are all wrong says something different about the defect
+ * than knowing element 3 is.
+ *
+ * Floating point is compared for equality deliberately.  The same accessor wrote the value
+ * and reads it back, so a correct round trip is bit-exact and any rounding is corruption.
+ */
+int verify_values(struct run_args *args) {
+    int item_index = 0;
+    int offset = 0;
+    int len = 0;
+    int mismatches = 0;
+    int32_t tag = args->tag;
+
+    if(args->element_type == TYPE_RAW || args->element_type == TYPE_IDENTITY) {
+        printf("ERROR: --check is not supported for --type=raw or --type=identity!\n");
+        return 1;
+    }
+
+    if(args->element_type == TYPE_BIT) {
+        int wanted = (int)(unsigned int)args->write_vals.u8[0];
+        int actual = plc_tag_get_bit(tag, 0);
+
+        if(actual != wanted) {
+            printf("ERROR: wrote bit value %d but read back %d!\n", wanted, actual);
+            return 1;
+        }
+
+        printf("Checked: bit value is %d as written.\n", wanted);
+
+        return PLCTAG_STATUS_OK;
+    }
+
+    len = plc_tag_get_size(tag);
+
+    while(offset < len && item_index < args->write_val_count) {
+        switch(args->element_type) {
+            case TYPE_I8: {
+                int8_t actual = plc_tag_get_int8(tag, offset);
+
+                if(actual != args->write_vals.i8[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRId8 " but read back %" PRId8 "!\n", item_index,
+                           args->write_vals.i8[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 1;
+            } break;
+
+            case TYPE_U8: {
+                uint8_t actual = plc_tag_get_uint8(tag, offset);
+
+                if(actual != args->write_vals.u8[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRIu8 " but read back %" PRIu8 "!\n", item_index,
+                           args->write_vals.u8[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 1;
+            } break;
+
+            case TYPE_I16: {
+                int16_t actual = plc_tag_get_int16(tag, offset);
+
+                if(actual != args->write_vals.i16[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRId16 " but read back %" PRId16 "!\n", item_index,
+                           args->write_vals.i16[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 2;
+            } break;
+
+            case TYPE_U16: {
+                uint16_t actual = plc_tag_get_uint16(tag, offset);
+
+                if(actual != args->write_vals.u16[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRIu16 " but read back %" PRIu16 "!\n", item_index,
+                           args->write_vals.u16[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 2;
+            } break;
+
+            case TYPE_I32: {
+                int32_t actual = plc_tag_get_int32(tag, offset);
+
+                if(actual != args->write_vals.i32[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRId32 " but read back %" PRId32 "!\n", item_index,
+                           args->write_vals.i32[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 4;
+            } break;
+
+            case TYPE_U32: {
+                uint32_t actual = plc_tag_get_uint32(tag, offset);
+
+                if(actual != args->write_vals.u32[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRIu32 " but read back %" PRIu32 "!\n", item_index,
+                           args->write_vals.u32[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 4;
+            } break;
+
+            case TYPE_I64: {
+                int64_t actual = plc_tag_get_int64(tag, offset);
+
+                if(actual != args->write_vals.i64[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRId64 " but read back %" PRId64 "!\n", item_index,
+                           args->write_vals.i64[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 8;
+            } break;
+
+            case TYPE_U64: {
+                uint64_t actual = plc_tag_get_uint64(tag, offset);
+
+                if(actual != args->write_vals.u64[item_index]) {
+                    printf("ERROR: element %d: wrote %" PRIu64 " but read back %" PRIu64 "!\n", item_index,
+                           args->write_vals.u64[item_index], actual);
+                    mismatches++;
+                }
+
+                offset += 8;
+            } break;
+
+            case TYPE_F32: {
+                float actual = plc_tag_get_float32(tag, offset);
+
+                if(actual != args->write_vals.f32[item_index]) {
+                    printf("ERROR: element %d: wrote %f but read back %f!\n", item_index,
+                           (double)args->write_vals.f32[item_index], (double)actual);
+                    mismatches++;
+                }
+
+                offset += 4;
+            } break;
+
+            case TYPE_F64: {
+                double actual = plc_tag_get_float64(tag, offset);
+
+                if(actual != args->write_vals.f64[item_index]) {
+                    printf("ERROR: element %d: wrote %f but read back %f!\n", item_index, args->write_vals.f64[item_index],
+                           actual);
+                    mismatches++;
+                }
+
+                offset += 8;
+            } break;
+
+            case TYPE_STRING: {
+                int str_len = plc_tag_get_string_length(tag, offset);
+                char *actual = calloc((size_t)(unsigned int)(str_len + 1), sizeof(char));
+
+                if(!actual) {
+                    printf("ERROR: Unable to allocate temporary buffer to check string!\n");
+                    return 1;
+                }
+
+                if(str_len > 0 && plc_tag_get_string(tag, offset, actual, str_len) != PLCTAG_STATUS_OK) {
+                    printf("ERROR: element %d: unable to read back the string!\n", item_index);
+                    mismatches++;
+                } else if(strcmp(actual, args->write_vals.string[item_index]) != 0) {
+                    /*
+                     * update_values() truncates an over-long write to the tag's capacity and
+                     * shortens its own copy to match, so this compares against what was
+                     * actually sent rather than against the command line.
+                     */
+                    printf("ERROR: element %d: wrote \"%s\" but read back \"%s\"!\n", item_index,
+                           args->write_vals.string[item_index], actual);
+                    mismatches++;
+                }
+
+                free(actual);
+
+                offset += plc_tag_get_string_total_length(tag, offset);
+            } break;
+
+            default:
+                printf("ERROR: --check does not know how to compare this type!\n");
+                return 1;
+        }
+
+        item_index++;
+    }
+
+    if(item_index < args->write_val_count) {
+        printf("ERROR: only %d of %d written values fit in the tag, so the rest were never checked!\n", item_index,
+               args->write_val_count);
+        return 1;
+    }
+
+    if(mismatches > 0) {
+        printf("ERROR: %d of %d values did not read back as written!\n", mismatches, args->write_val_count);
+        return 1;
+    }
+
+    printf("Checked: all %d values read back as written.\n", args->write_val_count);
+
+    return PLCTAG_STATUS_OK;
 }

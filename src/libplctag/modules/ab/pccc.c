@@ -52,16 +52,6 @@
 
 
 START_PACK typedef struct {
-    /* PCCC Command Req Routing */
-    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
-    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
-    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
-    uint8_t request_id_size;        /* ALWAYS 7 */
-    uint16_le vendor_id;            /* Our CIP Vendor ID */
-    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
-} END_PACK cip_pccc_req;
-
-START_PACK typedef struct {
     /* CIP Reply */
     uint8_t reply_code;     /* 0xCB Execute PCCC Reply */
     uint8_t reserved;       /* 0x00 in reply */
@@ -80,32 +70,12 @@ START_PACK typedef struct {
 
 START_PACK typedef struct {
     /* PCCC Command */
-    uint8_t pccc_command;         /* CMD read, write etc. */
-    uint8_t pccc_status;          /* STS 0x00 in request */
-    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
-    uint8_t pccc_function;        /* FNC sub-function of command */
-    uint16_le pccc_offset;        /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words requested */
-} END_PACK plc5_pccc_read_cmd_req;
-
-START_PACK typedef struct {
-    /* PCCC Command */
     uint8_t pccc_command;       /* CMD read, write etc. */
     uint8_t pccc_status;        /* STS 0x00 in request */
     uint16_le pccc_seq_num;     /* TNS transaction/sequence id */
     uint8_t pccc_function;      /* FNC sub-function of command */
     uint8_t pccc_transfer_size; /* total number of bytes requested */
 } END_PACK slc_pccc_read_cmd_req;
-
-START_PACK typedef struct {
-    /* PCCC Command */
-    uint8_t pccc_command;         /* CMD read, write etc. */
-    uint8_t pccc_status;          /* STS 0x00 in request */
-    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
-    uint8_t pccc_function;        /* FNC sub-function of command */
-    uint16_le pccc_offset;        /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words to be written */
-} END_PACK plc5_pccc_write_cmd_req;
 
 START_PACK typedef struct {
     /* PCCC Command */
@@ -1323,7 +1293,7 @@ static int pccc_response_overhead(bool is_dhp) {
  * The connection adds the EIP and CPF framing, so a request buffer starts at the CIP message
  * and the prefix is the front of that message.
  */
-static uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp) {
+uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp) {
     if(is_dhp) {
         pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(req->data);
 
@@ -1371,7 +1341,7 @@ static pccc_cmd_resp *pccc_response_cmd(cip_tag_p tag, bool is_dhp) {
  * response, so it can be smaller than our overhead.  Compare before subtracting: the
  * difference is unsigned, so an underflow would wrap to a huge value that passes every check.
  */
-static int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload) {
+int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload) {
     int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
     if(session_payload_space <= 0) {
@@ -1423,7 +1393,7 @@ static int pccc_submit(cip_tag_p tag, cip_request_p req, uint8_t *data_end, bool
  * On failure the caller's request has already been released by cip_submit_*() when the submit
  * itself failed, so req is NULL in that case and only the tag state needs unwinding.
  */
-static int pccc_finish_request(cip_tag_p tag, cip_request_p req, int rc, bool is_write) {
+int pccc_finish_request(cip_tag_p tag, cip_request_p req, int rc, bool is_write) {
     if(rc == PLCTAG_STATUS_OK) {
         critical_block(tag->api_mutex) {
             if(tag->req) {
@@ -1582,7 +1552,7 @@ int pccc_tag_status(cip_tag_p tag) {
 }
 
 
-int pccc_tag_tickler(cip_tag_p tag) {
+int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check_write) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -1591,7 +1561,7 @@ int pccc_tag_tickler(cip_tag_p tag) {
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        rc = pccc_check_read_status(tag);
+        rc = check_read(tag);
         tag->status = (int8_t)rc;
 
         /* check to see if the read finished. */
@@ -1612,7 +1582,7 @@ int pccc_tag_tickler(cip_tag_p tag) {
     }
 
     if(tag->write_in_progress) {
-        rc = pccc_check_write_status(tag);
+        rc = check_write(tag);
         tag->status = (int8_t)rc;
 
         /* check to see if the write finished. */
@@ -1630,6 +1600,9 @@ int pccc_tag_tickler(cip_tag_p tag) {
 
     return tag->status;
 }
+
+
+int pccc_tag_tickler(cip_tag_p tag) { return pccc_tickle(tag, pccc_check_read_status, pccc_check_write_status); }
 
 
 /*

@@ -88,7 +88,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_special", "test_tag_attributes", "test_tag_type_attribute",
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
-    "test_write_before_read", "thread_stress",
+    "test_write_before_read", "thread_stress", "test_bit_write",
 ]
 
 
@@ -154,17 +154,33 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestLINTArray[0].43",
               "--debug=4", "--write=0", "--check=0"]),
+        # --check on a bit tag re-reads only that bit, so every test above passes even if the
+        # mask also clobbered the neighbours in the same word.  test_bit_write stamps a known
+        # alternating pattern on the whole word, flips the one bit through the bit tag, and
+        # reads the word back: exactly one bit may differ.  It restores the original word on
+        # the way out, including after a failure.
+        #
+        # The CIP read-modify-write (service 0x4E) is the case that only hardware can prove --
+        # ab_server has no handler for it, so the simulator suite cannot reach this path at all.
+        test("INT bit write changes only that bit (CIP read-modify-write)",
+             [exe("test_bit_write"), "--bit=13", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestINTArray[0]",
+              f"--bit-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestINTArray[0].13"]),
+        test("LINT bit write changes only that bit (CIP read-modify-write, 64 bit word)",
+             [exe("test_bit_write"), "--bit=43", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestLINTArray[0]",
+              f"--bit-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestLINTArray[0].43"]),
         test("test non-standard UDT strings", [exe("string_non_standard_udt")]),
         test("test non-standard string size", [exe("test_string")]),
         test("B data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0",
-              "--write=0", "--debug=4"]),
+              "--write=0", "--check", "--debug=4"]),
         test("B bit data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/6",
               "--write=1", "--check=1", "--debug=4"]),
         test("N data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N7:0",
-              "--write=42", "--debug=4"]),
+              "--write=42", "--check", "--debug=4"]),
         test("N bit data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N7:0/10",
               "--write=1", "--check=1", "--debug=4"]),
@@ -176,6 +192,16 @@ def build_manifest() -> list[Test]:
         test("N bit data file Micrologix tag clear",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N7:0/10",
               "--write=0", "--check=0", "--debug=4"]),
+        # The SLC masked write carries a mask word then a data word; a wrong width shows up
+        # here and nowhere else.
+        test("Micrologix B bit write changes only that bit (SLC masked write)",
+             [exe("test_bit_write"), "--bit=6", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=B3:0",
+              f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/6"]),
+        test("Micrologix N bit write changes only that bit (SLC masked write)",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N7:0/10"]),
         test("L data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=4&name=L10:0",
@@ -198,7 +224,7 @@ def build_manifest() -> list[Test]:
              expect_failure=True),  # N250 does not exist
         test("B data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0",
-              "--debug=4", "--write=0"]),
+              "--debug=4", "--write=0", "--check"]),
         test("B bit data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=1", "--check=1"]),
@@ -209,10 +235,20 @@ def build_manifest() -> list[Test]:
               "--check=0"]),
         test("N data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
-              "--debug=4", "--write=0"]),
+              "--debug=4", "--write=0", "--check"]),
         test("N bit data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1", "--check=1"]),
+        # The PLC/5 read-modify-write is an AND mask and an OR mask, one element each.  An
+        # inverted or over-wide mask passes the two tests above and fails this one.
+        test("PLC5 B bit write changes only that bit (AND/OR mask pair)",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0",
+              f"--bit-tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0/10"]),
+        test("PLC5 N bit write changes only that bit (AND/OR mask pair)",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10"]),
         test("missing data file PLC5 tag read",
              [exe("tag_rw2"), "--type=sint16",
               f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N250:0", "--debug=4"],
@@ -225,15 +261,35 @@ def build_manifest() -> list[Test]:
         test("PCCC-mapped Logix tag read/write (slot 5)",
              [exe("tag_rw2"), "--type=sint16",
               f"--tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0",
-              "--debug=4", "--write=42"]),
+              "--debug=4", "--write=42", "--check"]),
+        # eip_lgx_pccc.c never looks at tag->is_bit, so a bit write here is a whole-word typed
+        # write of the buffer the tag last read.  Nothing but this checks that the rest of the
+        # word survived it.
+        test("PCCC-mapped Logix bit write changes only that bit (slot 5)",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0/10"]),
+        # The regression test for the 2026-10-07 read-before-write fix: no client-side read,
+        # so the bit tag's buffer is whatever it held at create.  This is the one that failed
+        # before the fix, and the one above passes either way.
+        test("PCCC-mapped Logix bit write refreshes the word first (slot 5, stale buffer)",
+             [exe("test_bit_write"), "--stale", "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0/10"]),
         test("basic DH+ bridging",
              [exe("tag_rw2"), "--type=uint8",
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N7:0",
-              "--debug=4", "--write=42"]),
+              "--debug=4", "--write=42", "--check"]),
         test("basic DH+ bridging bit change",
              [exe("tag_rw2"), "--type=uint8",
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10",
               "--debug=4", "--write=0"]),
+        # The DH+ bridge rides the same PLC/5 mask pair over a different transport, so a
+        # framing error that shifts the masks by the routing header shows up only here.
+        test("DH+ bridged bit write changes only that bit",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0",
+              f"--bit-tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10"]),
         test("missing data file DH+ bridged tag read",
              [exe("tag_rw2"), "--type=uint8",
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N250:0",
@@ -242,7 +298,7 @@ def build_manifest() -> list[Test]:
         test("basic CIP bridging",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
-              "--debug=4", "--write=5"]),
+              "--debug=4", "--write=5", "--check"]),
         # Raw CIP tags are the only tag type whose request is the bare CIP message, so
         # they are what exercises the library's own EIP and CPF framing. Cover every
         # combination that frames differently: connected vs unconnected, a service the

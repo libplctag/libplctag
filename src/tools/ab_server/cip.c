@@ -52,6 +52,13 @@
 #define CIP_SRV_READ_NAMED_TAG ((uint8_t)0x4c)
 #define CIP_SRV_WRITE_NAMED_TAG ((uint8_t)0x4d)
 #define CIP_SRV_FORWARD_CLOSE ((uint8_t)0x4e)
+/*
+ * The same code is Read-Modify-Write when the path addresses a tag rather than the
+ * Connection Manager object.  The two never collide here: a Forward Close arrives at the
+ * unconnected dispatcher, an RMW at the connected one, wrapped in an Unconnected_Send or a
+ * connected CPF item.
+ */
+#define CIP_SRV_RMW ((uint8_t)0x4e)
 #define CIP_SRV_READ_NAMED_TAG_FRAG ((uint8_t)0x52)
 #define CIP_SRV_UNCONNECTED_SEND ((uint8_t)0x52)
 #define CIP_SRV_WRITE_NAMED_TAG_FRAG ((uint8_t)0x53)
@@ -119,6 +126,9 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 #define CIP_WRITE_FRAG_PAYLOAD_MIN_SIZE \
     ((size_t)9) /* two bytes for element count, four for byte offset, two bytes for type, 1 bytes for data */
 
+/* two bytes for the mask size, then one byte of OR mask and one of AND mask at minimum. */
+#define CIP_RMW_PAYLOAD_MIN_SIZE ((size_t)4)
+
 #define CIP_TAG_MAX_INDEXES ((uint32_t)3) /* should double check for OMRON */
 
 #define MAX_SUB_PACKETS ((uint16_t)1000) /* maximum number of sub-packets in a multi-service request */
@@ -137,6 +147,8 @@ static slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path
                                    plc_s *plc);
 static slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                     plc_s *plc);
+static slice_s handle_rmw_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
+                                  plc_s *plc);
 static slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, slice_s output, plc_s *plc);
 static slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                     plc_s *plc);
@@ -249,6 +261,12 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
         case CIP_SRV_WRITE_NAMED_TAG_FRAG:
             return handle_write_request(cip_service, cip_service_path, cip_service_payload, output, plc);
             break;
+
+        /*
+         * Read-Modify-Write, which is how a client sets or clears one bit without a race.
+         * Only reachable here: the unconnected dispatcher reads 0x4e as Forward Close.
+         */
+        case CIP_SRV_RMW: return handle_rmw_request(cip_service, cip_service_path, cip_service_payload, output, plc); break;
 
         default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
     }
@@ -1247,15 +1265,6 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     slice_set_uint8(cip_response_header_slice, 2, CIP_OK); /* status */
     slice_set_uint8(cip_response_header_slice, 3, 0);      /* no extended error */
 
-    /* peel off space for the header */
-    cip_response_header_slice = slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE);
-
-    /* fill in the CIP response header. */
-    slice_set_uint8(cip_response_header_slice, 0, cip_service | CIP_DONE);
-    slice_set_uint8(cip_response_header_slice, 1, 0);      /* reserved */
-    slice_set_uint8(cip_response_header_slice, 2, CIP_OK); /* status */
-    slice_set_uint8(cip_response_header_slice, 3, 0);      /* no extended error */
-
     /* Calculate and record request latency */
     int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
     if(request_start > 0) {
@@ -1276,6 +1285,129 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     }
 
     /* return the remaining output space */
+    return cip_response_header_slice;
+}
+
+
+/*
+ * Handle Read-Modify-Write (service 0x4e on a tag path).
+ *
+ * This is how a client changes one bit of a word without reading it first: the PLC does the
+ * read, the mask and the write itself, so nothing another client wrote to the rest of the
+ * word in the meantime is lost.  A client that emulates it with a read and a whole-word write
+ * has a window where exactly that happens.
+ *
+ * The request payload is
+ *
+ *   uint16_le  size of one mask in bytes
+ *   uint8_t[]  OR mask   -- a set bit turns its bit on
+ *   uint8_t[]  AND mask  -- a clear bit turns its bit off
+ *
+ * and the new value is (old & AND) | OR, applied one element wide at the addressed element.
+ * The reply carries no data.
+ *
+ * Validating the mask width against the tag's element size is the point of this handler
+ * existing: a client that got the width or the byte order wrong would otherwise be answered
+ * by a server that happily masked the wrong bytes, and the simulator would agree with the
+ * client while a real PLC rejected it.
+ */
+slice_s handle_rmw_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
+                           plc_s *plc) {
+    tag_def_s *tag = NULL;
+    uint32_t num_indexes = CIP_TAG_MAX_INDEXES;
+    uint32_t indexes[CIP_TAG_MAX_INDEXES] = {0};
+    uint16_t mask_size = 0;
+    size_t request_start_byte_offset = 0;
+    size_t request_end_byte_offset = 0;
+    uint8_t cip_err = CIP_OK;
+    slice_s cip_response_header_slice = {0};
+
+    log_info("Processing Read Modify Write request.");
+
+    /* we need the tag to know how wide an element is and where it sits. */
+    if(!parse_tag_path(cip_service_path, plc, &tag, &num_indexes, &(indexes[0]))) {
+        log_info("Unable to parse tag path:");
+        log_info_slice(cip_service_path);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    atomic_store_int64(&tag->last_request_time_us, util_time_us());
+
+    if(num_indexes > 0 && num_indexes != tag->num_dimensions) {
+        log_info("Wrong number of indexes passed.   Must be zero or %zu indexes.", tag->num_dimensions);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    /*
+     * A variable-length element has no stride, so there is no fixed-width element to mask and
+     * no way to find one by index.  A real controller has no such tag type on this service.
+     */
+    if(tag->variable_elements) {
+        log_info("Read Modify Write is not supported on a variable-length element tag!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+    }
+
+    if(slice_len(cip_service_payload) < CIP_RMW_PAYLOAD_MIN_SIZE) {
+        log_info("Insufficient data in the CIP Read Modify Write request payload!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+
+    mask_size = slice_get_uint16_le(cip_service_payload, 0);
+
+    /* the two masks follow the size word, so the payload has to hold both of them. */
+    if(slice_len(cip_service_payload) < sizeof(uint16_t) + ((size_t)mask_size * 2)) {
+        log_info("Read Modify Write payload is %zu bytes, too short for two %u byte masks!",
+                 slice_len(cip_service_payload), mask_size);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+
+    /* the masks cover exactly one element.  A real controller rejects any other width. */
+    if((size_t)mask_size != tag->elem_size) {
+        log_info("Read Modify Write mask is %u bytes but an element of this tag is %zu bytes!", mask_size, tag->elem_size);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    /* one element, at the index the path gave. */
+    if(!calculate_request_start_and_end_offsets(tag, num_indexes, indexes, 1, &request_start_byte_offset,
+                                                &request_end_byte_offset)) {
+        log_info("Unable to calculate the offset of the Read Modify Write request!");
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    if(request_end_byte_offset - request_start_byte_offset < (size_t)mask_size) {
+        log_info("The addressed element is smaller than the %u byte mask!", mask_size);
+        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    critical_block(tag->data_mutex) {
+        if(request_end_byte_offset > tag->data_size) {
+            log_info("The addressed element runs past the end of the tag data!");
+            cip_err = CIP_ERR_INVALID_PARAM;
+            break;
+        }
+
+        for(size_t i = 0; i < (size_t)mask_size; i++) {
+            uint8_t or_mask = slice_get_uint8(cip_service_payload, sizeof(uint16_t) + i);
+            uint8_t and_mask = slice_get_uint8(cip_service_payload, sizeof(uint16_t) + (size_t)mask_size + i);
+            uint8_t old_byte = tag->data[request_start_byte_offset + i];
+            uint8_t new_byte = (uint8_t)((old_byte & and_mask) | or_mask);
+
+            log_info("RMW byte %zu: %02x & %02x | %02x = %02x", i, old_byte, and_mask, or_mask, new_byte);
+
+            tag->data[request_start_byte_offset + i] = new_byte;
+        }
+    }
+
+    if(cip_err != CIP_OK) { return make_cip_log_error(output, cip_service, cip_err, false, 0); }
+
+    /* the reply is a bare header; RMW returns no data. */
+    cip_response_header_slice = slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE);
+
+    slice_set_uint8(cip_response_header_slice, 0, cip_service | CIP_DONE);
+    slice_set_uint8(cip_response_header_slice, 1, 0);      /* reserved */
+    slice_set_uint8(cip_response_header_slice, 2, CIP_OK); /* status */
+    slice_set_uint8(cip_response_header_slice, 3, 0);      /* no extended error */
+
     return cip_response_header_slice;
 }
 

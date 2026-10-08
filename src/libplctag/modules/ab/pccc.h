@@ -63,12 +63,76 @@ extern const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length);
 extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
 
+/*
+ * The front of a PCCC request carried by the Execute PCCC service, and the PCCC command
+ * blocks that follow it.
+ *
+ * These live here rather than in pccc.c because PCCC-mapped Logix uses the same request
+ * prefix and the same command block, with its own function codes and its own payload.
+ */
+START_PACK typedef struct {
+    /* PCCC Command Req Routing */
+    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
+    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
+    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
+    uint8_t request_id_size;        /* ALWAYS 7 */
+    uint16_le vendor_id;            /* Our CIP Vendor ID */
+    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
+} END_PACK cip_pccc_req;
+
+START_PACK typedef struct {
+    /* PCCC Command */
+    uint8_t pccc_command;         /* CMD read, write etc. */
+    uint8_t pccc_status;          /* STS 0x00 in request */
+    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
+    uint8_t pccc_function;        /* FNC sub-function of command */
+    uint16_le pccc_offset;        /* offset of requested in total request */
+    uint16_le pccc_transfer_size; /* total number of words requested */
+} END_PACK plc5_pccc_read_cmd_req;
+
+START_PACK typedef struct {
+    /* PCCC Command */
+    uint8_t pccc_command;         /* CMD read, write etc. */
+    uint8_t pccc_status;          /* STS 0x00 in request */
+    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
+    uint8_t pccc_function;        /* FNC sub-function of command */
+    uint16_le pccc_offset;        /* offset of requested in total request */
+    uint16_le pccc_transfer_size; /* total number of words to be written */
+} END_PACK plc5_pccc_write_cmd_req;
+
+
 /* generic direct ethernet tag functions */
 extern int pccc_check_response_header(cip_tag_p tag, bool is_dhp);
 extern int pccc_tag_status(cip_tag_p tag);
 extern int pccc_tag_tickler(cip_tag_p tag);
 extern int pccc_tag_read_start(cip_tag_p tag);
 extern int pccc_tag_write_start(cip_tag_p tag);
+
+/*
+ * Write the request prefix and return the first byte after it.  is_dhp picks the DH+ routing
+ * header over the Execute PCCC header; PCCC-mapped Logix is never DH+ and passes false.
+ */
+extern uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp);
+
+/*
+ * Attach a submitted request to the tag under api_mutex, or roll the operation back and
+ * release the request.  Every PCCC start function ends here.
+ */
+extern int pccc_finish_request(cip_tag_p tag, cip_request_p req, int rc, bool is_write);
+
+/*
+ * Check that a request needing overhead + payload bytes fits what the session will carry.
+ * Compares before subtracting, so a connection too small for the overhead cannot wrap.
+ */
+extern int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload);
+
+/*
+ * The shared tickler body.  The two reply decoders differ between PCCC and PCCC-mapped
+ * Logix -- a range read carries no type descriptor and a typed read does -- so they are
+ * passed in; everything around them is the same.
+ */
+typedef int (*pccc_check_func)(cip_tag_p tag);
+extern int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check_write);
 
 /*
  * The whole PCCC reply as it arrives once the connection has stripped the EIP and CPF

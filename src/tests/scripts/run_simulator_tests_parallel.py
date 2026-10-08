@@ -311,6 +311,7 @@ REQUIRED_EXECUTABLES = [
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
+    "test_bit_write",
 ]
 
 
@@ -374,6 +375,7 @@ def build_manifest() -> Manifest:
                         "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]",
                         "--tag=TestReal:REAL[1]", "--tag=TestLReal:LREAL[1]",
                         "--tag=TestLint:LINT[1]", "--tag=TestSint:SINT[1]",
+                        "--tag=TestIntArray:INT[10]",
                         "--tag=TestString:STRING[4]"],
         startup_wait_s=3,
     )
@@ -392,6 +394,51 @@ def build_manifest() -> Manifest:
     # (a0 02 ce 0f) on Logix, SHORT_STRING on Micro800, the plain CIP STRING on Omron.  The
     # element stride differs with it (88/83/84 bytes), so writing one element of an array and
     # reading its neighbours back is what actually pins the encoding down.
+    # The CIP Read-Modify-Write, service 0x4e on a tag path, which is how the library sets or
+    # clears one bit.  ab_server had no handler for it until 2026-10-07, so none of this was
+    # reachable and the whole path was hardware-only.
+    sec.test("INT bit read/write (CIP read-modify-write)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13",
+               "--write=1", "--check=1", "--debug=4"], F)
+    # Clearing exercises the AND mask, setting only the OR mask.  They fail separately.
+    sec.test("INT bit clear (CIP read-modify-write)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13",
+               "--write=0", "--check=0", "--debug=4"], F)
+    sec.test("LINT bit read/write (CIP read-modify-write, 64 bit word)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43",
+               "--write=1", "--check=1", "--debug=4"], F)
+    sec.test("LINT bit clear (CIP read-modify-write, 64 bit word)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43",
+               "--write=0", "--check=0", "--debug=4"], F)
+    # --check on a bit tag re-reads only that bit, so the four tests above pass even if the
+    # masks clobbered the neighbours.  These stamp a pattern on the whole word and require
+    # exactly one bit to move.  The mask width is the thing being pinned: an INT is two bytes
+    # and a LINT is eight, and ab_server now rejects any other width the way a controller does.
+    sec.test("INT bit write changes only that bit (CIP read-modify-write)",
+              [exe("test_bit_write"), "--bit=13", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[0]",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13"], F)
+    sec.test("LINT bit write changes only that bit (CIP read-modify-write, 64 bit word)",
+              [exe("test_bit_write"), "--bit=43", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestLint",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43"], F)
+    # A bit in an indexed element of an array: the RMW path has to resolve the index before it
+    # masks, and masking element 0 instead would pass every test above.
+    # The control for the lgx_pccc --stale pair: where the device applies the mask, the
+    # client's buffer cannot matter at all.
+    sec.test("INT bit write survives a stale buffer (device applies the mask)",
+              [exe("test_bit_write"), "--stale", "--bit=13", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[0]",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13"], F)
+    sec.test("INT array element 7 bit write changes only that bit",
+              [exe("test_bit_write"), "--bit=2", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[7]",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[7].2"], F)
+
     sec.test("Logix STRING UDT read/write and element stride",
               [exe("tag_rw2"), "--type=string",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=4&name=TestString",
@@ -1071,11 +1118,11 @@ def build_manifest() -> Manifest:
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--check", "--debug=4"], F)
     sec.test("B bit data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0", "--write=42", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0", "--write=42", "--check", "--debug=4"], F)
     sec.test("N bit data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=1", "--check=1", "--debug=4"], F)
     # Clearing matters as much as setting: a mask that turns on too much still passes a
@@ -1085,6 +1132,19 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=0", "--check=0", "--debug=4"], F)
     sec.test("N bit data file Micrologix tag clear",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=0", "--check=0", "--debug=4"], F)
+    # --check on a bit tag re-reads only that bit, so a mask that also clobbered its
+    # neighbours passes every test above.  test_bit_write stamps a known alternating pattern
+    # on the whole word, flips the one bit, and reads the word back, so collateral damage in
+    # the read-modify-write is visible.  Both polarities, because an AND mask and an OR mask
+    # fail differently.
+    sec.test("Micrologix bit write changes only that bit (B3, SLC masked write)",
+              [exe("test_bit_write"), "--bit=6",
+               f"--word-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=B3:0",
+               f"--bit-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--debug=4"], F)
+    sec.test("Micrologix bit write changes only that bit (N7, SLC masked write)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0",
+               f"--bit-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--debug=4"], F)
     sec.test("L data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0", "--write=0,1,2,3", "--debug=4"], F)
     sec.test("L bit data file Micrologix tag read",
@@ -1175,15 +1235,37 @@ def build_manifest() -> Manifest:
     sec.test("identity, routed",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={lgw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--check", "--debug=4"], F)
     sec.test("B bit data file PCCC-mapped Logix tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag={lgx_pccc_tag}&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=sint16", f"--tag={lgx_pccc_tag}&name=N7:0", "--write=42", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint16", f"--tag={lgx_pccc_tag}&name=N7:0", "--write=42", "--check", "--debug=4"], F)
     sec.test("L data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=sint32", f"--tag={lgx_pccc_tag}&name=L19:0", "--write=7", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint32", f"--tag={lgx_pccc_tag}&name=L19:0", "--write=7", "--check", "--debug=4"], F)
     sec.test("F data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=real32", f"--tag={lgx_pccc_tag}&name=F8:0", "--write=3.5", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=real32", f"--tag={lgx_pccc_tag}&name=F8:0", "--write=3.5", "--check", "--debug=4"], F)
+
+    # PCCC-mapped Logix has no masked write of its own: eip_lgx_pccc.c never looks at
+    # tag->is_bit, so a bit write is a whole-word typed write of the buffer the tag last read.
+    # That makes the collateral-damage check the only thing standing between a stale or
+    # mis-sized buffer and a clobbered word.
+    sec.test("PCCC-mapped Logix bit write changes only that bit (B3)",
+              [exe("test_bit_write"), "--bit=6",
+               f"--word-tag={lgx_pccc_tag}&name=B3:0", f"--bit-tag={lgx_pccc_tag}&name=B3:0/6", "--debug=4"], F)
+    sec.test("PCCC-mapped Logix bit write changes only that bit (N7)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag={lgx_pccc_tag}&name=N7:0", f"--bit-tag={lgx_pccc_tag}&name=N7:0/10", "--debug=4"], F)
+    # --stale is the regression test for the 2026-10-07 fix: it skips the client-side read, so
+    # the bit tag's buffer is whatever it held at create.  Before the fix the whole-word write
+    # put that stale buffer on the wire and destroyed the other fifteen bits.  The library now
+    # reads immediately before a bit write, so the word survives.  The two cases above pass
+    # either way -- they refresh first -- which is exactly why this one has to exist.
+    sec.test("PCCC-mapped Logix bit write refreshes the word first (B3, stale buffer)",
+              [exe("test_bit_write"), "--stale", "--bit=6",
+               f"--word-tag={lgx_pccc_tag}&name=B3:0", f"--bit-tag={lgx_pccc_tag}&name=B3:0/6", "--debug=4"], F)
+    sec.test("PCCC-mapped Logix bit write refreshes the word first (N7, stale buffer)",
+              [exe("test_bit_write"), "--stale", "--bit=10",
+               f"--word-tag={lgx_pccc_tag}&name=N7:0", f"--bit-tag={lgx_pccc_tag}&name=N7:0/10", "--debug=4"], F)
 
     # A multi-element read exercises the array type prefix in the typed-read reply; a single
     # element would still get one, but this is where a wrong total-size byte would show up.
@@ -1233,16 +1315,30 @@ def build_manifest() -> Manifest:
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={pgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0"], F)
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0", "--check"], F)
     sec.test("B bit data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=1", "--check=1"], F)
     # The PLC/5 read-modify-write: an AND mask and an OR mask, one element each.
     sec.test("B bit data file PLC5 tag clear",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=0", "--check=0"], F)
     sec.test("N data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0"], F)
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0", "--check"], F)
     sec.test("N bit data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1", "--check=1"], F)
+    # --check on a bit tag re-reads only that bit, so a mask that also clobbered its
+    # neighbours passes every test above.  test_bit_write stamps a known alternating pattern
+    # on the whole word, flips the one bit, and reads the word back, so collateral damage in
+    # the read-modify-write is visible.  Both polarities, because an AND mask and an OR mask
+    # fail differently.
+    sec.test("PLC5 bit write changes only that bit (B3, AND/OR mask pair)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0",
+               f"--bit-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&name=B3:0/10", "--debug=4"], F)
+    sec.test("PLC5 bit write changes only that bit (N7, AND/OR mask pair)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0",
+               f"--bit-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&name=N7:0/10", "--debug=4"], F)
+
     # These two are the reason the PLC/5 word-count fix matters: both files are wider than the
     # two bytes that B3 and N7 use, so both used to be rejected outright by the simulator.
     plc5_st_test = sec.test("ST string data file PLC5 tag read/write",
