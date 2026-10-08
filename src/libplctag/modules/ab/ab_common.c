@@ -45,7 +45,6 @@
 #include <libplctag/modules/ab/eip_plc5_pccc.h>
 #include <libplctag/modules/ab/eip_slc_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/standard_tag.h>

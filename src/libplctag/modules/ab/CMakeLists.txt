@@ -20,6 +20,5 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/session.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/session.h"
                     PARENT_SCOPE
 )

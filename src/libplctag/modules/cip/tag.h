@@ -291,3 +291,15 @@ extern tag_byte_order_t cip_short_string_byte_order;
 
 extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_order_t *byte_order,
                                  tag_vtable_p vtable, debug_module_t debug_module);
+
+
+/*
+ * A read-only special tag (@tags, @udt, @identity) differs from the others only in which
+ * request it builds and which reply checker it runs.  The surrounding state machine -- the
+ * busy guards, the read_in_progress flag, the write rejection, the completion note -- is the
+ * same in all of them, so it lives here and takes the two differing steps as parameters.
+ */
+typedef int (*cip_tag_op_func)(cip_tag_p tag);
+
+extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func build_request);
+extern int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func check_read);

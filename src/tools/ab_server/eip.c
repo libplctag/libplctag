@@ -45,8 +45,6 @@
 #define EIP_REGISTER_SESSION_SIZE (4) /* 4 bytes, 2 16-bit words */
 
 #define EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
-#define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
-#define EIP_CONNECTED_SEND ((uint16_t)0x0070)
 
 /* supported EIP version */
 #define EIP_VERSION ((uint16_t)1)

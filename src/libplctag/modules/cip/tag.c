@@ -587,3 +587,76 @@ int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *r
 
     return PLCTAG_STATUS_OK;
 }
+
+
+int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func build_request) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Starting");
+
+    if(tag->write_in_progress) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "A write is in progress on a read-only tag!");
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(tag->read_in_progress) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Read operation already in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
+
+    tag->read_in_progress = 1;
+
+    rc = build_request(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
+
+        tag->read_in_progress = 0;
+
+        return rc;
+    }
+
+    pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Done.");
+
+    return PLCTAG_STATUS_PENDING;
+}
+
+
+int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func check_read) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Starting.");
+
+    rc = cip_check_request_status(tag);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    if(tag->write_in_progress) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Something started a write on a read-only tag.  This is not supported!");
+
+        cip_tag_abort_request(tag);
+
+        /* fire the event anyway so that a waiting caller is not left hanging. */
+        tag->write_complete = 1;
+
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(tag->read_in_progress) {
+        rc = check_read(tag);
+
+        tag->status = (int8_t)rc;
+
+        /* if the operation completed, make a note so that the callback will be called. */
+        if(!tag->read_in_progress) {
+            pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Read complete.");
+            tag->read_complete = 1;
+        } else {
+            pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Done. Read in progress.");
+        }
+
+        return rc;
+    }
+
+    pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
+
+    return tag->status;
+}

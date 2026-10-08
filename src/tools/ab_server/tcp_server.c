@@ -248,6 +248,18 @@ THREAD_FUNC(conn_handler) {
 
                 case ERR_TCP_PROCESSED: break;
 
+                case ERR_TCP_DROP_RESPONSE:
+                    /* as the success path, minus the write. */
+                    log_info("Deliberately not answering this request.");
+
+                    memset(input_buf, 0, sizeof(input_buf));
+                    memset(output_buf, 0, sizeof(output_buf));
+
+                    accumulated_data = slice_make(input_buf, 0);
+                    read_target = slice_make(input_buf, sizeof(input_buf));
+                    tmp_output = slice_make(output_buf, sizeof(output_buf));
+                    break;
+
                 case ERR_TCP_BAD_REQUEST:
                     log_info("WARN: Bad request!");
                     log_info_slice(accumulated_data);
@@ -256,7 +268,7 @@ THREAD_FUNC(conn_handler) {
                 default: log_info("WARN: Unsupported return code %d!", rc); break;
             }
         }
-    } while((rc == ERR_TCP_INCOMPLETE || rc == ERR_TCP_PROCESSED)
+    } while((rc == ERR_TCP_INCOMPLETE || rc == ERR_TCP_PROCESSED || rc == ERR_TCP_DROP_RESPONSE)
             && (*(session->server_done) != true)); /* make sure another thread hasn't killed the server */
 
     socket_close(session->client_fd);

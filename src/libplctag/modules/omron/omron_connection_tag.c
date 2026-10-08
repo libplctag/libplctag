@@ -36,7 +36,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/connection_tag.h>
-#include <libplctag/modules/omron/conn.h>
+#include <libplctag/modules/omron/omron_common.h>
 #include <libplctag/modules/omron/omron_connection_tag.h>
 #include <stdint.h>
 #include <utils/attr.h>

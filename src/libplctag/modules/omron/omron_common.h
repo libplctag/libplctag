@@ -35,6 +35,7 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -48,12 +49,17 @@
 /* Runtime attributes shared by every Omron tag type. */
 extern const attr_def_t omron_attribs[];
 
-
-// THREAD_FUNC(request_handler_func);
-
 /* the string and integer layout of an OMRON NJ/NX tag. */
 extern tag_byte_order_t omron_njnx_tag_byte_order;
 
 /* what OMRON can do, and the vtable built around it, for the shared standard-tag engine. */
 extern const cip_standard_tag_ops_t cip_standard_tag_ops_omron;
 extern struct tag_vtable_t cip_standard_tag_vtable_omron;
+
+/*
+ * The Omron module's own connection lifecycle.  Everything else about a connection --
+ * sequence numbers, payload space, requests -- is declared by cip/conn.h.
+ */
+extern int conn_startup(void);
+extern void conn_teardown(void);
+extern int conn_find_or_create(cip_conn_p *conn, attr attribs, int *is_new_conn);

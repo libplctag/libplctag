@@ -85,6 +85,14 @@ typedef enum {
     ERR_TCP_UNSUPPORTED = 2002, /* Unsupported command/feature */
     ERR_TCP_PROCESSED = 2003,   /* Successfully processed */
     ERR_TCP_DONE = 2004,        /* Close connection */
+    /*
+     * Fault injection only, for --no_reply: the request was understood and a response was
+     * built, and the server is deliberately not sending it.  The connection stays open and
+     * the input buffer is reset, so the next request is read cleanly -- unlike
+     * ERR_TCP_INCOMPLETE, which keeps the unanswered bytes and concatenates the next
+     * request onto them.
+     */
+    ERR_TCP_DROP_RESPONSE = 2005,
 
     /* OS/System POSIX Errors (3000-3499) */
     /* These map errno values to internal error codes */

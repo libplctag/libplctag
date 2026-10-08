@@ -39,6 +39,10 @@
 /* EIP header size is 24 bytes. */
 #define EIP_HEADER_SIZE (24)
 
+/* the two EIP commands that carry CIP; the rest are session management. */
+#define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
+#define EIP_CONNECTED_SEND ((uint16_t)0x0070)
+
 /* EIP errors. */
 #define EIP_ERR_BAD_REQUEST ((uint32_t)1) /* FIXME */
 

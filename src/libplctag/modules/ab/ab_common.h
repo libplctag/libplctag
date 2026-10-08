@@ -35,6 +35,7 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/tag.h>
@@ -66,3 +67,11 @@ extern tag_byte_order_t logix_tag_listing_byte_order;
 /* what Rockwell can do, and the vtable built around it, for the shared standard-tag engine. */
 extern const cip_standard_tag_ops_t cip_standard_tag_ops_ab;
 extern struct tag_vtable_t cip_standard_tag_vtable_ab;
+
+/*
+ * The AB module's own connection lifecycle.  Everything else about a connection --
+ * sequence numbers, payload space, requests -- is declared by cip/conn.h.
+ */
+extern int session_startup(void);
+extern void session_teardown(void);
+extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);

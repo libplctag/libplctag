@@ -256,6 +256,15 @@ typedef struct plc_s {
     atomic_int32_t *empty_frag_count;
     atomic_int32_t *reject_size_count;
 
+    /*
+     * As above.  no_reply_count swallows the next N connected CIP requests whole: the response is
+     * built and then dropped, and the connection is left open as though the packet were
+     * still arriving.  A client sees a request that is never answered and never refused,
+     * which no other fault here produces -- empty_frag_count and the corruptions all send
+     * something back.  It is what an auto-sync read needs to be wedged on demand.
+     */
+    atomic_int32_t *no_reply_count;
+
     /* size offered back with the 0x0109 rejection above. */
     uint16_t reject_size_supported;
 

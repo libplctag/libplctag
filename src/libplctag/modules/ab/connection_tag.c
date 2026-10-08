@@ -36,7 +36,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/connection_tag.h>
-#include <libplctag/modules/ab/session.h>
+#include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/cip/connection_tag.h>
 #include <stdint.h>
 #include <utils/attr.h>

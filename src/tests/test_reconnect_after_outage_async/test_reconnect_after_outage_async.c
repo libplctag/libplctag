@@ -60,6 +60,17 @@
 #define FIRST_RUN_TIME (10000)
 #define DISCONNECT_TIME_MS (60000)
 #define SECOND_RUN_TIME (30000)
+
+/*
+ * How long the library may wait for a reply before giving up on the request.
+ *
+ * This is connection_inactivity_timeout_ms, which process_requests() uses as its request
+ * deadline.  Left at its default of 31000ms, a reply lost across the outage parks the
+ * connection for just longer than SECOND_RUN_TIME, and the test ends while still waiting --
+ * which is exactly how this test failed once.  Five seconds leaves the recovery six times
+ * inside the window.
+ */
+#define REQUEST_TIMEOUT_MS (5000)
 #define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
 
 #define STRINGIFY(x) #x
@@ -68,7 +79,8 @@
 
 /* uses auto_sync_read_ms for automatic reads */
 #define AUTO_SYNC_TAG_ATTRIBS_FMT \
-    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=100"
+    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=100" \
+    "&connection_inactivity_timeout_ms=" TO_STRING(REQUEST_TIMEOUT_MS)
 
 /* Default port; overridden by an optional second CLI argument so this test and
  * test_reconnect_after_outage_sync can run against independent ab_server instances

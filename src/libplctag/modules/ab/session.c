@@ -37,7 +37,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>

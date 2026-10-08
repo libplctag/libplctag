@@ -50,6 +50,7 @@
 
 #include "args.h"
 #include "eip.h"
+#include "err.h"
 #include "fault.h"
 #include "mutex.h"
 #include "plc.h"
@@ -74,6 +75,7 @@ static slice_s request_handler(slice_s input, slice_s output, void *plc);
  * dup_conn_id_tries pointer points back at this one instance. */
 static atomic_int32_t g_dup_conn_id_tries;
 static atomic_int32_t g_empty_frag_count;
+static atomic_int32_t g_no_reply_count;
 static atomic_int32_t g_reject_size_count;
 
 /* one per fault_kind_t, shared the same way -- see plc_s.fault_counts. */
@@ -168,6 +170,7 @@ int main(int argc, const char **argv) {
     /* shared across every connection's copy of plc -- see plc_s.dup_conn_id_tries. */
     plc.dup_conn_id_tries = &g_dup_conn_id_tries;
     plc.empty_frag_count = &g_empty_frag_count;
+    plc.no_reply_count = &g_no_reply_count;
     plc.reject_size_count = &g_reject_size_count;
     for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
@@ -246,6 +249,9 @@ void usage(void) {
                     "                               0x0109, \"connection size not supported\", offering a smaller\n"
                     "                               size for the client to retry with.\n"
                     "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
+                    "        --no_reply=<n>         accept the next <n> connected CIP requests and never answer\n"
+                    "                               them, leaving the connection open.  Session setup and\n"
+                    "                               ForwardOpen are untouched.\n"
                     "        --empty_frag=<n>       answer the next <n> read requests with a partial transfer\n"
                     "                               status and no data.  This is what a real PLC sends when\n"
                     "                               packed requests leave no room, and it makes no progress,\n"
@@ -319,6 +325,13 @@ static const args_flag_def_t arg_flags[] = {
      "empty_frag",
      "Answer the first <count> read requests with a partial-transfer status and no data",
      {.has_default = true, .value.int_val = 0}},
+    {"no_reply",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "no_reply",
+     "Silently drop the responses to the first <count> connected CIP requests",
+     {.has_default = true, .value.int_val = 0}},
     {"reject_size",
      ARGS_TYPE_INT,
      ARGS_OPTIONAL,
@@ -363,6 +376,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     /* make sure that the fault injection counts are zero. */
     atomic_store_int32(plc->dup_conn_id_tries, 0);
     atomic_store_int32(plc->empty_frag_count, 0);
+    atomic_store_int32(plc->no_reply_count, 0);
     atomic_store_int32(plc->reject_size_count, 0);
     for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
 
@@ -460,6 +474,11 @@ void process_args(int argc, const char **argv, plc_s *plc) {
 
     log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));
     plc->reject_size_supported = (uint16_t)args_get_int(&args, "supported_size");
+
+    if(args_get_int(&args, "no_reply") != 0) {
+        log_info("Dropping the responses to the next %d connected CIP requests.", (int)args_get_int(&args, "no_reply"));
+        atomic_store_int32(plc->no_reply_count, (int32_t)args_get_int(&args, "no_reply"));
+    }
 
     if(args_get_int(&args, "delay") != 0) {
         log_info("Setting response delay to %dms.", (int)args_get_int(&args, "delay"));
@@ -1092,10 +1111,26 @@ slice_s request_handler(slice_s input, slice_s output, void *plc_arg) {
         uint16_t eip_len = slice_get_uint16_le(input, 2);
 
         if(slice_len(input) >= (size_t)(EIP_HEADER_SIZE + eip_len)) {
+            uint16_t eip_command = slice_get_uint16_le(input, 0);
             slice_s resp = eip_dispatch_request(input, output, plc);
 
             /* if there is a response delay requested, then wait a bit. */
             if(plc->response_delay > 0) { util_sleep_ms(plc->response_delay); }
+
+            /*
+             * --no_reply: throw the response away and tell the server loop the packet is
+             * still incomplete, which leaves the connection open and the client waiting.
+             *
+             * Connected sends only.  Session registration and ForwardOpen both arrive as
+             * unconnected sends, and swallowing one of those wedges the client before it has
+             * a connection to read over -- which it recovers from by retrying, so it proves
+             * nothing.  The target is a read on an established connection.
+             */
+            if(eip_command == EIP_CONNECTED_SEND && atomic_dec_int32(plc->no_reply_count) > 0) {
+                log_info("Dropping the response to this request.");
+
+                return slice_make_err(ERR_TCP_DROP_RESPONSE);
+            }
 
             return resp;
         }

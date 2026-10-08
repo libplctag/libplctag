@@ -37,7 +37,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/tag.h>
@@ -91,78 +90,18 @@ int setup_identity_tag(cip_tag_p tag) {
 }
 
 
+/*
+ * An identity tag is always unconnected.  ab_common.c only recognises "@identity" under
+ * the generic PLC type, and that type sets use_connected_msg to zero unconditionally, so
+ * there is no configuration that reaches a connected identity request.
+ */
 int identity_tag_read_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "A write is in progress on an identity tag!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Read operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* mark the tag read in progress */
-    tag->read_in_progress = 1;
-
-    /*
-     * An identity tag is always unconnected.  ab_common.c only recognises "@identity" under
-     * the generic PLC type, and that type sets use_connected_msg to zero unconditionally, so
-     * there is no configuration that reaches a connected identity request.
-     */
-    rc = identity_tag_build_read_request_unconnected(tag);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
-        tag->read_in_progress = 0;
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_PENDING;
+    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, identity_tag_build_read_request_unconnected);
 }
 
 
 int identity_tag_tickler(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = cip_check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Write attempted on identity tag. Not supported!");
-
-        cip_tag_abort_request(tag);
-        tag->write_complete = 1;
-
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    if(tag->read_in_progress) {
-        rc = identity_tag_check_read_status_unconnected(tag);
-
-        tag->status = (int8_t)rc;
-
-        if(!tag->read_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Read complete.");
-            tag->read_complete = 1;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Read in progress.");
-        }
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "No operation in progress.");
-
-    return tag->status;
+    return cip_readonly_tickler(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, identity_tag_check_read_status_unconnected);
 }
 
 

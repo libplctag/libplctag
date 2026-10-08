@@ -151,6 +151,18 @@
  */
 #define SESSION_DEFAULT_TIMEOUT (CIP_EIP_CONN_TIMEOUT_MS)
 
+/*
+ * The shortest deadline a request on an established connection may be given.
+ *
+ * process_requests() takes its deadline from connection_inactivity_timeout_ms, which
+ * conn_create() has already clamped to CONN_INACTIVITY_TIMEOUT_MIN_MS and above, so this
+ * does not bind today.  It is a backstop against that clamp moving or a future caller
+ * reaching the request path without one, and it is set where a reply is physically
+ * impossible rather than merely slow: a current PLC on a local gigabit network answers in
+ * well under a millisecond, so 10ms is still an order of magnitude of headroom.
+ */
+#define CIP_REQUEST_MIN_TIMEOUT_MS (10)
+
 
 /*
  * Connection retry backoff bounds.  The cap is the same budget we give the PLC for a

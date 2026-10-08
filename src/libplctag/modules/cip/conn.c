@@ -1540,14 +1540,38 @@ int process_requests(cip_conn_p conn) {
                 break;
             }
 
+            /*
+             * A request on an established connection waits for as long as the caller said
+             * they would tolerate silence, not for SESSION_DEFAULT_TIMEOUT.
+             *
+             * SESSION_DEFAULT_TIMEOUT is the compile-time maximum -- 32000ms -- and it is
+             * the right budget for Register Session and Forward Open, where the number on
+             * the wire is that same maximum.  Applying it to every ordinary request means
+             * one lost reply parks the connection, and every tag on it, for 32 seconds with
+             * nothing else bounding it.  connection_inactivity_timeout_ms is the caller's
+             * own statement of how long a silent connection may stay silent, so it is the
+             * honest deadline for a request too, and it is settable per connection.
+             *
+             * Taken as given above CIP_REQUEST_MIN_TIMEOUT_MS, which conn_create()'s own
+             * clamp already keeps it well clear of.  A caller who lowers this is asking to
+             * find out quickly that a PLC has stopped answering, and that is the whole
+             * point of lowering it, so the floor sits where a reply is physically
+             * impossible rather than merely slow.  A bridged path -- DH+ behind a gateway,
+             * several hops -- wants a larger value and gets one without doing anything: the
+             * attribute is 31000ms unless someone sets it.
+             */
+            int32_t request_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
+
+            if(request_timeout_ms < CIP_REQUEST_MIN_TIMEOUT_MS) { request_timeout_ms = CIP_REQUEST_MIN_TIMEOUT_MS; }
+
             /* send the request */
-            if((rc = send_eip_request(conn, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+            if((rc = send_eip_request(conn, (int)request_timeout_ms)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error sending packet %s!", plc_tag_decode_error(rc));
                 break;
             }
 
             /* wait for the response */
-            if((rc = recv_eip_response(conn, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+            if((rc = recv_eip_response(conn, (int)request_timeout_ms)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error receiving packet response %s!", plc_tag_decode_error(rc));
                 break;
             }

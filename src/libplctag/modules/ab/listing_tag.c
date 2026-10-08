@@ -37,7 +37,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/ab/session.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/tag.h>
@@ -223,80 +222,12 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
  */
 
 int listing_tag_read_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "A write is in progress on a listing tag!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* mark the tag read in progress */
-    tag->read_in_progress = 1;
-
-    /* build the new request */
-    rc = listing_tag_build_read_request_connected(tag);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
-
-        tag->read_in_progress = 0;
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_PENDING;
+    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, listing_tag_build_read_request_connected);
 }
 
 
 int listing_tag_tickler(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = cip_check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Something started a write on a listing tag.   This is not supported!");
-
-        cip_tag_abort_request(tag);
-
-        /* fire the event anyway. */
-        tag->write_complete = 1;
-
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    if(tag->read_in_progress) {
-
-        rc = listing_tag_check_read_status_connected(tag);
-
-        tag->status = (int8_t)rc;
-
-        /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->read_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Read complete.");
-            tag->read_complete = 1;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done. Read in progress.");
-        }
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
-
-    return tag->status;
+    return cip_readonly_tickler(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, listing_tag_check_read_status_connected);
 }
 
 
