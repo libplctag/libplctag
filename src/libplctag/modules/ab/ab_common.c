@@ -71,9 +71,7 @@
 
 
 /* request/response handling thread */
-volatile thread_p io_handler_thread = NULL;
 
-volatile int ab_protocol_terminating = 0;
 
 
 /*
@@ -91,7 +89,6 @@ volatile int ab_protocol_terminating = 0;
 /* forward declarations*/
 static int get_tag_data_type(cip_tag_p tag, attr attribs);
 
-static void ab_tag_destroy(cip_tag_p tag);
 
 
 /* vtables for different kinds of tags */
@@ -119,8 +116,6 @@ int ab_init(void) {
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Initializing AB protocol library.");
 
-    ab_protocol_terminating = 0;
-
     if((rc = session_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, 0, "Unable to initialize session library!");
         return rc;
@@ -137,23 +132,11 @@ int ab_init(void) {
 void ab_teardown(void) {
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Releasing global AB protocol resources.");
 
-    if(io_handler_thread) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Terminating IO thread.");
-        /* signal the IO thread to quit first. */
-        ab_protocol_terminating = 1;
-
-        /* wait for the thread to die */
-        thread_join(io_handler_thread);
-        thread_destroy((thread_p *)&io_handler_thread);
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
-    }
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Freeing session information.");
-
+    /*
+     * The connection handler threads belong to the connections, not to this module: each one
+     * is created and joined by modules/cip/conn.c.  session_teardown() waits for them.
+     */
     session_teardown();
-
-    ab_protocol_terminating = 0;
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Done.");
 }
@@ -180,7 +163,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      * we have a vehicle for returning status.
      */
 
-    tag = (cip_tag_p)rc_alloc(sizeof(struct cip_tag_t), (rc_cleanup_func)ab_tag_destroy);
+    tag = (cip_tag_p)rc_alloc(sizeof(struct cip_tag_t), (rc_cleanup_func)cip_tag_destroy);
     if(!tag) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, 0, "Unable to allocate memory for AB EIP tag!");
         return (plc_tag_p)NULL;
@@ -790,80 +773,6 @@ int get_tag_data_type(cip_tag_p tag, attr attribs) {
  * Generic status checker.   May be overridden by individual PLC types.
  */
 
-/*
- * ab_tag_destroy
- *
- * This blocks on the global library mutex.  This should
- * be fixed to allow for more parallelism.  For now, safety is
- * the primary concern.
- */
-
-void ab_tag_destroy(cip_tag_p tag) {
-    cip_conn_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag ? tag->tag_id : 0, "Starting.");
-
-    /* already destroyed? */
-    if(!tag) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Tag pointer is null!");
-
-        return;
-    }
-
-    /* abort anything in flight */
-    cip_tag_abort(tag);
-
-    session = tag->session;
-
-    /* tags should always have a session.  Release it. */
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag session %p",
-           tag ? tag->session : NULL);
-    if(session) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Removing tag from session.");
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing session reference of tag %" PRId32 ".",
-               tag->tag_id);
-        rc_dec(session);
-        tag->session = NULL;
-    } else {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "No session pointer!");
-    }
-
-    if(tag->ext_mutex) {
-        mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
-    }
-
-    if(tag->api_mutex) {
-        mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
-    }
-
-    if(tag->tag_cond_wait) {
-        cond_destroy(&(tag->tag_cond_wait));
-        tag->tag_cond_wait = NULL;
-    }
-
-    if(tag->byte_order && tag->byte_order->is_allocated) {
-        mem_free(tag->byte_order);
-        tag->byte_order = NULL;
-    }
-
-    if(tag->data) {
-        mem_free(tag->data);
-        tag->data = NULL;
-    }
-
-    if(tag->instance) {
-        rc_dec(tag->instance);
-        tag->instance = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag->tag_id, "Finished releasing all tag resources.");
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, tag->tag_id, "Done");
-}
-
-
 /* Attribute accessors for the table below.  An accessor returns a status, or for a byte
  * array the number of bytes copied, and never touches tag->status -- the core records it. */
 
@@ -1096,16 +1005,11 @@ cip_plc_type_t get_plc_type(attr attribs) {
 }
 
 
+/* AB accepts every PLC family its own table knows; the table is the filter. */
 int check_cpu(cip_tag_p tag, attr attribs) {
-    cip_plc_type_t result = get_plc_type(attribs);
+    tag->plc_type = get_plc_type(attribs);
 
-    if(result != CIP_PLC_NONE) {
-        tag->plc_type = result;
-        return PLCTAG_STATUS_OK;
-    } else {
-        tag->plc_type = result;
-        return PLCTAG_ERR_BAD_DEVICE;
-    }
+    return (tag->plc_type != CIP_PLC_NONE) ? PLCTAG_STATUS_OK : PLCTAG_ERR_BAD_DEVICE;
 }
 
 int check_tag_name(cip_tag_p tag, const char *name) {

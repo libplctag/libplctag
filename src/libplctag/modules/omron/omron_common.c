@@ -69,9 +69,7 @@
 
 
 /* request/response handling thread */
-volatile thread_p omron_conn_handler_thread = NULL;
 
-volatile int omron_protocol_terminating = 0;
 
 
 /*
@@ -92,7 +90,6 @@ static int get_tag_data_type(cip_tag_p tag, attr attribs);
 static int check_cpu(cip_tag_p tag, attr attribs);
 static int check_tag_name(cip_tag_p tag, const char *name);
 
-static void omron_tag_destroy(cip_tag_p tag);
 
 /* vtables for different kinds of tags */
 static struct tag_vtable_t default_vtable = {
@@ -119,14 +116,12 @@ int omron_init(void) {
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Initializing Omron CIP protocol library.");
 
-    omron_protocol_terminating = 0;
-
     if((rc = conn_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_ERROR, 0, "Unable to initialize conn library!");
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Finished initializing AB protocol library.");
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Finished initializing Omron CIP protocol library.");
 
     return rc;
 }
@@ -137,23 +132,11 @@ int omron_init(void) {
 void omron_teardown(void) {
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Releasing global Omron CIP protocol resources.");
 
-    if(omron_conn_handler_thread) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Terminating IO thread.");
-        /* signal the IO thread to quit first. */
-        omron_protocol_terminating = 1;
-
-        /* wait for the thread to die */
-        thread_join(omron_conn_handler_thread);
-        thread_destroy((thread_p *)&omron_conn_handler_thread);
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "IO thread already stopped.");
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Freeing conn information.");
-
+    /*
+     * The connection handler threads belong to the connections, not to this module: each one
+     * is created and joined by modules/cip/conn.c.  conn_teardown() waits for them.
+     */
     conn_teardown();
-
-    omron_protocol_terminating = 0;
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Done.");
 }
@@ -176,7 +159,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
      * we have a vehicle for returning status.
      */
 
-    tag = (cip_tag_p)rc_alloc(sizeof(struct cip_tag_t), (rc_cleanup_func)omron_tag_destroy);
+    tag = (cip_tag_p)rc_alloc(sizeof(struct cip_tag_t), (rc_cleanup_func)cip_tag_destroy);
     if(!tag) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_ERROR, 0, "Unable to allocate memory for AB EIP tag!");
         return (plc_tag_p)NULL;
@@ -526,77 +509,6 @@ int get_tag_data_type(cip_tag_p tag, attr attribs) {
  * Generic status checker.   May be overridden by individual PLC types.
  */
 
-/*
- * omron_tag_destroy
- *
- * This blocks on the global library mutex.  This should
- * be fixed to allow for more parallelism.  For now, safety is
- * the primary concern.
- */
-
-void omron_tag_destroy(cip_tag_p tag) {
-    cip_conn_p conn = NULL;
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    /* already destroyed? */
-    if(!tag) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Tag pointer is null!");
-
-        return;
-    }
-
-    /* abort anything in flight */
-    cip_tag_abort(tag);
-
-    conn = tag->session;
-
-    /* tags should always have a conn.  Release it. */
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Getting ready to release tag conn %p", tag->session);
-    if(conn) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to conn of tag %" PRId32 ".",
-               tag->tag_id);
-        tag->session = rc_dec(tag->session);
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "No conn pointer!");
-    }
-
-    if(tag->ext_mutex) {
-        mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
-    }
-
-    if(tag->api_mutex) {
-        mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
-    }
-
-    if(tag->tag_cond_wait) {
-        cond_destroy(&(tag->tag_cond_wait));
-        tag->tag_cond_wait = NULL;
-    }
-
-    if(tag->byte_order && tag->byte_order->is_allocated) {
-        mem_free(tag->byte_order);
-        tag->byte_order = NULL;
-    }
-
-    if(tag->data) {
-        mem_free(tag->data);
-        tag->data = NULL;
-    }
-
-    if(tag->instance) {
-        rc_dec(tag->instance);
-        tag->instance = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Finished releasing all tag resources.");
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "done");
-}
-
-
 /* Attribute accessors for the table below.  An accessor returns a status, or for a byte
  * array the number of bytes copied, and never touches tag->status -- the core records it. */
 
@@ -774,16 +686,11 @@ static cip_plc_type_t get_plc_type(attr attribs) {
 }
 
 
+/* Omron accepts exactly one family, so the test is an equality rather than a table lookup. */
 int check_cpu(cip_tag_p tag, attr attribs) {
-    cip_plc_type_t result = get_plc_type(attribs);
+    tag->plc_type = get_plc_type(attribs);
 
-    if(result == CIP_PLC_OMRON_NJNX) {
-        tag->plc_type = result;
-        return PLCTAG_STATUS_OK;
-    } else {
-        tag->plc_type = result;
-        return PLCTAG_ERR_BAD_DEVICE;
-    }
+    return (tag->plc_type == CIP_PLC_OMRON_NJNX) ? PLCTAG_STATUS_OK : PLCTAG_ERR_BAD_DEVICE;
 }
 
 int check_tag_name(cip_tag_p tag, const char *name) {

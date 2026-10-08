@@ -236,6 +236,13 @@ extern int cip_tag_status(cip_tag_p tag);
 extern int cip_tag_abort(cip_tag_p tag);
 
 /*
+ * The refcount cleanup for a CIP tag, passed to rc_alloc() by every dialect's tag
+ * constructor.  Aborts anything in flight, releases the connection, and frees everything the
+ * generic tag owns.  Nothing here is dialect-specific, which is why there is one copy.
+ */
+extern void cip_tag_destroy(cip_tag_p tag);
+
+/*
  * The tag attributes every CIP family answers identically.  A family's attr_def_t table
  * points straight at these; only the attributes whose meaning really differs by family
  * stay in that family's own file.

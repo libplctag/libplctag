@@ -83,6 +83,73 @@ tag_byte_order_t cip_short_string_byte_order = {.is_allocated = 0,
  * fragments and has to keep its place.  cip_tag_abort_request() is the one that resets it.
  */
 
+/*
+ * Release everything a CIP tag owns.
+ *
+ * Called by the refcount machinery when the last reference goes, so it must tolerate being
+ * handed a tag that never finished being built -- every field is checked before it is freed.
+ * It must also tolerate a null tag, which is why nothing is logged with tag->tag_id before
+ * that test: the Omron copy this replaced dereferenced the pointer in its first pdebug and
+ * again inside the null branch itself.
+ */
+void cip_tag_destroy(cip_tag_p tag) {
+    cip_conn_p conn = NULL;
+
+    if(!tag) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Tag pointer is null!");
+        return;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    /* abort anything in flight */
+    cip_tag_abort(tag);
+
+    conn = tag->session;
+
+    /* a tag should always have a connection.  Release it. */
+    if(conn) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing connection reference of tag %" PRId32 ".",
+               tag->tag_id);
+        tag->session = rc_dec(conn);
+    } else {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "No connection pointer!");
+    }
+
+    if(tag->ext_mutex) {
+        mutex_destroy(&(tag->ext_mutex));
+        tag->ext_mutex = NULL;
+    }
+
+    if(tag->api_mutex) {
+        mutex_destroy(&(tag->api_mutex));
+        tag->api_mutex = NULL;
+    }
+
+    if(tag->tag_cond_wait) {
+        cond_destroy(&(tag->tag_cond_wait));
+        tag->tag_cond_wait = NULL;
+    }
+
+    if(tag->byte_order && tag->byte_order->is_allocated) {
+        mem_free(tag->byte_order);
+        tag->byte_order = NULL;
+    }
+
+    if(tag->data) {
+        mem_free(tag->data);
+        tag->data = NULL;
+    }
+
+    if(tag->instance) {
+        rc_dec(tag->instance);
+        tag->instance = NULL;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Done.");
+}
+
+
 int cip_tag_abort_request_only(cip_tag_p tag) {
     if(!tag) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Called with a null tag pointer.");
