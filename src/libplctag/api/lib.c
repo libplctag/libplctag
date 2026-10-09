@@ -45,7 +45,7 @@
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag_string.h>
 #include <libplctag/lib/version.h>
-#include <libplctag/modules/ab/ab.h>
+#include <libplctag/modules/cip_tag_create.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <libplctag/modules/omron/omron.h>
 #include <limits.h>
@@ -76,8 +76,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 #        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
-        case DLL_PROCESS_ATTACH:
-            break;
+        case DLL_PROCESS_ATTACH: break;
 
         case DLL_PROCESS_DETACH:
             /*
@@ -92,14 +91,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
             if(lpvReserved == NULL) { plc_tag_shutdown(); }
             break;
 
-        case DLL_THREAD_ATTACH:
-            break;
+        case DLL_THREAD_ATTACH: break;
 
-        case DLL_THREAD_DETACH:
-            break;
+        case DLL_THREAD_DETACH: break;
 
-        default:
-            break;
+        default: break;
     }
 
     return TRUE;
@@ -782,17 +778,20 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
      *
-     * FIXME - there has to be a better way to do this.  We now have repetitive code
-     * that looks up the tag constructor based on the protocol type.  Is this the sort
-     * of thing that we should be doing with a registry or a vtable entry?
+     * A cloned tag names no protocol attribute, so find_tag_create_func() cannot be used
+     * and the constructor comes from what the source tag is.  The four CIP cases all go to
+     * one constructor now, which sorts Rockwell from OMRON itself; what is left is one case
+     * per module.
+     *
+     * FIXME - a tag still cannot name its own constructor.  A pointer on the vtable would
+     * remove this switch entirely, at the cost of a field in every module's vtable.
      */
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_AB_CONNECTION: tag_constructor = ab_tag_create; break;
-
-            case TAG_PROTOCOL_OMRON: tag_constructor = omron_tag_create; break;
-            case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = omron_tag_create; break;
+            case TAG_PROTOCOL_AB_CONNECTION:
+            case TAG_PROTOCOL_OMRON:
+            case TAG_PROTOCOL_OMRON_CONNECTION: tag_constructor = cip_tag_create; break;
 
             case TAG_PROTOCOL_MODBUS:
             case TAG_PROTOCOL_MB_CONNECTION: tag_constructor = mb_tag_create; break;
@@ -1486,7 +1485,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
 
-    if(tag_id <= 0 || tag_id >= TAG_ID_MASK) {
+    if(tag_id <= 0 || tag_id > TAG_ID_MASK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Called with zero or invalid tag!");
         return PLCTAG_ERR_NULL_PTR;
     }
