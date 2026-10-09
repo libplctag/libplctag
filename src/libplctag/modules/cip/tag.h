@@ -303,3 +303,47 @@ typedef int (*cip_tag_op_func)(cip_tag_p tag);
 
 extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func build_request);
 extern int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func check_read);
+
+
+/*
+ * The steps of CIP tag creation that do not vary between PLC families.
+ *
+ * Every CIP constructor runs the same skeleton: allocate, initialise the generic parts,
+ * resolve the element count, then size the tag either from the attributes or by leaving it
+ * for the PLC to say.  Only the debug module and the protocol tag differ, so they are
+ * parameters -- the default vtable among them, because each module's carries its own
+ * attribute table -- and the rest lives here.  A family that skips one of these is a family whose
+ * tags are missing a check, which is how the Rockwell side came to have no bound on the
+ * element count at all.
+ */
+extern cip_tag_p cip_tag_alloc(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                               void *userdata, tag_protocol_t protocol_type, tag_vtable_p default_vtable,
+                               debug_module_t debug_module);
+extern int cip_tag_resolve_elem_count(cip_tag_p tag, attr attribs, debug_module_t debug_module);
+
+/* for a tag whose size the PLC reports on the first read. */
+extern int cip_tag_size_from_plc(cip_tag_p tag, debug_module_t debug_module);
+
+/* for a tag whose size the caller states through elem_size.  Allocates tag->data. */
+extern int cip_tag_size_from_attributes(cip_tag_p tag, attr attribs, debug_module_t debug_module);
+
+
+/*
+ * What a per-family setup must have left behind, checked after it returns.
+ *
+ * A dispatch table's cost is that its leaves can diverge silently: add a required step and
+ * one leaf forgets it, and the tag misbehaves at read time rather than failing at create.
+ * This is what a data table gives free -- a missing column is visible -- and what a table of
+ * functions has to be told to check.
+ *
+ * It runs on every tag create, not only in Debug.  Creating a tag is rare and three pointer
+ * tests are free, and failing here beats a tag that reads through an unimplemented vtable.
+ * The default vtable is a parameter because each module's carries its own attribute table,
+ * and "still the default" is exactly the failure being caught.
+ *
+ * elem_size is deliberately not checked: cip_tag_size_from_attributes() already rejects an
+ * unresolved one, and the families that defer their size to the PLC legitimately have none
+ * yet.
+ */
+extern int cip_tag_check_setup(cip_tag_p tag, const char *family_name, tag_vtable_p default_vtable,
+                               debug_module_t debug_module);

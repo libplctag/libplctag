@@ -36,6 +36,7 @@
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
+#include <libplctag/modules/cip_tag_create.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/tag.h>
@@ -131,10 +132,10 @@ int session_startup(void) { return session_list_init(&conn_list); }
 
 void session_teardown(void) { session_list_teardown(&conn_list, DEBUG_MODULE_AB_SESSION); }
 int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_session) {
-    const cip_conn_profile_t *profile = ab_conn_profile(get_plc_type(attribs));
+    const cip_conn_profile_t *profile = ab_conn_profile(cip_plc_type_from_attributes(attribs));
 
     if(!profile) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unknown PLC type %d!", get_plc_type(attribs));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unknown PLC type %d!", cip_plc_type_from_attributes(attribs));
         return PLCTAG_ERR_BAD_DEVICE;
     }
 

@@ -44,6 +44,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/modules/cip/tag.h>
 #include <stdbool.h>
@@ -659,4 +660,133 @@ int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_
     pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
 
     return tag->status;
+}
+
+
+cip_tag_p cip_tag_alloc(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                        void *userdata, tag_protocol_t protocol_type, tag_vtable_p default_vtable,
+                        debug_module_t debug_module) {
+    cip_tag_p tag = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    tag = (cip_tag_p)rc_alloc(sizeof(struct cip_tag_t), (rc_cleanup_func)cip_tag_destroy);
+    if(!tag) {
+        pdebug(debug_module, DEBUG_ERROR, 0, "Unable to allocate memory for CIP tag!");
+        return NULL;
+    }
+
+    /*
+     * The default vtable goes on before anything can fail, so that an abort between here
+     * and the family's own setup has something safe to dispatch through.
+     */
+    tag->vtable = default_vtable;
+    tag->protocol_type = protocol_type;
+
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(debug_module, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "tag=%p", tag);
+
+    return tag;
+}
+
+
+int cip_tag_resolve_elem_count(cip_tag_p tag, attr attribs, debug_module_t debug_module) {
+    tag->elem_count = attr_get_int(attribs, "elem_count", 1);
+
+    /*
+     * An array can legitimately have up to INT32_MAX elements, but it cannot have zero or a
+     * negative number of them.  Several places divide the tag size by this to recover the
+     * element size, so a zero here is a division by zero later.
+     */
+    if(tag->elem_count < 1) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Element count must be at least one, was %d!", tag->elem_count);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int cip_tag_size_from_plc(cip_tag_p tag, debug_module_t debug_module) {
+    /*
+     * The CIP read and write services carry the element count in a two-byte field, and every
+     * place that builds one casts to uint16_t explicitly, so nothing downstream objects to a
+     * larger value -- the count simply wraps and the PLC is asked for a different number of
+     * elements than the caller asked for, with no error raised anywhere.
+     *
+     * This lives here rather than in a caller because a tag that learns its size from the PLC
+     * has no other size check at all: the element-size path below has one, and this path had
+     * none on the Rockwell side.
+     */
+    if(tag->elem_count > UINT16_MAX) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Element count must be no more than %d, was %d!", UINT16_MAX,
+               tag->elem_count);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    tag->size = 0;
+    tag->data = NULL;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int cip_tag_size_from_attributes(cip_tag_p tag, attr attribs, debug_module_t debug_module) {
+    /* get the element size if it is not already set. */
+    if(!tag->elem_size) { tag->elem_size = attr_get_int(attribs, "elem_size", 0); }
+
+    if(tag->elem_size < 1) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Element size must be at least one byte, was %d!", tag->elem_size);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * Both of these come from the attribute string, so their product can overflow.  Signed
+     * overflow is undefined, so test by division before multiplying rather than checking the
+     * result afterwards -- by then the damage is already done and the wrapped value looks
+     * like a perfectly reasonable size.
+     */
+    if(tag->elem_count > CIP_MAX_TAG_DATA_SIZE / tag->elem_size) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id,
+               "Tag of %d elements of %d bytes each is larger than the maximum tag size of %d bytes!", tag->elem_count,
+               tag->elem_size, CIP_MAX_TAG_DATA_SIZE);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    tag->size = (tag->elem_count) * (tag->elem_size);
+
+    /* this may be changed in the future if this is a tag list request. */
+    tag->data = (uint8_t *)mem_alloc(tag->size);
+    if(tag->data == NULL) {
+        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to allocate tag data!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int cip_tag_check_setup(cip_tag_p tag, const char *family_name, tag_vtable_p default_vtable, debug_module_t debug_module) {
+    if(!tag->byte_order) {
+        pdebug(debug_module, DEBUG_ERROR, tag->tag_id, "Setup for %s left no byte order!", family_name);
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    if(!tag->vtable || tag->vtable == default_vtable) {
+        pdebug(debug_module, DEBUG_ERROR, tag->tag_id, "Setup for %s left no vtable; this tag name is not supported!",
+               family_name);
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    if(!tag->std_ops) {
+        pdebug(debug_module, DEBUG_ERROR, tag->tag_id, "Setup for %s left no standard-tag operations!", family_name);
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    return PLCTAG_STATUS_OK;
 }

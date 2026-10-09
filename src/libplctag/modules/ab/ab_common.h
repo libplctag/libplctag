@@ -38,6 +38,7 @@
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/plc_type.h>
+#include <libplctag/modules/cip_tag_create.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
 
@@ -49,9 +50,22 @@
 /* Runtime attributes shared by every AB tag type. */
 extern const attr_def_t ab_attribs[];
 
-extern cip_plc_type_t get_plc_type(attr attribs);
 extern int check_cpu(cip_tag_p tag, attr attribs);
 extern int check_tag_name(cip_tag_p tag, const char *name);
+
+/*
+ * The per-family leaves, reached through the dispatch table in modules/cip_tag_create.c.
+ *
+ * Six of the table's rows share two of these: PLC/5 direct and bridged both reach
+ * ab_setup_plc5_tag, and SLC and MicroLogix in both dialects reach ab_setup_slc_tag, because
+ * nothing but the byte order and the dialect differs between them.
+ */
+extern int ab_setup_plc5_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_slc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_lgx_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_logix_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_micro800_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_generic_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 
 /* special tag setup, see raw_tag.c, listing_tag.c, udt_tag.c and identity_tag.c */
 extern int setup_raw_tag(cip_tag_p tag);

@@ -36,6 +36,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/modules/ab/ab.h>
+#include <libplctag/modules/cip_tag_create.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/system/system.h>
@@ -65,9 +66,12 @@ struct {
     /* System tags */
     {.protocol = "system", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = system_tag_create},
 
-    /* Allen-Bradley PLCs */
-    {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
-    {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    /*
+     * CIP PLCs, Rockwell and OMRON alike.  Both arrive as ab-eip and are told apart by the
+     * plc attribute, which cip_tag_create() reads -- see modules/cip_tag_create.c.
+     */
+    {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = cip_tag_create},
+    {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = cip_tag_create},
 
     /* Modbus TCP */
     {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},

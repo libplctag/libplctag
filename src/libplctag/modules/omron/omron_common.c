@@ -84,7 +84,6 @@
 
 
 /* forward declarations*/
-static cip_plc_type_t get_plc_type(attr attribs);
 static int get_tag_data_type(cip_tag_p tag, attr attribs);
 static int check_cpu(cip_tag_p tag, attr attribs);
 static int check_tag_name(cip_tag_p tag, const char *name);
@@ -144,6 +143,7 @@ void omron_teardown(void) {
 plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                            void *userdata, plc_tag_p src_tag) {
     cip_tag_p tag = NULL;
+    const cip_plc_entry_t *entry = NULL;
     const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
 
@@ -153,36 +153,9 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
         return omron_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
     }
 
-    /*
-     * allocate memory for the new tag.  Do this first so that
-     * we have a vehicle for returning status.
-     */
-
-    tag = (cip_tag_p)rc_alloc(sizeof(struct cip_tag_t), (rc_cleanup_func)cip_tag_destroy);
-    if(!tag) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_ERROR, 0, "Unable to allocate memory for AB EIP tag!");
-        return (plc_tag_p)NULL;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "tag=%p", tag);
-
-    /*
-     * we got far enough to allocate memory, set the default vtable up
-     * in case we need to abort later.
-     */
-
-    tag->vtable = &default_vtable;
-    tag->protocol_type = TAG_PROTOCOL_OMRON;
-
-    /* set up the generic parts. */
-    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unable to initialize generic tag parts!");
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".",
-               tag->tag_id);
-        rc_dec(tag);
-        return (plc_tag_p)NULL;
-    }
+    /* allocate the tag.  It is the vehicle for returning status from here on. */
+    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_OMRON, &default_vtable, DEBUG_MODULE_OMRON_COMMON);
+    if(!tag) { return (plc_tag_p)NULL; }
 
     /*
      * check the CPU type.
@@ -212,14 +185,59 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
         }
     }
 
-    /* set up any required settings based on the PLC type. */
-    tag->use_connected_msg = 1;
+    /*
+     * One family, so one row, and no dialect to work out: an NJ/NX is never DH+ bridged.
+     */
+    entry = cip_plc_entry_find(tag->plc_type, CIP_DIALECT_DIRECT);
+    if(!entry || !entry->setup_tag) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unknown PLC type!");
+        tag->status = PLCTAG_ERR_BAD_CONFIG;
+        return (plc_tag_p)tag;
+    }
 
-    /* make sure that the connection requirement is forced. */
-    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
-
-    /* get the connection path.  We need this to make a decision about the PLC. */
     path = attr_get_str(attribs, "path", NULL);
+
+    /*
+     * An NJ/NX always needs a path.  The check stays here rather than in the leaf because
+     * only this function knows whether the tag was cloned from another, which supplies the
+     * connection instead of a path.
+     */
+    if(!src_tag && str_length(path) == 0) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "A path is required for this PLC type.");
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        return (plc_tag_p)tag;
+    }
+
+    /*
+     * The element type, and the special tags.
+     *
+     * Ahead of the connection, as on the Rockwell side and for the same reason: this reads
+     * only attributes, and a special tag sets its own vtable and byte order here which the
+     * leaf below must not overwrite.
+     */
+    rc = get_tag_data_type(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
+               "Error %s getting tag element data type or handling special tag!", plc_tag_decode_error(rc));
+        tag->status = (int8_t)rc;
+        return (plc_tag_p)tag;
+    }
+
+    rc = entry->setup_tag(entry, tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unable to set up %s tag!", entry->name);
+        tag->status = (int8_t)rc;
+        return (plc_tag_p)tag;
+    }
+
+    rc = cip_tag_check_setup(tag, entry->name, &default_vtable, DEBUG_MODULE_OMRON_COMMON);
+    if(rc != PLCTAG_STATUS_OK) {
+        tag->status = (int8_t)rc;
+        return (plc_tag_p)tag;
+    }
+
+    /* the leaf settles whether a connection is wanted, so the attribute is set from it. */
+    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
     /*
      * Find or create a conn.
@@ -253,76 +271,16 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "using conn=%p", tag->session);
 
-    /* get the tag data type, or try. */
-    rc = get_tag_data_type(tag, attribs);
+    rc = cip_tag_resolve_elem_count(tag, attribs, DEBUG_MODULE_OMRON_COMMON);
+    if(rc == PLCTAG_STATUS_OK) {
+        /* an Omron tag always learns its size from the PLC. */
+        rc = cip_tag_size_from_plc(tag, DEBUG_MODULE_OMRON_COMMON);
+    }
+
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Error %s getting tag element data type or handling special tag!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
         return (plc_tag_p)tag;
     }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up OMRON NJ/NX Series tag.");
-
-    if(!src_tag && str_length(path) == 0) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "A path is required for this PLC type.");
-        tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag_p)tag;
-    }
-
-    /* what this family can do, for the shared standard-tag engine. */
-    tag->std_ops = &cip_standard_tag_ops_omron;
-    tag->debug_module = DEBUG_MODULE_OMRON_STANDARD_TAG;
-
-    /* if we did not fill in the byte order elsewhere, fill it in now. */
-    if(!tag->byte_order) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Using default Omron byte order.");
-        tag->byte_order = &omron_njnx_tag_byte_order;
-    }
-
-    /* if this was not filled in elsewhere default to generic *Logix */
-    if(tag->vtable == &default_vtable || !tag->vtable) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting default Logix vtable.");
-        tag->vtable = &cip_standard_tag_vtable_omron;
-    }
-
-    tag->use_connected_msg = 1;
-    tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-
-    /* pass the connection requirement since it may be overridden above. */
-    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
-
-    /* get the element count, default to 1 if missing. */
-    tag->elem_count = attr_get_int(attribs, "elem_count", 1);
-
-    /*
-     * An array can legitimately have up to INT32_MAX elements, but it cannot have zero or a
-     * negative number of them.  Several places divide the tag size by this to recover the
-     * element size, so a zero here is a division by zero later.
-     */
-    if(tag->elem_count < 1) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be at least one, was %d!",
-               tag->elem_count);
-        tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag_p)tag;
-    }
-
-    /*
-     * The CIP read and write services carry the element count in a two-byte field, and every
-     * place that builds one casts to uint16_t explicitly, so nothing downstream objects to a
-     * larger value -- the count simply wraps and the PLC is asked for a different number of
-     * elements than the caller asked for.  There is no size check here of the kind ab_common.c
-     * has because an Omron tag learns its size from the PLC rather than from the attributes.
-     */
-    if(tag->elem_count > UINT16_MAX) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Element count must be no more than %d, was %d!", UINT16_MAX,
-               tag->elem_count);
-        tag->status = PLCTAG_ERR_TOO_LARGE;
-        return (plc_tag_p)tag;
-    }
-
-    tag->size = 0;
-    tag->data = NULL;
 
     /*
      * check the tag name, this is protocol specific.
@@ -670,24 +628,42 @@ const attr_def_t omron_attribs[] = {
 };
 
 
-static cip_plc_type_t get_plc_type(attr attribs) {
-    const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
+int omron_setup_njnx_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up %s tag.", entry->name);
 
-    if(!str_cmp_i(cpu_type, "omron-njnx") || !str_cmp_i(cpu_type, "omron-nj") || !str_cmp_i(cpu_type, "omron-nx")
-       || !str_cmp_i(cpu_type, "njnx") || !str_cmp_i(cpu_type, "nx1p2")) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, 0, "Found OMRON NJ/NX Series PLC.");
-        return CIP_PLC_OMRON_NJNX;
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, 0, "Unsupported device type: %s", cpu_type);
+    /* what this family can do, for the shared standard-tag engine. */
+    tag->std_ops = &cip_standard_tag_ops_omron;
+    tag->debug_module = DEBUG_MODULE_OMRON_STANDARD_TAG;
 
-        return CIP_PLC_NONE;
+    /* an NJ/NX only answers over a connection.  Packing is off unless asked for. */
+    tag->use_connected_msg = 1;
+    tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
+
+    /*
+     * first_read is deliberately not set here, unlike every Rockwell leaf.  This module
+     * decides whether to kick off the initial read from whether the tag is special and has a
+     * read function, and sets first_read inside that branch; setting it here would also set
+     * it for a special tag, which is a behaviour change this step is not making.
+     */
+
+    /* both are "if nobody else already did it": a special tag sets its own while its name is parsed. */
+    if(!tag->byte_order) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Using default Omron byte order.");
+        tag->byte_order = &omron_njnx_tag_byte_order;
     }
+
+    if(tag->vtable == &default_vtable || !tag->vtable) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting default Omron vtable.");
+        tag->vtable = &cip_standard_tag_vtable_omron;
+    }
+
+    return PLCTAG_STATUS_OK;
 }
 
 
 /* Omron accepts exactly one family, so the test is an equality rather than a table lookup. */
 int check_cpu(cip_tag_p tag, attr attribs) {
-    tag->plc_type = get_plc_type(attribs);
+    tag->plc_type = cip_plc_type_from_attributes(attribs);
 
     return (tag->plc_type == CIP_PLC_OMRON_NJNX) ? PLCTAG_STATUS_OK : PLCTAG_ERR_BAD_DEVICE;
 }

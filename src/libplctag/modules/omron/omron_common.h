@@ -36,6 +36,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip_tag_create.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -45,6 +46,12 @@
 
 
 
+
+/*
+ * The OMRON leaf, reached through the dispatch table in modules/cip_tag_create.c.  One
+ * family, one row, one leaf.
+ */
+extern int omron_setup_njnx_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 
 /* Runtime attributes shared by every Omron tag type. */
 extern const attr_def_t omron_attribs[];

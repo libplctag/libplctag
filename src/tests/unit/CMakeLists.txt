@@ -154,8 +154,23 @@ target_include_directories(test_cip_status PRIVATE
 
 target_link_libraries(test_cip_status PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_cip_plc_table: the CIP PLC dispatch table's keys.  A missing or duplicated key makes
+# one family behave like another rather than raising an error, and no tag-creating test can
+# see that without a PLC of every family.
+add_executable(test_cip_plc_table test_cip_plc_table.c)
+
+target_include_directories(test_cip_plc_table PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_cip_plc_table PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # Register the unit tests with CTest
 add_test(NAME unit_test_cip_status COMMAND test_cip_status)
+add_test(NAME unit_test_cip_plc_table COMMAND test_cip_plc_table)
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
