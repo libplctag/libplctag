@@ -172,9 +172,11 @@ def build_manifest() -> list[Test]:
               f"--bit-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestLINTArray[0].43"]),
         test("test non-standard UDT strings", [exe("string_non_standard_udt")]),
         test("test non-standard string size", [exe("test_string")]),
+        # The MicroLogix program drives B3/0, so any value written to the whole word must
+        # leave bit 0 set or the read-back disagrees with what we sent.
         test("B data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0",
-              "--write=0", "--check", "--debug=4"]),
+              "--write=1", "--check", "--debug=4"]),
         test("B bit data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/6",
               "--write=1", "--check=1", "--debug=4"]),
@@ -194,8 +196,9 @@ def build_manifest() -> list[Test]:
               "--write=0", "--check=0", "--debug=4"]),
         # The SLC masked write carries a mask word then a data word; a wrong width shows up
         # here and nowhere else.
+        # The pattern keeps bit 0 set because the MicroLogix program drives B3/0.
         test("Micrologix B bit write changes only that bit (SLC masked write)",
-             [exe("test_bit_write"), "--bit=6", "--debug=4",
+             [exe("test_bit_write"), "--bit=6", "--pattern=0x5a5b", "--debug=4",
               f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=B3:0",
               f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/6"]),
         test("Micrologix N bit write changes only that bit (SLC masked write)",
