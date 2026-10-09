@@ -81,8 +81,6 @@ static THREAD_LOCAL vector_p active_tags = NULL;
  * handle held by the application would resolve to an unrelated tag. */
 static volatile int32_t next_tag_id = 10; /* MAGIC */
 
-/* Bound on the search for a free id, so a saturated table fails instead of spinning. */
-#define MAX_TAG_MAP_ATTEMPTS (50)
 
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
@@ -138,7 +136,8 @@ int add_tag_lookup(plc_tag_p tag) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Starting.");
 
     critical_block(tag->instance->tag_lookup_mutex) {
-        int attempts = 0;
+        int32_t attempts = 0;
+        int32_t max_attempts = 0;
 
         /*
          * The library is being torn down and the tag table has already been swept, so
@@ -154,12 +153,20 @@ int add_tag_lookup(plc_tag_p tag) {
         /* only get this when we hold the mutex. */
         new_id = next_tag_id;
 
+        /*
+         * Every live tag occupies exactly one id, so one probe per live tag plus one
+         * must land on a free id.  A fixed bound instead fails while the id space is
+         * nearly empty, whenever the ids in use happen to form a run longer than the
+         * bound.  See issue 681.
+         */
+        max_attempts = (int32_t)hashtable_entries(tag->instance->tags) + 1;
+
         do {
             new_id = tag_id_inc(new_id);
 
             if(new_id <= 0) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ID %d is illegal!", new_id);
-                attempts = MAX_TAG_MAP_ATTEMPTS;
+                attempts = max_attempts;
                 break;
             }
 
@@ -171,9 +178,9 @@ int add_tag_lookup(plc_tag_p tag) {
             }
 
             attempts++;
-        } while(attempts < MAX_TAG_MAP_ATTEMPTS);
+        } while(attempts < max_attempts);
 
-        if(attempts < MAX_TAG_MAP_ATTEMPTS) {
+        if(attempts < max_attempts) {
             /* Set tag->tag_id before the tag is published into the hashtable (in
              * the same tag_lookup_mutex critical section as the hashtable_put()
              * below), not after: any thread that can observe this tag at all had
