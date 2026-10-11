@@ -8,12 +8,11 @@ endif()
 
 # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
-# Build unit tests only in Debug builds; they're not part of the release artifact set.
-# No platform gate: the mocks are wired up with plain -D compile definitions rather than
-# GNU ld's --wrap, so this builds on every compiler/linker the project supports.
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_subdirectory("unit")
-endif()
+# Unit tests build in every configuration, so the release-only CI jobs (Windows, 32-bit,
+# ARM) run them too.  No platform gate: the mocks are wired up with plain -D compile
+# definitions rather than GNU ld's --wrap, so this builds on every compiler/linker the
+# project supports.
+add_subdirectory("unit")
 add_subdirectory("stress_api_lock")
 add_subdirectory("stress_rc_mem")
 add_subdirectory("stress_test")

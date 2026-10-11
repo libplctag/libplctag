@@ -80,7 +80,6 @@ extern void log_slice_impl_func(const char *func, int line, log_level_t lvl, sli
         if((LOG_LEVEL_SPEW) <= log_get_level()) log_slice_impl_func(__func__, __LINE__, LOG_LEVEL_SPEW, (s)); \
     } while(0)
 
-#define RANDOM_U64_ERROR (UINT64_MAX)
 extern uint64_t random_u64(uint64_t upper_bound);
 
 /* Fairness tracking */

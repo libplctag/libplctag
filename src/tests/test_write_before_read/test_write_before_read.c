@@ -58,7 +58,7 @@
 #define DATA_TIMEOUT (5000)
 
 
-static int write_before_read(const char *tag_string, int32_t value) {
+static int write_before_read(const char *tag_string, int32_t value, bool abort_create_read) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     int elem_size = 0;
@@ -71,6 +71,32 @@ static int write_before_read(const char *tag_string, int32_t value) {
     if(tag < 0) {
         printf("ERROR %s: could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
+    }
+
+    /*
+     * Aborting the create's read is what leaves first_read set: a read that ends any other
+     * way clears it, and a lost reply is resent after the reconnect rather than failed.
+     * The write below then has no type to send and must take the pre-write read.
+     */
+    if(abort_create_read) {
+        rc = plc_tag_abort(tag);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("ERROR %s: could not abort the create's read!\n", plc_tag_decode_error(rc));
+            plc_tag_destroy(tag);
+            return 1;
+        }
+
+        /*
+         * A Logix tag's buffer is sized by its first read, so after the abort it is empty and
+         * there is nothing to write.  Size it by hand, as a caller staging a write would.
+         * DINT elements are assumed.
+         */
+        rc = plc_tag_set_size(tag, 4 * plc_tag_get_int_attribute(tag, "elem_count", 1));
+        if(rc < 0) {
+            printf("ERROR %s: could not size the tag buffer!\n", plc_tag_decode_error(rc));
+            plc_tag_destroy(tag);
+            return 1;
+        }
     }
 
     /*
@@ -142,10 +168,12 @@ static int write_before_read(const char *tag_string, int32_t value) {
 
 
 static void usage(void) {
-    printf("Usage: test_write_before_read --tag=<attribute string> [--tag=<attribute string> ...]\n");
+    printf("Usage: test_write_before_read [--abort-create-read] --tag=<attribute string> [--tag=<attribute string> ...]\n");
     printf("  Each tag is created asynchronously and written before it has ever been read.\n");
     printf("  Pass an array tag as well as a scalar: only the array reaches the case where\n");
     printf("  the pre-write read used to come back with an unusable element size.\n");
+    printf("  --abort-create-read aborts the read tag creation starts, so the write must fetch the type.\n");
+    printf("  The tags must then be DINT, since the buffer is sized by hand.\n");
 }
 
 
@@ -155,6 +183,7 @@ int main(int argc, char **argv) {
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     int failures = 0;
     int tags_run = 0;
+    bool abort_create_read = false;
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
@@ -167,8 +196,10 @@ int main(int argc, char **argv) {
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
     for(int i = 1; i < argc; i++) {
-        if(strncmp(argv[i], "--tag=", 6) == 0) {
-            failures += write_before_read(argv[i] + 6, 0x01020304 + i);
+        if(strcmp(argv[i], "--abort-create-read") == 0) {
+            abort_create_read = true;
+        } else if(strncmp(argv[i], "--tag=", 6) == 0) {
+            failures += write_before_read(argv[i] + 6, 0x01020304 + i, abort_create_read);
             tags_run++;
         } else {
             printf("ERROR: unknown argument \"%s\"!\n", argv[i]);

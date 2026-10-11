@@ -862,6 +862,13 @@ static int check_read_status(cip_tag_p tag) {
             if(tag->pre_write_read) {
                 pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
                 tag->pre_write_read = 0;
+
+                /*
+                 * The type is known now.  The tickler clears first_read only after this
+                 * returns, so the write restarted below would see it set and pre-read again,
+                 * forever.
+                 */
+                tag->first_read = 0;
                 rc = cip_standard_tag_write_start((plc_tag_p)tag);
             } else {
                 pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Read complete.");

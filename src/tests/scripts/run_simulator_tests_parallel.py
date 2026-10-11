@@ -496,6 +496,24 @@ def build_manifest() -> Manifest:
               [exe("test_write_before_read"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F)
+    # The same, with the create's read aborted -- the only way a write reaches the pre-write
+    # read, since a read that ends any other way clears first_read.  That branch once restarted
+    # the write with first_read still set and pre-read forever.  The check proves it was taken.
+    # Its own server, so the round trip cannot race the test above on the same tag.
+    wbr_abort_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0", "--tag=Test_Array_1:DINT[1000]"],
+        startup_wait_s=1,
+    )
+    wbr_abort = sec.test("write before read, create read aborted",
+              [exe("test_write_before_read"), "--abort-create-read",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F,
+              server=wbr_abort_server)
+    sec.test("check the pre-write read ran once per tag",
+              None, F, depends_on=wbr_abort.id, ports_needed=0,
+              check=CheckSpec(log_file=wbr_abort.log_file,
+                               pattern=r"doing pre-read to get type information", expected=2))
     sec.test("raw CIP tags bundled into one packet",
               [exe("test_raw_cip"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",

@@ -320,6 +320,8 @@ void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s)
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
+    if(upper_bound == 0) { return 0; }
+
     arc4random_buf(&random_number, sizeof(random_number));
     random_number %= upper_bound;
 
@@ -352,10 +354,14 @@ uint64_t random_u64(uint64_t upper_bound) {
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
-    if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
-        return RANDOM_U64_ERROR;
-    }
     if(upper_bound == 0) { return 0; }
+
+    if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+        /* fall back as the Linux branch does; a sentinel would be outside [0, upper_bound). */
+        srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
+        for(size_t i = 0; i < sizeof(random_number); ++i) { ((uint8_t *)&random_number)[i] ^= (uint8_t)(rand() % 256); }
+    }
+
     random_number %= upper_bound;
 
     return random_number;
