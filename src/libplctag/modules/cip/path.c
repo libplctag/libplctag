@@ -53,8 +53,10 @@ static int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *
 static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, uint8_t *src_node, uint8_t *dest_node);
 
 int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size,
-                    int *is_dhp, uint16_t *dhp_dest) {
+                    int *is_dhp, uint16_t *dhp_dest, bool *is_bridged) {
     size_t path_len = 0;
+    size_t seg_start = 0;
+    bool at_port = true; /* numeric segments alternate port, link */
     size_t conn_path_index = 0;
     size_t path_index = 0;
     uint8_t dhp_port = 0;
@@ -66,12 +68,15 @@ int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
 
     *is_dhp = 0;
+    *is_bridged = false;
 
     path_len = (size_t)(ssize_t)str_length(path);
 
     while(path && path[path_index] && path_index < path_len && conn_path_index < max_conn_path_size) {
         /* skip spaces before each segment */
         while(path[path_index] == ' ') { path_index++; }
+
+        seg_start = conn_path_index;
 
         if(path[path_index] == ',') {
             /* skip separators. */
@@ -80,8 +85,14 @@ int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8
             path_index++;
         } else if(match_numeric_segment(path, &path_index, tmp_conn_path, &conn_path_index) == PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found numeric segment.");
+
+            if(at_port && tmp_conn_path[seg_start] != 1) { *is_bridged = true; }
+            at_port = !at_port;
         } else if(match_ip_addr_segment(path, &path_index, tmp_conn_path, &conn_path_index) == PLCTAG_STATUS_OK) {
+            /* a whole port/address pair, out port 2 or 3 onto Ethernet. */
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found IP address segment.");
+
+            *is_bridged = true;
         } else if(match_dhp_addr_segment(path, &path_index, &dhp_port, &dhp_src_node, &dhp_dest_node) == PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found DH+ address segment.");
 
@@ -93,6 +104,7 @@ int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8
             }
 
             *is_dhp = 1;
+            *is_bridged = true;
         } else {
             /* unknown, cannot parse this! */
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to parse remaining path string from position %d, \"%s\".",
@@ -166,6 +178,24 @@ int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done");
 
     return PLCTAG_STATUS_OK;
+}
+
+
+bool cip_path_is_bridged(const char *path) {
+    uint8_t encoded_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    int encoded_path_size = (int)sizeof(encoded_path);
+    int needs_connection = 0;
+    int is_dhp = 0;
+    uint16_t dhp_dest = 0;
+    bool is_bridged = false;
+
+    if(cip_encode_path(path, &needs_connection, CIP_PLC_KIND_DHP_CAPABLE, &encoded_path[0], &encoded_path_size, &is_dhp,
+                       &dhp_dest, &is_bridged)
+       != PLCTAG_STATUS_OK) {
+        return false;
+    }
+
+    return is_bridged;
 }
 
 

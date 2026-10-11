@@ -111,6 +111,7 @@ cip_dialect_t cip_dialect_from_attributes(cip_plc_type_t plc_type, attr attribs)
     int needs_connection = 0;
     int is_dhp = 0;
     uint16_t dhp_dest = 0;
+    bool is_bridged = false;
 
     /* a family with no DH+ row cannot bridge, so the path cannot change the answer. */
     if(!cip_plc_entry_find(plc_type, CIP_DIALECT_DHP)) { return CIP_DIALECT_DIRECT; }
@@ -121,7 +122,7 @@ cip_dialect_t cip_dialect_from_attributes(cip_plc_type_t plc_type, attr attribs)
      * sized, when the connection is created.
      */
     if(cip_encode_path(path, &needs_connection, CIP_PLC_KIND_DHP_CAPABLE, &encoded_path[0], &encoded_path_size, &is_dhp,
-                       &dhp_dest)
+                       &dhp_dest, &is_bridged)
        != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Path does not parse; treating the tag as direct.");
         return CIP_DIALECT_DIRECT;

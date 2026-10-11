@@ -2320,7 +2320,10 @@ cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_pro
      */
     int dhp_kind = (profile->dhp_capable ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
 
-    rc = cip_encode_path(path, use_connected_msg, dhp_kind, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    bool is_bridged = false;
+
+    rc = cip_encode_path(path, use_connected_msg, dhp_kind, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest,
+                         &is_bridged);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
                plc_tag_decode_error(rc));

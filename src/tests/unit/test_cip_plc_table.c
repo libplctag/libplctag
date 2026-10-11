@@ -49,6 +49,7 @@
 
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/path.h>
 #include <utils/attr.h>
 
 
@@ -230,6 +231,25 @@ static void test_an_unparseable_path_is_direct(void **state) {
  * a wrong answer here from a working one until the PLC refuses the framing, so pin the two
  * rules the old leaves enforced in code.
  */
+static void test_a_path_bridges_when_it_leaves_the_chassis(void **state) {
+    (void)state;
+
+    /* leaves the chassis: IP out port 2 or 3, DH+, or a pair whose port is not the backplane */
+    assert_true(cip_path_is_bridged("1,4,18,10.206.1.36"));
+    assert_true(cip_path_is_bridged("1,2,19,10.206.1.38"));
+    assert_true(cip_path_is_bridged("1,2,A:27:1"));
+    assert_true(cip_path_is_bridged("1,3,2,5"));
+    assert_true(cip_path_is_bridged("1,4,18,10.206.1.39,1,0"));
+
+    /* stays on the backplane, or is not a path at all */
+    assert_true(!cip_path_is_bridged("1,4"));
+    assert_true(!cip_path_is_bridged("1,0,1,2"));
+    assert_true(!cip_path_is_bridged(""));
+    assert_true(!cip_path_is_bridged(NULL));
+    assert_true(!cip_path_is_bridged("1,x"));
+}
+
+
 static void test_the_row_settles_connected_messaging(void **state) {
     cip_plc_type_t plc_type = CIP_PLC_NONE;
     size_t dialect_index = 0;
@@ -277,6 +297,7 @@ int main(void) {
         cmocka_unit_test(test_an_ordinary_path_is_direct),
         cmocka_unit_test(test_a_family_that_cannot_bridge_is_always_direct),
         cmocka_unit_test(test_an_unparseable_path_is_direct),
+        cmocka_unit_test(test_a_path_bridges_when_it_leaves_the_chassis),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

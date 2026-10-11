@@ -46,6 +46,7 @@
 #include <libplctag/modules/ab/eip_slc_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/cip/connection_tag.h>
+#include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
@@ -248,6 +249,16 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
     }
 
     /*
+     * A PCCC CPU sits directly on a network, never in a ControlLogix chassis, so a path to
+     * one must leave the gateway's chassis.  A DH+ path already does; this is the direct row.
+     */
+    if(!src_tag && str_length(path) && entry->dialect == CIP_DIALECT_DIRECT && cip_plc_entry_find(plc_type, CIP_DIALECT_DHP)
+       && !cip_path_is_bridged(path)) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", entry->name);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
      * Whether the requests will be connected ones.  The row answers it, which is what lets
      * the connection be created ahead of the tag; the tag reads the same answer back below.
      */
@@ -419,12 +430,9 @@ static void apply_tag_defaults(cip_tag_p tag, tag_byte_order_t *byte_order, tag_
  */
 static int setup_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs,
                           tag_byte_order_t *byte_order) {
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up %s tag.", entry->name);
+    (void)attribs;
 
-    if(entry->dialect == CIP_DIALECT_DIRECT && str_length(attr_get_str(attribs, "path", NULL))) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id,
-               "A path is not supported for this PLC type if it is not for a DH+ bridge.");
-    }
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up %s tag.", entry->name);
 
     tag->allow_packing = 0;
     tag->first_read = 0; /* the data file in the name states the type, so there is nothing to discover. */
