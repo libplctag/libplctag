@@ -36,7 +36,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/cip_tag_create.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -48,7 +48,7 @@
 
 
 /*
- * The OMRON leaf, reached through the dispatch table in modules/cip_tag_create.c.  One
+ * The OMRON leaf, reached through the dispatch table in modules/cip/cip_tag_create.c.  One
  * family, one row, one leaf.
  */
 extern int omron_setup_njnx_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
@@ -70,3 +70,6 @@ extern struct tag_vtable_t cip_standard_tag_vtable_omron;
 extern int conn_startup(void);
 extern void conn_teardown(void);
 extern int conn_find_or_create(cip_conn_p *conn, attr attribs, int *is_new_conn);
+
+/* live connections on the OMRON list.  For tests only; see session_list_count(). */
+extern int32_t conn_live_count(void);

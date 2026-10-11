@@ -36,7 +36,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/modules/ab/ab.h>
-#include <libplctag/modules/cip_tag_create.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/system/system.h>
@@ -68,7 +68,7 @@ struct {
 
     /*
      * CIP PLCs, Rockwell and OMRON alike.  Both arrive as ab-eip and are told apart by the
-     * plc attribute, which cip_tag_create() reads -- see modules/cip_tag_create.c.
+     * plc attribute, which cip_tag_create() reads -- see modules/cip/cip_tag_create.c.
      */
     {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = cip_tag_create},
     {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = cip_tag_create},

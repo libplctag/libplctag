@@ -39,19 +39,6 @@
 #include <libplctag/modules/cip/plc_type.h>
 #include <stdint.h>
 
-/*
- * State shared by every CIP tag, whatever the family.
- *
- * CIP_TAG_BASE_STRUCT follows the TAG_BASE_STRUCT idiom in lib/tag.h: a macro
- * expanded into each family's tag struct rather than a nested struct, so field
- * accesses stay direct.
- *
- * NOTE: expanding this into two family structs makes their layouts identical by
- * construction.  That is deliberate, but nothing may cast one family's tag to
- * another's -- the fields past this macro differ.  ab_common.c used to rely on
- * the layouts happening to match; that was a bug, not an interface.
- */
-
 /* the longest encoded tag name, and the longest encoded type info, in bytes. */
 #define MAX_TAG_NAME (260)
 #define MAX_TAG_TYPE_INFO (64)
@@ -87,79 +74,6 @@ typedef enum {
 struct cip_standard_tag_ops_t;
 
 
-/*
- * The state every CIP tag carries, whatever the family.
- *
- * One thing is deliberately NOT here: the PCCC fields (file_type,
- * req_pccc_seq_num), which belong to PCCC tags only.
- */
-#define CIP_TAG_BASE_STRUCT                                                                \
-    TAG_BASE_STRUCT;                                                                       \
-                                                                                           \
-    int use_connected_msg;                                                                 \
-                                                                                           \
-    /* the encoded symbolic name */                                                        \
-    uint8_t encoded_name[MAX_TAG_NAME];                                                    \
-    int encoded_name_size;                                                                 \
-                                                                                           \
-    /* the encoded type, as it came off the wire */                                        \
-    uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];                                          \
-    int encoded_type_info_size;                                                            \
-                                                                                           \
-    cip_elem_type_t elem_type;                                                             \
-    int elem_count;                                                                        \
-    int elem_size;                                                                         \
-                                                                                           \
-    int special_tag;                                                                       \
-                                                                                           \
-    /* standard tags: how much data may one packet carry? */                               \
-    int write_data_per_packet;                                                             \
-                                                                                           \
-    /*                                                                                     \
-     * What this tag's family can do, set once at creation.  The shared engines read this  \
-     * instead of asking what plc_type is.  See cip/standard_tag.h.                        \
-     */                                                                                    \
-    const struct cip_standard_tag_ops_t *std_ops;                                          \
-                                                                                           \
-    /*                                                                                     \
-     * The module ID this tag's work is logged under.  Callers filter on these, so a       \
-     * shared engine still has to log as the family it is serving.  Set at creation.       \
-     */                                                                                    \
-    debug_module_t debug_module;                                                           \
-                                                                                           \
-    uint32_t next_id;       /* listing tags */                                             \
-    uint8_t udt_get_fields; /* UDT tags */                                                 \
-    uint16_t udt_id;                                                                       \
-                                                                                           \
-    /*                                                                                     \
-     * Consecutive fragment responses that carried no payload.                             \
-     *                                                                                     \
-     * A partial-transfer status with zero bytes is legitimate: when several requests are  \
-     * packed into one packet the earlier ones can consume all the room, leaving the later \
-     * ones only a bare CIP header.  It is also what a PLC would send forever to keep us   \
-     * asking for the same fragment, so count them and give up rather than loop.  Reset    \
-     * whenever a response actually delivers data.                                         \
-     */                                                                                    \
-    int fragment_retry_count;                                                              \
-                                                                                           \
-    int pre_write_read;                                                                    \
-    int first_read;                                                                        \
-    int offset;                                                                            \
-    int allow_packing;                                                                     \
-                                                                                           \
-    int read_in_progress;                                                                  \
-    int write_in_progress;                                                                 \
-                                                                                           \
-    /* how do we talk to this device? */                                                   \
-    cip_plc_type_t plc_type;                                                               \
-                                                                                           \
-    /* pointer back to the connection */                                                   \
-    cip_conn_p session;                                                                    \
-                                                                                           \
-    /* the in-flight request object */                                                     \
-    cip_request_p req
-
-
 /* The PCCC data file a tag addresses.  PCCC rides inside CIP, so this lives here. */
 typedef enum {
     PCCC_FILE_UNKNOWN = 0x00, /* UNKNOWN! */
@@ -190,7 +104,70 @@ typedef enum {
  * Logix or OMRON tag are cheaper than a second struct that has to be kept in step.
  */
 struct cip_tag_t {
-    CIP_TAG_BASE_STRUCT;
+    TAG_BASE_STRUCT;
+
+    int use_connected_msg;
+
+    /* the encoded symbolic name */
+    uint8_t encoded_name[MAX_TAG_NAME];
+    int encoded_name_size;
+
+    /* the encoded type, as it came off the wire */
+    uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
+    int encoded_type_info_size;
+
+    cip_elem_type_t elem_type;
+    int elem_count;
+    int elem_size;
+
+    int special_tag;
+
+    /* standard tags: how much data may one packet carry? */
+    int write_data_per_packet;
+
+    /*
+     * What this tag's family can do, set once at creation.  The shared engines read this
+     * instead of asking what plc_type is.  See cip/standard_tag.h.
+     */
+    const struct cip_standard_tag_ops_t *std_ops;
+
+    /*
+     * The module ID this tag's work is logged under.  Callers filter on these, so a
+     * shared engine still has to log as the family it is serving.  Set at creation.
+     */
+    debug_module_t debug_module;
+
+    uint32_t next_id;       /* listing tags */
+    uint8_t udt_get_fields; /* UDT tags */
+    uint16_t udt_id;
+
+    /*
+     * Consecutive fragment responses that carried no payload.
+     *
+     * A partial-transfer status with zero bytes is legitimate: when several requests are
+     * packed into one packet the earlier ones can consume all the room, leaving the later
+     * ones only a bare CIP header.  It is also what a PLC would send forever to keep us
+     * asking for the same fragment, so count them and give up rather than loop.  Reset
+     * whenever a response actually delivers data.
+     */
+    int fragment_retry_count;
+
+    int pre_write_read;
+    int first_read;
+    int offset;
+    int allow_packing;
+
+    int read_in_progress;
+    int write_in_progress;
+
+    /* how do we talk to this device? */
+    cip_plc_type_t plc_type;
+
+    /* pointer back to the connection */
+    cip_conn_p session;
+
+    /* the in-flight request object */
+    cip_request_p req;
 
     /* PCCC only: the data file this tag addresses. */
     pccc_file_t file_type;

@@ -36,6 +36,7 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <limits.h>
 #include <platform.h>
@@ -85,6 +86,11 @@ int conn_startup(void) { return session_list_init(&conn_list); }
 
 
 void conn_teardown(void) { session_list_teardown(&conn_list, DEBUG_MODULE_OMRON_CONN); }
+
+
+int32_t conn_live_count(void) { return session_list_count(&conn_list); }
+
+
 int conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
     const cip_conn_profile_t *profile = omron_conn_profile(CIP_PLC_OMRON_NJNX);
 
@@ -93,7 +99,9 @@ int conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
         return PLCTAG_ERR_BAD_DEVICE;
     }
 
-    return cip_conn_find_or_create(&conn_list, profile, attribs, tag_conn, is_new_conn);
+    /* one family, and an NJ/NX is never DH+ bridged, so the row is fixed. */
+    return cip_conn_find_or_create(&conn_list, profile, cip_plc_entry_find(CIP_PLC_OMRON_NJNX, CIP_DIALECT_DIRECT), attribs,
+                                   tag_conn, is_new_conn);
 }
 
 

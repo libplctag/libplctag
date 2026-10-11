@@ -112,6 +112,7 @@ def build_manifest() -> list[Test]:
     dhp_bridge_gw = "10.206.1.40"
     cip_bridge_gw = "10.206.1.37"
     cip_bridge_target = "10.206.1.39"
+    cip_bridge_out = "1,4,18"  # backplane to the slot 4 Ethernet module, then out its port 2/A
 
     tests = [
         test("special tags", [exe("test_special")]),
@@ -302,6 +303,25 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
               "--debug=4", "--write=5", "--check"]),
+        # A PCCC CPU reached through a ControlLogix chassis's Ethernet module instead of
+        # directly.  The path holds no DH+ segment, so these are the direct rows carried
+        # inside an Unconnected Send -- the PCCC request is routed, not reframed.
+        test("CIP bridged MicroLogix tag read/write",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&name=N7:0",
+              "--debug=4", "--write=42", "--check"]),
+        test("CIP bridged MicroLogix bit write changes only that bit",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&name=N7:0/10"]),
+        test("CIP bridged PLC5 tag read/write",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
+              "--debug=4", "--write=42", "--check"]),
+        test("CIP bridged PLC5 bit write changes only that bit",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10"]),
         # Raw CIP tags are the only tag type whose request is the bare CIP message, so
         # they are what exercises the library's own EIP and CPF framing. Cover every
         # combination that frames differently: connected vs unconnected, a service the

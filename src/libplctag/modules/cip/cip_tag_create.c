@@ -54,25 +54,33 @@
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/plc_type.h>
-#include <libplctag/modules/cip_tag_create.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <stdint.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 
 
 static const cip_plc_entry_t cip_plc_entries[] = {
-    {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_plc5_tag},
-    {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DHP, .setup_tag = ab_setup_plc5_tag},
-    {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_slc_tag},
-    {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DHP, .setup_tag = ab_setup_slc_tag},
-    {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_slc_tag},
-    {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DHP, .setup_tag = ab_setup_slc_tag},
-    {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_lgx_pccc_tag},
-    {.name = "Logix", .plc_type = CIP_PLC_LGX, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_logix_tag},
-    {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_micro800_tag},
-    {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .dialect = CIP_DIALECT_DIRECT, .setup_tag = ab_setup_generic_tag},
-    {.name = "OMRON NJ/NX", .plc_type = CIP_PLC_OMRON_NJNX, .dialect = CIP_DIALECT_DIRECT, .setup_tag = omron_setup_njnx_tag},
+    {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_plc5_tag},
+    {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1, .setup_tag = ab_setup_plc5_tag},
+    {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_slc_tag},
+    {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1, .setup_tag = ab_setup_slc_tag},
+    {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_slc_tag},
+    {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1, .setup_tag = ab_setup_slc_tag},
+    {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_lgx_pccc_tag},
+    {.name = "Logix", .plc_type = CIP_PLC_LGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = -1, .setup_tag = ab_setup_logix_tag},
+    {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1, .setup_tag = ab_setup_micro800_tag},
+    {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_generic_tag},
+    {.name = "OMRON NJ/NX", .plc_type = CIP_PLC_OMRON_NJNX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1, .setup_tag = omron_setup_njnx_tag},
 };
+
+
+bool cip_entry_use_connected_msg(const cip_plc_entry_t *entry, attr attribs) {
+    /* the one family that lets the tag string decide, and it defaults to connected. */
+    if(entry->use_connected_msg < 0) { return (attr_get_int(attribs, "use_connected_msg", 1) != 0); }
+
+    return (entry->use_connected_msg != 0);
+}
 
 
 const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t dialect) {
@@ -162,8 +170,8 @@ cip_plc_type_t cip_plc_type_from_attributes(attr attribs) {
 }
 
 
-plc_tag_p cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                         void *userdata, plc_tag_p src_tag) {
+int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                   void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
     /*
      * Both families arrive as protocol=ab-eip and are told apart by the plc attribute, so
      * something has to read that attribute and pick a module.  That something is this file,
@@ -176,15 +184,15 @@ plc_tag_p cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id,
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_OMRON:
-            case TAG_PROTOCOL_OMRON_CONNECTION: return omron_tag_create(attribs, tag_callback_func, userdata, src_tag);
+            case TAG_PROTOCOL_OMRON_CONNECTION: return omron_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
 
-            default: return ab_tag_create(attribs, tag_callback_func, userdata, src_tag);
+            default: return ab_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
         }
     }
 
     if(cip_plc_type_from_attributes(attribs) == CIP_PLC_OMRON_NJNX) {
-        return omron_tag_create(attribs, tag_callback_func, userdata, src_tag);
+        return omron_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
     }
 
-    return ab_tag_create(attribs, tag_callback_func, userdata, src_tag);
+    return ab_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
 }

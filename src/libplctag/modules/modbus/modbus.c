@@ -391,22 +391,25 @@ static struct tag_vtable_t modbus_vtable;
 
 /****** main entry point *******/
 
-plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                        void *userdata, plc_tag_p src_tag) {
+int mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                  void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Starting.");
 
     if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
-        return mb_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+        *tag_out = mb_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+
+        /* the connection tag types still report through the tag. */
+        return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
     }
 
     /* create the tag object. */
     rc = create_tag_object(attribs, &tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
-        return NULL;
+        return rc;
     }
 
     /* set up the generic parts. */
@@ -414,7 +417,7 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
         rc_dec(tag);
-        return (plc_tag_p)NULL;
+        return rc;
     }
 
     tag->protocol_type = TAG_PROTOCOL_MODBUS;
@@ -442,7 +445,8 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     }
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
-        tag->status = (int8_t)rc;
+        *tag_out = (plc_tag_p)tag;
+        return rc;
     }
 
     /* Do NOT put the tag on the PLC's list or kick off a read here: the generic
@@ -453,7 +457,9 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Done.");
 
-    return (plc_tag_p)tag;
+    *tag_out = (plc_tag_p)tag;
+
+    return PLCTAG_STATUS_OK;
 }
 
 

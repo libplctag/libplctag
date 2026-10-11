@@ -92,8 +92,8 @@ int setup_identity_tag(cip_tag_p tag) {
 
 /*
  * An identity tag is always unconnected.  ab_common.c only recognises "@identity" under
- * the generic PLC type, and that type sets use_connected_msg to zero unconditionally, so
- * there is no configuration that reaches a connected identity request.
+ * the generic PLC type, and that family's row says unconnected with no tag-string override,
+ * so there is no configuration that reaches a connected identity request.
  */
 int identity_tag_read_start(cip_tag_p tag) {
     return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, identity_tag_build_read_request_unconnected);

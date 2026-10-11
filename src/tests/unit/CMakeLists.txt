@@ -168,9 +168,21 @@ target_include_directories(test_cip_plc_table PRIVATE
 
 target_link_libraries(test_cip_plc_table PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+add_executable(test_conn_leak test_conn_leak.c)
+
+target_include_directories(test_conn_leak PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_conn_leak PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # Register the unit tests with CTest
 add_test(NAME unit_test_cip_status COMMAND test_cip_status)
 add_test(NAME unit_test_cip_plc_table COMMAND test_cip_plc_table)
+add_test(NAME unit_test_conn_leak COMMAND test_conn_leak)
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)

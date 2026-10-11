@@ -37,18 +37,22 @@
  * Which family and dialect a CIP tag belongs to, and what to call to set one up.
  *
  * This file is the composition root for CIP tag creation: it is the one place that knows
- * both the Rockwell and the OMRON modules, so neither has to know the other.  modules/cip
- * stays below both and names neither.
+ * both the Rockwell and the OMRON modules, so neither has to know the other.  It lives in
+ * modules/cip because what it dispatches is CIP and nothing else, but it is the one file
+ * here that sits *above* the families rather than below them -- the rest of modules/cip
+ * names no family and must keep it that way.
  *
  * The table is a dispatch table, not a data table.  Tag creation is not one algorithm with
  * per-family constants -- PCCC logical-address encoding, Logix symbolic encoding and
- * OMRON's are different code.  So each row carries functions, and the only data in a row is
- * its key.  Where the families really are parameters of one algorithm, as in Forward Open
- * negotiation, the existing cip_conn_profile_t table already does the job and this one does
- * not duplicate it.
+ * OMRON's are different code.  So each row carries a function.  The data a row does carry is
+ * its key plus what has to be known before the tag exists, which is whether the connection
+ * is a connected one.  Where the families really are parameters of one algorithm, as in
+ * Forward Open negotiation, the existing cip_conn_profile_t table already does the job and
+ * this one does not duplicate it.
  */
 
 #include <libplctag/lib/tag.h>
+#include <stdbool.h>
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -74,6 +78,16 @@ struct cip_plc_entry_t {
     cip_dialect_t dialect;
 
     /*
+     * Whether a request to this family travels over a CIP connection.
+     *
+     * Data on the row rather than a line in the leaf, because the EtherNet/IP connection is
+     * created knowing the answer and no tag exists at that point.  -1 means the family lets
+     * the tag string decide and defaults to connected; every other answer is fixed and a tag
+     * string cannot change it.
+     */
+    int8_t use_connected_msg;
+
+    /*
      * Everything this family does to a freshly allocated tag that the shared skeleton
      * cannot: its vtable, its byte order, its messaging policy.  NULL while a family is
      * still on the old path.
@@ -84,6 +98,16 @@ struct cip_plc_entry_t {
      */
     int (*setup_tag)(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 };
+
+
+/*
+ * Whether a tag of this family uses a CIP connection, from the row and, for the one family
+ * that allows it, the tag string.
+ *
+ * Both the connection and the tag need this answer, and the connection needs it first, so it
+ * is resolved here instead of inside the family's setup leaf.
+ */
+extern bool cip_entry_use_connected_msg(const cip_plc_entry_t *entry, attr attribs);
 
 
 /* NULL if no row matches, which is a configuration error and not an internal one. */
@@ -117,5 +141,5 @@ extern cip_plc_type_t cip_plc_type_from_attributes(attr attribs);
  * It reads the plc attribute, or a cloned tag's protocol, and calls the module that serves
  * it.  Registered in lib/init.c's tag_type_map.
  */
-extern plc_tag_p cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                void *userdata, plc_tag_p src_tag);
+extern int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);

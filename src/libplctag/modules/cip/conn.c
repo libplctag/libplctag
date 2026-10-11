@@ -286,6 +286,15 @@ int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
 }
 
 
+int32_t session_list_count(cip_conn_list_t *list) {
+    int32_t count = 0;
+
+    critical_block(list->mutex) { count = (int32_t)vector_length(list->conns); }
+
+    return count;
+}
+
+
 int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -304,7 +313,7 @@ int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
 
 
 cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                            int connection_group_id) {
+                                            int connection_group_id, const cip_plc_entry_t *plc_entry) {
     for(int i = 0; i < vector_length(list->conns); i++) {
         cip_conn_p conn = vector_get(list->conns, i);
 
@@ -312,7 +321,18 @@ cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *h
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_inc: Acquiring connection reference.");
         conn = rc_inc(conn);
         if(conn) {
-            if(conn->connection_group_id == connection_group_id && session_match_valid(host, path, conn)) { return conn; }
+            /*
+             * The row is part of the key, not just the address.  Rows are static singletons,
+             * so this is a pointer comparison.  Two families can name the same gateway and
+             * path -- `plc=lgx` and `plc=lgx-pccc` are the same physical PLC addressed two
+             * ways -- and they cannot share a connection: the family decides the payload
+             * sizing, the messaging and now the tag setup the connection hands out.  Before
+             * this, whichever family got there first silently supplied all three.
+             */
+            if(conn->connection_group_id == connection_group_id && conn->plc_entry == plc_entry
+               && session_match_valid(host, path, conn)) {
+                return conn;
+            }
 
             rc_dec(conn);
         }
@@ -1789,7 +1809,7 @@ void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
 THREAD_FUNC(session_handler) {
     cip_conn_p conn = arg;
     int rc = PLCTAG_STATUS_OK;
-    session_state_t state = SESSION_OPEN_SOCKET_START;
+    conn->state = SESSION_OPEN_SOCKET_START;
     int64_t now = 0;
     int64_t timeout_time = 0;
     int64_t wait_until_time = 0;
@@ -1823,7 +1843,7 @@ THREAD_FUNC(session_handler) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
         critical_block(conn->session_mutex) { purge_aborted_requests_unsafe(conn); }
 
-        switch(state) {
+        switch(conn->state) {
             case SESSION_OPEN_SOCKET_START:
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");
                 session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
@@ -1832,7 +1852,7 @@ THREAD_FUNC(session_handler) {
                 rc = session_open_socket(conn);
                 if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
-                    state = SESSION_CLOSE_SOCKET;
+                    conn->state = SESSION_CLOSE_SOCKET;
                 } else {
                     if(rc == PLCTAG_STATUS_OK) {
                         /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
@@ -1842,12 +1862,12 @@ THREAD_FUNC(session_handler) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                                "Connect complete immediately, going to state SESSION_REGISTER.");
 
-                        state = SESSION_REGISTER;
+                        conn->state = SESSION_REGISTER;
                     } else {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                                "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
 
-                        state = SESSION_OPEN_SOCKET_WAIT;
+                        conn->state = SESSION_OPEN_SOCKET_WAIT;
                     }
                 }
 
@@ -1870,7 +1890,7 @@ THREAD_FUNC(session_handler) {
                     inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
                     auto_disconnect_time = now + inactivity_timeout_ms;
 
-                    state = SESSION_REGISTER;
+                    conn->state = SESSION_REGISTER;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Still waiting for connection to succeed.");
 
@@ -1878,7 +1898,7 @@ THREAD_FUNC(session_handler) {
                 } else {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
 
-                    state = SESSION_CLOSE_SOCKET;
+                    conn->state = SESSION_CLOSE_SOCKET;
                 }
 
                 /* in all cases, don't wait. */
@@ -1892,15 +1912,15 @@ THREAD_FUNC(session_handler) {
 
                 if((rc = session_register(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session registration failed %s!", plc_tag_decode_error(rc));
-                    state = SESSION_CLOSE_SOCKET;
+                    conn->state = SESSION_CLOSE_SOCKET;
                 } else {
                     if(conn->use_connected_msg) {
                         /* a fresh session gets a fresh set of Forward Open retries. */
                         forward_open_reset_negotiation(conn);
 
-                        state = SESSION_SEND_FORWARD_OPEN;
+                        conn->state = SESSION_SEND_FORWARD_OPEN;
                     } else {
-                        state = SESSION_IDLE;
+                        conn->state = SESSION_IDLE;
                     }
                 }
                 cond_signal(conn->session_wait_cond);
@@ -1912,12 +1932,12 @@ THREAD_FUNC(session_handler) {
 
                 if((rc = send_forward_open_request(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
-                    state = SESSION_UNREGISTER;
+                    conn->state = SESSION_UNREGISTER;
                 } else {
 
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                            "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
-                    state = SESSION_RECEIVE_FORWARD_OPEN;
+                    conn->state = SESSION_RECEIVE_FORWARD_OPEN;
                 }
                 cond_signal(conn->session_wait_cond);
                 break;
@@ -1931,7 +1951,7 @@ THREAD_FUNC(session_handler) {
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Forward Open succeeded, going to SESSION_IDLE state.");
 
-                    state = SESSION_IDLE;
+                    conn->state = SESSION_IDLE;
                     cond_signal(conn->session_wait_cond);
                     break;
                 }
@@ -1943,7 +1963,7 @@ THREAD_FUNC(session_handler) {
                  * inside the session -- the socket and the registration are already up, and a
                  * PLC that will not grant one connection size may well grant another.
                  */
-                state = SESSION_UNREGISTER;
+                conn->state = SESSION_UNREGISTER;
 
                 if(rc == PLCTAG_ERR_DUPLICATE) {
                     conn->fo_dup_retries++;
@@ -1954,7 +1974,7 @@ THREAD_FUNC(session_handler) {
                                "Duplicate connection ID, retry %" PRIu32 " of %d with a new one.", conn->fo_dup_retries,
                                CIP_FO_MAX_DUP_RETRIES);
 
-                        state = SESSION_SEND_FORWARD_OPEN;
+                        conn->state = SESSION_SEND_FORWARD_OPEN;
                     } else {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                                "The PLC refused %d connection IDs in a row; it has no connection to give us.",
@@ -1970,7 +1990,7 @@ THREAD_FUNC(session_handler) {
                      * limit can still have room for a small connection.
                      */
                     if(forward_open_step_size_down(conn)) {
-                        state = SESSION_SEND_FORWARD_OPEN;
+                        conn->state = SESSION_SEND_FORWARD_OPEN;
                     } else {
                         rc = PLCTAG_ERR_TOO_SMALL;
                     }
@@ -1982,7 +2002,7 @@ THREAD_FUNC(session_handler) {
                         conn->only_use_old_forward_open = true;
                         conn->fo_tried_plain = true;
 
-                        state = SESSION_SEND_FORWARD_OPEN;
+                        conn->state = SESSION_SEND_FORWARD_OPEN;
                     } else {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0,
                                "The PLC refused both Forward Open services, so it does not support connected messaging.  "
@@ -1990,7 +2010,7 @@ THREAD_FUNC(session_handler) {
                     }
                 }
 
-                if(state == SESSION_UNREGISTER) {
+                if(conn->state == SESSION_UNREGISTER) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward Open failed, %s.", plc_tag_decode_error(rc));
 
                     /*
@@ -2010,7 +2030,7 @@ THREAD_FUNC(session_handler) {
                 session_set_connection_status(conn, PLCTAG_CONN_STATUS_UP);
 
                 /*
-                 * Reaching this state is the only thing that counts as a successful connect,
+                 * Reaching this conn->state is the only thing that counts as a successful connect,
                  * so it is the only place the backoff restarts.  Every earlier step -- the
                  * socket, the registration, the Forward Open -- can succeed and still leave a
                  * session that cannot carry a request, and resetting at one of those makes the
@@ -2042,9 +2062,9 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error while processing requests %s!",
                            plc_tag_decode_error(rc));
                     if(conn->use_connected_msg) {
-                        state = SESSION_DISCONNECT;
+                        conn->state = SESSION_DISCONNECT;
                     } else {
-                        state = SESSION_UNREGISTER;
+                        conn->state = SESSION_UNREGISTER;
                     }
 
                     cond_signal(conn->session_wait_cond);
@@ -2057,9 +2077,9 @@ THREAD_FUNC(session_handler) {
                     auto_disconnect = 1;
 
                     if(conn->use_connected_msg) {
-                        state = SESSION_DISCONNECT;
+                        conn->state = SESSION_DISCONNECT;
                     } else {
-                        state = SESSION_UNREGISTER;
+                        conn->state = SESSION_UNREGISTER;
                     }
                     cond_signal(conn->session_wait_cond);
                 }
@@ -2084,7 +2104,7 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Forward close failed %s!", plc_tag_decode_error(rc));
                 }
 
-                state = SESSION_UNREGISTER;
+                conn->state = SESSION_UNREGISTER;
                 cond_signal(conn->session_wait_cond);
                 break;
 
@@ -2096,7 +2116,7 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unregistering session failed %s!", plc_tag_decode_error(rc));
                 }
 
-                state = SESSION_CLOSE_SOCKET;
+                conn->state = SESSION_CLOSE_SOCKET;
                 cond_signal(conn->session_wait_cond);
                 break;
 
@@ -2109,9 +2129,9 @@ THREAD_FUNC(session_handler) {
                 }
 
                 if(auto_disconnect) {
-                    state = SESSION_WAIT_IDLE_RECONNECT;
+                    conn->state = SESSION_WAIT_IDLE_RECONNECT;
                 } else {
-                    state = SESSION_START_RETRY;
+                    conn->state = SESSION_START_RETRY;
                 }
                 cond_signal(conn->session_wait_cond);
                 break;
@@ -2132,7 +2152,7 @@ THREAD_FUNC(session_handler) {
                        retry_wait_ms);
 
                 /* start waiting. */
-                state = SESSION_WAIT_ERR_RETRY;
+                conn->state = SESSION_WAIT_ERR_RETRY;
 
                 cond_signal(conn->session_wait_cond);
                 break;
@@ -2143,7 +2163,7 @@ THREAD_FUNC(session_handler) {
 
                 if(timeout_time < now) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
-                    state = SESSION_OPEN_SOCKET_START;
+                    conn->state = SESSION_OPEN_SOCKET_START;
                     cond_signal(conn->session_wait_cond);
                 } else {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Wait not complete, still %dms to go.",
@@ -2166,7 +2186,7 @@ THREAD_FUNC(session_handler) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                                "There are requests waiting, reopening connection to PLC.");
 
-                        state = SESSION_OPEN_SOCKET_START;
+                        conn->state = SESSION_OPEN_SOCKET_START;
                         cond_signal(conn->session_wait_cond);
                     }
                 }
@@ -2175,15 +2195,15 @@ THREAD_FUNC(session_handler) {
 
 
             default:
-                pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0, "Unknown state %d!", state);
+                pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0, "Unknown state %d!", conn->state);
 
                 /* FIXME - this logic is not complete.  We might be here without
                  * a connected conn or a registered conn. */
 
                 if(conn->use_connected_msg) {
-                    state = SESSION_DISCONNECT;
+                    conn->state = SESSION_DISCONNECT;
                 } else {
-                    state = SESSION_UNREGISTER;
+                    conn->state = SESSION_UNREGISTER;
                 }
 
                 cond_signal(conn->session_wait_cond);
@@ -2428,8 +2448,8 @@ cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_pro
 
     return conn;
 }
-int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, attr attribs,
-                            cip_conn_p *tag_conn, int *is_new_conn) {
+int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, const cip_plc_entry_t *plc_entry,
+                            attr attribs, cip_conn_p *tag_conn, int *is_new_conn) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
@@ -2477,7 +2497,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
     critical_block(list->mutex) {
         /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
-            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id);
+            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_entry);
         } else {
             /* no sharing, create a new one */
             session = NULL;
@@ -2498,6 +2518,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
+                session->plc_entry = plc_entry;
                 atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
                 atomic_init_int32(&session->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
 

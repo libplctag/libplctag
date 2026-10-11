@@ -45,7 +45,7 @@
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag_string.h>
 #include <libplctag/lib/version.h>
-#include <libplctag/modules/cip_tag_create.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <libplctag/modules/omron/omron.h>
 #include <limits.h>
@@ -809,7 +809,22 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return src_tag ? PLCTAG_ERR_NOT_ALLOWED : PLCTAG_ERR_BAD_PARAM;
     }
 
-    tag = tag_constructor(attribs, tag_callback_func, userdata, src_tag);
+    rc = tag_constructor(attribs, tag_callback_func, userdata, src_tag, &tag);
+
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Warning, %s error found while creating tag!", plc_tag_decode_error(rc));
+
+        /*
+         * A constructor that failed after allocating still hands the tag back so it can be
+         * released here.  rc_dec() tolerates NULL, so the two cases need no separate paths,
+         * and the instance reference was never transferred, so it is released here too.
+         */
+        attr_destroy(attribs);
+        rc_dec(tag);
+        rc_dec(inst);
+
+        return rc;
+    }
 
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, skipping mutex creation and other generic setup.");
@@ -824,17 +839,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      * not need its own rc_dec(inst) -- that would double-release. */
     tag->instance = inst;
     inst = NULL;
-
-    if(tag->status != PLCTAG_STATUS_OK && tag->status != PLCTAG_STATUS_PENDING) {
-        int tag_status = tag->status;
-
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Warning, %s error found while creating tag!", plc_tag_decode_error(tag_status));
-
-        attr_destroy(attribs);
-        rc_dec(tag);
-
-        return tag_status;
-    }
 
     /* set up the read cache config. */
     read_cache_ms = attr_get_int(attribs, "read_cache_ms", 0);

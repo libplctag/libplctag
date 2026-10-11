@@ -57,8 +57,8 @@
  * These are field lists rather than nested structs on purpose: a nested struct would change
  * how the fields are spelled at every use and raises a question about how packing applies
  * through it, while a macro cannot change the layout at all.  The _Static_assert block at the
- * end of this file is what proves that.  It is the same idiom CIP_CONN_BASE_STRUCT uses in
- * conn.h.
+ * end of this file is what proves that.  It is the same idiom TAG_BASE_STRUCT uses in
+ * lib/tag.h.
  */
 
 /* clang-format off */

@@ -36,7 +36,7 @@
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/cip_tag_create.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/tag.h>
@@ -131,15 +131,28 @@ int session_startup(void) { return session_list_init(&conn_list); }
 
 
 void session_teardown(void) { session_list_teardown(&conn_list, DEBUG_MODULE_AB_SESSION); }
+
+
+int32_t session_live_count(void) { return session_list_count(&conn_list); }
+
+
 int session_find_or_create(cip_conn_p *tag_session, attr attribs, int *is_new_session) {
-    const cip_conn_profile_t *profile = ab_conn_profile(cip_plc_type_from_attributes(attribs));
+    cip_plc_type_t plc_type = cip_plc_type_from_attributes(attribs);
+    const cip_conn_profile_t *profile = ab_conn_profile(plc_type);
 
     if(!profile) {
-        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unknown PLC type %d!", cip_plc_type_from_attributes(attribs));
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unknown PLC type %d!", plc_type);
         return PLCTAG_ERR_BAD_DEVICE;
     }
 
-    return cip_conn_find_or_create(&conn_list, profile, attribs, tag_session, is_new_session);
+    /*
+     * The row is resolved from the same attributes the connection is about to parse its own
+     * path from, so the dialect stored on the connection and the path it encodes cannot
+     * disagree.
+     */
+    return cip_conn_find_or_create(&conn_list, profile,
+                                   cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs)), attribs,
+                                   tag_session, is_new_session);
 }
 
 

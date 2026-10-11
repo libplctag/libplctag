@@ -1371,8 +1371,8 @@ int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload) {
  * Hand the finished CIP message to the connection, which adds the framing.
  *
  * A plain PCCC request is addressed to the device at the gateway, so it is not routed onward.
- * A DH+ one rides a connection to the bridge, and ab_common.c sets use_connected_msg for
- * those, so cip_submit_payload() picks the connected framing for them.
+ * A DH+ one rides a connection to the bridge, and the DH+ rows say so, so
+ * cip_submit_payload() picks the connected framing for them.
  */
 static int pccc_submit(cip_tag_p tag, cip_request_p req, uint8_t *data_end, bool is_dhp) {
     int cip_request_size = (int)(data_end - req->data);

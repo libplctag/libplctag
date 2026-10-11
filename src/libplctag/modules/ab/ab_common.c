@@ -40,12 +40,13 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/cip_tag_create.h>
-#include <libplctag/modules/ab/connection_tag.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>
 #include <libplctag/modules/ab/eip_slc_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
+#include <libplctag/modules/cip/connection_tag.h>
+#include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/standard_tag.h>
@@ -88,6 +89,10 @@
 
 /* forward declarations*/
 static int get_tag_data_type(cip_tag_p tag, attr attribs);
+static plc_tag_p ab_connection_tag_create(attr attribs,
+                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                          void *userdata, plc_tag_p src_tag);
+static int setup_raw_tag(cip_tag_p tag);
 
 
 
@@ -98,6 +103,19 @@ struct tag_vtable_t default_vtable = {
     .status = cip_tag_unimplemented_status,
     .tickler = cip_tag_unimplemented_tickler,
     .write = cip_tag_unimplemented_write,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+
+    /* attribute accessors */
+    .attribs = ab_attribs,
+};
+
+static struct tag_vtable_t raw_tag_vtable = {
+    .abort = (tag_vtable_func)cip_tag_abort_request,
+    .read = NULL,
+    .status = (tag_vtable_func)cip_tag_status,
+    .tickler = (tag_vtable_func)cip_raw_tag_tickler,
+    .write = (tag_vtable_func)cip_raw_tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
 
@@ -142,10 +160,12 @@ void ab_teardown(void) {
 }
 
 
-plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                        void *userdata, plc_tag_p src_tag) {
+int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                  void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
     cip_tag_p tag = NULL;
+    cip_conn_p session = NULL;
     const cip_plc_entry_t *entry = NULL;
+    cip_plc_type_t plc_type = CIP_PLC_NONE;
     const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
 
@@ -153,59 +173,62 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     /* short circuit for device tag */
     if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
-        return (plc_tag_p)ab_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+        *tag_out = (plc_tag_p)ab_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
+
+        /* the connection tag types still report through the tag. */
+        return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
     }
 
-    /* allocate the tag.  It is the vehicle for returning status from here on. */
-    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_AB, &default_vtable, DEBUG_MODULE_AB_COMMON);
-    if(!tag) { return (plc_tag_p)NULL; }
-
     /*
-     * check the CPU type.
+     * Which family, which dialect, and which connection -- all settled before a tag exists.
      *
-     * This determines the protocol type.
+     * The family determines the connection: it decides the payload sizing and the messaging,
+     * so a connection is keyed on its row as much as on its address.  That is why this runs
+     * first rather than on a half-built tag.
      *
+     * A clone takes its family from what it was cloned from and its dialect from the
+     * connection it inherits.  Its own attributes cannot be asked: a clone need not repeat
+     * the path that made the original DH+.
      */
-
     if(src_tag) {
         switch(src_tag->protocol_type) {
             case TAG_PROTOCOL_AB: {
                 cip_tag_p src = (cip_tag_p)src_tag;
-                tag->plc_type = src->plc_type;
+                plc_type = src->plc_type;
+                session = src->session;
                 break;
             }
 
             case TAG_PROTOCOL_AB_CONNECTION: {
-                cip_conn_p src_session = (cip_conn_p)((connection_tag_p)src_tag)->conn;
-                tag->plc_type = src_session ? src_session->profile->plc_type : CIP_PLC_NONE;
+                session = (cip_conn_p)((connection_tag_p)src_tag)->conn;
+                plc_type = session ? session->profile->plc_type : CIP_PLC_NONE;
                 break;
             }
 
-            default: tag->plc_type = CIP_PLC_NONE; break;
+            default: break;
         }
+
+        if(!session) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+
+        if(session->plc_entry) { entry = cip_plc_entry_find(plc_type, session->plc_entry->dialect); }
     } else {
-        if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
+        /* AB accepts every PLC family its own table knows; the table is the filter. */
+        plc_type = cip_plc_type_from_attributes(attribs);
+
+        if(plc_type == CIP_PLC_NONE) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
-            /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-            rc_dec(tag);
-            return (plc_tag_p)NULL;
+            return PLCTAG_ERR_BAD_DEVICE;
         }
+
+        entry = cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs));
     }
 
-    /*
-     * Which family, which dialect, and what that pair says to do.
-     *
-     * The dialect comes from the path rather than from the connection, so this runs before
-     * the connection exists -- which is what lets one hook replace what used to be two
-     * switches, one before the connection to settle the messaging and one after it to read
-     * back is_dhp.
-     */
-    entry = cip_plc_entry_find(tag->plc_type, cip_dialect_from_attributes(tag->plc_type, attribs));
     if(!entry || !entry->setup_tag) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unknown PLC type!");
-        tag->status = PLCTAG_ERR_BAD_CONFIG;
-        return (plc_tag_p)tag;
+        return PLCTAG_ERR_BAD_CONFIG;
     }
 
     path = attr_get_str(attribs, "path", NULL);
@@ -219,25 +242,70 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      * nothing after it is a present but empty attribute, and it used to pass here and fail
      * further in with a worse message.  str_length(NULL) is 0, so this covers both.
      */
-    if(!src_tag && str_length(path) == 0 && tag->plc_type == CIP_PLC_LGX) {
+    if(!src_tag && str_length(path) == 0 && plc_type == CIP_PLC_LGX) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "A path is required for Logix-class PLCs!");
-        tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag_p)tag;
+        return PLCTAG_ERR_BAD_PARAM;
     }
+
+    /*
+     * Whether the requests will be connected ones.  The row answers it, which is what lets
+     * the connection be created ahead of the tag; the tag reads the same answer back below.
+     */
+    attr_set_int(attribs, "use_connected_msg", (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0));
+
+    /*
+     * Find or create a session.
+     *
+     * All tags need sessions.  They are the TCP connection to the gateway PLC.
+     */
+    if(src_tag) {
+        /* the reference this tag will own.  The source keeps its own. */
+        session = rc_inc(session);
+
+        if(!session) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+    } else {
+        if(session_find_or_create(&session, attribs, NULL) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
+            return PLCTAG_ERR_BAD_GATEWAY;
+        }
+    }
+
+    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_AB, &default_vtable, DEBUG_MODULE_AB_COMMON);
+    if(!tag) {
+        /* nothing owns the connection yet, so this is the one failure that has to say so. */
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
+        rc_dec(session);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /*
+     * The tag owns the connection from here, so every failure below releases it along with
+     * the tag and needs no unwinding of its own.
+     */
+    tag->session = session;
+    tag->plc_type = plc_type;
+    tag->use_connected_msg = (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0);
+
+    /*
+     * Handed back even when this function goes on to fail, so the caller can release it.
+     * The error itself travels in the return value from here on.
+     */
+    *tag_out = (plc_tag_p)tag;
 
     /*
      * The element type, and the special tags.
      *
-     * This reads only attributes -- never tag->session -- so it belongs ahead of the
-     * connection, and it has to be: a special tag sets its own vtable and byte order here,
-     * and the leaf below fills in the family's defaults only where it finds none.
+     * A special tag sets its own vtable and byte order here, and the leaf below fills in the
+     * family's defaults only where it finds none, so this has to run first.
      */
     rc = get_tag_data_type(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Error %s getting tag element data type or handling special tag!",
                plc_tag_decode_error(rc));
-        tag->status = (int8_t)rc;
-        return (plc_tag_p)tag;
+        return rc;
     }
 
     /*
@@ -251,60 +319,19 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     rc = entry->setup_tag(entry, tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to set up %s tag!", entry->name);
-        tag->status = (int8_t)rc;
-        return (plc_tag_p)tag;
+        return rc;
     }
 
     rc = cip_tag_check_setup(tag, entry->name, &default_vtable, DEBUG_MODULE_AB_COMMON);
     if(rc != PLCTAG_STATUS_OK) {
-        tag->status = (int8_t)rc;
-        return (plc_tag_p)tag;
-    }
-
-    /* the leaf settles whether a connection is wanted, so the attribute is set from it. */
-    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
-
-    /*
-     * Find or create a session.
-     *
-     * All tags need sessions.  They are the TCP connection to the gateway PLC.
-     */
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            /* see the note on the plc_type switch above. */
-            case TAG_PROTOCOL_AB: {
-                cip_tag_p src = (cip_tag_p)src_tag;
-                tag->session = rc_inc(src->session);
-                break;
-            }
-
-            case TAG_PROTOCOL_AB_CONNECTION: {
-                tag->session = rc_inc((cip_conn_p)((connection_tag_p)src_tag)->conn);
-                break;
-            }
-
-            default: tag->session = NULL; break;
-        }
-
-        if(!tag->session) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
-            tag->status = PLCTAG_ERR_NOT_FOUND;
-            return (plc_tag_p)tag;
-        }
-    } else {
-        if(session_find_or_create(&tag->session, attribs, NULL) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
-            tag->status = PLCTAG_ERR_BAD_GATEWAY;
-            return (plc_tag_p)tag;
-        }
+        return rc;
     }
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "using session=%p", tag->session);
 
     rc = cip_tag_resolve_elem_count(tag, attribs, DEBUG_MODULE_AB_COMMON);
     if(rc != PLCTAG_STATUS_OK) {
-        tag->status = (int8_t)rc;
-        return (plc_tag_p)tag;
+        return rc;
     }
 
     switch(tag->plc_type) {
@@ -324,8 +351,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->status = (int8_t)rc;
-        return (plc_tag_p)tag;
+        return rc;
     }
 
     /*
@@ -334,8 +360,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     if(!tag->special_tag && check_tag_name(tag, attr_get_str(attribs, "name", NULL)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Bad tag name!");
-        tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag_p)tag;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     /* kick off a read to get the tag type and size. */
@@ -361,7 +386,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Done.");
 
-    return (plc_tag_p)tag;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -387,11 +412,10 @@ static void apply_tag_defaults(cip_tag_p tag, tag_byte_order_t *byte_order, tag_
 /*
  * The three PCCC families, direct or bridged.
  *
- * Only two things differ across their six rows: the byte order, which the two leaves below
- * supply, and whether the request is connected, which follows from the dialect alone -- a
- * DH+ bridge always needs a connection, a direct PCCC device never uses one.  That is the
- * whole of what the three `if(!tag->session->is_dhp)` branches used to decide, and deciding
- * it from the key means it no longer has to wait for the connection to exist.
+ * Only one thing differs across their six rows: the byte order, which the two leaves below
+ * supply.  Whether the request is connected follows from the dialect alone -- a DH+ bridge
+ * always needs a connection, a direct PCCC device never uses one -- so it is data on the row
+ * and settled before the connection is created.
  */
 static int setup_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs,
                           tag_byte_order_t *byte_order) {
@@ -402,7 +426,6 @@ static int setup_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
                "A path is not supported for this PLC type if it is not for a DH+ bridge.");
     }
 
-    tag->use_connected_msg = (entry->dialect == CIP_DIALECT_DHP);
     tag->allow_packing = 0;
     tag->first_read = 0; /* the data file in the name states the type, so there is nothing to discover. */
 
@@ -433,7 +456,6 @@ int ab_setup_lgx_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
      * unconnected request.  It is not DH+ capable, so it has one row and no dialect to
      * consider.
      */
-    tag->use_connected_msg = 0;
     tag->allow_packing = 0;
     tag->first_read = 0;
 
@@ -446,8 +468,7 @@ int ab_setup_lgx_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
 int ab_setup_logix_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up %s tag.", entry->name);
 
-    /* a connection and packing are both wanted by default, and both can be turned off. */
-    tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
+    /* packing is wanted by default and can be turned off; the connection is settled by the row. */
     tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
 
     /* the first read is what discovers the element type and size. */
@@ -466,8 +487,7 @@ int ab_setup_micro800_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "A path is not supported for this PLC type.");
     }
 
-    /* a Micro800 only answers over a connection, and cannot pack requests. */
-    tag->use_connected_msg = 1;
+    /* a Micro800 cannot pack requests; its row says it only answers over a connection. */
     tag->allow_packing = 0;
     tag->first_read = 1;
 
@@ -485,8 +505,7 @@ int ab_setup_generic_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attri
     /* a generic device may be reached through a chassis path, unlike the families above. */
     if(str_length(path)) { pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Using path: %s", path); }
 
-    /* every generic operation is stateless, so there is no connection and nothing to pack. */
-    tag->use_connected_msg = 0;
+    /* every generic operation is stateless, so there is nothing to pack. */
     tag->allow_packing = 0;
     tag->first_read = 0;
 
@@ -876,13 +895,6 @@ const attr_def_t ab_attribs[] = {
 };
 
 
-/* AB accepts every PLC family its own table knows; the table is the filter. */
-int check_cpu(cip_tag_p tag, attr attribs) {
-    tag->plc_type = cip_plc_type_from_attributes(attribs);
-
-    return (tag->plc_type != CIP_PLC_NONE) ? PLCTAG_STATUS_OK : PLCTAG_ERR_BAD_DEVICE;
-}
-
 int check_tag_name(cip_tag_p tag, const char *name) {
     int rc = PLCTAG_STATUS_OK;
     pccc_addr_t pccc_address;
@@ -1061,3 +1073,25 @@ struct tag_vtable_t cip_standard_tag_vtable_ab = {
     /* attribute accessors */
     .attribs = ab_attribs,
 };
+
+
+static plc_tag_p ab_connection_tag_create(attr attribs,
+                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                          void *userdata, plc_tag_p src_tag) {
+    /*
+     * AB adopts a connection from an OMRON tag as well as its own: both families hang the
+     * same cip_conn_p off the same field, and a user who already has one should not be
+     * made to open a second.  The BAD_GATEWAY override is long-standing behaviour -- AB
+     * reports it for any find-or-create failure, where OMRON passes the real error up.
+     */
+    static const cip_connection_tag_ops_t ops = {.connection_protocol = TAG_PROTOCOL_AB_CONNECTION,
+                                                 .debug_module = DEBUG_MODULE_AB_CONNECTION,
+                                                 .source_protocols = {TAG_PROTOCOL_AB, TAG_PROTOCOL_OMRON},
+                                                 .find_or_create = session_find_or_create,
+                                                 .create_failure_rc = PLCTAG_ERR_BAD_GATEWAY};
+
+    return cip_connection_tag_create(attribs, &ops, tag_callback_func, userdata, src_tag);
+}
+
+
+static int setup_raw_tag(cip_tag_p tag) { return cip_raw_tag_setup(tag, &raw_tag_vtable, DEBUG_MODULE_AB_EIP_CIP_SPECIAL); }

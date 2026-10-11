@@ -48,7 +48,7 @@
 #include <libplctag/api/libplctag.h>
 
 #include <libplctag/modules/cip/plc_type.h>
-#include <libplctag/modules/cip_tag_create.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <utils/attr.h>
 
 
@@ -224,6 +224,47 @@ static void test_an_unparseable_path_is_direct(void **state) {
 }
 
 
+/*
+ * Whether requests are connected is row data now, not a line in each setup leaf, because the
+ * connection is created before any tag exists.  Nothing in the simulator suite distinguishes
+ * a wrong answer here from a working one until the PLC refuses the framing, so pin the two
+ * rules the old leaves enforced in code.
+ */
+static void test_the_row_settles_connected_messaging(void **state) {
+    cip_plc_type_t plc_type = CIP_PLC_NONE;
+    size_t dialect_index = 0;
+    attr attribs = attr_create();
+
+    (void)state;
+
+    assert_non_null(attribs);
+
+    for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
+        for(dialect_index = 0; dialect_index < (sizeof(all_dialects) / sizeof(all_dialects[0])); dialect_index++) {
+            const cip_plc_entry_t *entry = cip_plc_entry_find(plc_type, all_dialects[dialect_index]);
+
+            if(!entry) { continue; }
+
+            /* -1 means "ask the tag string"; anything else is a fixed yes or no. */
+            assert_true(entry->use_connected_msg >= -1 && entry->use_connected_msg <= 1);
+
+            /* a DH+ bridge is reached over a connection, and no tag string may say otherwise. */
+            if(entry->dialect == CIP_DIALECT_DHP) { assert_int_equal((int)entry->use_connected_msg, 1); }
+        }
+    }
+
+    /* the one family that defers to the tag string, and what it does with no answer. */
+    assert_true(cip_entry_use_connected_msg(cip_plc_entry_find(CIP_PLC_LGX, CIP_DIALECT_DIRECT), attribs));
+    assert_int_equal(attr_set_str(attribs, "use_connected_msg", "0"), PLCTAG_STATUS_OK);
+    assert_true(!cip_entry_use_connected_msg(cip_plc_entry_find(CIP_PLC_LGX, CIP_DIALECT_DIRECT), attribs));
+
+    /* and a family that does not defer ignores the same attribute. */
+    assert_true(cip_entry_use_connected_msg(cip_plc_entry_find(CIP_PLC_MICRO800, CIP_DIALECT_DIRECT), attribs));
+
+    attr_destroy(attribs);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_every_plc_type_has_a_direct_row),
@@ -231,6 +272,7 @@ int main(void) {
         cmocka_unit_test(test_every_row_is_named),
         cmocka_unit_test(test_every_row_has_a_leaf),
         cmocka_unit_test(test_the_key_is_what_the_row_answers_to),
+        cmocka_unit_test(test_the_row_settles_connected_messaging),
         cmocka_unit_test(test_a_dhp_path_is_a_dhp_dialect),
         cmocka_unit_test(test_an_ordinary_path_is_direct),
         cmocka_unit_test(test_a_family_that_cannot_bridge_is_always_direct),
