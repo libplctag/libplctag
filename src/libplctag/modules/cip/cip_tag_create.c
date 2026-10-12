@@ -60,18 +60,67 @@
 #include <utils/debug.h>
 
 
+/* maximum for PCCC embedded within CIP. */
+#define MAX_CIP_PCCC_MSG_SIZE (244)
+
+#define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
+#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
+
+#define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
+#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
+
+/*
+ * Smallest PCCC connection payload we can actually use.  A ForwardOpen error can offer a
+ * smaller size than we asked for and we accept it, but below the fixed per-request overhead
+ * there is no room left for a request.  PCCC needs about 92 bytes for its command header and
+ * addressing; MIN_PAYLOAD_SIZE_CIP is the CIP equivalent.
+ */
+#define MIN_PAYLOAD_SIZE_PCCC (92)
+
+/* the three connection shapes, which the rows share. */
+#define PCCC_CONN                                                                                                       \
+    .max_payload_capacity = MAX_CIP_PCCC_MSG_SIZE, .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .fo_ex_conn_size = 0,         \
+    .only_use_old_forward_open = true, .min_payload_size = MIN_PAYLOAD_SIZE_PCCC
+
+#define LGX_CONN                                                                                                        \
+    .max_payload_capacity = MAX_CIP_LGX_MSG_SIZE_EX, .fo_conn_size = MAX_CIP_LGX_MSG_SIZE,                              \
+    .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .only_use_old_forward_open = false, .min_payload_size = MIN_PAYLOAD_SIZE_CIP
+
+#define OMRON_CONN                                                                                                      \
+    .max_payload_capacity = MAX_CIP_OMRON_MSG_SIZE_EX, .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE,                          \
+    .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .only_use_old_forward_open = false, .min_payload_size = MIN_PAYLOAD_SIZE_CIP
+
+/*
+ * Micro800 supports the Extended Forward Open and asks for the same size *Logix does: the
+ * only published figure for anything larger traces back to a single forum post and no
+ * Rockwell document states one, while 4002 is measured -- 4082 comes back as an invalid
+ * connection size and 4002 succeeds.  Asking higher costs a failed round trip on every
+ * connection and sizes the per-connection buffer to match.  Raise it if a Micro800 is
+ * measured accepting more.  Generic CIP takes the *Logix sizing too.
+ */
 static const cip_plc_entry_t cip_plc_entries[] = {
-    {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_plc5_tag},
-    {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1, .setup_tag = ab_setup_plc5_tag},
-    {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_slc_tag},
-    {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1, .setup_tag = ab_setup_slc_tag},
-    {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_slc_tag},
-    {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1, .setup_tag = ab_setup_slc_tag},
-    {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_lgx_pccc_tag},
-    {.name = "Logix", .plc_type = CIP_PLC_LGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = -1, .setup_tag = ab_setup_logix_tag},
-    {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1, .setup_tag = ab_setup_micro800_tag},
-    {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0, .setup_tag = ab_setup_generic_tag},
-    {.name = "OMRON NJ/NX", .plc_type = CIP_PLC_OMRON_NJNX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1, .setup_tag = omron_setup_njnx_tag},
+    {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
+     .setup_tag = ab_setup_plc5_tag, PCCC_CONN, .dhp_capable = true},
+    {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
+     .setup_tag = ab_setup_plc5_tag, PCCC_CONN, .dhp_capable = true},
+    {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
+     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+    {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
+     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+    {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
+     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+    {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
+     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+    {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
+     .setup_tag = ab_setup_lgx_pccc_tag, PCCC_CONN, .dhp_capable = false},
+    {.name = "Logix", .plc_type = CIP_PLC_LGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = -1,
+     .setup_tag = ab_setup_logix_tag, LGX_CONN, .dhp_capable = false},
+    {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1,
+     .setup_tag = ab_setup_micro800_tag, LGX_CONN, .dhp_capable = false},
+    {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
+     .setup_tag = ab_setup_generic_tag, LGX_CONN, .dhp_capable = false},
+    {.name = "OMRON NJ/NX", .plc_type = CIP_PLC_OMRON_NJNX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1,
+     .setup_tag = omron_setup_njnx_tag, OMRON_CONN, .dhp_capable = false},
 };
 
 

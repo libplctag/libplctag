@@ -42,13 +42,11 @@
  * here that sits *above* the families rather than below them -- the rest of modules/cip
  * names no family and must keep it that way.
  *
- * The table is a dispatch table, not a data table.  Tag creation is not one algorithm with
- * per-family constants -- PCCC logical-address encoding, Logix symbolic encoding and
- * OMRON's are different code.  So each row carries a function.  The data a row does carry is
- * its key plus what has to be known before the tag exists, which is whether the connection
- * is a connected one.  Where the families really are parameters of one algorithm, as in
- * Forward Open negotiation, the existing cip_conn_profile_t table already does the job and
- * this one does not duplicate it.
+ * Each row carries a function, because tag creation is not one algorithm with per-family
+ * constants -- PCCC logical-address encoding, Logix symbolic encoding and OMRON's are
+ * different code.  The data a row carries is what the connection needs before any tag
+ * exists: whether it is a connected one, and how to size and negotiate it.  The connection
+ * holds its row, so a tag asks the connection rather than the table.
  */
 
 #include <libplctag/lib/tag.h>
@@ -97,6 +95,17 @@ struct cip_plc_entry_t {
      * their six rows.
      */
     int (*setup_tag)(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+
+    /*
+     * Connection sizing and negotiation.  Shared code reads these rather than plc_type, so
+     * it never has to know which family it is talking to.
+     */
+    int max_payload_capacity;       /* sizes the connection's receive buffer */
+    int fo_conn_size;               /* payload to ask for in a plain Forward Open */
+    int fo_ex_conn_size;            /* payload to ask for in an extended Forward Open, 0 if unsupported */
+    bool only_use_old_forward_open;
+    uint16_t min_payload_size;      /* refuse to negotiate below this */
+    bool dhp_capable;               /* family can bridge to DH+ */
 };
 
 

@@ -172,7 +172,7 @@ int session_get_available_cip_payload_space(cip_conn_p conn) {
 
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               conn->max_payload_size, conn->profile->fo_conn_size, conn->profile->fo_ex_conn_size, max_payload_size);
+               conn->max_payload_size, conn->plc_entry->fo_conn_size, conn->plc_entry->fo_ex_conn_size, max_payload_size);
 
         // Account for CPF data item overhead
         if(conn->use_connected_msg) {
@@ -639,11 +639,11 @@ static bool forward_open_step_size_down(cip_conn_p conn) {
 
     next_idx = forward_open_rung_at_or_below(limit);
 
-    if(next_idx < 0 || forward_open_size_ladder[next_idx] < conn->profile->min_payload_size) {
+    if(next_idx < 0 || forward_open_size_ladder[next_idx] < conn->plc_entry->min_payload_size) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                "No connection size left to try at or below %u bytes that still clears the %u bytes this protocol needs "
                "for a single request!",
-               limit, conn->profile->min_payload_size);
+               limit, conn->plc_entry->min_payload_size);
         return false;
     }
 
@@ -695,7 +695,7 @@ int send_forward_open_request(cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Flag prohibiting use of extended ForwardOpen is %d.",
            conn->only_use_old_forward_open);
 
-    max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->profile->fo_conn_size : conn->profile->fo_ex_conn_size);
+    max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->plc_entry->fo_conn_size : conn->plc_entry->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
     critical_block(conn->session_mutex) {
@@ -2275,9 +2275,9 @@ THREAD_FUNC(session_handler) {
 }
 
 
-cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_profile_t *profile, const char *host,
-                                       const char *path, int *use_connected_msg, int connection_group_id) {
-    const int max_payload_capacity = profile->max_payload_capacity;
+cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, const char *host,
+                                     const char *path, int *use_connected_msg, int connection_group_id) {
+    const int max_payload_capacity = plc_entry->max_payload_capacity;
     const bool data_buffer_is_static = true;
     static volatile uint32_t connection_id = 0;
 
@@ -2356,7 +2356,7 @@ cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_pro
      * family this is.  PLC-5, SLC and MicroLogix can; everything else rejects a DH+
      * segment rather than ignoring it.
      */
-    int dhp_kind = (profile->dhp_capable ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
+    int dhp_kind = (plc_entry->dhp_capable ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
 
     bool is_bridged = false;
 
@@ -2437,17 +2437,17 @@ cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_pro
 
     /* fix up the rest of teh fields */
     conn->owner_list = list;
-    conn->profile = profile;
+    conn->plc_entry = plc_entry;
 
     /* the one value off the row the negotiation is allowed to change */
-    conn->only_use_old_forward_open = profile->only_use_old_forward_open;
+    conn->only_use_old_forward_open = plc_entry->only_use_old_forward_open;
 
     /* the opening ask comes from the row above, so the fallback ladder has not been touched yet. */
     conn->fo_ladder_idx = -1;
     conn->fo_offered_size = 0;
     conn->fo_dup_retries = 0;
     conn->fo_tried_plain = false;
-    conn->max_payload_size = (uint16_t)profile->fo_conn_size;
+    conn->max_payload_size = (uint16_t)plc_entry->fo_conn_size;
     conn->use_connected_msg = *use_connected_msg;
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     conn->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
@@ -2489,8 +2489,8 @@ cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_pro
 
     return conn;
 }
-int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, const cip_plc_entry_t *plc_entry,
-                            attr attribs, cip_conn_p *tag_conn, int *is_new_conn) {
+int cip_conn_find_or_create(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs, cip_conn_p *tag_conn,
+                            int *is_new_conn) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
@@ -2498,8 +2498,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
      * The family's row decides, so every tag on the connection, @connection included, gets
      * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.
      */
-    int use_connected_msg = plc_entry ? (cip_entry_use_connected_msg(plc_entry, attribs) ? 1 : 0)
-                                      : attr_get_int(attribs, "use_connected_msg", 0);
+    int use_connected_msg = (cip_entry_use_connected_msg(plc_entry, attribs) ? 1 : 0);
     cip_conn_p session = NULL;
     int new_session = 0;
     /*
@@ -2565,16 +2564,15 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
         } else if(session == NULL) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating new session.");
 
-            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s session.", profile->name);
+            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s session.", plc_entry->name);
 
-            session = session_create_from_profile(list, profile, session_gw, session_path, &use_connected_msg,
-                                                  connection_group_id);
+            session = session_create_from_entry(list, plc_entry, session_gw, session_path, &use_connected_msg,
+                                                connection_group_id);
 
             if(session == NULL) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
-                session->plc_entry = plc_entry;
                 atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
                 atomic_init_int32(&session->connection_retry_max_delay_ms, connection_retry_max_delay_ms);
 

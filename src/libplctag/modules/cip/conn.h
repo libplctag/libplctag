@@ -200,26 +200,6 @@ typedef enum {
 } session_state_t;
 
 
-/*
- * Everything that varies between PLC families, as data.
- *
- * A dialect declares one row per family it supports and hands the matching row
- * to session_create_from_profile().  Nothing here is interpreted by the shared
- * code except as the values it stores, so adding a family is adding a row --
- * there is no dispatch to extend and no constructor to write.
- */
-typedef struct {
-    cip_plc_type_t plc_type; /* the PLC family this row describes */
-    const char *name; /* for logging only */
-
-    int max_payload_capacity; /* sizes the connection's receive buffer */
-    int fo_conn_size;         /* payload to ask for in a plain Forward Open */
-    int fo_ex_conn_size;      /* payload to ask for in an extended Forward Open, 0 if unsupported */
-    bool only_use_old_forward_open;
-
-    uint16_t min_payload_size; /* refuse to negotiate below this */
-    bool dhp_capable;          /* family can bridge to DH+ */
-} cip_conn_profile_t;
 
 
 /* the most requests that may be bundled into one Multiple Service Packet */
@@ -367,23 +347,14 @@ typedef struct cip_conn_t {
     int connection_group_id;
 
     /*
-     * The family's row, owned by the dialect that declared it.  Rows are static constants
-     * with program lifetime, so this is never dangling and never written through.
+     * The family and routing dialect this connection was created for, with its sizing and
+     * its tag setup.  Rows are static constants with program lifetime, so this is never
+     * dangling and never written through, and never NULL.
      *
      * Shared code reads what the family implies -- min_payload_size, dhp_capable -- rather
-     * than plc_type, so it never has to know which family this is.  See cip_encode_path()'s
-     * CIP_PLC_KIND_* for the same idea applied to path encoding.  plc_type is here only so
-     * a tag created from an @connection tag can inherit the family from the connection.
-     */
-    const cip_conn_profile_t *profile;
-
-    /*
-     * The same family plus the routing dialect this connection actually negotiated, which
-     * the profile alone cannot say.  Resolved once when the connection is created, so a tag
-     * can ask the connection for its dialect instead of re-reading a path attribute it may
-     * not have -- a cloned tag has no path of its own.
-     *
-     * NULL only if the family has no row, which the tag path reports for itself.
+     * than plc_type, so it never has to know which family this is.  A tag asks the
+     * connection for its dialect instead of re-reading a path attribute it may not have --
+     * a cloned tag has no path of its own.
      */
     const cip_plc_entry_t *plc_entry;
 
@@ -489,7 +460,7 @@ typedef cip_request_t *cip_request_p;
 #define GET_MAX_PAYLOAD_SIZE(conn)    \
     (((conn)->max_payload_size > 0) ? \
          (conn)->max_payload_size :   \
-         (((conn)->profile->fo_conn_size > 0) ? (conn)->profile->fo_conn_size : (conn)->profile->fo_ex_conn_size))
+         (((conn)->plc_entry->fo_conn_size > 0) ? (conn)->plc_entry->fo_conn_size : (conn)->plc_entry->fo_ex_conn_size))
 
 
 /* shared connection handling, see modules/cip/conn.c */
@@ -585,8 +556,8 @@ extern int process_requests(cip_conn_p conn);
 extern THREAD_FUNC(session_handler);
 extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);
 
-extern cip_conn_p session_create_from_profile(cip_conn_list_t *list, const cip_conn_profile_t *profile, const char *host,
-                                              const char *path, int *use_connected_msg, int connection_group_id);
-extern int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *profile, const cip_plc_entry_t *plc_entry,
-                                   attr attribs, cip_conn_p *tag_conn, int *is_new_conn);
+extern cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, const char *host,
+                                            const char *path, int *use_connected_msg, int connection_group_id);
+extern int cip_conn_find_or_create(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs,
+                                   cip_conn_p *tag_conn, int *is_new_conn);
 extern void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);

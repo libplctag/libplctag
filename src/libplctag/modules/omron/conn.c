@@ -48,9 +48,6 @@
 #include <utils/random_utils.h>
 
 
-/* Omron is special */
-#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
-#define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
 
 
 /*
@@ -66,22 +63,6 @@
 static cip_conn_list_t conn_list = {0};
 
 
-/* Omron speaks one dialect, so the table has one row. */
-static const cip_conn_profile_t omron_conn_profiles[] = {
-    /*                                         capacity                   fo_size                 fo_ex_size                 old_fo  min payload           dh+ */
-    {CIP_PLC_OMRON_NJNX, "Omron NJ/NX", MAX_CIP_OMRON_MSG_SIZE_EX, MAX_CIP_OMRON_MSG_SIZE, MAX_CIP_OMRON_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false},
-};
-
-
-static const cip_conn_profile_t *omron_conn_profile(cip_plc_type_t plc_type) {
-    for(size_t i = 0; i < (sizeof(omron_conn_profiles) / sizeof(omron_conn_profiles[0])); i++) {
-        if(omron_conn_profiles[i].plc_type == plc_type) { return &omron_conn_profiles[i]; }
-    }
-
-    return NULL;
-}
-
-
 int conn_startup(void) { return session_list_init(&conn_list); }
 
 
@@ -92,16 +73,15 @@ int32_t conn_live_count(void) { return session_list_count(&conn_list); }
 
 
 int conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
-    const cip_conn_profile_t *profile = omron_conn_profile(CIP_PLC_OMRON_NJNX);
+    /* one family, and an NJ/NX is never DH+ bridged, so the row is fixed. */
+    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(CIP_PLC_OMRON_NJNX, CIP_DIALECT_DIRECT);
 
-    if(!profile) {
-        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "No connection profile for Omron NJ/NX!");
+    if(!plc_entry) {
+        pdebug(DEBUG_MODULE_OMRON_CONN, DEBUG_WARN, 0, "No PLC table entry for Omron NJ/NX!");
         return PLCTAG_ERR_BAD_DEVICE;
     }
 
-    /* one family, and an NJ/NX is never DH+ bridged, so the row is fixed. */
-    return cip_conn_find_or_create(&conn_list, profile, cip_plc_entry_find(CIP_PLC_OMRON_NJNX, CIP_DIALECT_DIRECT), attribs,
-                                   tag_conn, is_new_conn);
+    return cip_conn_find_or_create(&conn_list, plc_entry, attribs, tag_conn, is_new_conn);
 }
 
 

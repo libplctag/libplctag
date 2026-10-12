@@ -41,6 +41,7 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/cip.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/wire.h>
@@ -193,7 +194,7 @@ int cip_encode_forward_open_old(cip_conn_p conn) {
     fo->orig_to_targ_rpi = h2le32(CIP_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if(conn->profile->dhp_capable && conn->is_dhp) {
+    if(conn->plc_entry->dhp_capable && conn->is_dhp) {
         fo->orig_to_targ_conn_params = h2le16(CIP_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(
@@ -203,7 +204,7 @@ int cip_encode_forward_open_old(cip_conn_p conn) {
     fo->targ_to_orig_rpi = h2le32(CIP_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if(conn->profile->dhp_capable && conn->is_dhp) {
+    if(conn->plc_entry->dhp_capable && conn->is_dhp) {
         fo->targ_to_orig_conn_params = h2le16(CIP_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(

@@ -201,7 +201,7 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
 
             case TAG_PROTOCOL_AB_CONNECTION: {
                 session = (cip_conn_p)((connection_tag_p)src_tag)->conn;
-                plc_type = session ? session->profile->plc_type : CIP_PLC_NONE;
+                plc_type = session ? session->plc_entry->plc_type : CIP_PLC_NONE;
                 break;
             }
 
@@ -213,7 +213,7 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
             return PLCTAG_ERR_NOT_FOUND;
         }
 
-        if(session->plc_entry) { entry = cip_plc_entry_find(plc_type, session->plc_entry->dialect); }
+        entry = session->plc_entry;
     } else {
         /* AB accepts every PLC family its own table knows; the table is the filter. */
         plc_type = cip_plc_type_from_attributes(attribs);
