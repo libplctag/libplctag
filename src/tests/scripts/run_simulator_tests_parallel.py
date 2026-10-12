@@ -566,6 +566,19 @@ def build_manifest() -> Manifest:
               [exe("test_shutdown_restart"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"], F)
     sec.test("connection tag connection state transitions (ControlLogix)",
               [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&connection_inactivity_timeout_ms=5000&name=@connection"], T)
+    # The status must be the connection's own and not only what callbacks were told, so an app
+    # with no callback that creates with a timeout of 0 can poll it through the sequence.  The
+    # response delay holds CONNECTING across Register Session and the Forward Open.
+    delayed_conn_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--delay=300"],
+        startup_wait_s=1,
+    )
+    sec.test("@connection status polled with no callback walks the states (ControlLogix)",
+              [exe("test_connection_tag"), "--poll",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&connection_inactivity_timeout_ms=5000&name=@connection"],
+              T, server=delayed_conn_server)
     sec.test("multiple simultaneous @connection tags on same session (ControlLogix)",
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection",
@@ -586,12 +599,12 @@ def build_manifest() -> Manifest:
     sec.test("destroy tag from inside its own callback (AB/EIP)",
               [exe("test_callback_destroy"),
                f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
-    sec.test("create-from-tag API (17 permutation tests with AB/EIP)",
+    sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
                "--clone-attrib=name=TestBigArray[1]&elem_count=1",
                f"--connection-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection",
-               "--timeout=10000"], F)
+               "--logix", "--timeout=10000"], F)
 
     # --- ControlLogix slot-16 path encoding section -------------------------
     slot16_server = ServerSpec(
@@ -1120,7 +1133,7 @@ def build_manifest() -> Manifest:
                "--num-tags=200", "--test-duration-secs=10"], S)
     sec.test("emulator test extended callbacks async (Omron)",
               [exe("test_callback_ex_async"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray"], F)
-    sec.test("create-from-tag API (17 permutation tests with Omron)",
+    sec.test("create-from-tag API (19 permutation tests with Omron)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
                "--clone-attrib=name=TestDINTArray[1]&elem_count=1",
@@ -1445,7 +1458,7 @@ def build_manifest() -> Manifest:
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--timeout=5000"], F)
-    sec.test("create-from-tag API (17 permutation tests with Modbus)",
+    sec.test("create-from-tag API (19 permutation tests with Modbus)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                "--clone-attrib=name=hr20&elem_count=2",

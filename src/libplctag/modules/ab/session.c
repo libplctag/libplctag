@@ -105,16 +105,16 @@ static cip_conn_list_t conn_list = {0};
  * One row per AB PLC family.  Adding a family is adding a row.
  */
 static const cip_conn_profile_t ab_conn_profiles[] = {
-    /*                                       capacity                  fo_size                    fo_ex_size                   old_fo  min payload            dh+    unconn */
-    {CIP_PLC_PLC5,     "PLC/5",               MAX_CIP_PLC5_MSG_SIZE,    MAX_CIP_PLC5_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
-    {CIP_PLC_SLC,      "SLC 500",             MAX_CIP_SLC_MSG_SIZE,     MAX_CIP_SLC_MSG_SIZE,      0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
-    {CIP_PLC_MLGX,     "MicroLogix",          MAX_CIP_MLGX_MSG_SIZE,    MAX_CIP_MLGX_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true,  false},
-    {CIP_PLC_LGX_PCCC, "*Logix PCCC",         MAX_CIP_LGX_PCCC_MSG_SIZE, MAX_CIP_LGX_PCCC_MSG_SIZE, 0,                          true,   MIN_PAYLOAD_SIZE_PCCC, false, false},
-    {CIP_PLC_LGX,      "*Logix",              MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false, false},
-    {CIP_PLC_MICRO800, "Micro800",            MAX_CIP_MICRO800_MSG_SIZE_EX, MAX_CIP_MICRO800_MSG_SIZE, MAX_CIP_MICRO800_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false, false},
+    /*                                       capacity                  fo_size                    fo_ex_size                   old_fo  min payload            dh+ */
+    {CIP_PLC_PLC5,     "PLC/5",               MAX_CIP_PLC5_MSG_SIZE,    MAX_CIP_PLC5_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true},
+    {CIP_PLC_SLC,      "SLC 500",             MAX_CIP_SLC_MSG_SIZE,     MAX_CIP_SLC_MSG_SIZE,      0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true},
+    {CIP_PLC_MLGX,     "MicroLogix",          MAX_CIP_MLGX_MSG_SIZE,    MAX_CIP_MLGX_MSG_SIZE,     0,                           true,   MIN_PAYLOAD_SIZE_PCCC, true},
+    {CIP_PLC_LGX_PCCC, "*Logix PCCC",         MAX_CIP_LGX_PCCC_MSG_SIZE, MAX_CIP_LGX_PCCC_MSG_SIZE, 0,                          true,   MIN_PAYLOAD_SIZE_PCCC, false},
+    {CIP_PLC_LGX,      "*Logix",              MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false},
+    {CIP_PLC_MICRO800, "Micro800",            MAX_CIP_MICRO800_MSG_SIZE_EX, MAX_CIP_MICRO800_MSG_SIZE, MAX_CIP_MICRO800_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false},
 
-    /* generic CIP is *Logix sizing, but stateless: it never uses connected messaging */
-    {CIP_PLC_GENERIC,  "generic CIP device",  MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false, true},
+    /* generic CIP is *Logix sizing; its plc table row keeps it unconnected */
+    {CIP_PLC_GENERIC,  "generic CIP device",  MAX_CIP_LGX_MSG_SIZE_EX,  MAX_CIP_LGX_MSG_SIZE,      MAX_CIP_LGX_MSG_SIZE_EX,     false,  MIN_PAYLOAD_SIZE_CIP,  false},
 };
 
 

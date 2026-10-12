@@ -46,6 +46,7 @@
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/cip.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/path.h>
@@ -1920,7 +1921,7 @@ THREAD_FUNC(session_handler) {
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Still waiting for connection to succeed.");
 
-                    /* don't wait more.  The TCP connect check will wait in select(). */
+                    /* don't wait more.  The TCP connect check will wait in poll() (POSIX) or select() (Windows). */
                 } else {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session connect failed %s!", plc_tag_decode_error(rc));
 
@@ -2493,7 +2494,12 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
-    int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
+    /*
+     * The family's row decides, so every tag on the connection, @connection included, gets
+     * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.
+     */
+    int use_connected_msg = plc_entry ? (cip_entry_use_connected_msg(plc_entry, attribs) ? 1 : 0)
+                                      : attr_get_int(attribs, "use_connected_msg", 0);
     cip_conn_p session = NULL;
     int new_session = 0;
     /*
@@ -2538,18 +2544,28 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_conn_profile_t *pro
         /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
             session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_entry);
+
+            /* one connection cannot be both connected and unconnected. */
+            if(session && session->use_connected_msg != use_connected_msg) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
+                       "use_connected_msg=%d conflicts with the existing connection's %d!  Use a different "
+                       "connection_group_id.",
+                       use_connected_msg, session->use_connected_msg);
+                rc_dec(session);
+                session = NULL;
+                rc = PLCTAG_ERR_BAD_PARAM;
+            }
         } else {
             /* no sharing, create a new one */
             session = NULL;
         }
 
-        if(session == NULL) {
+        if(rc != PLCTAG_STATUS_OK) {
+            /* refused above; nothing to create. */
+        } else if(session == NULL) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating new session.");
 
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s session.", profile->name);
-
-            /* a stateless family cannot use connected messaging whatever the tag asked for */
-            if(profile->force_unconnected) { use_connected_msg = 0; }
 
             session = session_create_from_profile(list, profile, session_gw, session_path, &use_connected_msg,
                                                   connection_group_id);

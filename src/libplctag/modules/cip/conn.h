@@ -219,7 +219,6 @@ typedef struct {
 
     uint16_t min_payload_size; /* refuse to negotiate below this */
     bool dhp_capable;          /* family can bridge to DH+ */
-    bool force_unconnected;    /* stateless family: never use connected messaging */
 } cip_conn_profile_t;
 
 

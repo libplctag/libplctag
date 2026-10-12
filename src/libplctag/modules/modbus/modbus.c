@@ -1159,7 +1159,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Still waiting for socket to connect.");
 
-                    /* do not wait more.   The TCP connection check will wait in select(). */
+                    /* do not wait more.   The TCP connection check will wait in poll() (POSIX) or select() (Windows). */
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s received while waiting for socket connection.",
                            plc_tag_decode_error(rc));

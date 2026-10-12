@@ -258,10 +258,14 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
     }
 
     /*
-     * Whether the requests will be connected ones.  The row answers it, which is what lets
-     * the connection be created ahead of the tag; the tag reads the same answer back below.
+     * The connection decides use_connected_msg.  A clone inherits its source's connection, so
+     * one that asks for the other setting is refused here, as find-or-create refuses it below.
      */
-    attr_set_int(attribs, "use_connected_msg", (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0));
+    if(src_tag && attr_get_str(attribs, "use_connected_msg", NULL)
+       && (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0) != session->use_connected_msg) {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
     /*
      * Find or create a session.
@@ -277,9 +281,11 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
             return PLCTAG_ERR_NOT_FOUND;
         }
     } else {
-        if(session_find_or_create(&session, attribs, NULL) != PLCTAG_STATUS_OK) {
+        rc = session_find_or_create(&session, attribs, NULL);
+        if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
-            return PLCTAG_ERR_BAD_GATEWAY;
+            /* a settings conflict is the caller's to fix; anything else stays BAD_GATEWAY. */
+            return (rc == PLCTAG_ERR_BAD_PARAM ? rc : PLCTAG_ERR_BAD_GATEWAY);
         }
     }
 
@@ -297,7 +303,7 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
      */
     tag->session = session;
     tag->plc_type = plc_type;
-    tag->use_connected_msg = (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0);
+    tag->use_connected_msg = session->use_connected_msg;
 
     /*
      * Handed back even when this function goes on to fail, so the caller can release it.

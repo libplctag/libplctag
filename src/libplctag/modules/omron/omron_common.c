@@ -229,12 +229,6 @@ int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int
     }
 
     /*
-     * Whether the requests will be connected ones.  The row answers it, which is what lets
-     * the connection be created ahead of the tag; the tag reads the same answer back below.
-     */
-    attr_set_int(attribs, "use_connected_msg", (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0));
-
-    /*
      * Find or create a conn.
      *
      * All tags need conns.  They are the TCP connection to the gateway PLC.
@@ -268,7 +262,7 @@ int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int
      */
     tag->session = conn;
     tag->plc_type = plc_type;
-    tag->use_connected_msg = (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0);
+    tag->use_connected_msg = conn->use_connected_msg;
 
     /*
      * Handed back even when this function goes on to fail, so the caller can release it.

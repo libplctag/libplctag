@@ -239,7 +239,11 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
 static int32_t connection_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     connection_tag_p tag = (connection_tag_p)raw_tag;
 
-    *result = tag->last_conn_state;
+    /*
+     * Straight from the connection, as data tags report it.  last_conn_state only moves when
+     * the tickler delivers events, and it skips them all for a tag without a callback.
+     */
+    *result = (tag->watch ? atomic_get_int32(&tag->watch->status) : tag->last_conn_state);
 
     return PLCTAG_STATUS_OK;
 }

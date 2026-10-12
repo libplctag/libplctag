@@ -68,8 +68,8 @@ static cip_conn_list_t conn_list = {0};
 
 /* Omron speaks one dialect, so the table has one row. */
 static const cip_conn_profile_t omron_conn_profiles[] = {
-    /*                                         capacity                   fo_size                 fo_ex_size                 old_fo  min payload           dh+    unconn */
-    {CIP_PLC_OMRON_NJNX, "Omron NJ/NX", MAX_CIP_OMRON_MSG_SIZE_EX, MAX_CIP_OMRON_MSG_SIZE, MAX_CIP_OMRON_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false, false},
+    /*                                         capacity                   fo_size                 fo_ex_size                 old_fo  min payload           dh+ */
+    {CIP_PLC_OMRON_NJNX, "Omron NJ/NX", MAX_CIP_OMRON_MSG_SIZE_EX, MAX_CIP_OMRON_MSG_SIZE, MAX_CIP_OMRON_MSG_SIZE_EX, false, MIN_PAYLOAD_SIZE_CIP, false},
 };
 
 
