@@ -50,7 +50,6 @@
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
-#include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/omron.h>
@@ -112,7 +111,7 @@ struct tag_vtable_t default_vtable = {
 };
 
 static struct tag_vtable_t raw_tag_vtable = {
-    .abort = (tag_vtable_func)cip_tag_abort_request,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = NULL,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)cip_raw_tag_tickler,
@@ -374,18 +373,15 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* kick off a read to get the tag type and size. */
-    if(!tag->special_tag && tag->vtable->read && tag->first_read) {
-        /* trigger the first read. */
-        /* convoluted logic that needs to be refactored */
-
-        /* if this is a PLC that does not need first reads to get the type, then we do not trigger an
-        early read during creation.   We do, however, need to flag that the read is the first one so
-        that the created event will be raised. Ugh.  This is a mess. */
+    /* the create read checks the tag against the PLC; the tickler raises CREATED when it ends. */
+    if(tag->vtable->read && tag->create_read_status == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Kicking off initial read.");
 
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
+    } else if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+        /* @raw has nothing to read; its tickler completes the create when the connection is up. */
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Waiting for the connection to complete the create.");
     } else {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Tag does not need a first read, raising created event.");
 
@@ -435,7 +431,8 @@ static int setup_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up %s tag.", entry->name);
 
     tag->allow_packing = 0;
-    tag->first_read = 0; /* the data file in the name states the type, so there is nothing to discover. */
+    /* the type is in the file letter; the create read checks that the file and elements exist. */
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     apply_tag_defaults(tag, byte_order, &pccc_vtable);
 
@@ -465,7 +462,9 @@ int ab_setup_lgx_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
      * consider.
      */
     tag->allow_packing = 0;
-    tag->first_read = 0;
+
+    /* the create read also brings the type descriptor every typed write must send back. */
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     apply_tag_defaults(tag, &slc_tag_byte_order, &lgx_pccc_vtable);
 
@@ -480,7 +479,7 @@ int ab_setup_logix_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs
     tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
 
     /* the first read is what discovers the element type and size. */
-    tag->first_read = 1;
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     apply_tag_defaults(tag, &logix_tag_byte_order, &cip_standard_tag_vtable_ab);
 
@@ -497,7 +496,7 @@ int ab_setup_micro800_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
 
     /* a Micro800 cannot pack requests; its row says it only answers over a connection. */
     tag->allow_packing = 0;
-    tag->first_read = 1;
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     apply_tag_defaults(tag, &cip_short_string_byte_order, &cip_standard_tag_vtable_ab);
 
@@ -515,7 +514,6 @@ int ab_setup_generic_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attri
 
     /* every generic operation is stateless, so there is nothing to pack. */
     tag->allow_packing = 0;
-    tag->first_read = 0;
 
     /*
      * No default vtable.  A generic tag is only ever one of the special tags -- @identity,
@@ -1070,7 +1068,7 @@ const cip_standard_tag_ops_t cip_standard_tag_ops_ab = {.read_service = CIP_SVC_
 
 /* the standard (symbolic, named) tag type.  The engine is shared; see modules/cip/standard_tag.c. */
 struct tag_vtable_t cip_standard_tag_vtable_ab = {
-    .abort = (tag_vtable_func)cip_tag_abort_request,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)cip_standard_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)cip_standard_tag_tickler,

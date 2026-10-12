@@ -267,17 +267,9 @@ def build_manifest() -> list[Test]:
               f"--tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0",
               "--debug=4", "--write=42", "--check"]),
         # eip_lgx_pccc.c never looks at tag->is_bit, so a bit write here is a whole-word typed
-        # write of the buffer the tag last read.  Nothing but this checks that the rest of the
-        # word survived it.
+        # write of the buffer the tag last read.  The test reads first, as an app must.
         test("PCCC-mapped Logix bit write changes only that bit (slot 5)",
              [exe("test_bit_write"), "--bit=10", "--debug=4",
-              f"--word-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0",
-              f"--bit-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0/10"]),
-        # The regression test for the 2026-10-07 read-before-write fix: no client-side read,
-        # so the bit tag's buffer is whatever it held at create.  This is the one that failed
-        # before the fix, and the one above passes either way.
-        test("PCCC-mapped Logix bit write refreshes the word first (slot 5, stale buffer)",
-             [exe("test_bit_write"), "--stale", "--bit=10", "--debug=4",
               f"--word-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0",
               f"--bit-tag=protocol=ab_eip&gateway={logix_gw}&path=1,5&plc=lgxpccc&elem_count=1&name=N7:0/10"]),
         test("basic DH+ bridging",

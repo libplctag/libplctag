@@ -71,6 +71,18 @@ int cip_raw_tag_tickler(cip_tag_p tag) {
     rc = cip_check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
+    /* a raw tag has no target until the app writes one, so a connection that is up is its create. */
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+        int32_t conn_status = PLCTAG_CONN_STATUS_DOWN;
+
+        if(cip_tag_get_connection_status((plc_tag_p)tag, &conn_status) == PLCTAG_STATUS_OK
+           && conn_status == PLCTAG_CONN_STATUS_UP) {
+            cip_tag_finish_create(tag, PLCTAG_STATUS_OK);
+        }
+
+        return tag->status;
+    }
+
     if(tag->read_in_progress) {
         /*
          * A raw tag is write-only: the application supplies a whole CIP request and gets
@@ -125,6 +137,13 @@ int cip_raw_tag_write_start(cip_tag_p tag) {
     debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting");
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+        pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "The connection is not up yet.");
+        return PLCTAG_ERR_BUSY;
+    }
 
     if(tag->read_in_progress) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Raw tag found with a read in flight!");

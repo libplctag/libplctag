@@ -71,7 +71,7 @@ static int udt_tag_build_read_fields_request_connected(cip_tag_p tag);
 
 /* define the vtable for udt tag type. */
 static struct tag_vtable_t udt_tag_vtable = {
-    .abort = (tag_vtable_func)cip_tag_abort_request,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)udt_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)udt_tag_tickler,
@@ -138,6 +138,7 @@ int setup_udt_tag(cip_tag_p tag, const char *name) {
     tag->elem_type = CIP_TYPE_TAG_UDT;
     tag->elem_count = 1;
     tag->elem_size = 1;
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     tag->byte_order = &udt_tag_logix_byte_order;
 

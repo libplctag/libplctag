@@ -245,8 +245,8 @@ void usage(void) {
            "  --pattern   The value stamped on the word before each bit write.  Default is an\n"
            "              alternating 0x5A5A... truncated to the word size.\n"
            "  --stale     Do not read the bit tag before writing it, so its buffer is whatever it\n"
-           "              held at create time.  The word must survive that too: either the device\n"
-           "              applies the mask, or the library refreshes before it writes.\n"
+           "              held at create time.  The word must survive that too, which only a\n"
+           "              device that applies the mask can promise.\n"
            "  --timeout   Milliseconds per operation.  Default 5000.\n"
            "  --debug     Library debug level, 1 through 5.\n"
            "\n"
@@ -326,11 +326,9 @@ int write_word(int32_t tag, int word_size, int timeout, uint64_t value) {
  * bytes that go out are whatever the tag last read plus the one changed bit.  Refreshing
  * first keeps the default test about the mask rather than about cache staleness.
  *
- * --stale skips the refresh, which is the harder question: with the tag's buffer left as it
- * was at create time, does the word still survive?  It does when the device applies the mask,
- * and it does when the library refreshes on the caller's behalf.  It does not when a bit
- * write is a whole-word write of a stale buffer, which is what PCCC-mapped Logix did until
- * 2026-10-07.
+ * --stale skips the refresh: with the tag's buffer left as it was at create time, does the
+ * word still survive?  Only where the device applies the mask.  A PCCC-mapped Logix bit write
+ * is a whole-word write of the buffer, so --stale does not apply to it.
  */
 int write_bit(int32_t tag, int timeout, int value, bool refresh) {
     int rc = PLCTAG_STATUS_OK;

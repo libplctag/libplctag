@@ -70,11 +70,12 @@
 #define CIP_EIP_CMD_UNCONNECTED_SEND ((uint8_t)0x52)
 
 /*
- * Bytes the Unconnected Send wrapper adds ahead of the embedded CIP message:
+ * Bytes the Unconnected Send wrapper adds around the embedded CIP message:
  * service code, path size, the four-byte Connection Manager path, the two
- * timeout tick bytes and the embedded length.
+ * timeout tick bytes and the embedded length ahead of it, and the pad byte
+ * an odd-length message needs after it.
  */
-#define CIP_EIP_UC_SEND_OVERHEAD (10)
+#define CIP_EIP_UC_SEND_OVERHEAD (11)
 /*
  * Multiple Service Packet reply accounting.  Packed responses all have to fit
  * in one response packet; the PLC fails the whole exchange if they do not.
@@ -258,11 +259,11 @@ typedef struct {
 
 /*
  * How many times to retry a Forward Open the PLC rejected for a duplicate connection ID.
- * Each attempt uses a fresh serial number, so a few are enough to clear a stale connection
+ * Each attempt uses a fresh serial number, so a bounded number clears a stale connection
  * the PLC has not timed out yet; past that the PLC is refusing for some other reason and
  * retrying at full speed only makes it worse.
  */
-#define CIP_FO_MAX_DUP_RETRIES (5)
+#define CIP_FO_MAX_DUP_RETRIES (20)
 #define CIP_EIP_VERSION ((uint16_t)0x0001)
 #define CIP_EIP_CMD_CIP_MULTI ((uint8_t)0x0A)
 #define CIP_EIP_CMD_CIP_OK ((uint8_t)0x80)
@@ -352,6 +353,7 @@ typedef struct cip_conn_t {
     int32_t fo_ladder_idx;    /* rung of the fallback size ladder, -1 before the first step */
     uint32_t fo_dup_retries;  /* duplicate connection ID retries spent */
     bool fo_tried_plain;      /* the plain Forward Open has already been refused */
+    bool fo_plc_answered;     /* the last Forward Open got a reply, as opposed to no reply at all */
 
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;

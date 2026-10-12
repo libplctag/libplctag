@@ -1370,9 +1370,10 @@ int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload) {
 /*
  * Hand the finished CIP message to the connection, which adds the framing.
  *
- * A plain PCCC request is addressed to the device at the gateway, so it is not routed onward.
- * A DH+ one rides a connection to the bridge, and the DH+ rows say so, so
- * cip_submit_payload() picks the connected framing for them.
+ * A PCCC request with no path is addressed to the device at the gateway, so it is not routed
+ * onward.  With a path it is routed: a DH+ one rides a connection to the bridge, and the DH+
+ * rows say so, and a CIP-bridged one goes in an Unconnected Send along the path.
+ * cip_submit_payload() picks the framing for both.
  */
 static int pccc_submit(cip_tag_p tag, cip_request_p req, uint8_t *data_end, bool is_dhp) {
     int cip_request_size = (int)(data_end - req->data);
@@ -1381,8 +1382,9 @@ static int pccc_submit(cip_tag_p tag, cip_request_p req, uint8_t *data_end, bool
            cip_request_size);
     pdebug_dump_bytes(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, req->data, cip_request_size);
 
-    return is_dhp ? cip_submit_payload(tag->session, req, cip_request_size, false)
-                  : cip_submit_unrouted_payload(tag->session, req, cip_request_size);
+    if(is_dhp || tag->session->conn_path_size > 0) { return cip_submit_payload(tag->session, req, cip_request_size, false); }
+
+    return cip_submit_unrouted_payload(tag->session, req, cip_request_size);
 }
 
 
@@ -1543,6 +1545,8 @@ int pccc_tag_status(cip_tag_p tag) {
         return PLCTAG_ERR_CREATE;
     }
 
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
     if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
 
     if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
@@ -1566,10 +1570,7 @@ int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check
         /* check to see if the read finished. */
         if(!tag->read_in_progress) {
             /* the first read completing is what completes the create. */
-            if(tag->first_read) {
-                tag->first_read = 0;
-                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
-            }
+            cip_tag_finish_create(tag, rc);
 
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Read complete with status %s.",
                    plc_tag_decode_error(tag->status));
@@ -1621,6 +1622,8 @@ int pccc_tag_read_start(cip_tag_p tag) {
     tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
     /* pseudo-exception block for error handling */
     do {
@@ -1791,6 +1794,8 @@ int pccc_tag_write_start(cip_tag_p tag) {
     tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
     if(tag->is_bit) {
         return (tag->plc_type == CIP_PLC_PLC5) ? plc5_tag_write_bit_start(tag) : slc_tag_write_bit_start(tag);
@@ -2145,7 +2150,7 @@ static int pccc_check_write_status(cip_tag_p tag) {
  * shows in tag->plc_type and the bridge in tag->session->is_dhp, and the functions above read
  * both.  The byte orders still differ, and those live with each family.
  */
-struct tag_vtable_t pccc_vtable = {.abort = (tag_vtable_func)cip_tag_abort_request,
+struct tag_vtable_t pccc_vtable = {.abort = (tag_vtable_func)cip_data_tag_abort,
                                    .read = (tag_vtable_func)pccc_tag_read_start,
                                    .status = (tag_vtable_func)pccc_tag_status,
                                    .tickler = (tag_vtable_func)pccc_tag_tickler,

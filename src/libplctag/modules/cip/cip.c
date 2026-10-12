@@ -507,6 +507,12 @@ static int write_request_framing(cip_conn_p conn, int payload_size, bool unroute
     } else {
         eip_cip_uc_req *cip = (eip_cip_uc_req *)(conn->data);
 
+        /* CIP pads an odd-length embedded message to a word; the length field below does not count the pad. */
+        if(payload_size & 1) {
+            *data = 0;
+            data++;
+        }
+
         /* the route path to the target follows the embedded CIP message. */
         if(conn->conn_path_size > 0) {
             *data = (uint8_t)(conn->conn_path_size / 2); /* in 16-bit words */
@@ -556,7 +562,8 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
     int offset = cip_framing_size(conn, unrouted);
     uint8_t *payload = conn->data + offset;
     int payload_size = 0;
-    int route_path_size = (conn->use_connected_msg || unrouted) ? 0 : ((int)conn->conn_path_size + 2);
+    /* the route path, its size and reserved bytes, and the pad an odd-length message may need. */
+    int route_path_size = (conn->use_connected_msg || unrouted) ? 0 : ((int)conn->conn_path_size + 3);
     size_t room = 0;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Starting with %d request(s).", num_requests);

@@ -42,8 +42,8 @@
  *
  * A typed read carries its own data-type descriptor, which a range read does not.  That is
  * why check_read_status() here decodes the descriptor and saves it as tag->encoded_type_info,
- * and why a typed write has to send that descriptor back.  A write therefore needs a read to
- * have completed first, which is what the pre_write_read path below does.
+ * and why a typed write has to send that descriptor back.  The create read supplies it, so
+ * every write has it.
  */
 
 #include <libplctag/api/libplctag.h>
@@ -61,12 +61,11 @@
 static int tag_read_start(cip_tag_p tag);
 static int tag_tickler(cip_tag_p tag);
 static int tag_write_start(cip_tag_p tag);
-static int tag_write_encode(cip_tag_p tag);
 static int check_read_status(cip_tag_p tag);
 static int check_write_status(cip_tag_p tag);
 
 struct tag_vtable_t lgx_pccc_vtable = {
-    .abort = (tag_vtable_func)cip_tag_abort_request,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)tag_read_start,
     .status = (tag_vtable_func)pccc_tag_status,
     .tickler = (tag_vtable_func)tag_tickler,
@@ -98,6 +97,8 @@ int tag_read_start(cip_tag_p tag) {
     tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
     do {
         if(tag->read_in_progress || tag->write_in_progress) {
@@ -258,35 +259,7 @@ static int check_read_status(cip_tag_p tag) {
             break;
         }
 
-        if(!tag->pre_write_read) {
-            mem_copy(tag->data, data, (int)(data_end - data));
-        } else if(tag->is_bit) {
-            /*
-             * A bit write reads the word first and sends the whole thing back, because this
-             * family has no masked write.  Take every byte from the PLC except the one
-             * holding the addressed bit, and in that byte keep only the bit the caller set.
-             * Anything another client changed in the rest of the word therefore survives.
-             */
-            int bit_byte = tag->bit / 8;
-            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-            uint8_t wanted = (uint8_t)(tag->data[bit_byte] & mask);
-
-            if(bit_byte >= (int)(data_end - data)) {
-                pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-                       "Bit %d is in byte %d but the reply only carried %d bytes!", tag->bit, bit_byte,
-                       (int)(data_end - data));
-                rc = PLCTAG_ERR_TOO_SMALL;
-                break;
-            }
-
-            mem_copy(tag->data, data, (int)(data_end - data));
-
-            tag->data[bit_byte] = (uint8_t)((tag->data[bit_byte] & ~mask) | wanted);
-        }
-        /*
-         * Otherwise this is an ordinary pre-read for type information and the reply must not
-         * land on top of the values the caller has set.
-         */
+        mem_copy(tag->data, data, (int)(data_end - data));
 
         /* copy type data into tag. */
         if((intptr_t)type_start > (intptr_t)type_end) {
@@ -308,28 +281,6 @@ static int check_read_status(cip_tag_p tag) {
 
     cip_tag_abort_request(tag);
 
-    /*
-     * If this read was the front half of a write, encode the write now.  This goes straight
-     * to the encoder rather than back through tag_write_start(), which would see the same
-     * reason to read first and loop.
-     */
-    if(tag->pre_write_read) {
-        tag->pre_write_read = 0;
-
-        if(rc == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-
-            rc = tag_write_encode(tag);
-        } else {
-            /* the write never started, so end it here rather than leaving the caller pending. */
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Pre-write read failed, %s; abandoning the write.",
-                   plc_tag_decode_error(rc));
-
-            tag->write_in_progress = 0;
-            tag->write_complete = 1;
-        }
-    }
-
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 
     return rc;
@@ -339,55 +290,15 @@ static int check_read_status(cip_tag_p tag) {
 /*
  * tag_write_start
  *
- * Decide whether this write needs a read in front of it, then encode it.
+ * Build and submit the PCCC typed write of the whole buffer.
  *
- * Two reasons to read first, and the bit one is the important one:
- *
- *   - A typed write echoes the controller's type descriptor back, and only a read supplies
- *     it, so a write with no completed read waits behind one.
- *
- *   - This family has no masked write.  A ControlLogix's PCCC emulation serves only the
- *     typed pair 0x68/0x67 -- the PLC/5 read-modify-write function 0x26 is not mapped -- and
- *     the logical address it takes has no bit field: the level byte carries file, element and
- *     optionally sub-element, and a sub-element is a word inside a structured element, not a
- *     bit.  So setting one bit means sending the whole word, and the other fifteen bits come
- *     from whatever this tag last read.  Refreshing immediately before the write is what
- *     keeps a concurrent change to the rest of the word from being destroyed.
- *
- *     This narrows the window; it does not close it.  Another client can still write the
- *     word between our read and our write.  Nothing can fix that from the client side
- *     without a mask the device honours, so a bit write on this family is not atomic and the
- *     three other PCCC families, which do send a mask, are the ones to use where it matters.
+ * This family has no masked write.  A ControlLogix's PCCC emulation serves only the typed
+ * pair 0x68/0x67 -- the PLC/5 read-modify-write function 0x26 is not mapped -- and the
+ * logical address it takes has no bit field.  So a bit write sends the whole word, and the
+ * other fifteen bits are whatever the tag last read.  The library does not read first: the
+ * app owns the buffer and must refresh it before a bit write if the word can change.
  */
 int tag_write_start(cip_tag_p tag) {
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->read_in_progress || tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    if(tag->first_read || tag->is_bit) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Reading before the write: %s.",
-               (tag->is_bit ? "a bit write sends the whole word" : "no read has completed yet, so there is no type info"));
-
-        /*
-         * Stay out of pccc_finish_request() here: the operation is not finishing, it is
-         * handing off to the read, which calls tag_write_encode() when it lands.
-         */
-        tag->pre_write_read = 1;
-
-        return tag_read_start(tag);
-    }
-
-    return tag_write_encode(tag);
-}
-
-
-/*
- * Build and submit the PCCC typed write.  Everything that had to happen before it has.
- */
-int tag_write_encode(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     cip_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
@@ -398,6 +309,13 @@ int tag_write_encode(cip_tag_p tag) {
     tag->req_pccc_seq_num = conn_seq_id;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
+    if(tag->read_in_progress || tag->write_in_progress) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
 
     do {
         tag->write_in_progress = 1;

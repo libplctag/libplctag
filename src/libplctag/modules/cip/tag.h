@@ -37,6 +37,7 @@
 #include <utils/debug.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/plc_type.h>
+#include <libplctag/api/libplctag.h>
 #include <stdint.h>
 
 /* the longest encoded tag name, and the longest encoded type info, in bytes. */
@@ -152,8 +153,13 @@ struct cip_tag_t {
      */
     int fragment_retry_count;
 
-    int pre_write_read;
-    int first_read;
+
+    /*
+     * PENDING while the create read is out, OK once it succeeded or when there is none, and
+     * the error that failed it otherwise.  An error is final.  Its own field because the
+     * library resets tag->status at the start of every operation.
+     */
+    plctag_error_code_t create_read_status;
     int offset;
     int allow_packing;
 
@@ -202,7 +208,28 @@ extern int cip_tag_unimplemented_status(plc_tag_p tag);
 extern int cip_tag_unimplemented_tickler(plc_tag_p tag);
 extern int cip_tag_unimplemented_write(plc_tag_p tag);
 
-/* the vtable's status entry: PENDING while an operation is in flight, else tag->status. */
+/*
+ * End the create read, if one is out, with rc as its result: OK completes the create and
+ * anything else fails it.  Call when a read finishes.
+ */
+extern void cip_tag_finish_create(cip_tag_p tag, int rc);
+
+/*
+ * End a create read that did not succeed, with rc as the result.  A failed create is final:
+ * the tag reports rc on every later status, read and write until it is destroyed.
+ */
+extern void cip_tag_fail_create(cip_tag_p tag, plctag_error_code_t rc);
+
+/*
+ * The vtable's abort entry for tags with a create read: an abort while it is out fails the
+ * create, and an abort after the create failed leaves that error alone.
+ */
+extern int cip_data_tag_abort(cip_tag_p tag);
+
+/*
+ * The vtable's status entry: the create error if the create failed, PENDING while an
+ * operation is in flight, else tag->status.
+ */
 extern int cip_tag_status(cip_tag_p tag);
 
 /*

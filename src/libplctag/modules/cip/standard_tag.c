@@ -73,7 +73,6 @@ static int calculate_write_data_per_packet(cip_tag_p tag);
 
 static bool tag_can_split_transfer(cip_tag_p tag);
 static bool tag_elements_are_variable(cip_tag_p tag);
-static uint16_t read_request_elem_count(cip_tag_p tag);
 static debug_module_t tag_debug_module(cip_tag_p tag);
 
 
@@ -149,21 +148,6 @@ static bool tag_elements_are_variable(cip_tag_p tag) {
 }
 
 
-/*
- * How many elements a read request should ask for.
- *
- * A pre-read before a write exists only to learn the tag's type and element size;
- * check_read_status() throws its data away and does not chase the remaining fragments.
- * Ask for a single element.  The reply carries the encoded type either way, and one
- * element is the only thing that tells us the element size directly: a full read derives
- * it as size/elem_count, which comes out wrong -- zero, for an array whose first fragment
- * is smaller than elem_count bytes.
- */
-static uint16_t read_request_elem_count(cip_tag_p tag) {
-    return (uint16_t)(tag->pre_write_read ? 1 : tag->elem_count);
-}
-
-
 /*************************************************************************
  **************************** API Functions ******************************
  ************************************************************************/
@@ -187,10 +171,7 @@ int cip_standard_tag_tickler(plc_tag_p tag_arg) {
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->read_in_progress) {
             /* done! */
-            if(tag->first_read) {
-                tag->first_read = 0;
-                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
-            }
+            cip_tag_finish_create(tag, rc);
 
             tag->read_complete = 1;
         }
@@ -235,6 +216,8 @@ int cip_standard_tag_read_start(plc_tag_p tag_arg) {
 
     pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting");
 
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
     if(tag->read_in_progress || tag->write_in_progress) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
         return PLCTAG_ERR_BUSY;
@@ -275,29 +258,16 @@ int cip_standard_tag_write_start(plc_tag_p tag_arg) {
 
     pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting");
 
-    if(tag->read_in_progress || tag->write_in_progress) {
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
+    /* the create read is still out, so the type and size are not known yet. */
+    if(tag->read_in_progress || tag->write_in_progress || tag->create_read_status == PLCTAG_STATUS_PENDING) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
         return PLCTAG_ERR_BUSY;
     }
 
     /* the write is now in flight */
     tag->write_in_progress = 1;
-
-    /*
-     * if the tag has not been read yet, read it.
-     *
-     * This gets the type data and sets up the request
-     * buffers.
-     */
-
-    if(tag->first_read) {
-        pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "No read has completed yet, doing pre-read to get type information.");
-
-        tag->pre_write_read = 1;
-        tag->write_in_progress = 0; /* temporarily mask this off */
-
-        return cip_standard_tag_read_start((plc_tag_p)tag);
-    }
 
     rc = build_write_request(tag, tag->offset);
 
@@ -357,7 +327,7 @@ int build_read_request(cip_tag_p tag, int byte_offset) {
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    *((uint16_le *)data) = h2le16(read_request_elem_count(tag));
+    *((uint16_le *)data) = h2le16((uint16_t)tag->elem_count);
     data += sizeof(uint16_le);
 
     {
@@ -379,7 +349,7 @@ int build_read_request(cip_tag_p tag, int byte_offset) {
      * must not be packed.
      */
     req->response_size = tag->size;
-    req->first_read = tag->first_read;
+    req->first_read = (tag->create_read_status == PLCTAG_STATUS_PENDING);
 
     /* hand the finished request to the connection. */
     rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
@@ -741,47 +711,7 @@ static int check_read_status(cip_tag_p tag) {
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
-            /*
-             * The pre-read asked for a single element, so the payload is that element and
-             * its length is the element size.  The write that follows needs elem_size to
-             * chunk itself, and deriving it the general way below -- reply length divided
-             * by elem_count -- yields zero for any array whose first fragment is shorter
-             * than elem_count bytes.
-             *
-             * That the payload is one element's worth only holds where elements are a
-             * fixed stride.  It is true for the tags this function serves: they carry
-             * logix_tag_byte_order, whose strings are a fixed 88 bytes.  It is not true
-             * generally -- the tag listing, @udt and the Omron types all set
-             * str_is_fixed_length to zero, and a listing entry's size varies with the
-             * length of the tag name it carries.  Those types declare an element size of
-             * one byte and build their own requests, so they never reach this code.
-             *
-             * Nothing here extrapolates a whole-tag size from the one element, because
-             * that is the step that would be wrong if a variable-stride tag ever did
-             * arrive: tag->size belongs to the caller, who set it staging the write.
-             */
-            if(tag->pre_write_read) {
-                if(payload_size <= 0) {
-                    pdebug(dbg, DEBUG_WARN, tag->tag_id, "Pre-write read returned no element data!");
-                    rc = PLCTAG_ERR_TOO_SMALL;
-                    break;
-                }
-
-                if(tag_elements_are_variable(tag)) {
-                    pdebug(dbg, DEBUG_DETAIL, tag->tag_id,
-                           "Pre-write read of %d bytes; elements are variable length, so the element size is unchanged.",
-                           (int)payload_size);
-                } else if(tag->elem_size <= 0) {
-                    tag->elem_size = (int)payload_size;
-
-                    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Pre-write read: element size is %d bytes.", tag->elem_size);
-                } else if(tag->elem_size != (int)payload_size) {
-                    /* keep what the tag already believes; a mismatch means the stride is not uniform. */
-                    pdebug(dbg, DEBUG_WARN, tag->tag_id,
-                           "Pre-write read returned a %d byte element but the element size is %d bytes!", (int)payload_size,
-                           tag->elem_size);
-                }
-            } else if(payload_size + tag->offset > tag->size) {
+            if(payload_size + tag->offset > tag->size) {
                 /* a PLC can keep returning fragments forever.  Do not grow without bound. */
                 if((payload_size + tag->offset) > (ptrdiff_t)CIP_MAX_TAG_DATA_SIZE) {
                     pdebug(dbg, DEBUG_WARN, tag->tag_id, "Tag data size of %d bytes is larger than the maximum of %d bytes!",
@@ -816,13 +746,7 @@ static int check_read_status(cip_tag_p tag) {
 
             pdebug(dbg, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);
 
-            /*
-             * copy the data, but only if this is not
-             * a pre-read for a subsequent write!  We do not
-             * want to overwrite the data the upstream has
-             * put into the tag's data buffer.
-             */
-            if(!tag->pre_write_read) { mem_copy(tag->data + tag->offset, data, (int)(payload_size)); }
+            mem_copy(tag->data + tag->offset, data, (int)(payload_size));
 
             /* bump the byte offset */
             tag->offset += (int)(payload_size);
@@ -842,13 +766,12 @@ static int check_read_status(cip_tag_p tag) {
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
-        /* skip if we are doing a pre-write read. */
-        if(!tag->pre_write_read && partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
+        if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(dbg, DEBUG_WARN, tag->tag_id,
                    "Got %d fragment responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
             rc = PLCTAG_ERR_PARTIAL;
-        } else if(!tag->pre_write_read && partial_data) {
+        } else if(partial_data) {
             /* call read start again to get the next piece */
             pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "calling cip_standard_tag_read_start() to get the next chunk.");
             rc = cip_standard_tag_read_start((plc_tag_p)tag);
@@ -858,21 +781,7 @@ static int check_read_status(cip_tag_p tag) {
             /* the transfer is over one way or the other, so start the next one clean. */
             tag->fragment_retry_count = 0;
 
-            /* if this is a pre-read for a write, then pass off to the write routine */
-            if(tag->pre_write_read) {
-                pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Restarting write call now.");
-                tag->pre_write_read = 0;
-
-                /*
-                 * The type is known now.  The tickler clears first_read only after this
-                 * returns, so the write restarted below would see it set and pre-read again,
-                 * forever.
-                 */
-                tag->first_read = 0;
-                rc = cip_standard_tag_write_start((plc_tag_p)tag);
-            } else {
-                pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Read complete.");
-            }
+            pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Read complete.");
         }
     }
 

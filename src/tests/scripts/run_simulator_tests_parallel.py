@@ -428,8 +428,7 @@ def build_manifest() -> Manifest:
                f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43"], F)
     # A bit in an indexed element of an array: the RMW path has to resolve the index before it
     # masks, and masking element 0 instead would pass every test above.
-    # The control for the lgx_pccc --stale pair: where the device applies the mask, the
-    # client's buffer cannot matter at all.
+    # Where the device applies the mask, the client's buffer cannot matter at all.
     sec.test("INT bit write survives a stale buffer (device applies the mask)",
               [exe("test_bit_write"), "--stale", "--bit=13", "--debug=4",
                f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[0]",
@@ -496,24 +495,41 @@ def build_manifest() -> Manifest:
               [exe("test_write_before_read"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F)
-    # The same, with the create's read aborted -- the only way a write reaches the pre-write
-    # read, since a read that ends any other way clears first_read.  That branch once restarted
-    # the write with first_read still set and pre-read forever.  The check proves it was taken.
-    # Its own server, so the round trip cannot race the test above on the same tag.
-    wbr_abort_server = ServerSpec(
+    # A create read that ends in an abort or a PLC error fails the create for good: status,
+    # read and write all keep reporting it.  Its own server, so nothing races the tests above.
+    create_fail_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0", "--tag=Test_Array_1:DINT[1000]"],
         startup_wait_s=1,
     )
-    wbr_abort = sec.test("write before read, create read aborted",
+    sec.test("aborted create read fails the create for good",
               [exe("test_write_before_read"), "--abort-create-read",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F,
-              server=wbr_abort_server)
-    sec.test("check the pre-write read ran once per tag",
-              None, F, depends_on=wbr_abort.id, ports_needed=0,
-              check=CheckSpec(log_file=wbr_abort.log_file,
-                               pattern=r"doing pre-read to get type information", expected=2))
+              server=create_fail_server)
+    sec.test("async create of a missing tag fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=No_Such_Tag"], F,
+              server=create_fail_server)
+    # @udt reads its definition at create, so an id the server does not answer fails there.
+    sec.test("async create of a @udt the server refuses fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@udt/4000"], F,
+              server=create_fail_server)
+    # A Forward Open the PLC refuses for its route is the PLC's answer for every tag waiting on
+    # that connection: async creates fail with it, and a sync create reports it, not TIMEOUT.
+    sec.test("async create through a refused route fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,5&plc=ControlLogix&elem_count=1&name=Test_Array_1"], F,
+              server=create_fail_server)
+    refused_route_sync = sec.test("sync create through a refused route fails with the PLC's error",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,5&plc=ControlLogix&elem_count=1&name=Test_Array_1"], F,
+              server=create_fail_server, expect_failure=True)
+    sec.test("check the refused route was reported, not a timeout",
+              None, F, depends_on=refused_route_sync.id, ports_needed=0,
+              check=CheckSpec(log_file=refused_route_sync.log_file,
+                               pattern=r"Error creating tag PLCTAG_ERR_BAD_PARAM", expected=1))
     sec.test("raw CIP tags bundled into one packet",
               [exe("test_raw_cip"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
@@ -696,7 +712,7 @@ def build_manifest() -> Manifest:
     sec.test("check the duplicate connection ID was retried in-session",
               None, T, depends_on=dup_conn_id_test.id, ports_needed=0,
               check=CheckSpec(log_file=dup_conn_id_test.log_file,
-                               pattern=r"Duplicate connection ID, retry 1 of 5", expected=1))
+                               pattern=r"Duplicate connection ID, retry 1 of 20", expected=1))
 
     # A PLC that refuses every connection ID is not going to be talked round, so the retries
     # are budgeted.  Without the budget this is an unbounded loop at full speed: each refusal
@@ -715,12 +731,12 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
                "--debug=4"], F, server=dup_forever_server, expect_failure=True)
-    # The whole budget is spent before giving up -- retry 5 of 5 is the last one attempted.
+    # The whole budget is spent before giving up -- retry 20 of 20 is the last one attempted.
     # The session then backs off and starts over, so this can appear more than once.
     sec.test("check every duplicate ID retry in the budget was used",
               None, T, depends_on=dup_forever_test.id, ports_needed=0,
               check=CheckSpec(log_file=dup_forever_test.log_file,
-                               pattern=r"Duplicate connection ID, retry 5 of 5", expected=1, at_least=True))
+                               pattern=r"Duplicate connection ID, retry 20 of 20", expected=1, at_least=True))
     sec.test("check the duplicate ID retry budget was enforced",
               None, T, depends_on=dup_forever_test.id, ports_needed=0,
               check=CheckSpec(log_file=dup_forever_test.log_file,
@@ -729,7 +745,7 @@ def build_manifest() -> Manifest:
     sec.test("check the duplicate ID retries stopped at the budget",
               None, T, depends_on=dup_forever_test.id, ports_needed=0,
               check=CheckSpec(log_file=dup_forever_test.log_file,
-                               pattern=r"Duplicate connection ID, retry 6 of 5", expected=0))
+                               pattern=r"Duplicate connection ID, retry 21 of 20", expected=0))
     # The backoff between give-ups has to grow.  It restarts only on reaching SESSION_IDLE, so a
     # session that registers and then fails its ForwardOpen every time still backs off; resetting
     # it any earlier pins the reconnect at the initial delay and spins the handler thread.
@@ -1131,6 +1147,25 @@ def build_manifest() -> Manifest:
     mgw = "127.0.0.1:{PORT}"
 
     sec = m.section("micrologix", server=micrologix_server)
+    sec.test("async create of a missing data file fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N250:0"], F)
+    # A MicroLogix reached through a ControlLogix chassis: the PCCC request must go in an
+    # Unconnected Send along the path, padded after an odd-length PCCC message as a router
+    # requires.  ab_server rejects a bad layout, but it answers an unrouted request too, so
+    # the check on its log is what proves the routing.
+    mlgx_bridged_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Micrologix", "--port={PORT}", "--path=1,4,18,10.206.1.36", "--tag=N7[10]"],
+        startup_wait_s=1,
+    )
+    mlgx_bridged = sec.test("CIP bridged MicroLogix tag read/write",
+              [exe("tag_rw2"), "--type=sint16",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&path=1,4,18,10.206.1.36&name=N7:0",
+               "--write=42", "--check", "--debug=4"], F, server=mlgx_bridged_server)
+    sec.test("check the bridged PCCC request went in an Unconnected Send",
+              None, F, depends_on=mlgx_bridged.id, ports_needed=0,
+              check=CheckSpec(log_file=mlgx_bridged.server_log_file, pattern=r"52 02 20 06", expected=2, at_least=True))
     # The MicroLogix and the PLC/5 answer the Identity object while their data plane is PCCC,
     # which is the case the bench proves and nothing here did.
     sec.test("identity, unrouted",
@@ -1250,6 +1285,8 @@ def build_manifest() -> Manifest:
     lgx_pccc_tag = f"protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=1"
 
     sec = m.section("lgx_pccc", server=lgx_pccc_server)
+    sec.test("async create of a missing data file fails for good",
+              [exe("test_write_before_read"), "--missing-tag", f"--tag={lgx_pccc_tag}&name=N250:0"], F)
     sec.test("identity, routed",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={lgw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PCCC-mapped Logix tag read/write",
@@ -1265,24 +1302,13 @@ def build_manifest() -> Manifest:
 
     # PCCC-mapped Logix has no masked write of its own: eip_lgx_pccc.c never looks at
     # tag->is_bit, so a bit write is a whole-word typed write of the buffer the tag last read.
-    # That makes the collateral-damage check the only thing standing between a stale or
-    # mis-sized buffer and a clobbered word.
+    # The app has to read first, as test_bit_write does without --stale; these check that a
+    # refreshed word survives the write.
     sec.test("PCCC-mapped Logix bit write changes only that bit (B3)",
               [exe("test_bit_write"), "--bit=6",
                f"--word-tag={lgx_pccc_tag}&name=B3:0", f"--bit-tag={lgx_pccc_tag}&name=B3:0/6", "--debug=4"], F)
     sec.test("PCCC-mapped Logix bit write changes only that bit (N7)",
               [exe("test_bit_write"), "--bit=10",
-               f"--word-tag={lgx_pccc_tag}&name=N7:0", f"--bit-tag={lgx_pccc_tag}&name=N7:0/10", "--debug=4"], F)
-    # --stale is the regression test for the 2026-10-07 fix: it skips the client-side read, so
-    # the bit tag's buffer is whatever it held at create.  Before the fix the whole-word write
-    # put that stale buffer on the wire and destroyed the other fifteen bits.  The library now
-    # reads immediately before a bit write, so the word survives.  The two cases above pass
-    # either way -- they refresh first -- which is exactly why this one has to exist.
-    sec.test("PCCC-mapped Logix bit write refreshes the word first (B3, stale buffer)",
-              [exe("test_bit_write"), "--stale", "--bit=6",
-               f"--word-tag={lgx_pccc_tag}&name=B3:0", f"--bit-tag={lgx_pccc_tag}&name=B3:0/6", "--debug=4"], F)
-    sec.test("PCCC-mapped Logix bit write refreshes the word first (N7, stale buffer)",
-              [exe("test_bit_write"), "--stale", "--bit=10",
                f"--word-tag={lgx_pccc_tag}&name=N7:0", f"--bit-tag={lgx_pccc_tag}&name=N7:0/10", "--debug=4"], F)
 
     # A multi-element read exercises the array type prefix in the typed-read reply; a single
@@ -1330,6 +1356,9 @@ def build_manifest() -> Manifest:
     pgw = "127.0.0.1:{PORT}"
 
     sec = m.section("plc5", server=plc5_server)
+    sec.test("async create of a missing data file fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N250:0"], F)
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={pgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PLC5 tag read/write",

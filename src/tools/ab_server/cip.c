@@ -105,6 +105,7 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 #define CIP_ERR_EX_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_INVALID_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_TOO_LONG ((uint16_t)0x2105)
+#define CIP_ERR_EX_UC_SEND_PARAM ((uint16_t)0x0205)
 
 /* tag and object constants */
 #define CIP_TAG_PATH_MIN ((size_t)(4)) /* 1 byte segment type, 1 byte length count, 1 byte tag name, 1 byte padding */
@@ -209,6 +210,22 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
             if(slice_len(cip_service_payload) < (size_t)(2 + embedded_cip_service_length)) {
                 log_info("CIP service payload too short for embedded service length");
                 return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+            }
+
+            /*
+             * After the message: a pad byte if its length is odd, the route path size in words,
+             * a reserved byte, then the path.  A ControlLogix router rejects a request whose
+             * layout does not add up with 0x01/0x0205, so this does too.
+             */
+            {
+                size_t path_start = (size_t)4 + embedded_cip_service_length + (embedded_cip_service_length & 1);
+
+                if(slice_len(cip_service_payload) < path_start + 2
+                   || slice_len(cip_service_payload)
+                          != path_start + 2 + ((size_t)slice_get_uint8(cip_service_payload, path_start) * 2)) {
+                    log_info("Unconnected Send route path does not follow the embedded message where it should!");
+                    return make_cip_log_error(output, cip_service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_UC_SEND_PARAM);
+                }
             }
 
             return cip_dispatch_request(slice_from_slice(cip_service_payload, 4, embedded_cip_service_length), output, plc);

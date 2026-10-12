@@ -74,7 +74,7 @@ static int listing_tag_build_read_request_connected(cip_tag_p tag);
 
 /* define the vtable for listing tag type. */
 static struct tag_vtable_t listing_tag_vtable = {
-    .abort = (tag_vtable_func)cip_tag_abort_request,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)listing_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)listing_tag_tickler,
@@ -200,6 +200,7 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
 
         tag->byte_order = &listing_tag_logix_byte_order;
 
+        tag->create_read_status = PLCTAG_STATUS_PENDING;
         tag->vtable = &listing_tag_vtable;
 
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done. Found tag listing tag name %s.", name);
@@ -395,8 +396,21 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
-        /* keep going if we are not done yet, unless we are getting nowhere. */
-        if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
+        if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+            /*
+             * The create read is a probe: one reply shows the symbol table, and the program, exist.
+             * The whole walk can take hundreds of requests and every read redoes it, so it waits
+             * for the first read, and the buffer stays empty until then.
+             */
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Create probe answered.");
+
+            tag->size = 0;
+            tag->elem_count = 1;
+            tag->offset = 0;
+            tag->next_id = 0;
+            tag->fragment_retry_count = 0;
+            tag->read_in_progress = 0;
+        } else if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
@@ -416,7 +430,6 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
 
             // tag->elem_count = tag->offset;
 
-            tag->first_read = 0;
             tag->offset = 0;
             tag->next_id = 0;
 

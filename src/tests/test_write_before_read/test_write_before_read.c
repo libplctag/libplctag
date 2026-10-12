@@ -39,11 +39,12 @@
  * asked for neither, and it has to end up with a correct element size and a value on
  * the wire either way.
  *
- * Note what this does NOT reach: tag_write_start()'s own pre-write read.  The create
- * kicks off a read of its own, a write refuses outright while that is in flight, and
- * by the time it clears the type is already known.  That branch is only reachable
- * when the create's read fails outright -- an unreachable PLC, say -- and there is no
- * deterministic way to arrange that from here.
+ * The write is refused with PLCTAG_ERR_BUSY until the create's own read has finished,
+ * so the caller retries past BUSY.
+ *
+ * --abort-create-read and --missing-tag check the other side: a create read that ends in
+ * an abort or a PLC error fails the create for good.  Status, read and write must all
+ * report that error from then on.
  */
 
 #include "compat_utils.h"
@@ -58,7 +59,7 @@
 #define DATA_TIMEOUT (5000)
 
 
-static int write_before_read(const char *tag_string, int32_t value, bool abort_create_read) {
+static int write_before_read(const char *tag_string, int32_t value) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     int elem_size = 0;
@@ -73,38 +74,7 @@ static int write_before_read(const char *tag_string, int32_t value, bool abort_c
         return 1;
     }
 
-    /*
-     * Aborting the create's read is what leaves first_read set: a read that ends any other
-     * way clears it, and a lost reply is resent after the reconnect rather than failed.
-     * The write below then has no type to send and must take the pre-write read.
-     */
-    if(abort_create_read) {
-        rc = plc_tag_abort(tag);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("ERROR %s: could not abort the create's read!\n", plc_tag_decode_error(rc));
-            plc_tag_destroy(tag);
-            return 1;
-        }
-
-        /*
-         * A Logix tag's buffer is sized by its first read, so after the abort it is empty and
-         * there is nothing to write.  Size it by hand, as a caller staging a write would.
-         * DINT elements are assumed.
-         */
-        rc = plc_tag_set_size(tag, 4 * plc_tag_get_int_attribute(tag, "elem_count", 1));
-        if(rc < 0) {
-            printf("ERROR %s: could not size the tag buffer!\n", plc_tag_decode_error(rc));
-            plc_tag_destroy(tag);
-            return 1;
-        }
-    }
-
-    /*
-     * Write as soon as the tag is not busy.  The create kicks off a read of its own to
-     * fetch the type; while that is in flight a write is refused outright, and only once
-     * it has finished -- unsuccessfully, or the type would be known -- does the write
-     * reach the pre-write read.  Retrying past BUSY is what the caller would do anyway.
-     */
+    /* the create's read fetches the type; until it lands a write is refused with BUSY. */
     deadline = compat_time_ms() + DATA_TIMEOUT;
     do {
         rc = plc_tag_write(tag, DATA_TIMEOUT);
@@ -117,10 +87,10 @@ static int write_before_read(const char *tag_string, int32_t value, bool abort_c
         return 1;
     }
 
-    /* the pre-write read must have established a usable element size. */
+    /* the create read must have established a usable element size. */
     elem_size = plc_tag_get_int_attribute(tag, "elem_size", -1);
     if(elem_size <= 0) {
-        printf("ERROR: element size is %d after the pre-write read!\n", elem_size);
+        printf("ERROR: element size is %d after the create read!\n", elem_size);
         plc_tag_destroy(tag);
         return 1;
     }
@@ -167,13 +137,89 @@ static int write_before_read(const char *tag_string, int32_t value, bool abort_c
 }
 
 
+/*
+ * Create asynchronously and make the create read fail, by aborting it or by naming a tag
+ * the PLC does not have.  The failure must be final: status, read and write all report
+ * the same error, and waiting does not change it.
+ */
+static int create_fails_for_good(const char *tag_string, bool abort_create_read) {
+    int32_t tag = 0;
+    int rc = PLCTAG_STATUS_OK;
+    int create_rc = PLCTAG_STATUS_OK;
+    int64_t deadline = 0;
+
+    printf("--- %s\n", tag_string);
+
+    tag = plc_tag_create(tag_string, 0);
+    if(tag < 0) {
+        printf("ERROR %s: could not create tag!\n", plc_tag_decode_error(tag));
+        return 1;
+    }
+
+    if(abort_create_read) {
+        rc = plc_tag_abort(tag);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("ERROR %s: could not abort the create's read!\n", plc_tag_decode_error(rc));
+            plc_tag_destroy(tag);
+            return 1;
+        }
+    }
+
+    deadline = compat_time_ms() + DATA_TIMEOUT;
+    while((create_rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING && compat_time_ms() < deadline) {
+        compat_sleep_ms(10, NULL);
+    }
+
+    if(create_rc == PLCTAG_STATUS_OK || create_rc == PLCTAG_STATUS_PENDING) {
+        printf("ERROR: the create ended with %s, not an error!\n", plc_tag_decode_error(create_rc));
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
+    if(abort_create_read && create_rc != PLCTAG_ERR_ABORT) {
+        printf("ERROR: an aborted create ended with %s, not ABORT!\n", plc_tag_decode_error(create_rc));
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
+    printf("Create failed with %s.\n", plc_tag_decode_error(create_rc));
+
+    /* give a retry or a reconnect time to undo it, if anything would. */
+    compat_sleep_ms(500, NULL);
+
+    if((rc = plc_tag_read(tag, DATA_TIMEOUT)) != create_rc) {
+        printf("ERROR: read returned %s after the create failed!\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
+    /* a read-only tag, such as @udt or @tags, has no write at all; the library says so first. */
+    rc = plc_tag_write(tag, DATA_TIMEOUT);
+    if(rc != create_rc && rc != PLCTAG_ERR_NOT_IMPLEMENTED) {
+        printf("ERROR: write returned %s after the create failed!\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
+    if((rc = plc_tag_status(tag)) != create_rc) {
+        printf("ERROR: status changed to %s after the create failed!\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
+    printf("The create error stuck on status, read and write.\n");
+
+    plc_tag_destroy(tag);
+
+    return 0;
+}
+
+
 static void usage(void) {
-    printf("Usage: test_write_before_read [--abort-create-read] --tag=<attribute string> [--tag=<attribute string> ...]\n");
+    printf("Usage: test_write_before_read [--abort-create-read | --missing-tag] --tag=<attribute string> [--tag=...]\n");
     printf("  Each tag is created asynchronously and written before it has ever been read.\n");
-    printf("  Pass an array tag as well as a scalar: only the array reaches the case where\n");
-    printf("  the pre-write read used to come back with an unusable element size.\n");
-    printf("  --abort-create-read aborts the read tag creation starts, so the write must fetch the type.\n");
-    printf("  The tags must then be DINT, since the buffer is sized by hand.\n");
+    printf("  --abort-create-read aborts the create's read; the create must fail with ABORT for good.\n");
+    printf("  --missing-tag expects tags the PLC does not have; the create must fail with its error for good.\n");
 }
 
 
@@ -184,6 +230,7 @@ int main(int argc, char **argv) {
     int failures = 0;
     int tags_run = 0;
     bool abort_create_read = false;
+    bool missing_tag = false;
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
@@ -198,8 +245,13 @@ int main(int argc, char **argv) {
     for(int i = 1; i < argc; i++) {
         if(strcmp(argv[i], "--abort-create-read") == 0) {
             abort_create_read = true;
+        } else if(strcmp(argv[i], "--missing-tag") == 0) {
+            missing_tag = true;
+        } else if(strncmp(argv[i], "--tag=", 6) == 0 && (abort_create_read || missing_tag)) {
+            failures += create_fails_for_good(argv[i] + 6, abort_create_read);
+            tags_run++;
         } else if(strncmp(argv[i], "--tag=", 6) == 0) {
-            failures += write_before_read(argv[i] + 6, 0x01020304 + i, abort_create_read);
+            failures += write_before_read(argv[i] + 6, 0x01020304 + i);
             tags_run++;
         } else {
             printf("ERROR: unknown argument \"%s\"!\n", argv[i]);

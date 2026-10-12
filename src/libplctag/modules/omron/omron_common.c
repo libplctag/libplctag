@@ -42,7 +42,6 @@
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
-#include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/omron.h>
@@ -107,7 +106,7 @@ static struct tag_vtable_t default_vtable = {
 };
 
 static struct tag_vtable_t omron_raw_tag_vtable = {
-    .abort = (tag_vtable_func)cip_tag_abort,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = NULL,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)cip_raw_tag_tickler,
@@ -327,10 +326,13 @@ int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int
         /* trigger the first read. */
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Kicking off initial read.");
 
-        tag->first_read = 1;
+        tag->create_read_status = PLCTAG_STATUS_PENDING;
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
         // tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
+    } else if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+        /* @raw has nothing to read; its tickler completes the create when the connection is up. */
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Waiting for the connection to complete the create.");
     } else {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id,
                "Not kicking off initial read: tag is special or does not have read function.");
@@ -669,9 +671,9 @@ int omron_setup_njnx_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attri
     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
 
     /*
-     * first_read is deliberately not set here, unlike every Rockwell leaf.  This module
+     * create_read_status is deliberately not set here, unlike every Rockwell leaf.  This module
      * decides whether to kick off the initial read from whether the tag is special and has a
-     * read function, and sets first_read inside that branch; setting it here would also set
+     * read function, and sets create_read_status inside that branch; setting it here would also set
      * it for a special tag, which is a behaviour change this step is not making.
      */
 
@@ -763,7 +765,7 @@ const cip_standard_tag_ops_t cip_standard_tag_ops_omron = {.read_service = CIP_S
 
 /* the standard (symbolic, named) tag type.  The engine is shared; see modules/cip/standard_tag.c. */
 struct tag_vtable_t cip_standard_tag_vtable_omron = {
-    .abort = (tag_vtable_func)cip_tag_abort,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)cip_standard_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)cip_standard_tag_tickler,

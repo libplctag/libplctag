@@ -46,6 +46,7 @@
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/lib/conn_attribs.h>
+#include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -296,6 +297,9 @@ int cip_check_request_status(cip_tag_p tag) {
         /* the request is dead, from session side. */
         cip_tag_abort_request(tag);
 
+        /* an abort, or the PLC refusing the connection, ends a create read for good. */
+        if(tag->create_read_status == PLCTAG_STATUS_PENDING) { cip_tag_fail_create(tag, (plctag_error_code_t)rc); }
+
         pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
@@ -342,6 +346,7 @@ int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_ord
     tag->elem_type = elem_type;
     tag->elem_count = 1;
     tag->elem_size = 1;
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     tag->byte_order = byte_order;
 
@@ -395,8 +400,55 @@ int cip_tag_unimplemented_write(plc_tag_p tag) {
 }
 
 
+void cip_tag_finish_create(cip_tag_p tag, int rc) {
+    if(tag->create_read_status != PLCTAG_STATUS_PENDING) { return; }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        cip_tag_fail_create(tag, (plctag_error_code_t)rc);
+        return;
+    }
+
+    tag->create_read_status = PLCTAG_STATUS_OK;
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+    plc_tag_generic_wake_tag((plc_tag_p)tag);
+}
+
+
+void cip_tag_fail_create(cip_tag_p tag, plctag_error_code_t rc) {
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "Create failed with %s.", plc_tag_decode_error(rc));
+
+    tag->create_read_status = rc;
+    tag->status = (int8_t)rc;
+
+    /* the create read is over; completing it is what clears the library's in-flight flag. */
+    if(tag->read_in_flight) { tag->read_complete = 1; }
+
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+
+    /* a sync create may be waiting; it should see the answer now, not when its timeout ends. */
+    plc_tag_generic_wake_tag((plc_tag_p)tag);
+}
+
+
+int cip_data_tag_abort(cip_tag_p tag) {
+    /* the create's error must survive, so there is nothing left to abort. */
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return PLCTAG_STATUS_OK; }
+
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING) { cip_tag_fail_create(tag, PLCTAG_ERR_ABORT); }
+
+    /* the abort itself worked; ABORT is the tag's status, not this call's result. */
+    cip_tag_abort(tag);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int cip_tag_status(cip_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING) { return PLCTAG_STATUS_PENDING; }
 
     if(tag->read_in_progress || tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
 
@@ -595,6 +647,8 @@ int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_
 
     pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Starting");
 
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
     if(tag->write_in_progress) {
         pdebug(debug_module, DEBUG_WARN, tag->tag_id, "A write is in progress on a read-only tag!");
         return PLCTAG_ERR_BAD_STATUS;
@@ -649,6 +703,7 @@ int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->read_in_progress) {
             pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Read complete.");
+            cip_tag_finish_create(tag, rc);
             tag->read_complete = 1;
         } else {
             pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Done. Read in progress.");

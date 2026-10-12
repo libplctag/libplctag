@@ -958,6 +958,28 @@ int get_payload_size(cip_request_p request) {
 }
 
 
+/*
+ * Fail every queued request with rc.  For a Forward Open the PLC refused: the requests were
+ * waiting for a connection the PLC has said it will not give, so its answer is theirs.
+ */
+static void fail_queued_requests_unsafe(cip_conn_p conn, int rc) {
+    cip_request_p request = NULL;
+
+    while(vector_length(conn->requests) > 0) {
+        request = vector_remove(conn->requests, 0);
+        if(!request) { continue; }
+
+        spin_block(&request->lock) {
+            request->status = rc;
+            request->request_size = 0;
+            request->resp_received = 1;
+        }
+
+        rc_dec(request);
+    }
+}
+
+
 int purge_aborted_requests_unsafe(cip_conn_p conn) {
     int purge_count = 0;
     cip_request_p request = NULL;
@@ -1384,11 +1406,15 @@ int receive_forward_open_response(cip_conn_p conn) {
      * surface as an error so the handler can log it and re-enter the connect/retry path
      * instead of parking.
      */
+    conn->fo_plc_answered = false;
+
     rc = recv_eip_response(conn, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to receive Forward Open response.");
         return rc;
     }
+
+    conn->fo_plc_answered = true;
 
     rc = cip_decode_forward_open_response(conn);
 
@@ -2020,6 +2046,17 @@ THREAD_FUNC(session_handler) {
                      * back and an empty slot can be filled.
                      */
                     if(forward_open_error_is_configuration(rc)) { backoff_saturate(&retry_backoff); }
+
+                    /*
+                     * The PLC's refusal is the answer for every request waiting on this
+                     * connection.  Two kinds wait for the reconnect instead: no reply at all,
+                     * which is not an answer, and running out of connections or sizes, which
+                     * says the PLC has nothing to give right now, not that it never will.
+                     */
+                    if(conn->fo_plc_answered && rc != PLCTAG_ERR_NO_RESOURCES && rc != PLCTAG_ERR_TOO_SMALL) {
+                        critical_block(conn->session_mutex) { fail_queued_requests_unsafe(conn, rc); }
+                        plc_tag_tickler_wake();
+                    }
                 }
 
                 cond_signal(conn->session_wait_cond);
