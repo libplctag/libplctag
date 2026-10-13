@@ -275,10 +275,8 @@ typedef struct cip_plc_entry_t cip_plc_entry_t;
 
 
 /*
- * A module's set of live connections.  Each dialect owns one and passes it in,
- * so AB and Omron keep separate connection pools: session_match_valid() keys
- * only on host and path, and the two dialects build a connection differently
- * for the same address.
+ * The set of live connections.  There is one, in conn.c, for every CIP family;
+ * a connection records it so it can remove itself.
  */
 typedef struct {
     mutex_p mutex;
@@ -465,16 +463,10 @@ typedef cip_request_t *cip_request_p;
 
 /* shared connection handling, see modules/cip/conn.c */
 
-extern int session_list_init(cip_conn_list_t *list);
 extern int session_list_add(cip_conn_list_t *list, cip_conn_p conn);
 extern int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn);
 extern int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
 
-/*
- * How many connections the list currently holds.  Nothing in the library needs this; it
- * exists so a test can assert that a failed tag create leaks no connection.
- */
-extern int32_t session_list_count(cip_conn_list_t *list);
 extern int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn);
 extern cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
                                                    int connection_group_id, const cip_plc_entry_t *plc_entry);
@@ -558,6 +550,16 @@ extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);
 
 extern cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, const char *host,
                                             const char *path, int *use_connected_msg, int connection_group_id);
-extern int cip_conn_find_or_create(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs,
-                                   cip_conn_p *tag_conn, int *is_new_conn);
-extern void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
+
+/* the one connection list, for every CIP family.  Started and torn down with the library. */
+extern int cip_conn_startup(void);
+extern void cip_conn_teardown(void);
+
+/* find a shared connection matching the tag's attributes, or create one. */
+extern int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn);
+
+/*
+ * How many connections the list currently holds.  Nothing in the library needs this; it
+ * exists so a test can assert that a failed tag create leaks no connection.
+ */
+extern int32_t cip_conn_live_count(void);

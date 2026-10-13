@@ -59,6 +59,14 @@ extern int check_tag_name(cip_tag_p tag, const char *name);
  * ab_setup_plc5_tag, and SLC and MicroLogix in both dialects reach ab_setup_slc_tag, because
  * nothing but the byte order and the dialect differs between them.
  */
+/*
+ * The Rockwell constructor, on a family and connection cip_tag_create() has already settled.
+ * It takes ownership of the connection reference, on failure as well as success.
+ */
+extern int ab_tag_create(const cip_plc_entry_t *entry, cip_conn_p session, attr attribs,
+                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
+                         plc_tag_p *tag_out);
+
 extern int ab_setup_plc5_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 extern int ab_setup_slc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 extern int ab_setup_lgx_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
@@ -66,10 +74,9 @@ extern int ab_setup_logix_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr 
 extern int ab_setup_micro800_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 extern int ab_setup_generic_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 
-/* special tag setup, see listing_tag.c, udt_tag.c and identity_tag.c */
+/* special tag setup, see listing_tag.c and udt_tag.c */
 extern int setup_tag_listing_tag(cip_tag_p tag, const char *name);
 extern int setup_udt_tag(cip_tag_p tag, const char *name);
-extern int setup_identity_tag(cip_tag_p tag);
 
 
 /* per-family string and integer layouts, used when setting a tag up. */
@@ -84,9 +91,4 @@ extern struct tag_vtable_t cip_standard_tag_vtable_ab;
  * The AB module's own connection lifecycle.  Everything else about a connection --
  * sequence numbers, payload space, requests -- is declared by cip/conn.h.
  */
-extern int session_startup(void);
-extern void session_teardown(void);
-extern int session_find_or_create(cip_conn_p *session, attr attribs, int *is_new_session);
 
-/* live connections on the Rockwell list.  For tests only; see session_list_count(). */
-extern int32_t session_live_count(void);

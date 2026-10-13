@@ -16,9 +16,8 @@ message("Building unit tests with mini_mock (local CMocka-macro stand-in, see mi
 # from deep inside the prebuilt library would need something else.
 set(MOCK_DEFINITIONS
     "refcount_startup=mock_refcount_startup"
-    "ab_init=mock_ab_init"
+    "cip_conn_startup=mock_cip_conn_startup"
     "mb_init=mock_mb_init"
-    "omron_init=mock_omron_init"
 )
 
 # test_init: tests initialize_modules()

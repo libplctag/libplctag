@@ -76,13 +76,9 @@ plc_tag_p cip_connection_tag_create(attr attribs, const cip_connection_tag_ops_t
     } else {
         int new_conn = 0;
 
-        args.conn_rc = ops->find_or_create(&conn, attribs, &new_conn);
+        args.conn_rc = cip_conn_find_or_create(&conn, attribs, &new_conn);
         if(args.conn_rc != PLCTAG_STATUS_OK) {
             conn = NULL;
-            /* a settings conflict is the caller's to fix, so it is never masked. */
-            if(ops->create_failure_rc != PLCTAG_STATUS_OK && args.conn_rc != PLCTAG_ERR_BAD_PARAM) {
-                args.conn_rc = ops->create_failure_rc;
-            }
         }
 
         args.conn_is_new = (new_conn != 0);

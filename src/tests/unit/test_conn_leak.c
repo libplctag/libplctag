@@ -47,8 +47,7 @@
 #include "mini_mock.h"
 
 #include <libplctag/api/libplctag.h>
-#include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/omron/omron_common.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <stdio.h>
@@ -67,7 +66,7 @@
 #define POLL_INTERVAL_MS (10)
 
 
-static int32_t total_live_conns(void) { return session_live_count() + conn_live_count(); }
+static int32_t total_live_conns(void) { return cip_conn_live_count(); }
 
 
 /* true if every connection went away inside the deadline. */
@@ -97,7 +96,7 @@ static void test_a_live_tag_holds_a_connection(void **state) {
 
     tag = plc_tag_create(LOGIX_TAG "&elem_size=4&elem_count=1&name=Dummy", 0);
     assert_true(tag > 0);
-    assert_int_equal(session_live_count(), 1);
+    assert_int_equal(cip_conn_live_count(), 1);
 
     plc_tag_destroy(tag);
     assert_true(conns_drained());

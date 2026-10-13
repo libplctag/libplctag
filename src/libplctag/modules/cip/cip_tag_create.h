@@ -147,8 +147,8 @@ extern cip_plc_type_t cip_plc_type_from_attributes(attr attribs);
 /*
  * The constructor the library dispatches protocol=ab-eip to.
  *
- * It reads the plc attribute, or a cloned tag's protocol, and calls the module that serves
- * it.  Registered in lib/init.c's tag_type_map.
+ * It settles the family and the connection, then hands both to the module that serves the
+ * family.  Registered in lib/init.c's tag_type_map.
  */
 extern int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                 void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);

@@ -226,7 +226,7 @@ static lock_t instance_lock = LOCK_INIT;
 static tag_registry_p current_instance = NULL;
 
 /* Staging for an instance between tag_registry_init() building it and initialize_modules()
- * either publishing it (tag_registry_publish(), once ab_init()/mb_init()/omron_init()
+ * either publishing it (tag_registry_publish(), once cip_conn_startup()/mb_init()
  * have also succeeded) or discarding it (tag_registry_discard_pending(), if one of
  * those fails). Not protected by instance_lock: only initialize_modules() touches
  * it, and only while it is the sole thread inside the library's startup CAS. */

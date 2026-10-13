@@ -46,18 +46,19 @@
  */
 
 #include <libplctag/api/libplctag.h>
-#include <libplctag/modules/ab/ab.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <platform.h>
+#include <libplctag/lib/connection_tag.h>
 #include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip/connection_tag.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <stdint.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
+#include <utils/rc.h>
 
 
 /* maximum for PCCC embedded within CIP. */
@@ -220,29 +221,132 @@ cip_plc_type_t cip_plc_type_from_attributes(attr attribs) {
 }
 
 
+/*
+ * @connection, for either family.  The ops are the one place the families differ: each keeps
+ * its own debug module ID -- public API that callers filter on -- and its own protocol.
+ *
+ * AB adopts a connection from an OMRON tag as well as its own, since both hang the same
+ * cip_conn_p off the same field.  Both pass a find-or-create failure up unchanged.
+ */
+static plc_tag_p create_connection_tag(attr attribs, bool is_omron,
+                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                      void *userdata, plc_tag_p src_tag) {
+    static const cip_connection_tag_ops_t ab_ops = {.connection_protocol = TAG_PROTOCOL_AB_CONNECTION,
+                                                    .debug_module = DEBUG_MODULE_AB_CONNECTION,
+                                                    .source_protocols = {TAG_PROTOCOL_AB, TAG_PROTOCOL_OMRON}};
+    static const cip_connection_tag_ops_t omron_ops = {.connection_protocol = TAG_PROTOCOL_OMRON_CONNECTION,
+                                                       .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
+                                                       .source_protocols = {TAG_PROTOCOL_OMRON, TAG_PROTOCOL_UNKNOWN}};
+
+    return cip_connection_tag_create(attribs, is_omron ? &omron_ops : &ab_ops, tag_callback_func, userdata, src_tag);
+}
+
+
+/*
+ * Which family and which connection, settled before a tag exists, then the family's own
+ * constructor on that connection.
+ *
+ * A clone takes its family from the connection it inherits.  Its own attributes cannot be
+ * asked: a clone need not repeat the path that made the original DH+.
+ */
 int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                    void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
-    /*
-     * Both families arrive as protocol=ab-eip and are told apart by the plc attribute, so
-     * something has to read that attribute and pick a module.  That something is this file,
-     * which is above both of them.  It used to be ab_tag_create(), which meant the Rockwell
-     * module called the OMRON module's constructor and had to know the OMRON spellings of
-     * the plc attribute to do it.
-     *
-     * A cloned tag names its module directly and needs no attribute at all.
-     */
+    const cip_plc_entry_t *entry = NULL;
+    cip_conn_p conn = NULL;
+    cip_plc_type_t plc_type = CIP_PLC_NONE;
+    const char *path = attr_get_str(attribs, "path", NULL);
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        bool is_omron = (src_tag ? (src_tag->protocol_type == TAG_PROTOCOL_OMRON
+                                    || src_tag->protocol_type == TAG_PROTOCOL_OMRON_CONNECTION)
+                                 : (cip_plc_type_from_attributes(attribs) == CIP_PLC_OMRON_NJNX));
+
+        *tag_out = create_connection_tag(attribs, is_omron, tag_callback_func, userdata, src_tag);
+
+        /* the connection tag types still report through the tag. */
+        return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
+    }
+
     if(src_tag) {
         switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_OMRON:
-            case TAG_PROTOCOL_OMRON_CONNECTION: return omron_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
+            case TAG_PROTOCOL_AB:
+            case TAG_PROTOCOL_OMRON: conn = ((cip_tag_p)src_tag)->session; break;
 
-            default: return ab_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
+            case TAG_PROTOCOL_AB_CONNECTION:
+            case TAG_PROTOCOL_OMRON_CONNECTION: conn = (cip_conn_p)((connection_tag_p)src_tag)->conn; break;
+
+            default: break;
+        }
+
+        if(!conn) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to acquire source connection reference.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+
+        entry = conn->plc_entry;
+        plc_type = entry->plc_type;
+
+        /* the connection decides use_connected_msg, so a clone cannot ask for the other setting. */
+        if(attr_get_str(attribs, "use_connected_msg", NULL)
+           && (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0) != conn->use_connected_msg) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        /* the reference the new tag will own.  The source keeps its own. */
+        conn = rc_inc(conn);
+        if(!conn) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to acquire source connection reference.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+    } else {
+        plc_type = cip_plc_type_from_attributes(attribs);
+        if(plc_type == CIP_PLC_NONE) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "CPU type not valid or missing.");
+            return PLCTAG_ERR_BAD_DEVICE;
+        }
+
+        entry = cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs));
+        if(!entry || !entry->setup_tag) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unknown PLC type!");
+            return PLCTAG_ERR_BAD_CONFIG;
+        }
+
+        /*
+         * str_length() rather than a NULL test: "path=" is a present but empty attribute and
+         * would otherwise fail further in with a worse message.
+         */
+        if(str_length(path) == 0 && (plc_type == CIP_PLC_LGX || plc_type == CIP_PLC_OMRON_NJNX)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path is required for %s PLCs!", entry->name);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        /*
+         * A PCCC CPU sits directly on a network, never in a ControlLogix chassis, so a path to
+         * one must leave the gateway's chassis.  A DH+ path already does; this is the direct row.
+         */
+        if(str_length(path) && entry->dialect == CIP_DIALECT_DIRECT && cip_plc_entry_find(plc_type, CIP_DIALECT_DHP)
+           && !cip_path_is_bridged(path)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", entry->name);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        rc = cip_conn_find_or_create(&conn, attribs, NULL);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to create connection, error %s!", plc_tag_decode_error(rc));
+            return rc;
         }
     }
 
-    if(cip_plc_type_from_attributes(attribs) == CIP_PLC_OMRON_NJNX) {
-        return omron_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
+
+    /* the constructor owns the connection reference from here, on success or failure. */
+    if(plc_type == CIP_PLC_OMRON_NJNX) {
+        return omron_tag_create(entry, conn, attribs, tag_callback_func, userdata, tag_out);
     }
 
-    return ab_tag_create(attribs, tag_callback_func, userdata, src_tag, tag_out);
+    return ab_tag_create(entry, conn, attribs, tag_callback_func, userdata, tag_out);
 }

@@ -36,10 +36,9 @@
 /*
  * The @connection tag body shared by the CIP families.
  *
- * AB and OMRON differ only in which protocol constants they answer to and which
- * find-or-create they call, so those are parameters rather than a second copy of the
- * function.  Each family keeps its own entry point so that its debug module ID -- which
- * is public API that callers filter on -- stays its own.
+ * AB and OMRON differ only in which protocol constants they answer to and their debug
+ * module ID -- public API that callers filter on -- so those are parameters rather than a
+ * second copy of the function.
  */
 
 #include <libplctag/lib/tag.h>
@@ -59,15 +58,6 @@ typedef struct {
      * accepts only its own.  TAG_PROTOCOL_UNKNOWN pads an unused slot.
      */
     tag_protocol_t source_protocols[2];
-
-    int (*find_or_create)(cip_conn_p *conn, attr attribs, int *is_new);
-
-    /*
-     * What to report when find_or_create() fails.  AB reports PLCTAG_ERR_BAD_GATEWAY
-     * whatever went wrong; OMRON passes the underlying error through.  Left as
-     * PLCTAG_STATUS_OK to pass through.
-     */
-    int32_t create_failure_rc;
 } cip_connection_tag_ops_t;
 
 

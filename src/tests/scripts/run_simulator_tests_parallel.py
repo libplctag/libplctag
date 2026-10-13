@@ -385,11 +385,17 @@ def build_manifest() -> Manifest:
 
     # @identity: Get_Attributes_All on the Identity object, class 1 instance 1.  With a path
     # the request is routed inside an Unconnected Send, without one it goes out unrouted --
-    # the two branches of identity_tag.c:226.  Nothing in this suite reached either before.
+    # the two branches of cip/identity_tag.c:184.  Nothing in this suite reached either before.
     sec.test("identity, routed",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&plc=generic&name=@identity&debug=3"], F)
+    # @identity on the family's own PLC type rides the family's connection: connected by default.
+    sec.test("identity, Logix, connected",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@identity&debug=3"], F)
+    sec.test("identity, Logix, unconnected",
+              [exe("get_identity"),
+               f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@identity&debug=3"], F)
     # "STRING" is a different type on each PLC family: a UDT sent as an abbreviated struct
     # (a0 02 ce 0f) on Logix, SHORT_STRING on Micro800, the plain CIP STRING on Omron.  The
     # element stride differs with it (88/83/84 bytes), so writing one element of an array and
@@ -975,6 +981,8 @@ def build_manifest() -> Manifest:
     sec = m.section("micro800", server=micro800_server)
     sec.test("identity, unrouted",
               [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=generic&name=@identity&debug=3"], F)
+    sec.test("identity, Micro800, connected",
+              [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=@identity&debug=3"], F)
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
@@ -1021,6 +1029,8 @@ def build_manifest() -> Manifest:
     sec = m.section("omron", server=omron_server)
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={ogw}&plc=generic&name=@identity&debug=3"], F)
+    sec.test("identity, Omron, connected",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@identity&debug=3"], F)
     sec.test("basic Omron read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
                "--write=42", "--debug=4"], F)

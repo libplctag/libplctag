@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,14 +33,21 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+/*
+ * The @identity tag body, shared by the CIP families.
+ *
+ * One Get_Attributes_All against the Identity object, sent however the connection sends
+ * everything else.  Nothing in that is family-specific.  Each family still owns its vtable,
+ * for its attribute table and the debug module ID callers filter on.
+ */
 
-
-#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <utils/attr.h>
+#include <libplctag/modules/cip/tag.h>
+#include <utils/debug.h>
 
-void omron_teardown(void);
-int omron_init(void);
-int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                           void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
+
+extern int cip_identity_tag_read_start(cip_tag_p tag);
+extern int cip_identity_tag_tickler(cip_tag_p tag);
+
+/* sets the type, byte order and vtable of a tag named @identity. */
+extern int cip_identity_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module);

@@ -361,10 +361,25 @@ def build_manifest() -> list[Test]:
         test("identity, routed: L81 v31.11 via L8x port",
              [exe("get_identity"),
               f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=generic&name=@identity&debug=3"]),
-        # There is deliberately no connected-messaging identity test.  ab_common.c recognises
-        # "@identity" only under the generic PLC type, which sets use_connected_msg to zero
-        # unconditionally, so a connected identity request is unreachable -- asking for one
-        # just reads a tag literally named "@identity" and gets "tag does not exist".
+        # @identity on each family's own PLC type, so it rides that family's connection.
+        test("identity, Logix, connected",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@identity&debug=3"]),
+        test("identity, Logix, unconnected",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@identity&debug=3"]),
+        test("identity, PCCC-mapped Logix",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=lgx-pccc&name=@identity&debug=3"]),
+        test("identity, PLC/5 direct",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={plc5_gw}&plc=plc5&name=@identity&debug=3"]),
+        test("identity, MicroLogix direct",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mlgx_gw}&plc=micrologix&name=@identity&debug=3"]),
+        # A DH+ node has no CIP Identity object; the DHRIO bridge would answer in its place.
+        test("identity, PLC/5 via DH+ is refused",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&plc=plc5&name=@identity&debug=3"],
+             expect_failure=True),
         # Several ordinary tags read together, so the requests are bundled into one Multiple
         # Service Packet and the reply budget decides how many fit.  The raw CIP bundling test
         # covers the assembly; this covers it for tags that carry a reply size.
@@ -447,7 +462,7 @@ def build_logix_matrix() -> list[Test]:
 
         # Needs no tag to exist, so every cell can run it.  The path matters: with one the
         # request is routed to the CPU in that slot inside an Unconnected Send, without one
-        # it stops at the entry module.  Those are the two branches of identity_tag.c:226,
+        # it stops at the entry module.  Those are the two branches of cip/identity_tag.c:184,
         # and this axis is what identifies each CPU.
         tests.append(test(f"{target.label}: identity",
                           [exe("get_identity"),

@@ -35,10 +35,9 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_registry.h>
-#include <libplctag/modules/ab/ab.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/modbus/modbus.h>
-#include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/system/system.h>
 #include <utils/rc.h>
 #include <platform.h>
@@ -92,8 +91,7 @@ static const struct {
     const char *name;
     int (*init)(void);
 } lib_components[] = {
-    {"refcount", refcount_startup}, {"tag registry", tag_registry_init}, {"AB", ab_init}, {"Modbus", mb_init},
-    {"Omron", omron_init},
+    {"refcount", refcount_startup}, {"tag registry", tag_registry_init}, {"CIP", cip_conn_startup}, {"Modbus", mb_init},
 };
 
 #define LIB_COMPONENT_COUNT ((int)(sizeof(lib_components) / sizeof(lib_components[0])))
@@ -202,14 +200,12 @@ void destroy_modules(void) {
      * and tickler condvar that tag_registry_teardown() then destroys.  That pair is not a
      * stack, and pretending otherwise in a table would be wrong rather than tidy.
      */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
-    omron_teardown();
-
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
-    ab_teardown();
+    /* the connection handler threads belong to the connections; this waits for them. */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down CIP connections.");
+    cip_conn_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
     refcount_teardown();

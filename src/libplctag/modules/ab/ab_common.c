@@ -35,24 +35,21 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
-#include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/ab/ab.h>
 #include <libplctag/modules/ab/ab_common.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>
 #include <libplctag/modules/ab/eip_slc_pccc.h>
 #include <libplctag/modules/ab/pccc.h>
-#include <libplctag/modules/cip/connection_tag.h>
 #include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/identity_tag.h>
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
-#include <libplctag/modules/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <utils/attr.h>
@@ -89,9 +86,6 @@
 
 /* forward declarations*/
 static int get_tag_data_type(cip_tag_p tag, attr attribs);
-static plc_tag_p ab_connection_tag_create(attr attribs,
-                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                          void *userdata, plc_tag_p src_tag);
 static int setup_raw_tag(cip_tag_p tag);
 
 
@@ -124,170 +118,33 @@ static struct tag_vtable_t raw_tag_vtable = {
 };
 
 
+/* @identity: the body is shared, see modules/cip/identity_tag.c. */
+static struct tag_vtable_t identity_tag_vtable = {
+    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .read = (tag_vtable_func)cip_identity_tag_read_start,
+    .status = (tag_vtable_func)cip_tag_status,
+    .tickler = (tag_vtable_func)cip_identity_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+
+    /* attribute accessors */
+    .attribs = ab_attribs,
+};
+
+
 /*
  * Public functions.
  */
 
 
-int ab_init(void) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Initializing AB protocol library.");
-
-    if((rc = session_startup()) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_ERROR, 0, "Unable to initialize session library!");
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Finished initializing AB protocol library.");
-
-    return rc;
-}
-
-/*
- * called when the whole program is going to terminate.
- */
-void ab_teardown(void) {
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Releasing global AB protocol resources.");
-
-    /*
-     * The connection handler threads belong to the connections, not to this module: each one
-     * is created and joined by modules/cip/conn.c.  session_teardown() waits for them.
-     */
-    session_teardown();
-
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Done.");
-}
-
-
-int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                  void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
+int ab_tag_create(const cip_plc_entry_t *entry, cip_conn_p session, attr attribs,
+                  void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
+                  plc_tag_p *tag_out) {
     cip_tag_p tag = NULL;
-    cip_conn_p session = NULL;
-    const cip_plc_entry_t *entry = NULL;
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
-    const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Starting.");
-
-    /* short circuit for device tag */
-    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
-        *tag_out = (plc_tag_p)ab_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
-
-        /* the connection tag types still report through the tag. */
-        return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
-    }
-
-    /*
-     * Which family, which dialect, and which connection -- all settled before a tag exists.
-     *
-     * The family determines the connection: it decides the payload sizing and the messaging,
-     * so a connection is keyed on its row as much as on its address.  That is why this runs
-     * first rather than on a half-built tag.
-     *
-     * A clone takes its family from what it was cloned from and its dialect from the
-     * connection it inherits.  Its own attributes cannot be asked: a clone need not repeat
-     * the path that made the original DH+.
-     */
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB: {
-                cip_tag_p src = (cip_tag_p)src_tag;
-                plc_type = src->plc_type;
-                session = src->session;
-                break;
-            }
-
-            case TAG_PROTOCOL_AB_CONNECTION: {
-                session = (cip_conn_p)((connection_tag_p)src_tag)->conn;
-                plc_type = session ? session->plc_entry->plc_type : CIP_PLC_NONE;
-                break;
-            }
-
-            default: break;
-        }
-
-        if(!session) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-
-        entry = session->plc_entry;
-    } else {
-        /* AB accepts every PLC family its own table knows; the table is the filter. */
-        plc_type = cip_plc_type_from_attributes(attribs);
-
-        if(plc_type == CIP_PLC_NONE) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
-            return PLCTAG_ERR_BAD_DEVICE;
-        }
-
-        entry = cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs));
-    }
-
-    if(!entry || !entry->setup_tag) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unknown PLC type!");
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    path = attr_get_str(attribs, "path", NULL);
-
-    /*
-     * A Logix tag needs a path.  The check stays here rather than in the leaf because only
-     * this function knows whether the tag was cloned from another, which supplies the
-     * connection instead of a path.
-     *
-     * str_length() rather than a NULL test, which is what Omron always used: "path=" with
-     * nothing after it is a present but empty attribute, and it used to pass here and fail
-     * further in with a worse message.  str_length(NULL) is 0, so this covers both.
-     */
-    if(!src_tag && str_length(path) == 0 && plc_type == CIP_PLC_LGX) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "A path is required for Logix-class PLCs!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /*
-     * A PCCC CPU sits directly on a network, never in a ControlLogix chassis, so a path to
-     * one must leave the gateway's chassis.  A DH+ path already does; this is the direct row.
-     */
-    if(!src_tag && str_length(path) && entry->dialect == CIP_DIALECT_DIRECT && cip_plc_entry_find(plc_type, CIP_DIALECT_DHP)
-       && !cip_path_is_bridged(path)) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", entry->name);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /*
-     * The connection decides use_connected_msg.  A clone inherits its source's connection, so
-     * one that asks for the other setting is refused here, as find-or-create refuses it below.
-     */
-    if(src_tag && attr_get_str(attribs, "use_connected_msg", NULL)
-       && (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0) != session->use_connected_msg) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /*
-     * Find or create a session.
-     *
-     * All tags need sessions.  They are the TCP connection to the gateway PLC.
-     */
-    if(src_tag) {
-        /* the reference this tag will own.  The source keeps its own. */
-        session = rc_inc(session);
-
-        if(!session) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unable to acquire source session reference.");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        rc = session_find_or_create(&session, attribs, NULL);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, 0, "Unable to create session!");
-            /* a settings conflict is the caller's to fix; anything else stays BAD_GATEWAY. */
-            return (rc == PLCTAG_ERR_BAD_PARAM ? rc : PLCTAG_ERR_BAD_GATEWAY);
-        }
-    }
 
     tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_AB, &default_vtable, DEBUG_MODULE_AB_COMMON);
     if(!tag) {
@@ -302,7 +159,7 @@ int ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int ev
      * the tag and needs no unwinding of its own.
      */
     tag->session = session;
-    tag->plc_type = plc_type;
+    tag->plc_type = entry->plc_type;
     tag->use_connected_msg = session->use_connected_msg;
 
     /*
@@ -540,6 +397,16 @@ int get_tag_data_type(cip_tag_p tag, attr attribs) {
 
     pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, 0, "Starting.");
 
+    /* every family has an Identity object, but a DH+ node is not CIP: the bridge would answer for it. */
+    if(str_cmp_i(attr_get_str(attribs, "name", NULL), "@identity") == 0) {
+        if(tag->session->plc_entry->dialect == CIP_DIALECT_DHP) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "@identity is not supported on %s!", tag->session->plc_entry->name);
+            return PLCTAG_ERR_UNSUPPORTED;
+        }
+
+        return cip_identity_tag_setup(tag, &identity_tag_vtable, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
+    }
+
     switch(tag->plc_type) {
         case CIP_PLC_PLC5:
         case CIP_PLC_SLC:
@@ -662,21 +529,10 @@ int get_tag_data_type(cip_tag_p tag, attr attribs) {
             break;
 
         case CIP_PLC_GENERIC:
-            /* Generic PLC type only supports special tags like @identity */
-            tag_name = attr_get_str(attribs, "name", NULL);
-
-            if(str_cmp_i(tag_name, "@identity") == 0) {
-                rc = setup_identity_tag(tag);
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Error setting up identity tag!");
-                    return rc;
-                }
-            } else {
-                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Generic PLC type only supports @identity tag, got: %s", tag_name);
-                return PLCTAG_ERR_UNSUPPORTED;
-            }
-
-            break;
+            /* @identity returned above, and it is the only tag a generic device has. */
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Generic PLC type only supports @identity tag, got: %s",
+                   attr_get_str(attribs, "name", ""));
+            return PLCTAG_ERR_UNSUPPORTED;
 
         default:
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, 0, "Unknown PLC type!");
@@ -1085,25 +941,6 @@ struct tag_vtable_t cip_standard_tag_vtable_ab = {
     /* attribute accessors */
     .attribs = ab_attribs,
 };
-
-
-static plc_tag_p ab_connection_tag_create(attr attribs,
-                                          void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                          void *userdata, plc_tag_p src_tag) {
-    /*
-     * AB adopts a connection from an OMRON tag as well as its own: both families hang the
-     * same cip_conn_p off the same field, and a user who already has one should not be
-     * made to open a second.  The BAD_GATEWAY override is long-standing behaviour -- AB
-     * reports it for any find-or-create failure, where OMRON passes the real error up.
-     */
-    static const cip_connection_tag_ops_t ops = {.connection_protocol = TAG_PROTOCOL_AB_CONNECTION,
-                                                 .debug_module = DEBUG_MODULE_AB_CONNECTION,
-                                                 .source_protocols = {TAG_PROTOCOL_AB, TAG_PROTOCOL_OMRON},
-                                                 .find_or_create = session_find_or_create,
-                                                 .create_failure_rc = PLCTAG_ERR_BAD_GATEWAY};
-
-    return cip_connection_tag_create(attribs, &ops, tag_callback_func, userdata, src_tag);
-}
 
 
 static int setup_raw_tag(cip_tag_p tag) { return cip_raw_tag_setup(tag, &raw_tag_vtable, DEBUG_MODULE_AB_EIP_CIP_SPECIAL); }

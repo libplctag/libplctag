@@ -61,6 +61,48 @@
 #include <utils/vector.h>
 
 
+static int session_list_init(cip_conn_list_t *list);
+static int32_t session_list_count(cip_conn_list_t *list);
+static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
+static int find_or_create_on_list(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs,
+                                  cip_conn_p *tag_conn, int *is_new_conn);
+
+
+/*
+ * Every CIP connection, Rockwell and OMRON alike.  The family's table entry is part of the
+ * match key, so connections for two families never match each other.
+ */
+static cip_conn_list_t conn_list = {0};
+
+
+int cip_conn_startup(void) { return session_list_init(&conn_list); }
+
+
+void cip_conn_teardown(void) { session_list_teardown(&conn_list, DEBUG_MODULE_CIP); }
+
+
+int32_t cip_conn_live_count(void) { return session_list_count(&conn_list); }
+
+
+int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
+    cip_plc_type_t plc_type = cip_plc_type_from_attributes(attribs);
+
+    /*
+     * The entry is resolved from the same attributes the connection is about to parse its
+     * own path from, so the dialect stored on the connection and the path it encodes cannot
+     * disagree.
+     */
+    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs));
+
+    if(!plc_entry) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unknown PLC type %d!", (int)plc_type);
+        return PLCTAG_ERR_BAD_DEVICE;
+    }
+
+    return find_or_create_on_list(&conn_list, plc_entry, attribs, tag_conn, is_new_conn);
+}
+
+
 uint16_t next_conn_serial_number(uint16_t current) {
     uint16_t next = (uint16_t)(current + 1);
 
@@ -215,7 +257,7 @@ int cip_conn_max_cip_payload(cip_conn_p conn) {
 }
 
 
-int session_list_init(cip_conn_list_t *list) {
+static int session_list_init(cip_conn_list_t *list) {
     int rc = PLCTAG_STATUS_OK;
 
     if((rc = mutex_create(&(list->mutex))) != PLCTAG_STATUS_OK) {
@@ -287,7 +329,7 @@ int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
 }
 
 
-int32_t session_list_count(cip_conn_list_t *list) {
+static int32_t session_list_count(cip_conn_list_t *list) {
     int32_t count = 0;
 
     critical_block(list->mutex) { count = (int32_t)vector_length(list->conns); }
@@ -2489,8 +2531,8 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
 
     return conn;
 }
-int cip_conn_find_or_create(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs, cip_conn_p *tag_conn,
-                            int *is_new_conn) {
+static int find_or_create_on_list(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs,
+                                  cip_conn_p *tag_conn, int *is_new_conn) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
@@ -2637,7 +2679,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_plc_entry_t *plc_en
 
 
 /*
- * Bring a module's whole connection list down.
+ * Bring the whole connection list down.
  *
  * The order matters: the list is emptied and freed first, but the mutex cannot
  * go until the handler threads have finished, because a handler may still be
@@ -2645,7 +2687,7 @@ int cip_conn_find_or_create(cip_conn_list_t *list, const cip_plc_entry_t *plc_en
  * freed pages to the OS immediately turns any use-after-free here into a
  * SIGSEGV rather than something harmless.
  */
-void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module) {
+static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module) {
     int64_t start_time = 0;
     int active_count = 0;
 

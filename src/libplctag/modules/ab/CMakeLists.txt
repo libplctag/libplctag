@@ -2,10 +2,8 @@
 
 
 set(AB_PROTOCOL_SOURCES
-                     "${CMAKE_CURRENT_SOURCE_DIR}/ab.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/ab_common.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/ab_common.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/identity_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/listing_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/udt_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/eip_lgx_pccc.c"
@@ -16,6 +14,5 @@ set(AB_PROTOCOL_SOURCES
                      "${CMAKE_CURRENT_SOURCE_DIR}/eip_slc_pccc.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/pccc.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/session.c"
                     PARENT_SCOPE
 )

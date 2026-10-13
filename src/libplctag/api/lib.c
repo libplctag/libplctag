@@ -47,7 +47,6 @@
 #include <libplctag/lib/version.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/modbus/modbus.h>
-#include <libplctag/modules/omron/omron.h>
 #include <limits.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -110,7 +109,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
  *
  * Builds the tag hashtable, its lookup mutex, and the tag tickler condition
  * variable, and stages the result in building_instance for initialize_modules()
- * to either publish (lib_instance_publish(), once ab_init()/mb_init()/omron_init()
+ * to either publish (lib_instance_publish(), once cip_conn_startup()/mb_init()
  * have also succeeded) or discard (lib_instance_discard_pending(), if one of them
  * fails). Deliberately does not start the tickler thread -- see the comment on
  * lib_instance_publish() above.
@@ -1068,7 +1067,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     /*
      * Join the tag tickler thread now, before the protocol modules are torn down: the
      * tickler calls into protocol vtable functions for every active tag, so it must not
-     * still be running once ab_teardown()/mb_teardown()/omron_teardown() (called from
+     * still be running once cip_conn_teardown()/mb_teardown() (called from
      * destroy_modules() below) start freeing protocol-level globals.
      */
     tag_registry_stop_tickler(inst);

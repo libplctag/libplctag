@@ -35,16 +35,14 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
-#include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/modules/cip/connection_tag.h>
+#include <libplctag/modules/cip/identity_tag.h>
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
-#include <libplctag/modules/omron/omron.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <limits.h>
 #include <platform.h>
@@ -85,9 +83,6 @@
 /* forward declarations*/
 static int get_tag_data_type(cip_tag_p tag, attr attribs);
 static int check_tag_name(cip_tag_p tag, const char *name);
-static plc_tag_p omron_connection_tag_create(attr attribs,
-                                             void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                             void *userdata, plc_tag_p src_tag);
 static int omron_setup_raw_tag(cip_tag_p tag);
 
 
@@ -119,134 +114,33 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
 };
 
 
+/* @identity: the body is shared, see modules/cip/identity_tag.c. */
+static struct tag_vtable_t identity_tag_vtable = {
+    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .read = (tag_vtable_func)cip_identity_tag_read_start,
+    .status = (tag_vtable_func)cip_tag_status,
+    .tickler = (tag_vtable_func)cip_identity_tag_tickler,
+    .write = NULL,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+
+    /* attribute accessors */
+    .attribs = omron_attribs,
+};
+
+
 /*
  * Public functions.
  */
 
 
-int omron_init(void) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Initializing Omron CIP protocol library.");
-
-    if((rc = conn_startup()) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_ERROR, 0, "Unable to initialize conn library!");
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Finished initializing Omron CIP protocol library.");
-
-    return rc;
-}
-
-/*
- * called when the whole program is going to terminate.
- */
-void omron_teardown(void) {
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Releasing global Omron CIP protocol resources.");
-
-    /*
-     * The connection handler threads belong to the connections, not to this module: each one
-     * is created and joined by modules/cip/conn.c.  conn_teardown() waits for them.
-     */
-    conn_teardown();
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Done.");
-}
-
-
-int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                     void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
+int omron_tag_create(const cip_plc_entry_t *entry, cip_conn_p conn, attr attribs,
+                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
+                     plc_tag_p *tag_out) {
     cip_tag_p tag = NULL;
-    cip_conn_p conn = NULL;
-    const cip_plc_entry_t *entry = NULL;
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
-    const char *path = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Starting.");
-
-    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
-        *tag_out = omron_connection_tag_create(attribs, tag_callback_func, userdata, src_tag);
-
-        /* the connection tag types still report through the tag. */
-        return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
-    }
-
-    /*
-     * Which family, and which connection -- both settled before a tag exists, as on the
-     * Rockwell side.  One family, so one row, and no dialect to work out: an NJ/NX is never
-     * DH+ bridged.
-     */
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_OMRON: {
-                cip_tag_p src = (cip_tag_p)src_tag;
-                plc_type = src->plc_type;
-                conn = src->session;
-                break;
-            }
-
-            case TAG_PROTOCOL_OMRON_CONNECTION: {
-                conn = (cip_conn_p)((connection_tag_p)src_tag)->conn;
-                plc_type = conn ? conn->plc_entry->plc_type : CIP_PLC_NONE;
-                break;
-            }
-
-            default: break;
-        }
-
-        if(!conn) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Unable to reuse source conn!");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        /* Omron accepts exactly one family, so the test is an equality rather than a table lookup. */
-        plc_type = cip_plc_type_from_attributes(attribs);
-
-        if(plc_type != CIP_PLC_OMRON_NJNX) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, 0, "CPU type not valid or missing.");
-            return PLCTAG_ERR_BAD_DEVICE;
-        }
-    }
-
-    entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
-    if(!entry || !entry->setup_tag) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, 0, "Unknown PLC type!");
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    path = attr_get_str(attribs, "path", NULL);
-
-    /*
-     * An NJ/NX always needs a path.  The check stays here rather than in the leaf because
-     * only this function knows whether the tag was cloned from another, which supplies the
-     * connection instead of a path.
-     */
-    if(!src_tag && str_length(path) == 0) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, 0, "A path is required for this PLC type.");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /*
-     * Find or create a conn.
-     *
-     * All tags need conns.  They are the TCP connection to the gateway PLC.
-     */
-    if(src_tag) {
-        /* the reference this tag will own.  The source keeps its own. */
-        conn = rc_inc(conn);
-
-        if(!conn) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Unable to reuse source conn!");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        if(conn_find_or_create(&conn, attribs, NULL) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Unable to create conn!");
-            return PLCTAG_ERR_BAD_GATEWAY;
-        }
-    }
 
     tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_OMRON, &default_vtable, DEBUG_MODULE_OMRON_COMMON);
     if(!tag) {
@@ -261,7 +155,7 @@ int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int
      * the tag and needs no unwinding of its own.
      */
     tag->session = conn;
-    tag->plc_type = plc_type;
+    tag->plc_type = entry->plc_type;
     tag->use_connected_msg = conn->use_connected_msg;
 
     /*
@@ -316,7 +210,7 @@ int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int
     }
 
     /* kick off a read to get the tag type and size. */
-    if(!tag->special_tag && tag->vtable->read) {
+    if(tag->vtable->read) {
         /* trigger the first read. */
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Kicking off initial read.");
 
@@ -329,7 +223,7 @@ int omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Waiting for the connection to complete the create.");
     } else {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id,
-               "Not kicking off initial read: tag is special or does not have read function.");
+               "Not kicking off initial read: tag does not have a read function.");
 
         /* force the created event because we do not do an initial read here. */
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
@@ -366,6 +260,10 @@ int get_tag_data_type(cip_tag_p tag, attr attribs) {
     const char *elem_type = NULL;
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Starting.");
+
+    if(str_cmp_i(attr_get_str(attribs, "name", NULL), "@identity") == 0) {
+        return cip_identity_tag_setup(tag, &identity_tag_vtable, DEBUG_MODULE_OMRON_COMMON);
+    }
 
     /* look for the elem_type attribute. */
     elem_type = attr_get_str(attribs, "elem_type", NULL);
@@ -770,20 +668,6 @@ struct tag_vtable_t cip_standard_tag_vtable_omron = {
     /* attribute accessors */
     .attribs = omron_attribs,
 };
-
-
-static plc_tag_p omron_connection_tag_create(attr attribs,
-                                             void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                             void *userdata, plc_tag_p src_tag) {
-    /* OMRON adopts a connection only from its own data tags, and reports the real error. */
-    static const cip_connection_tag_ops_t ops = {.connection_protocol = TAG_PROTOCOL_OMRON_CONNECTION,
-                                                 .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
-                                                 .source_protocols = {TAG_PROTOCOL_OMRON, TAG_PROTOCOL_UNKNOWN},
-                                                 .find_or_create = conn_find_or_create,
-                                                 .create_failure_rc = PLCTAG_STATUS_OK};
-
-    return cip_connection_tag_create(attribs, &ops, tag_callback_func, userdata, src_tag);
-}
 
 
 static int omron_setup_raw_tag(cip_tag_p tag) {
