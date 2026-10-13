@@ -47,19 +47,8 @@
 
 
 
-/*
- * The OMRON leaf, reached through the dispatch table in modules/cip/cip_tag_create.c.  One
- * family, one row, one leaf.
- */
-/*
- * The OMRON constructor, on a family and connection cip_tag_create() has already settled.
- * It takes ownership of the connection reference, on failure as well as success.
- */
-extern int omron_tag_create(const cip_plc_entry_t *entry, cip_conn_p conn, attr attribs,
-                            void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
-                            plc_tag_p *tag_out);
-
-extern int omron_setup_njnx_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+/* the NJ/NX name parser, reached through its row in modules/cip/cip_tag_create.c. */
+extern int omron_setup_njnx_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 
 /* Runtime attributes shared by every Omron tag type. */
 extern const attr_def_t omron_attribs[];
@@ -70,9 +59,3 @@ extern tag_byte_order_t omron_njnx_tag_byte_order;
 /* what OMRON can do, and the vtable built around it, for the shared standard-tag engine. */
 extern const cip_standard_tag_ops_t cip_standard_tag_ops_omron;
 extern struct tag_vtable_t cip_standard_tag_vtable_omron;
-
-/*
- * The Omron module's own connection lifecycle.  Everything else about a connection --
- * sequence numbers, payload space, requests -- is declared by cip/conn.h.
- */
-

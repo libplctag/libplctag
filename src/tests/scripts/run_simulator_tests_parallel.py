@@ -1170,9 +1170,11 @@ def build_manifest() -> Manifest:
     mgw = "127.0.0.1:{PORT}"
 
     sec = m.section("micrologix", server=micrologix_server)
-    sec.test("async create of a missing data file fails for good",
+    missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N250:0"], F)
+    sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
+              check=CheckSpec(log_file=missing.log_file, pattern=r"^Create failed with PLCTAG_ERR_NOT_FOUND\.$", expected=1))
     # A MicroLogix reached through a ControlLogix chassis: the PCCC request must go in an
     # Unconnected Send along the path, padded after an odd-length PCCC message as a router
     # requires.  ab_server rejects a bad layout, but it answers an unrouted request too, so
@@ -1308,8 +1310,10 @@ def build_manifest() -> Manifest:
     lgx_pccc_tag = f"protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=1"
 
     sec = m.section("lgx_pccc", server=lgx_pccc_server)
-    sec.test("async create of a missing data file fails for good",
+    missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag", f"--tag={lgx_pccc_tag}&name=N250:0"], F)
+    sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
+              check=CheckSpec(log_file=missing.log_file, pattern=r"^Create failed with PLCTAG_ERR_NOT_FOUND\.$", expected=1))
     sec.test("identity, routed",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={lgw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PCCC-mapped Logix tag read/write",
@@ -1379,9 +1383,11 @@ def build_manifest() -> Manifest:
     pgw = "127.0.0.1:{PORT}"
 
     sec = m.section("plc5", server=plc5_server)
-    sec.test("async create of a missing data file fails for good",
+    missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N250:0"], F)
+    sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
+              check=CheckSpec(log_file=missing.log_file, pattern=r"^Create failed with PLCTAG_ERR_NOT_FOUND\.$", expected=1))
     sec.test("identity, unrouted",
               [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={pgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PLC5 tag read/write",

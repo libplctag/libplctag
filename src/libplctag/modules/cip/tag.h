@@ -39,6 +39,7 @@
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/api/libplctag.h>
 #include <stdint.h>
+#include <utils/attr.h>
 
 /* the longest encoded tag name, and the longest encoded type info, in bytes. */
 #define MAX_TAG_NAME (260)
@@ -333,21 +334,10 @@ extern int cip_tag_size_from_attributes(cip_tag_p tag, attr attribs, debug_modul
 
 
 /*
- * What a per-family setup must have left behind, checked after it returns.
+ * The element type and size a symbolic CIP tag string states, if any.
  *
- * A dispatch table's cost is that its leaves can diverge silently: add a required step and
- * one leaf forgets it, and the tag misbehaves at read time rather than failing at create.
- * This is what a data table gives free -- a missing column is visible -- and what a table of
- * functions has to be told to check.
- *
- * It runs on every tag create, not only in Debug.  Creating a tag is rare and three pointer
- * tests are free, and failing here beats a tag that reads through an unimplemented vtable.
- * The default vtable is a parameter because each module's carries its own attribute table,
- * and "still the default" is exactly the failure being caught.
- *
- * elem_size is deliberately not checked: cip_tag_size_from_attributes() already rejects an
- * unresolved one, and the families that defer their size to the PLC legitimately have none
- * yet.
+ * elem_type names the type, and its size follows.  Without it, elem_size is taken as given,
+ * and a family that learns its size from the PLC may legitimately have neither.  One copy
+ * for Rockwell and OMRON: the two lists were identical.
  */
-extern int cip_tag_check_setup(cip_tag_p tag, const char *family_name, tag_vtable_p default_vtable,
-                               debug_module_t debug_module);
+extern int cip_tag_parse_elem_type(cip_tag_p tag, attr attribs, debug_module_t debug_module);

@@ -36,17 +36,19 @@
  *
  * Eleven rows for eight PLC types, because three of them -- PLC/5, SLC and MicroLogix --
  * are reached either directly or across a DH+ bridge and the two cases set different
- * messaging.  Rows map many-to-one onto leaf functions: the four real behaviours are PCCC
- * over CIP, PCCC-mapped Logix, CIP symbolic and OMRON's CIP symbolic, so the leaf count
- * stays at the number of behaviours rather than the number of configurations.
+ * messaging.  Rows map many-to-one onto name parsers: PLC/5 addressing, SLC addressing,
+ * Logix symbolic, generic and OMRON symbolic.
  *
- * A NULL setup_tag means that family has not been moved off the old per-family switch in
- * its module yet.  The rows exist anyway so the table is complete and the invariant test
- * has something to check.
+ * Below the table is the one CIP tag constructor.  It finds the row and the connection, then
+ * builds the tag from the row.
  */
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/ab/ab_common.h>
+#include <libplctag/modules/ab/eip_lgx_pccc.h>
+#include <libplctag/modules/ab/eip_plc5_pccc.h>
+#include <libplctag/modules/ab/eip_slc_pccc.h>
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <platform.h>
 #include <libplctag/lib/connection_tag.h>
@@ -91,6 +93,11 @@
     .max_payload_capacity = MAX_CIP_OMRON_MSG_SIZE_EX, .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE,                          \
     .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .only_use_old_forward_open = false, .min_payload_size = MIN_PAYLOAD_SIZE_CIP
 
+/* what every Rockwell tag starts with; packing and size_from_plc default to false. */
+#define AB_TAG(vt, bo)                                                                                                  \
+    .protocol = TAG_PROTOCOL_AB, .vtable = (vt), .byte_order = (bo), .std_ops = &cip_standard_tag_ops_ab,               \
+    .debug_module = DEBUG_MODULE_AB_EIP_CIP
+
 /*
  * Micro800 supports the Extended Forward Open and asks for the same size *Logix does: the
  * only published figure for anything larger traces back to a single forum post and no
@@ -101,27 +108,33 @@
  */
 static const cip_plc_entry_t cip_plc_entries[] = {
     {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     .setup_tag = ab_setup_plc5_tag, PCCC_CONN, .dhp_capable = true},
+     AB_TAG(&pccc_vtable, &plc5_tag_byte_order), .setup_name = ab_setup_plc5_name, PCCC_CONN},
     {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
-     .setup_tag = ab_setup_plc5_tag, PCCC_CONN, .dhp_capable = true},
+     AB_TAG(&pccc_vtable, &plc5_tag_byte_order), .setup_name = ab_setup_plc5_name, PCCC_CONN},
     {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
     {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
-     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
     {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
     {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
-     .setup_tag = ab_setup_slc_tag, PCCC_CONN, .dhp_capable = true},
+     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
+    /* SLC byte order, PLC/5 addressing. */
     {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     .setup_tag = ab_setup_lgx_pccc_tag, PCCC_CONN, .dhp_capable = false},
+     AB_TAG(&lgx_pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_plc5_name, PCCC_CONN},
     {.name = "Logix", .plc_type = CIP_PLC_LGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = -1,
-     .setup_tag = ab_setup_logix_tag, LGX_CONN, .dhp_capable = false},
+     AB_TAG(&cip_standard_tag_vtable_ab, &logix_tag_byte_order), .allow_packing = true, .packing_settable = true,
+     .size_from_plc = true, .setup_name = ab_setup_logix_name, LGX_CONN},
     {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1,
-     .setup_tag = ab_setup_micro800_tag, LGX_CONN, .dhp_capable = false},
+     AB_TAG(&cip_standard_tag_vtable_ab, &cip_short_string_byte_order), .size_from_plc = true,
+     .setup_name = ab_setup_logix_name, LGX_CONN},
+    /* only special tags, so no data-tag vtable. */
     {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     .setup_tag = ab_setup_generic_tag, LGX_CONN, .dhp_capable = false},
+     AB_TAG(NULL, &logix_tag_byte_order), .size_from_plc = true, .setup_name = ab_setup_generic_name, LGX_CONN},
     {.name = "OMRON NJ/NX", .plc_type = CIP_PLC_OMRON_NJNX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1,
-     .setup_tag = omron_setup_njnx_tag, OMRON_CONN, .dhp_capable = false},
+     .protocol = TAG_PROTOCOL_OMRON, .vtable = &cip_standard_tag_vtable_omron, .byte_order = &omron_njnx_tag_byte_order,
+     .std_ops = &cip_standard_tag_ops_omron, .debug_module = DEBUG_MODULE_OMRON_STANDARD_TAG, .packing_settable = true,
+     .size_from_plc = true, .setup_name = omron_setup_njnx_name, OMRON_CONN},
 };
 
 
@@ -143,42 +156,14 @@ const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t
     }
 
     /*
-     * No warning here.  cip_dialect_from_attributes() asks this for a DH+ row on every tag
-     * create precisely to find out whether the family has one, so a miss is the normal
-     * answer rather than a problem.  The callers that do treat a miss as an error say so
+     * No warning here.  Connection creation asks this for a DH+ row on every new connection
+     * precisely to find out whether the family has one, so a miss is the normal answer rather
+     * than a problem.  The callers that do treat a miss as an error say so
      * themselves, with the PLC type they were given.
      */
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "No PLC table entry for PLC type %d, dialect %d.", (int)plc_type, (int)dialect);
 
     return NULL;
-}
-
-
-cip_dialect_t cip_dialect_from_attributes(cip_plc_type_t plc_type, attr attribs) {
-    const char *path = attr_get_str(attribs, "path", NULL);
-    uint8_t encoded_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
-    int encoded_path_size = (int)sizeof(encoded_path);
-    int needs_connection = 0;
-    int is_dhp = 0;
-    uint16_t dhp_dest = 0;
-    bool is_bridged = false;
-
-    /* a family with no DH+ row cannot bridge, so the path cannot change the answer. */
-    if(!cip_plc_entry_find(plc_type, CIP_DIALECT_DHP)) { return CIP_DIALECT_DIRECT; }
-
-    /*
-     * The same parser the connection will use, so the two cannot disagree about what a path
-     * means.  Only is_dhp is wanted here; the encoded path itself is built again, properly
-     * sized, when the connection is created.
-     */
-    if(cip_encode_path(path, &needs_connection, CIP_PLC_KIND_DHP_CAPABLE, &encoded_path[0], &encoded_path_size, &is_dhp,
-                       &dhp_dest, &is_bridged)
-       != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Path does not parse; treating the tag as direct.");
-        return CIP_DIALECT_DIRECT;
-    }
-
-    return (is_dhp ? CIP_DIALECT_DHP : CIP_DIALECT_DIRECT);
 }
 
 
@@ -243,6 +228,111 @@ static plc_tag_p create_connection_tag(attr attribs, bool is_omron,
 
 
 /*
+ * Whether the tag string names a PLC that sits in a chassis behind a communication module,
+ * so a tag without a path would reach the module rather than the CPU.
+ *
+ * A spelling and not a row: ControlLogix and CompactLogix are one family and share a row,
+ * but a CompactLogix answers on its own Ethernet port.  The bare "lgx" and "logix" spellings
+ * have always required a path, so they still do.
+ */
+static bool plc_needs_path(attr attribs) {
+    const char *plc = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", NULL));
+
+    return (str_cmp_i(plc, "controllogix") == 0 || str_cmp_i(plc, "contrologix") == 0 || str_cmp_i(plc, "lgx") == 0
+            || str_cmp_i(plc, "logix") == 0);
+}
+
+
+/*
+ * What a tag dispatches through until its row sets it up, so an abort during creation is
+ * safe.  No attributes: a tag that fails to create never reaches the caller.
+ */
+static struct tag_vtable_t unimplemented_vtable = {
+    .abort = cip_tag_unimplemented_abort,
+    .read = cip_tag_unimplemented_read,
+    .status = cip_tag_unimplemented_status,
+    .tickler = cip_tag_unimplemented_tickler,
+    .write = cip_tag_unimplemented_write,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .attribs = NULL,
+};
+
+
+/*
+ * Build a tag from its row, on a connection the caller has settled.  Takes ownership of the
+ * connection reference, on failure as well as success.
+ */
+static int create_tag(const cip_plc_entry_t *entry, cip_conn_p conn, attr attribs,
+                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
+                      plc_tag_p *tag_out) {
+    cip_tag_p tag = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, entry->protocol, &unimplemented_vtable, DEBUG_MODULE_CIP);
+    if(!tag) {
+        /* nothing owns the connection yet, so this is the one failure that has to say so. */
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing connection reference.");
+        rc_dec(conn);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /*
+     * The tag owns the connection from here, so every failure below releases it along with
+     * the tag.  The tag is handed back even on failure, so the caller can release it.
+     */
+    tag->session = conn;
+    *tag_out = (plc_tag_p)tag;
+
+    tag->plc_type = entry->plc_type;
+    tag->use_connected_msg = conn->use_connected_msg;
+    if(entry->vtable) { tag->vtable = entry->vtable; }
+    tag->byte_order = entry->byte_order;
+    tag->std_ops = entry->std_ops;
+    tag->debug_module = entry->debug_module;
+    tag->allow_packing = (entry->packing_settable ? (attr_get_int(attribs, "allow_packing", entry->allow_packing) != 0)
+                                                  : entry->allow_packing);
+    /* the create read checks the tag against the PLC; the tickler raises CREATED when it ends. */
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
+
+    rc = cip_tag_resolve_elem_count(tag, attribs, DEBUG_MODULE_CIP);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    /* a special tag replaces the vtable, byte order and debug module set above. */
+    rc = entry->setup_name(entry, tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "Unable to set up %s tag, error %s!", entry->name,
+               plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* a special tag learns its size from the reply. */
+    if(entry->size_from_plc || tag->special_tag) {
+        rc = cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP);
+    } else {
+        rc = cip_tag_size_from_attributes(tag, attribs, DEBUG_MODULE_CIP);
+    }
+
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    if(tag->vtable->read) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Kicking off initial read.");
+        tag->read_in_flight = 1;
+        tag->vtable->read((plc_tag_p)tag);
+    } else {
+        /* @raw has nothing to read; its tickler completes the create when the connection is up. */
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Waiting for the connection to complete the create.");
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
  * Which family and which connection, settled before a tag exists, then the family's own
  * constructor on that connection.
  *
@@ -303,35 +393,20 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return PLCTAG_ERR_NOT_FOUND;
         }
     } else {
+        /* the connection settles the family and its row; these two need only the PLC type. */
         plc_type = cip_plc_type_from_attributes(attribs);
-        if(plc_type == CIP_PLC_NONE) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "CPU type not valid or missing.");
-            return PLCTAG_ERR_BAD_DEVICE;
-        }
-
-        entry = cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs));
-        if(!entry || !entry->setup_tag) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unknown PLC type!");
-            return PLCTAG_ERR_BAD_CONFIG;
-        }
 
         /*
          * str_length() rather than a NULL test: "path=" is a present but empty attribute and
          * would otherwise fail further in with a worse message.
          */
-        if(str_length(path) == 0 && (plc_type == CIP_PLC_LGX || plc_type == CIP_PLC_OMRON_NJNX)) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path is required for %s PLCs!", entry->name);
+        if(str_length(path) == 0 && plc_needs_path(attribs)) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to the CPU's slot is required for a ControlLogix PLC!");
             return PLCTAG_ERR_BAD_PARAM;
         }
 
-        /*
-         * A PCCC CPU sits directly on a network, never in a ControlLogix chassis, so a path to
-         * one must leave the gateway's chassis.  A DH+ path already does; this is the direct row.
-         */
-        if(str_length(path) && entry->dialect == CIP_DIALECT_DIRECT && cip_plc_entry_find(plc_type, CIP_DIALECT_DHP)
-           && !cip_path_is_bridged(path)) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", entry->name);
-            return PLCTAG_ERR_BAD_PARAM;
+        if(str_length(path) && plc_type == CIP_PLC_MICRO800) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path is not supported for Micro800 PLCs.");
         }
 
         rc = cip_conn_find_or_create(&conn, attribs, NULL);
@@ -339,14 +414,9 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to create connection, error %s!", plc_tag_decode_error(rc));
             return rc;
         }
+
+        entry = conn->plc_entry;
     }
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
-
-    /* the constructor owns the connection reference from here, on success or failure. */
-    if(plc_type == CIP_PLC_OMRON_NJNX) {
-        return omron_tag_create(entry, conn, attribs, tag_callback_func, userdata, tag_out);
-    }
-
-    return ab_tag_create(entry, conn, attribs, tag_callback_func, userdata, tag_out);
+    return create_tag(entry, conn, attribs, tag_callback_func, userdata, tag_out);
 }

@@ -216,14 +216,15 @@ static int check_read_status(cip_tag_p tag) {
                    pccc->general_status,
                    decode_cip_error_long((uint8_t *)&(pccc->general_status),
                                          cip_error_data_size((uint8_t *)&(pccc->general_status), data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = decode_cip_error_code((uint8_t *)&(pccc->general_status),
+                                       cip_error_data_size((uint8_t *)&(pccc->general_status), data_end));
             break;
         }
 
         if(pccc->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end));
             break;
         }
 
@@ -422,14 +423,15 @@ static int check_write_status(cip_tag_p tag) {
                    pccc->general_status,
                    decode_cip_error_long((uint8_t *)&(pccc->general_status),
                                          cip_error_data_size((uint8_t *)&(pccc->general_status), data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = decode_cip_error_code((uint8_t *)&(pccc->general_status),
+                                       cip_error_data_size((uint8_t *)&(pccc->general_status), data_end));
             break;
         }
 
         if(pccc->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end));
             break;
         }
 

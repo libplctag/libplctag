@@ -349,7 +349,7 @@ typedef struct cip_conn_t {
      * its tag setup.  Rows are static constants with program lifetime, so this is never
      * dangling and never written through, and never NULL.
      *
-     * Shared code reads what the family implies -- min_payload_size, dhp_capable -- rather
+     * Shared code reads what the family implies -- min_payload_size, the dialect -- rather
      * than plc_type, so it never has to know which family this is.  A tag asks the
      * connection for its dialect instead of re-reading a path attribute it may not have --
      * a cloned tag has no path of its own.
@@ -469,7 +469,7 @@ extern int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
 
 extern int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn);
 extern cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                                   int connection_group_id, const cip_plc_entry_t *plc_entry);
+                                                   int connection_group_id, cip_plc_type_t plc_type);
 
 extern uint16_t next_conn_serial_number(uint16_t current);
 extern uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn);
@@ -548,8 +548,6 @@ extern int process_requests(cip_conn_p conn);
 extern THREAD_FUNC(session_handler);
 extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);
 
-extern cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, const char *host,
-                                            const char *path, int *use_connected_msg, int connection_group_id);
 
 /* the one connection list, for every CIP family.  Started and torn down with the library. */
 extern int cip_conn_startup(void);

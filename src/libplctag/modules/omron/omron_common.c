@@ -80,26 +80,7 @@
 #define DEFAULT_RETRY_INTERVAL (300)
 
 
-/* forward declarations*/
-static int get_tag_data_type(cip_tag_p tag, attr attribs);
-static int check_tag_name(cip_tag_p tag, const char *name);
-static int omron_setup_raw_tag(cip_tag_p tag);
-
-
 /* vtables for different kinds of tags */
-static struct tag_vtable_t default_vtable = {
-    .abort = cip_tag_unimplemented_abort,
-    .read = cip_tag_unimplemented_read,
-    .status = cip_tag_unimplemented_status,
-    .tickler = cip_tag_unimplemented_tickler,
-    .write = cip_tag_unimplemented_write,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
-
-    /* attribute accessors */
-    .attribs = omron_attribs,
-};
-
 static struct tag_vtable_t omron_raw_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = NULL,
@@ -127,238 +108,6 @@ static struct tag_vtable_t identity_tag_vtable = {
     /* attribute accessors */
     .attribs = omron_attribs,
 };
-
-
-/*
- * Public functions.
- */
-
-
-int omron_tag_create(const cip_plc_entry_t *entry, cip_conn_p conn, attr attribs,
-                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
-                     plc_tag_p *tag_out) {
-    cip_tag_p tag = NULL;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, 0, "Starting.");
-
-    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_OMRON, &default_vtable, DEBUG_MODULE_OMRON_COMMON);
-    if(!tag) {
-        /* nothing owns the connection yet, so this is the one failure that has to say so. */
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, 0, "rc_dec: Releasing conn reference.");
-        rc_dec(conn);
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    /*
-     * The tag owns the connection from here, so every failure below releases it along with
-     * the tag and needs no unwinding of its own.
-     */
-    tag->session = conn;
-    tag->plc_type = entry->plc_type;
-    tag->use_connected_msg = conn->use_connected_msg;
-
-    /*
-     * Handed back even when this function goes on to fail, so the caller can release it.
-     * The error itself travels in the return value from here on.
-     */
-    *tag_out = (plc_tag_p)tag;
-
-    /*
-     * The element type, and the special tags.
-     *
-     * A special tag sets its own vtable and byte order here which the leaf below must not
-     * overwrite, so this has to run first.
-     */
-    rc = get_tag_data_type(tag, attribs);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-               "Error %s getting tag element data type or handling special tag!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    rc = entry->setup_tag(entry, tag, attribs);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unable to set up %s tag!", entry->name);
-        return rc;
-    }
-
-    rc = cip_tag_check_setup(tag, entry->name, &default_vtable, DEBUG_MODULE_OMRON_COMMON);
-    if(rc != PLCTAG_STATUS_OK) {
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "using conn=%p", tag->session);
-
-    rc = cip_tag_resolve_elem_count(tag, attribs, DEBUG_MODULE_OMRON_COMMON);
-    if(rc == PLCTAG_STATUS_OK) {
-        /* an Omron tag always learns its size from the PLC. */
-        rc = cip_tag_size_from_plc(tag, DEBUG_MODULE_OMRON_COMMON);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        return rc;
-    }
-
-    /*
-     * check the tag name, this is protocol specific.
-     */
-
-    if(!tag->special_tag && check_tag_name(tag, attr_get_str(attribs, "name", NULL)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Bad tag name!");
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* kick off a read to get the tag type and size. */
-    if(tag->vtable->read) {
-        /* trigger the first read. */
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Kicking off initial read.");
-
-        tag->create_read_status = PLCTAG_STATUS_PENDING;
-        tag->read_in_flight = 1;
-        tag->vtable->read((plc_tag_p)tag);
-        // tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
-    } else if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
-        /* @raw has nothing to read; its tickler completes the create when the connection is up. */
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Waiting for the connection to complete the create.");
-    } else {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id,
-               "Not kicking off initial read: tag does not have a read function.");
-
-        /* force the created event because we do not do an initial read here. */
-        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Using vtable %p.", tag->vtable);
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * determine the tag's data type and size.  Or at least guess it.
- */
-
-/*
- * An Omron string has no element size.
- *
- * It is a two-byte count, that many characters and a zero terminator, packed at its actual
- * length with no padding out to a capacity -- omron_njnx_tag_byte_order says as much with
- * str_is_fixed_length of zero, str_max_capacity of zero and str_total_length of zero.  An
- * array of them therefore has no stride, and the library's string layer reaches element N by
- * walking the count words of the N before it rather than by multiplying.
- *
- * So the string types below take an element size of one byte, the same answer the tag
- * listing and @udt tags give for the same reason.  It used to be 88 here, which is the Logix
- * STRING layout of a four-byte count, 82 characters and two pad bytes -- a different PLC
- * family's structure, and one that contradicts the byte order a few lines away in
- * omron_standard_tag.c.
- */
-int get_tag_data_type(cip_tag_p tag, attr attribs) {
-    const char *elem_type = NULL;
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Starting.");
-
-    if(str_cmp_i(attr_get_str(attribs, "name", NULL), "@identity") == 0) {
-        return cip_identity_tag_setup(tag, &identity_tag_vtable, DEBUG_MODULE_OMRON_COMMON);
-    }
-
-    /* look for the elem_type attribute. */
-    elem_type = attr_get_str(attribs, "elem_type", NULL);
-    if(elem_type) {
-        if(str_cmp_i(elem_type, "lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 64-bit integer.");
-            tag->elem_size = 8;
-            tag->elem_type = CIP_TYPE_INT64;
-        } else if(str_cmp_i(elem_type, "dint") == 0 || str_cmp_i(elem_type, "udint") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 32-bit integer.");
-            tag->elem_size = 4;
-            tag->elem_type = CIP_TYPE_INT32;
-        } else if(str_cmp_i(elem_type, "int") == 0 || str_cmp_i(elem_type, "uint") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 16-bit integer.");
-            tag->elem_size = 2;
-            tag->elem_type = CIP_TYPE_INT16;
-        } else if(str_cmp_i(elem_type, "sint") == 0 || str_cmp_i(elem_type, "usint") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 8-bit integer.");
-            tag->elem_size = 1;
-            tag->elem_type = CIP_TYPE_INT8;
-        } else if(str_cmp_i(elem_type, "bool") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of bit.");
-            tag->elem_size = 1;
-            tag->elem_type = CIP_TYPE_BOOL;
-        } else if(str_cmp_i(elem_type, "bool array") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of bool array.");
-            tag->elem_size = 4;
-            tag->elem_type = CIP_TYPE_BOOL_ARRAY;
-        } else if(str_cmp_i(elem_type, "real") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 32-bit float.");
-            tag->elem_size = 4;
-            tag->elem_type = CIP_TYPE_FLOAT32;
-        } else if(str_cmp_i(elem_type, "lreal") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of 64-bit float.");
-            tag->elem_size = 8;
-            tag->elem_type = CIP_TYPE_FLOAT64;
-        } else if(str_cmp_i(elem_type, "string") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of string.");
-            tag->elem_size = 1;
-            tag->elem_type = CIP_TYPE_STRING;
-        } else if(str_cmp_i(elem_type, "short string") == 0) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Found tag element type of short string.");
-            tag->elem_size = 1;
-            tag->elem_type = CIP_TYPE_SHORT_STRING;
-        } else {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Unknown tag type %s", elem_type);
-            return PLCTAG_ERR_UNSUPPORTED;
-        }
-    } else {
-        /*
-         * We have two cases
-         *      * tag listing, but only for CIP PLCs (but not for UDTs!).
-         *      * no type, just elem_size.
-         * Otherwise this is an error.
-         */
-        int elem_size = attr_get_int(attribs, "elem_size", 0);
-        const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
-        int special_tag_rc = PLCTAG_STATUS_OK;
-
-        /* check for special tags. */
-        if(str_cmp_i(tmp_tag_name, "@raw") == 0) { special_tag_rc = omron_setup_raw_tag(tag); }
-
-        // else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
-        //         special_tag_rc = omron_setup_tag_listing_tag(tag, tmp_tag_name);
-        // } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-        //         special_tag_rc = omron_setup_udt_tag(tag, tmp_tag_name);
-        // } /* else not a special tag. */
-
-        if(special_tag_rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Error parsing tag listing name!");
-            return special_tag_rc;
-        }
-
-        /* if we did not set an element size yet, set one. */
-        if(tag->elem_size == 0) {
-            if(elem_size > 0) {
-                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_INFO, tag->tag_id, "Setting element size to %d.", elem_size);
-                tag->elem_size = elem_size;
-            }
-        } else {
-            if(elem_size > 0) {
-                pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id,
-                       "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
-            }
-        }
-    }
-
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-
-
 
 
 /*
@@ -552,51 +301,27 @@ const attr_def_t omron_attribs[] = {
 };
 
 
-int omron_setup_njnx_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
-    pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting up %s tag.", entry->name);
-
-    /* what this family can do, for the shared standard-tag engine. */
-    tag->std_ops = &cip_standard_tag_ops_omron;
-    tag->debug_module = DEBUG_MODULE_OMRON_STANDARD_TAG;
-
-    /* packing is off unless asked for; its row says an NJ/NX only answers over a connection. */
-    tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-
-    /*
-     * create_read_status is deliberately not set here, unlike every Rockwell leaf.  This module
-     * decides whether to kick off the initial read from whether the tag is special and has a
-     * read function, and sets create_read_status inside that branch; setting it here would also set
-     * it for a special tag, which is a behaviour change this step is not making.
-     */
-
-    /* both are "if nobody else already did it": a special tag sets its own while its name is parsed. */
-    if(!tag->byte_order) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Using default Omron byte order.");
-        tag->byte_order = &omron_njnx_tag_byte_order;
-    }
-
-    if(tag->vtable == &default_vtable || !tag->vtable) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Setting default Omron vtable.");
-        tag->vtable = &cip_standard_tag_vtable_omron;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int check_tag_name(cip_tag_p tag, const char *name) {
+/* an NJ/NX has the CIP special tags, but not the Logix listing services. */
+int omron_setup_njnx_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+    const char *name = attr_get_str(attribs, "name", NULL);
     int rc = PLCTAG_STATUS_OK;
 
-    if(!name) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "No tag name parameter found!");
-        return PLCTAG_ERR_BAD_PARAM;
+    (void)entry;
+
+    if(str_cmp_i(name, "@identity") == 0) {
+        return cip_identity_tag_setup(tag, &identity_tag_vtable, DEBUG_MODULE_OMRON_COMMON);
     }
 
-    /* attempt to parse the tag name */
-    if((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "parse of CIP-style tag name %s failed!", name);
+    if(str_cmp_i(name, "@raw") == 0) { return cip_raw_tag_setup(tag, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG); }
 
-        return rc;
+    rc = cip_tag_parse_elem_type(tag, attribs, DEBUG_MODULE_OMRON_COMMON);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    /* any failure to encode the name is a bad name. */
+    rc = cip_encode_tag_name(tag, name);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Parse of CIP-style tag name %s failed!", name);
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     return PLCTAG_STATUS_OK;
@@ -669,7 +394,3 @@ struct tag_vtable_t cip_standard_tag_vtable_omron = {
     .attribs = omron_attribs,
 };
 
-
-static int omron_setup_raw_tag(cip_tag_p tag) {
-    return cip_raw_tag_setup(tag, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG);
-}

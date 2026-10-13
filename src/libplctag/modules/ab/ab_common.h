@@ -50,29 +50,14 @@
 /* Runtime attributes shared by every AB tag type. */
 extern const attr_def_t ab_attribs[];
 
-extern int check_tag_name(cip_tag_p tag, const char *name);
-
 /*
- * The per-family leaves, reached through the dispatch table in modules/cip/cip_tag_create.c.
- *
- * Six of the table's rows share two of these: PLC/5 direct and bridged both reach
- * ab_setup_plc5_tag, and SLC and MicroLogix in both dialects reach ab_setup_slc_tag, because
- * nothing but the byte order and the dialect differs between them.
+ * The name parsers, one per kind of Rockwell addressing, reached through the rows in
+ * modules/cip/cip_tag_create.c.  Each also handles the special tags its family has.
  */
-/*
- * The Rockwell constructor, on a family and connection cip_tag_create() has already settled.
- * It takes ownership of the connection reference, on failure as well as success.
- */
-extern int ab_tag_create(const cip_plc_entry_t *entry, cip_conn_p session, attr attribs,
-                         void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
-                         plc_tag_p *tag_out);
-
-extern int ab_setup_plc5_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_slc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_lgx_pccc_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_logix_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_micro800_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_generic_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_plc5_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_slc_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_logix_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+extern int ab_setup_generic_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 
 /* special tag setup, see listing_tag.c and udt_tag.c */
 extern int setup_tag_listing_tag(cip_tag_p tag, const char *name);

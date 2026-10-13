@@ -64,8 +64,10 @@
 static int session_list_init(cip_conn_list_t *list);
 static int32_t session_list_count(cip_conn_list_t *list);
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
-static int find_or_create_on_list(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs,
-                                  cip_conn_p *tag_conn, int *is_new_conn);
+static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type, attr attribs, cip_conn_p *tag_conn,
+                                  int *is_new_conn);
+static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const char *host, const char *path,
+                          int use_connected_msg, int connection_group_id, cip_conn_p *conn_out);
 
 
 /*
@@ -87,19 +89,12 @@ int32_t cip_conn_live_count(void) { return session_list_count(&conn_list); }
 int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
     cip_plc_type_t plc_type = cip_plc_type_from_attributes(attribs);
 
-    /*
-     * The entry is resolved from the same attributes the connection is about to parse its
-     * own path from, so the dialect stored on the connection and the path it encodes cannot
-     * disagree.
-     */
-    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(plc_type, cip_dialect_from_attributes(plc_type, attribs));
-
-    if(!plc_entry) {
+    if(!cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT)) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unknown PLC type %d!", (int)plc_type);
         return PLCTAG_ERR_BAD_DEVICE;
     }
 
-    return find_or_create_on_list(&conn_list, plc_entry, attribs, tag_conn, is_new_conn);
+    return find_or_create_on_list(&conn_list, plc_type, attribs, tag_conn, is_new_conn);
 }
 
 
@@ -356,7 +351,7 @@ int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
 
 
 cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                            int connection_group_id, const cip_plc_entry_t *plc_entry) {
+                                            int connection_group_id, cip_plc_type_t plc_type) {
     for(int i = 0; i < vector_length(list->conns); i++) {
         cip_conn_p conn = vector_get(list->conns, i);
 
@@ -365,14 +360,13 @@ cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *h
         conn = rc_inc(conn);
         if(conn) {
             /*
-             * The row is part of the key, not just the address.  Rows are static singletons,
-             * so this is a pointer comparison.  Two families can name the same gateway and
-             * path -- `plc=lgx` and `plc=lgx-pccc` are the same physical PLC addressed two
-             * ways -- and they cannot share a connection: the family decides the payload
-             * sizing, the messaging and now the tag setup the connection hands out.  Before
-             * this, whichever family got there first silently supplied all three.
+             * The family is part of the key, not just the address.  Two families can name the
+             * same gateway and path -- `plc=lgx` and `plc=lgx-pccc` are the same physical PLC
+             * addressed two ways -- and they cannot share a connection: the family decides the
+             * payload sizing, the messaging and the tag setup the connection hands out.  The
+             * path is in the key too, so the dialect the path chose matches as well.
              */
-            if(conn->connection_group_id == connection_group_id && conn->plc_entry == plc_entry
+            if(conn->connection_group_id == connection_group_id && conn->plc_entry->plc_type == plc_type
                && session_match_valid(host, path, conn)) {
                 return conn;
             }
@@ -2317,9 +2311,14 @@ THREAD_FUNC(session_handler) {
 }
 
 
-cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, const char *host,
-                                     const char *path, int *use_connected_msg, int connection_group_id) {
-    const int max_payload_capacity = plc_entry->max_payload_capacity;
+/*
+ * Create a connection for a PLC family.  The path is parsed here and only here, and the parse
+ * picks the family's row: a DH+ path takes the DH+ row, anything else the direct one.
+ */
+static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const char *host, const char *path,
+                          int use_connected_msg, int connection_group_id, cip_conn_p *conn_out) {
+    const cip_plc_entry_t *dhp_entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DHP);
+    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
     const bool data_buffer_is_static = true;
     static volatile uint32_t connection_id = 0;
 
@@ -2327,7 +2326,7 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
     cip_conn_p conn = NULL;
     size_t total_allocation_size = sizeof(*conn);
     /* the connection buffer holds the whole assembled packet: framing, route path and payload. */
-    size_t data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)max_payload_capacity;
+    size_t data_buffer_capacity = 0;
     size_t data_buffer_offset = 0;
     size_t host_name_offset = 0;
     size_t host_name_size = 0;
@@ -2338,6 +2337,7 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
     int tmp_conn_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
     int is_dhp = 0;
     uint16_t dhp_dest = 0;
+    bool is_bridged = false;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
 
@@ -2350,7 +2350,7 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
     if(!host || str_length(host) >= MAX_SESSION_HOST_LEN) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Gateway string is missing or longer than the maximum of %d bytes!",
                MAX_SESSION_HOST_LEN - 1);
-        return NULL;
+        return PLCTAG_ERR_BAD_GATEWAY;
     }
 
     /*
@@ -2361,14 +2361,37 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
      */
     if(path && str_length(path) >= MAX_CONN_PATH) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Path string is longer than the maximum of %d bytes!", MAX_CONN_PATH - 1);
-        return NULL;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(*use_connected_msg) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Session should use connected messaging.");
-    } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Session should not use connected messaging.");
+    /*
+     * The encoder knows only whether the family can bridge DH+.  One that cannot rejects a
+     * DH+ segment rather than ignoring it.  A DH+ path forces a connection.
+     */
+    rc = cip_encode_path(path, &use_connected_msg, (dhp_entry ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER),
+                         &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest, &is_bridged);
+    if(rc != PLCTAG_STATUS_OK) {
+        /* BAD_PARAM for a segment that does not parse, TOO_LARGE for a path that encodes too long. */
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to convert path string to binary path, error %s!",
+               plc_tag_decode_error(rc));
+        return rc;
     }
+
+    if(is_dhp) { plc_entry = dhp_entry; }
+
+    /*
+     * A PCCC CPU sits directly on a network, never in a ControlLogix chassis, so a path to one
+     * must leave the gateway's chassis.  A DH+ path already does.
+     */
+    if(dhp_entry && !is_dhp && str_length(path) && !is_bridged) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", plc_entry->name);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s connection, %s.", plc_entry->name,
+           (use_connected_msg ? "connected" : "unconnected"));
+
+    data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)plc_entry->max_payload_capacity;
 
     /* add in space for the data buffer. */
     if(data_buffer_is_static) {
@@ -2392,24 +2415,6 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
         path_offset = 0;
     }
 
-    /* encode the path */
-    /*
-     * The shared encoder knows only whether the family can bridge DH+, not which AB
-     * family this is.  PLC-5, SLC and MicroLogix can; everything else rejects a DH+
-     * segment rather than ignoring it.
-     */
-    int dhp_kind = (plc_entry->dhp_capable ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
-
-    bool is_bridged = false;
-
-    rc = cip_encode_path(path, use_connected_msg, dhp_kind, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest,
-                         &is_bridged);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
-               plc_tag_decode_error(rc));
-        return NULL;
-    }
-
     conn_path_offset = total_allocation_size;
     total_allocation_size += (size_t)tmp_conn_path_size;
 
@@ -2423,7 +2428,7 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
     conn = (cip_conn_p)rc_alloc((int)total_allocation_size, session_destroy);
     if(!conn) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error allocating new session!");
-        return NULL;
+        return PLCTAG_ERR_NO_MEM;
     }
 
     /* fill in the interior pointers */
@@ -2439,7 +2444,8 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
         if(conn->data == NULL) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate the connection data buffer!");
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
-            return rc_dec(conn);
+            rc_dec(conn);
+            return PLCTAG_ERR_NO_MEM;
         }
     }
 
@@ -2471,7 +2477,7 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate vector for requests!");
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
         rc_dec(conn);
-        return NULL;
+        return PLCTAG_ERR_NO_MEM;
     }
 
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
@@ -2490,7 +2496,7 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
     conn->fo_dup_retries = 0;
     conn->fo_tried_plain = false;
     conn->max_payload_size = (uint16_t)plc_entry->fo_conn_size;
-    conn->use_connected_msg = *use_connected_msg;
+    conn->use_connected_msg = use_connected_msg;
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     conn->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
@@ -2515,13 +2521,15 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
     /* create the conn mutex. */
     if((rc = mutex_create(&(conn->session_mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create session mutex!");
-        return rc_dec(conn);
+        rc_dec(conn);
+        return rc;
     }
 
     /* create the conn condition variable. */
     if((rc = cond_create(&(conn->session_wait_cond))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create session condition var!");
-        return rc_dec(conn);
+        rc_dec(conn);
+        return rc;
     }
 
     /* add the new conn to the list. */
@@ -2529,18 +2537,24 @@ cip_conn_p session_create_from_entry(cip_conn_list_t *list, const cip_plc_entry_
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done");
 
-    return conn;
+    *conn_out = conn;
+
+    return PLCTAG_STATUS_OK;
 }
-static int find_or_create_on_list(cip_conn_list_t *list, const cip_plc_entry_t *plc_entry, attr attribs,
-                                  cip_conn_p *tag_conn, int *is_new_conn) {
+
+
+
+static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type, attr attribs, cip_conn_p *tag_conn,
+                                  int *is_new_conn) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
     /*
      * The family's row decides, so every tag on the connection, @connection included, gets
-     * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.
+     * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.  A
+     * DH+ path forces it on when the connection is created.
      */
-    int use_connected_msg = (cip_entry_use_connected_msg(plc_entry, attribs) ? 1 : 0);
+    int use_connected_msg = (cip_entry_use_connected_msg(cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT), attribs) ? 1 : 0);
     cip_conn_p session = NULL;
     int new_session = 0;
     /*
@@ -2584,9 +2598,11 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_plc_entry_t *
     critical_block(list->mutex) {
         /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
-            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_entry);
+            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_type);
 
-            /* one connection cannot be both connected and unconnected. */
+            /* one connection cannot be both connected and unconnected.  Asked of its own row, which may be DH+. */
+            if(session) { use_connected_msg = (cip_entry_use_connected_msg(session->plc_entry, attribs) ? 1 : 0); }
+
             if(session && session->use_connected_msg != use_connected_msg) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                        "use_connected_msg=%d conflicts with the existing connection's %d!  Use a different "
@@ -2606,14 +2622,10 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_plc_entry_t *
         } else if(session == NULL) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating new session.");
 
-            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s session.", plc_entry->name);
-
-            session = session_create_from_entry(list, plc_entry, session_gw, session_path, &use_connected_msg,
-                                                connection_group_id);
-
-            if(session == NULL) {
-                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "unable to create or find a session!");
-                rc = PLCTAG_ERR_BAD_GATEWAY;
+            rc = session_create(list, plc_type, session_gw, session_path, use_connected_msg, connection_group_id, &session);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create a session, error %s!", plc_tag_decode_error(rc));
+                session = NULL;
             } else {
                 atomic_init_int32(&session->connection_inactivity_timeout_ms, connection_inactivity_timeout_ms);
                 atomic_init_int32(&session->connection_retry_max_delay_ms, connection_retry_max_delay_ms);

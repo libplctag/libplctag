@@ -52,29 +52,22 @@
  */
 
 
-struct {
+static const struct {
     const char *protocol;
-    const char *make;
-    const char *family;
-    const char *model;
     const tag_create_function tag_constructor;
 } tag_type_map[] = {
-    /* System tags - DEPRECATED */
-    {.protocol = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
-
-    /* System tags */
-    {.protocol = "system", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = system_tag_create},
+    {.protocol = "system", .tag_constructor = system_tag_create},
 
     /*
      * CIP PLCs, Rockwell and OMRON alike.  Both arrive as ab-eip and are told apart by the
      * plc attribute, which cip_tag_create() reads -- see modules/cip/cip_tag_create.c.
      */
-    {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = cip_tag_create},
-    {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = cip_tag_create},
+    {.protocol = "ab-eip", .tag_constructor = cip_tag_create},
+    {.protocol = "ab_eip", .tag_constructor = cip_tag_create},
 
     /* Modbus TCP */
-    {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
-    {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
+    {.protocol = "modbus-tcp", .tag_constructor = mb_tag_create},
+    {.protocol = "modbus_tcp", .tag_constructor = mb_tag_create}};
 
 
 /*
@@ -105,64 +98,28 @@ static const struct {
 static atomic_int32_t library_state = ATOMIC_INT_STATIC_INIT;
 
 
-/*
- * find_tag_create_func()
- *
- * Find an appropriate tag creation function.  This scans through the array
- * above to find a matching tag creation type.  The first match is returned.
- * A passed set of options will match when all non-null entries in the list
- * match.  This means that matches must be ordered from most to least general.
- *
- * Note that the protocol is used if it exists otherwise, the make family and
- * model will be used.
- */
-
+/* the constructor for the tag's protocol attribute, or NULL if no protocol matches. */
 tag_create_function find_tag_create_func(attr attributes) {
-    int i = 0;
     const char *protocol = attr_get_str(attributes, "protocol", NULL);
-    const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
-    const char *family = attr_get_str(attributes, "family", NULL);
-    const char *model = attr_get_str(attributes, "model", NULL);
-    int num_entries = (sizeof(tag_type_map) / sizeof(tag_type_map[0]));
 
-    /* if protocol is set, then use it to match. */
-    if(protocol && str_length(protocol) > 0) {
-        for(i = 0; i < num_entries; i++) {
-            if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s", protocol);
-                return tag_type_map[i].tag_constructor;
-            }
+    /* make=system&family=library is the deprecated spelling of protocol=system. */
+    if(!str_length(protocol)) {
+        const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
+
+        if(str_cmp_i(make, "system") == 0 && str_cmp_i(attr_get_str(attributes, "family", NULL), "library") == 0) {
+            return system_tag_create;
         }
-    } else {
-        /* match make/family/model */
-        for(i = 0; i < num_entries; i++) {
-            if(tag_type_map[i].make && make && str_cmp_i(tag_type_map[i].make, make) == 0) {
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s", make);
-                if(tag_type_map[i].family) {
-                    if(family && str_cmp_i(tag_type_map[i].family, family) == 0) {
-                        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s", make, family);
-                        if(tag_type_map[i].model) {
-                            if(model && str_cmp_i(tag_type_map[i].model, model) == 0) {
-                                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s model=%s", make, family,
-                                       model);
-                                return tag_type_map[i].tag_constructor;
-                            }
-                        } else {
-                            /* matches until a NULL */
-                            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s model=NULL", make, family);
-                            return tag_type_map[i].tag_constructor;
-                        }
-                    }
-                } else {
-                    /* matched until a NULL, so we matched */
-                    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=NULL model=NULL", make);
-                    return tag_type_map[i].tag_constructor;
-                }
-            }
+
+        return NULL;
+    }
+
+    for(size_t i = 0; i < (sizeof(tag_type_map) / sizeof(tag_type_map[0])); i++) {
+        if(str_cmp(tag_type_map[i].protocol, protocol) == 0) {
+            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s", protocol);
+            return tag_type_map[i].tag_constructor;
         }
     }
 
-    /* no match */
     return NULL;
 }
 

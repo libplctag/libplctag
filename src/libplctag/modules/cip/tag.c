@@ -52,6 +52,7 @@
 #include <stdint.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
+#include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
@@ -826,22 +827,41 @@ int cip_tag_size_from_attributes(cip_tag_p tag, attr attribs, debug_module_t deb
 }
 
 
-int cip_tag_check_setup(cip_tag_p tag, const char *family_name, tag_vtable_p default_vtable, debug_module_t debug_module) {
-    if(!tag->byte_order) {
-        pdebug(debug_module, DEBUG_ERROR, tag->tag_id, "Setup for %s left no byte order!", family_name);
-        return PLCTAG_ERR_BAD_CONFIG;
+int cip_tag_parse_elem_type(cip_tag_p tag, attr attribs, debug_module_t debug_module) {
+    /*
+     * A CIP STRING and a CIP SHORT_STRING are both a count followed by exactly that many
+     * characters, so neither has an element size.  One byte, as the tag listing and @udt tags
+     * use for the same reason.
+     */
+    static const struct {
+        const char *name;
+        int size;
+        cip_elem_type_t type;
+    } elem_types[] = {
+        {"lint", 8, CIP_TYPE_INT64},     {"ulint", 8, CIP_TYPE_INT64},
+        {"dint", 4, CIP_TYPE_INT32},     {"udint", 4, CIP_TYPE_INT32},
+        {"int", 2, CIP_TYPE_INT16},      {"uint", 2, CIP_TYPE_INT16},
+        {"sint", 1, CIP_TYPE_INT8},      {"usint", 1, CIP_TYPE_INT8},
+        {"bool", 1, CIP_TYPE_BOOL},      {"bool array", 4, CIP_TYPE_BOOL_ARRAY},
+        {"real", 4, CIP_TYPE_FLOAT32},   {"lreal", 8, CIP_TYPE_FLOAT64},
+        {"string", 1, CIP_TYPE_STRING},  {"short string", 1, CIP_TYPE_SHORT_STRING},
+    };
+    const char *elem_type = attr_get_str(attribs, "elem_type", NULL);
+
+    if(!elem_type) {
+        tag->elem_size = attr_get_int(attribs, "elem_size", 0);
+        return PLCTAG_STATUS_OK;
     }
 
-    if(!tag->vtable || tag->vtable == default_vtable) {
-        pdebug(debug_module, DEBUG_ERROR, tag->tag_id, "Setup for %s left no vtable; this tag name is not supported!",
-               family_name);
-        return PLCTAG_ERR_BAD_CONFIG;
+    for(size_t i = 0; i < (sizeof(elem_types) / sizeof(elem_types[0])); i++) {
+        if(str_cmp_i(elem_type, elem_types[i].name) == 0) {
+            pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Found tag element type %s.", elem_type);
+            tag->elem_size = elem_types[i].size;
+            tag->elem_type = elem_types[i].type;
+            return PLCTAG_STATUS_OK;
+        }
     }
 
-    if(!tag->std_ops) {
-        pdebug(debug_module, DEBUG_ERROR, tag->tag_id, "Setup for %s left no standard-tag operations!", family_name);
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    return PLCTAG_STATUS_OK;
+    pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unknown tag element type %s!", elem_type);
+    return PLCTAG_ERR_UNSUPPORTED;
 }

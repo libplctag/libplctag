@@ -42,17 +42,18 @@
  * here that sits *above* the families rather than below them -- the rest of modules/cip
  * names no family and must keep it that way.
  *
- * Each row carries a function, because tag creation is not one algorithm with per-family
- * constants -- PCCC logical-address encoding, Logix symbolic encoding and OMRON's are
- * different code.  The data a row carries is what the connection needs before any tag
- * exists: whether it is a connected one, and how to size and negotiate it.  The connection
- * holds its row, so a tag asks the connection rather than the table.
+ * A row is data -- what the connection needs before any tag exists, and what a new tag
+ * starts with -- plus one function, for the name, because PCCC logical-address encoding,
+ * Logix symbolic encoding and OMRON's are different code.  The connection holds its row, so
+ * a tag asks the connection rather than the table.
  */
 
 #include <libplctag/lib/tag.h>
 #include <stdbool.h>
 #include <libplctag/modules/cip/plc_type.h>
+#include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
+#include <utils/debug.h>
 #include <utils/attr.h>
 
 /*
@@ -86,15 +87,26 @@ struct cip_plc_entry_t {
     int8_t use_connected_msg;
 
     /*
-     * Everything this family does to a freshly allocated tag that the shared skeleton
-     * cannot: its vtable, its byte order, its messaging policy.  NULL while a family is
-     * still on the old path.
-     *
-     * It is handed its own row so that several rows can share a leaf and the leaf can still
-     * tell them apart -- which is how the three PCCC families need only two leaves between
-     * their six rows.
+     * What a new tag of this family starts with.  A special tag (@identity, @raw, @tags,
+     * @udt) replaces the vtable, byte order and debug module while its name is parsed.
+     * vtable is NULL for a family that has only special tags.
      */
-    int (*setup_tag)(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+    tag_protocol_t protocol;
+    tag_vtable_p vtable;
+    tag_byte_order_t *byte_order;
+    const cip_standard_tag_ops_t *std_ops;
+    debug_module_t debug_module;
+
+    bool allow_packing;     /* the default */
+    bool packing_settable;  /* whether the tag string's allow_packing may change it */
+    bool size_from_plc;     /* the first read reports the size; otherwise elem_size states it */
+
+    /*
+     * The one piece of tag creation that is code: parse the name, special or data, and
+     * encode it.  Rows share these -- PCCC file addressing, Logix symbolic, OMRON symbolic.
+     * It runs after the element count is known, because a symbolic name encodes it.
+     */
+    int (*setup_name)(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
 
     /*
      * Connection sizing and negotiation.  Shared code reads these rather than plc_type, so
@@ -105,7 +117,6 @@ struct cip_plc_entry_t {
     int fo_ex_conn_size;            /* payload to ask for in an extended Forward Open, 0 if unsupported */
     bool only_use_old_forward_open;
     uint16_t min_payload_size;      /* refuse to negotiate below this */
-    bool dhp_capable;               /* family can bridge to DH+ */
 };
 
 
@@ -121,17 +132,6 @@ extern bool cip_entry_use_connected_msg(const cip_plc_entry_t *entry, attr attri
 
 /* NULL if no row matches, which is a configuration error and not an internal one. */
 extern const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t dialect);
-
-/*
- * Which dialect this tag's attributes describe, decided before any connection exists.
- *
- * Only the path can make a tag DH+, and only for a family that has a DH+ row, so the table
- * is the list of what can bridge and there is no second one to keep in step.  An
- * unparseable path reads as direct: connection creation runs the same parser and reports it
- * properly, and guessing a dialect for a path that will be rejected anyway buys nothing.
- */
-extern cip_dialect_t cip_dialect_from_attributes(cip_plc_type_t plc_type, attr attribs);
-
 
 /*
  * Which CIP family the plc (or legacy cpu) attribute names, for every family the library

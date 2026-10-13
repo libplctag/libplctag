@@ -50,17 +50,14 @@
  * plc_type selects DH+ bridging, which only the PLC-5/SLC/MicroLogix families
  * support: a DH+ segment against any other family is rejected with
  * PLCTAG_ERR_BAD_PARAM rather than silently ignored.
+ *
+ * is_bridged says whether the path leaves the gateway's chassis: an IP segment, a DH+
+ * segment, or any port/link pair whose port is not the backplane (port 1).  Which network it
+ * leaves onto cannot be told from the string -- a port number means different things on
+ * different modules.
  */
 extern int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size,
                            int *is_dhp, uint16_t *dhp_dest, bool *is_bridged);
-
-/*
- * Whether the path leaves the gateway's chassis: an IP segment, a DH+ segment, or any
- * port/link pair whose port is not the backplane (port 1).  Which network it leaves onto
- * cannot be told from the string -- a port number means different things on different
- * modules.  False for an empty or unparseable path.
- */
-extern bool cip_path_is_bridged(const char *path);
 
 /* PLC families that support DH+ bridging, for cip_encode_path()'s plc_type. */
 #define CIP_PLC_KIND_OTHER (0)

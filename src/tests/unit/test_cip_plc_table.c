@@ -39,8 +39,8 @@
  * an error.  Neither is reachable from a test that creates tags, because it would need a
  * PLC of every family to notice.  So the table is checked directly.
  *
- * Every row now has a leaf -- the last family moved across in K5 -- so a NULL setup_tag is
- * an unfinished row rather than a migration in progress, and is asserted against.
+ * Every row must carry what the constructor reads unconditionally: a name parser, a byte
+ * order and standard-tag operations.
  */
 
 #include "mini_mock.h"
@@ -98,14 +98,18 @@ static void test_every_row_has_a_leaf(void **state) {
     (void)state;
 
     /*
-     * A row without a leaf reaches the constructor as PLCTAG_ERR_BAD_CONFIG, which reads
-     * like the caller named an impossible PLC rather than like the table is incomplete.
+     * The constructor calls through these without checking, so a missing one is a crash at
+     * the first tag create for that family.
      */
     for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
         for(dialect_index = 0; dialect_index < (sizeof(all_dialects) / sizeof(all_dialects[0])); dialect_index++) {
             const cip_plc_entry_t *entry = cip_plc_entry_find(plc_type, all_dialects[dialect_index]);
 
-            if(entry) { assert_non_null(entry->setup_tag); }
+            if(entry) {
+                assert_non_null(entry->setup_name);
+                assert_non_null(entry->byte_order);
+                assert_non_null(entry->std_ops);
+            }
         }
     }
 }
@@ -156,25 +160,49 @@ static void test_the_key_is_what_the_row_answers_to(void **state) {
 
 
 /*
- * The dialect classifier.
+ * The dialect, which connection creation computes from the path: a DH+ path takes the DH+ row.
  *
- * This is the half of the table's key that is computed rather than given, and the simulator
- * suite cannot reach it: ab_server is not a DH+ bridge, so nothing in 232 tests ever produces
- * CIP_DIALECT_DHP.  Only hardware does, which is exactly why it is pinned here instead.
+ * The simulator suite cannot reach it -- ab_server is not a DH+ bridge -- so only hardware
+ * produces CIP_DIALECT_DHP, which is exactly why it is pinned here.  This runs the parser the
+ * way connection creation does: DH+ capable exactly when the family has a DH+ row.
  */
+static int parse_path(cip_plc_type_t plc_type, const char *path, int *is_dhp, bool *is_bridged) {
+    uint8_t encoded[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    int encoded_size = (int)sizeof(encoded);
+    int needs_connection = 0;
+    uint16_t dhp_dest = 0;
+    int kind = (cip_plc_entry_find(plc_type, CIP_DIALECT_DHP) ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
+
+    *is_dhp = 0;
+    *is_bridged = false;
+
+    return cip_encode_path(path, &needs_connection, kind, &encoded[0], &encoded_size, is_dhp, &dhp_dest, is_bridged);
+}
+
+
 static cip_dialect_t dialect_for(cip_plc_type_t plc_type, const char *path) {
-    attr attribs = attr_create();
-    cip_dialect_t dialect = CIP_DIALECT_DIRECT;
+    int is_dhp = 0;
+    bool is_bridged = false;
 
-    assert_non_null(attribs);
+    assert_int_equal(parse_path(plc_type, path, &is_dhp, &is_bridged), PLCTAG_STATUS_OK);
 
-    if(path) { assert_int_equal(attr_set_str(attribs, "path", path), PLCTAG_STATUS_OK); }
+    return (is_dhp ? CIP_DIALECT_DHP : CIP_DIALECT_DIRECT);
+}
 
-    dialect = cip_dialect_from_attributes(plc_type, attribs);
 
-    attr_destroy(attribs);
+static bool rejects(cip_plc_type_t plc_type, const char *path) {
+    int is_dhp = 0;
+    bool is_bridged = false;
 
-    return dialect;
+    return parse_path(plc_type, path, &is_dhp, &is_bridged) != PLCTAG_STATUS_OK;
+}
+
+
+static bool bridges(const char *path) {
+    int is_dhp = 0;
+    bool is_bridged = false;
+
+    return parse_path(CIP_PLC_PLC5, path, &is_dhp, &is_bridged) == PLCTAG_STATUS_OK && is_bridged;
 }
 
 
@@ -191,37 +219,90 @@ static void test_a_dhp_path_is_a_dhp_dialect(void **state) {
 static void test_an_ordinary_path_is_direct(void **state) {
     (void)state;
 
-    assert_int_equal(dialect_for(CIP_PLC_PLC5, NULL), CIP_DIALECT_DIRECT);
     assert_int_equal(dialect_for(CIP_PLC_PLC5, ""), CIP_DIALECT_DIRECT);
     assert_int_equal(dialect_for(CIP_PLC_SLC, "1,0"), CIP_DIALECT_DIRECT);
     assert_int_equal(dialect_for(CIP_PLC_LGX, "1,0"), CIP_DIALECT_DIRECT);
 }
 
 
-static void test_a_family_that_cannot_bridge_is_always_direct(void **state) {
+static void test_a_family_that_cannot_bridge_rejects_dhp(void **state) {
     (void)state;
 
-    /*
-     * A DH+ segment against a family that cannot bridge is a bad path, and connection
-     * creation says so.  The classifier must not quietly pick the DH+ row for it -- there
-     * is no such row, so a wrong answer here would be a NULL lookup and a confusing
-     * PLCTAG_ERR_BAD_CONFIG instead of the real complaint about the path.
-     */
-    assert_int_equal(dialect_for(CIP_PLC_LGX, "1,2,A:27:1"), CIP_DIALECT_DIRECT);
-    assert_int_equal(dialect_for(CIP_PLC_LGX_PCCC, "1,2,A:27:1"), CIP_DIALECT_DIRECT);
-    assert_int_equal(dialect_for(CIP_PLC_MICRO800, "1,2,A:27:1"), CIP_DIALECT_DIRECT);
-    assert_int_equal(dialect_for(CIP_PLC_GENERIC, "1,2,A:27:1"), CIP_DIALECT_DIRECT);
+    /* a DH+ segment against a family with no DH+ row is a bad path, not a direct one. */
+    assert_true(rejects(CIP_PLC_LGX, "1,2,A:27:1"));
+    assert_true(rejects(CIP_PLC_LGX_PCCC, "1,2,A:27:1"));
+    assert_true(rejects(CIP_PLC_MICRO800, "1,2,A:27:1"));
+    assert_true(rejects(CIP_PLC_GENERIC, "1,2,A:27:1"));
 }
 
 
-static void test_an_unparseable_path_is_direct(void **state) {
+static void test_an_unparseable_path_is_rejected(void **state) {
     (void)state;
 
-    /* not this function's error to report; the connection runs the same parser and does. */
-    assert_int_equal(dialect_for(CIP_PLC_PLC5, "not a path at all"), CIP_DIALECT_DIRECT);
+    assert_true(rejects(CIP_PLC_PLC5, "not a path at all"));
 
-    /* a DH+ segment that is not last is rejected by the parser, so it is not a DH+ tag. */
-    assert_int_equal(dialect_for(CIP_PLC_PLC5, "1,A:27:1,2"), CIP_DIALECT_DIRECT);
+    /* a DH+ segment must be last. */
+    assert_true(rejects(CIP_PLC_PLC5, "1,A:27:1,2"));
+}
+
+
+static void test_a_path_bridges_when_it_leaves_the_chassis(void **state) {
+    (void)state;
+
+    /* leaves the chassis: IP out port 2 or 3, DH+, or a pair whose port is not the backplane */
+    assert_true(bridges("1,4,18,10.206.1.36"));
+    assert_true(bridges("1,2,19,10.206.1.38"));
+    assert_true(bridges("1,2,A:27:1"));
+    assert_true(bridges("1,3,2,5"));
+    assert_true(bridges("1,4,18,10.206.1.39,1,0"));
+
+    /* stays on the backplane, or is not a path at all */
+    assert_true(!bridges("1,4"));
+    assert_true(!bridges("1,0,1,2"));
+    assert_true(!bridges(""));
+    assert_true(!bridges("1,x"));
+}
+
+
+/*
+ * The create-time path rules, which no simulator can check: ab_server has no CompactLogix
+ * mode and refuses a ControlLogix connection without its configured path.  Nothing listens
+ * on the gateway, so a create that passes the checks returns a pending tag id.
+ */
+static int32_t create_status(const char *attribs) {
+    int32_t tag = plc_tag_create(attribs, 0);
+
+    if(tag > 0) {
+        plc_tag_destroy(tag);
+        return PLCTAG_STATUS_OK;
+    }
+
+    return tag;
+}
+
+
+static void test_the_path_rules(void **state) {
+    (void)state;
+
+    /* a ControlLogix CPU sits behind a communication module, so it needs its slot. */
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&plc=controllogix&name=X"), PLCTAG_ERR_BAD_PARAM);
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&plc=lgx&name=X"), PLCTAG_ERR_BAD_PARAM);
+
+    /* a CompactLogix and an NJ/NX answer on their own Ethernet port. */
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&plc=compactlogix&name=X"), PLCTAG_STATUS_OK);
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&plc=omron-njnx&name=X"), PLCTAG_STATUS_OK);
+
+    /* a path that does not parse, and one that encodes too long. */
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&path=1,zz&plc=controllogix&name=X"),
+                     PLCTAG_ERR_BAD_PARAM);
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&path=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,"
+                                   "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,"
+                                   "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,"
+                                   "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,"
+                                   "0&plc=controllogix&name=X"),
+                     PLCTAG_ERR_TOO_LARGE);
+
+    plc_tag_shutdown();
 }
 
 
@@ -231,25 +312,6 @@ static void test_an_unparseable_path_is_direct(void **state) {
  * a wrong answer here from a working one until the PLC refuses the framing, so pin the two
  * rules the old leaves enforced in code.
  */
-static void test_a_path_bridges_when_it_leaves_the_chassis(void **state) {
-    (void)state;
-
-    /* leaves the chassis: IP out port 2 or 3, DH+, or a pair whose port is not the backplane */
-    assert_true(cip_path_is_bridged("1,4,18,10.206.1.36"));
-    assert_true(cip_path_is_bridged("1,2,19,10.206.1.38"));
-    assert_true(cip_path_is_bridged("1,2,A:27:1"));
-    assert_true(cip_path_is_bridged("1,3,2,5"));
-    assert_true(cip_path_is_bridged("1,4,18,10.206.1.39,1,0"));
-
-    /* stays on the backplane, or is not a path at all */
-    assert_true(!cip_path_is_bridged("1,4"));
-    assert_true(!cip_path_is_bridged("1,0,1,2"));
-    assert_true(!cip_path_is_bridged(""));
-    assert_true(!cip_path_is_bridged(NULL));
-    assert_true(!cip_path_is_bridged("1,x"));
-}
-
-
 static void test_the_row_settles_connected_messaging(void **state) {
     cip_plc_type_t plc_type = CIP_PLC_NONE;
     size_t dialect_index = 0;
@@ -295,9 +357,10 @@ int main(void) {
         cmocka_unit_test(test_the_row_settles_connected_messaging),
         cmocka_unit_test(test_a_dhp_path_is_a_dhp_dialect),
         cmocka_unit_test(test_an_ordinary_path_is_direct),
-        cmocka_unit_test(test_a_family_that_cannot_bridge_is_always_direct),
-        cmocka_unit_test(test_an_unparseable_path_is_direct),
+        cmocka_unit_test(test_a_family_that_cannot_bridge_rejects_dhp),
+        cmocka_unit_test(test_an_unparseable_path_is_rejected),
         cmocka_unit_test(test_a_path_bridges_when_it_leaves_the_chassis),
+        cmocka_unit_test(test_the_path_rules),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

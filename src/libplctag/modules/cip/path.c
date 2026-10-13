@@ -181,23 +181,6 @@ int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8
 }
 
 
-bool cip_path_is_bridged(const char *path) {
-    uint8_t encoded_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
-    int encoded_path_size = (int)sizeof(encoded_path);
-    int needs_connection = 0;
-    int is_dhp = 0;
-    uint16_t dhp_dest = 0;
-    bool is_bridged = false;
-
-    if(cip_encode_path(path, &needs_connection, CIP_PLC_KIND_DHP_CAPABLE, &encoded_path[0], &encoded_path_size, &is_dhp,
-                       &dhp_dest, &is_bridged)
-       != PLCTAG_STATUS_OK) {
-        return false;
-    }
-
-    return is_bridged;
-}
-
 
 int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *conn_path_index) {
     int val = 0;
