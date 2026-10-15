@@ -122,8 +122,8 @@ static void encode_data(uint8_t *data, int *index, int val);
 // static int encode_file_type(pccc_file_t file_type);
 
 
-static int pccc_check_read_status(cip_tag_p tag);
-static int pccc_check_write_status(cip_tag_p tag);
+static int pccc_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int pccc_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int plc5_tag_write_bit_start(cip_tag_p tag);
 static int slc_tag_write_bit_start(cip_tag_p tag);
 
@@ -1281,8 +1281,8 @@ void encode_data(uint8_t *data, int *index, int val) {
  */
 
 /* the response handlers and the bit writers are reached only through the vtable entries below. */
-static int pccc_check_read_status(cip_tag_p tag);
-static int pccc_check_write_status(cip_tag_p tag);
+static int pccc_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int pccc_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int plc5_tag_write_bit_start(cip_tag_p tag);
 static int slc_tag_write_bit_start(cip_tag_p tag);
 
@@ -1350,8 +1350,8 @@ uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp) {
  * Both reply shapes end with the same PCCC command response, so the data that follows always
  * starts one pccc_cmd_resp past what this returns.
  */
-static pccc_cmd_resp *pccc_response_cmd(cip_tag_p tag, bool is_dhp) {
-    return (pccc_cmd_resp *)(tag->req->data + pccc_response_overhead(is_dhp) - (int)sizeof(pccc_cmd_resp));
+static pccc_cmd_resp *pccc_response_cmd(uint8_t *reply, bool is_dhp) {
+    return (pccc_cmd_resp *)(reply + pccc_response_overhead(is_dhp) - (int)sizeof(pccc_cmd_resp));
 }
 
 
@@ -1464,27 +1464,27 @@ int pccc_finish_request(cip_tag_p tag, cip_request_p req, int rc, bool is_write)
  * gateway multiplexes several PLCs over one CIP connection, so without the node
  * check any of them can answer for any other.
  */
-int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
+int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size, bool is_dhp) {
     pccc_cmd_resp *pccc_cmd = NULL;
     int min_size = pccc_response_overhead(is_dhp);
 
-    if(!tag || !tag->req || !tag->session) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, (tag ? tag->tag_id : 0), "Called without a request in flight or a session!");
+    if(!tag || !reply || !tag->session) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, (tag ? tag->tag_id : 0), "Called without a reply or a session!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!is_dhp) {
-        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(tag->req->data);
-        uint8_t *data_end = tag->req->data + tag->req->request_size;
+        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)reply;
+        uint8_t *data_end = reply + reply_size;
 
         /*
          * The four-byte CIP reply header comes before the PCCC fields, and a failed request
          * may carry nothing but that header and its extended status.  Check it first so a
          * remote error is reported as one rather than as a truncated reply.
          */
-        if(tag->req->request_size < 4) {
+        if(reply_size < 4) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Response of %d bytes is too short to hold a CIP reply header!",
-                   tag->req->request_size);
+                   reply_size);
             return PLCTAG_ERR_TOO_SMALL;
         }
 
@@ -1510,15 +1510,15 @@ int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
     }
 
     /* the connection strips the EIP and CPF framing, so this is a CIP reply size only. */
-    if(tag->req->request_size < min_size) {
+    if(reply_size < min_size) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id,
-               "Response of %d bytes is too short to hold a %s response header of %d bytes!", tag->req->request_size,
+               "Response of %d bytes is too short to hold a %s response header of %d bytes!", reply_size,
                (is_dhp ? "DH+ PCCC" : "PCCC"), min_size);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
     if(is_dhp) {
-        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(tag->req->data);
+        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)reply;
 
         /* we sent this to dhp_dest from node zero, so the answer has to come back the other way. */
         if(le2h16(dhp_routing->src_node) != tag->session->dhp_dest || le2h16(dhp_routing->dest_node) != 0) {
@@ -1529,7 +1529,7 @@ int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
             return PLCTAG_ERR_BAD_DATA;
         }
     } else {
-        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(tag->req->data);
+        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)reply;
 
         /*
          * The requester ID is echoed verbatim from our request.  It is how a PCCC target tells
@@ -1544,7 +1544,7 @@ int pccc_check_response_header(cip_tag_p tag, bool is_dhp) {
         }
     }
 
-    pccc_cmd = pccc_response_cmd(tag, is_dhp);
+    pccc_cmd = pccc_response_cmd(reply, is_dhp);
 
     if(le2h16(pccc_cmd->pccc_seq_num) != tag->req_pccc_seq_num) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Response has TNS %04x but we sent %04x!",
@@ -1578,7 +1578,7 @@ int pccc_tag_status(cip_tag_p tag) {
 }
 
 
-int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check_write) {
+int pccc_tickle(cip_tag_p tag, cip_tag_decode_func check_read, cip_tag_decode_func check_write) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -1587,7 +1587,7 @@ int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        rc = check_read(tag);
+        rc = check_read(tag, tag->req->data, tag->req->request_size);
         tag->status = (int8_t)rc;
 
         /* check to see if the read finished. */
@@ -1605,7 +1605,7 @@ int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check
     }
 
     if(tag->write_in_progress) {
-        rc = check_write(tag);
+        rc = check_write(tag, tag->req->data, tag->req->request_size);
         tag->status = (int8_t)rc;
 
         /* check to see if the write finished. */
@@ -1747,7 +1747,7 @@ int pccc_tag_read_start(cip_tag_p tag) {
  * NOTE that we can have only one outstanding request because PCCC
  * does not support fragments.
  */
-static int pccc_check_read_status(cip_tag_p tag) {
+static int pccc_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     bool is_dhp = tag->session->is_dhp;
     pccc_cmd_resp *pccc_cmd = NULL;
     uint8_t *data = NULL;
@@ -1758,12 +1758,12 @@ static int pccc_check_read_status(cip_tag_p tag) {
 
     /* fake exceptions */
     do {
-        rc = pccc_check_response_header(tag, is_dhp);
+        rc = pccc_check_response_header(tag, reply, reply_size, is_dhp);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        pccc_cmd = pccc_response_cmd(tag, is_dhp);
+        pccc_cmd = pccc_response_cmd(reply, is_dhp);
         data = (uint8_t *)(pccc_cmd + 1);
-        data_end = tag->req->data + tag->req->request_size;
+        data_end = reply + reply_size;
 
         if(pccc_cmd->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
@@ -2129,7 +2129,7 @@ static int slc_tag_write_bit_start(cip_tag_p tag) {
  *
  * Fragments are not supported.
  */
-static int pccc_check_write_status(cip_tag_p tag) {
+static int pccc_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     bool is_dhp = tag->session->is_dhp;
     pccc_cmd_resp *pccc_cmd = NULL;
     uint8_t *data_end = NULL;
@@ -2139,11 +2139,11 @@ static int pccc_check_write_status(cip_tag_p tag) {
 
     /* fake exception */
     do {
-        rc = pccc_check_response_header(tag, is_dhp);
+        rc = pccc_check_response_header(tag, reply, reply_size, is_dhp);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        pccc_cmd = pccc_response_cmd(tag, is_dhp);
-        data_end = tag->req->data + tag->req->request_size;
+        pccc_cmd = pccc_response_cmd(reply, is_dhp);
+        data_end = reply + reply_size;
 
         if(pccc_cmd->pccc_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",

@@ -42,7 +42,7 @@
 #include <utils/debug.h>
 
 
-static int raw_tag_check_write_status(cip_tag_p tag);
+static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int raw_tag_build_write_request(cip_tag_p tag);
 
 
@@ -104,7 +104,7 @@ int cip_raw_tag_tickler(cip_tag_p tag) {
     }
 
     if(tag->write_in_progress) {
-        rc = raw_tag_check_write_status(tag);
+        rc = raw_tag_check_write_status(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
@@ -180,7 +180,7 @@ int cip_raw_tag_write_start(cip_tag_p tag) {
  * stripped, so nothing here depends on whether the request went out connected or
  * unconnected.
  */
-static int raw_tag_check_write_status(cip_tag_p tag) {
+static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
     uint8_t *tag_data_buffer = NULL;
@@ -191,7 +191,7 @@ static int raw_tag_check_write_status(cip_tag_p tag) {
     /* the write is over one way or another, whatever the response turns out to hold. */
     tag->write_in_progress = 0;
 
-    data_size = tag->req->request_size;
+    data_size = reply_size;
 
     if(data_size <= 0) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Response carries no CIP data!");
@@ -206,7 +206,7 @@ static int raw_tag_check_write_status(cip_tag_p tag) {
         tag->data = tag_data_buffer;
         tag->size = data_size;
 
-        mem_copy(tag->data, tag->req->data, data_size);
+        mem_copy(tag->data, reply, data_size);
     } else {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
         rc = PLCTAG_ERR_NO_MEM;

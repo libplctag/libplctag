@@ -52,7 +52,7 @@
  ******************************************************************/
 
 /* identity tag functions */
-static int check_read_status(cip_tag_p tag);
+static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int build_read_request(cip_tag_p tag);
 
 
@@ -148,10 +148,10 @@ static int build_read_request(cip_tag_p tag) {
 }
 
 
-static int check_read_status(cip_tag_p tag) {
+static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
-    uint8_t *cip_response = tag->req->data;
-    uint8_t *data_end = tag->req->data + tag->req->request_size;
+    uint8_t *cip_response = reply;
+    uint8_t *data_end = reply + reply_size;
     uint8_t reply_service = 0;
     uint8_t cip_status = 0;
     int data_size = 0;

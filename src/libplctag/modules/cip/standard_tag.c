@@ -66,8 +66,8 @@
 static int build_read_request(cip_tag_p tag, int byte_offset);
 static int build_write_request(cip_tag_p tag, int byte_offset);
 static int build_write_bit_request(cip_tag_p tag);
-static int check_read_status(cip_tag_p tag);
-static int check_write_status(cip_tag_p tag);
+static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int calculate_write_data_per_packet(cip_tag_p tag);
 
 
@@ -164,7 +164,7 @@ int cip_standard_tag_tickler(plc_tag_p tag_arg) {
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        rc = check_read_status(tag);
+        rc = check_read_status(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
@@ -182,7 +182,7 @@ int cip_standard_tag_tickler(plc_tag_p tag_arg) {
     }
 
     if(tag->write_in_progress) {
-        rc = check_write_status(tag);
+        rc = check_write_status(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
@@ -594,7 +594,7 @@ int build_write_request(cip_tag_p tag, int byte_offset) {
 }
 
 
-static int check_read_status(cip_tag_p tag) {
+static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -607,13 +607,13 @@ static int check_read_status(cip_tag_p tag) {
     /* The request is valid. */
 
     /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
+    cip_resp = (cip_header *)reply;
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(cip_header);
+    data = reply + sizeof(cip_header);
 
     /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
+    data_end = reply + reply_size;
 
     do {
         ptrdiff_t payload_size = 0;
@@ -801,7 +801,7 @@ static int check_read_status(cip_tag_p tag) {
 }
 
 
-static int check_write_status(cip_tag_p tag) {
+static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     cip_header *cip_resp;
     int rc = PLCTAG_STATUS_OK;
     debug_module_t dbg = tag_debug_module(tag);
@@ -811,7 +811,7 @@ static int check_write_status(cip_tag_p tag) {
     /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
+    cip_resp = (cip_header *)reply;
 
     do {
         if(cip_resp->reply_service != (tag->std_ops->write_service_split | CIP_SVC_REPLY)
@@ -824,7 +824,7 @@ static int check_write_status(cip_tag_p tag) {
 
         if(cip_resp->status != CIP_STATUS_OK
            && !(cip_resp->status == CIP_STATUS_FRAG && tag_can_split_transfer(tag))) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, tag->req->data + tag->req->request_size);
+            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, reply + reply_size);
 
             pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP write failed with status: 0x%x %s", cip_resp->status,
                    decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));

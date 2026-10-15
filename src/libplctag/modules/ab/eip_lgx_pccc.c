@@ -61,8 +61,8 @@
 static int tag_read_start(cip_tag_p tag);
 static int tag_tickler(cip_tag_p tag);
 static int tag_write_start(cip_tag_p tag);
-static int check_read_status(cip_tag_p tag);
-static int check_write_status(cip_tag_p tag);
+static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
 struct tag_vtable_t lgx_pccc_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
@@ -186,7 +186,7 @@ int tag_read_start(cip_tag_p tag) {
  * NOTE that we can have only one outstanding request because PCCC
  * does not support fragments.
  */
-static int check_read_status(cip_tag_p tag) {
+static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -201,15 +201,15 @@ static int check_read_status(cip_tag_p tag) {
         int pccc_res_type = 0;
         int pccc_res_length = 0;
 
-        rc = pccc_check_response_header(tag, false);
+        rc = pccc_check_response_header(tag, reply, reply_size, false);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        pccc = (cip_pccc_full_resp *)(tag->req->data);
+        pccc = (cip_pccc_full_resp *)reply;
 
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
 
-        data_end = tag->req->data + tag->req->request_size;
+        data_end = reply + reply_size;
 
         if(pccc->general_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
@@ -403,7 +403,7 @@ int tag_write_start(cip_tag_p tag) {
  *
  * Fragments are not supported.
  */
-static int check_write_status(cip_tag_p tag) {
+static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -412,11 +412,11 @@ static int check_write_status(cip_tag_p tag) {
         cip_pccc_full_resp *pccc = NULL;
         uint8_t *data_end = NULL;
 
-        rc = pccc_check_response_header(tag, false);
+        rc = pccc_check_response_header(tag, reply, reply_size, false);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        pccc = (cip_pccc_full_resp *)(tag->req->data);
-        data_end = tag->req->data + tag->req->request_size;
+        pccc = (cip_pccc_full_resp *)reply;
+        data_end = reply + reply_size;
 
         if(pccc->general_status != CIP_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",

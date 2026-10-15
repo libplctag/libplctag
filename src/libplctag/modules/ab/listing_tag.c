@@ -69,7 +69,7 @@ START_PACK typedef struct {
 static int listing_tag_read_start(cip_tag_p tag);
 static int listing_tag_tickler(cip_tag_p tag);
 // static int listing_tag_write_start(cip_tag_p tag);
-static int listing_tag_check_read_status_connected(cip_tag_p tag);
+static int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int listing_tag_build_read_request_connected(cip_tag_p tag);
 
 /* define the vtable for listing tag type. */
@@ -242,7 +242,7 @@ int listing_tag_tickler(cip_tag_p tag) {
  * locked!
  */
 
-int listing_tag_check_read_status_connected(cip_tag_p tag) {
+int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -254,13 +254,13 @@ int listing_tag_check_read_status_connected(cip_tag_p tag) {
     /* if we got here then we have a request and it was processed correctly. */
 
     /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
+    cip_resp = (cip_header *)reply;
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(cip_header);
+    data = reply + sizeof(cip_header);
 
     /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
+    data_end = reply + reply_size;
 
     /* check the status */
     do {

@@ -105,7 +105,7 @@ START_PACK typedef struct {
 
 
 /* generic direct ethernet tag functions */
-extern int pccc_check_response_header(cip_tag_p tag, bool is_dhp);
+extern int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size, bool is_dhp);
 extern int pccc_tag_status(cip_tag_p tag);
 extern int pccc_tag_tickler(cip_tag_p tag);
 extern int pccc_tag_read_start(cip_tag_p tag);
@@ -134,8 +134,7 @@ extern int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t paylo
  * Logix -- a range read carries no type descriptor and a typed read does -- so they are
  * passed in; everything around them is the same.
  */
-typedef int (*pccc_check_func)(cip_tag_p tag);
-extern int pccc_tickle(cip_tag_p tag, pccc_check_func check_read, pccc_check_func check_write);
+extern int pccc_tickle(cip_tag_p tag, cip_tag_decode_func check_read, cip_tag_decode_func check_write);
 
 /*
  * The whole PCCC reply as it arrives once the connection has stripped the EIP and CPF

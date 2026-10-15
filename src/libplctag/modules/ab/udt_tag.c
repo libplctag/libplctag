@@ -60,13 +60,13 @@
 
 /* UDT tag functions. */
 static int udt_tag_start_metadata_request(cip_tag_p tag);
-static int udt_tag_check_read_status(cip_tag_p tag);
+static int udt_tag_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int udt_tag_read_start(cip_tag_p tag);
 static int udt_tag_tickler(cip_tag_p tag);
 // static int listing_tag_write_start(cip_tag_p tag);
-static int udt_tag_check_read_metadata_status_connected(cip_tag_p tag);
+static int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int udt_tag_build_read_metadata_request_connected(cip_tag_p tag);
-static int udt_tag_check_read_fields_status_connected(cip_tag_p tag);
+static int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int udt_tag_build_read_fields_request_connected(cip_tag_p tag);
 
 /* define the vtable for udt tag type. */
@@ -171,9 +171,9 @@ static int udt_tag_start_metadata_request(cip_tag_p tag) {
 }
 
 
-static int udt_tag_check_read_status(cip_tag_p tag) {
-    return tag->udt_get_fields ? udt_tag_check_read_fields_status_connected(tag)
-                               : udt_tag_check_read_metadata_status_connected(tag);
+static int udt_tag_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+    return tag->udt_get_fields ? udt_tag_check_read_fields_status_connected(tag, reply, reply_size)
+                               : udt_tag_check_read_metadata_status_connected(tag, reply, reply_size);
 }
 
 
@@ -197,7 +197,7 @@ int udt_tag_tickler(cip_tag_p tag) {
  * locked!
  */
 
-int udt_tag_check_read_metadata_status_connected(cip_tag_p tag) {
+int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -209,13 +209,13 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag) {
     /* if we got here then we have a response and it is valid. */
 
     /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
+    cip_resp = (cip_header *)reply;
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(cip_header);
+    data = reply + sizeof(cip_header);
 
     /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
+    data_end = reply + reply_size;
 
     /* check the status */
     do {
@@ -495,7 +495,7 @@ int udt_tag_build_read_metadata_request_connected(cip_tag_p tag) {
  * locked!
  */
 
-int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
+int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -507,13 +507,13 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag) {
     /* the request is there and valid */
 
     /* point to the data */
-    cip_resp = (cip_header *)(tag->req->data);
+    cip_resp = (cip_header *)reply;
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(cip_header);
+    data = reply + sizeof(cip_header);
 
     /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
+    data_end = reply + reply_size;
 
     /* check the status */
     do {

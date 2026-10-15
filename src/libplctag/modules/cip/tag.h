@@ -312,8 +312,11 @@ extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_b
  */
 typedef int (*cip_tag_op_func)(cip_tag_p tag);
 
+/* Parse a reply: the CIP message the connection delivered for this tag, framing stripped. */
+typedef int (*cip_tag_decode_func)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+
 extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func build_request);
-extern int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func check_read);
+extern int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_decode_func check_read);
 
 
 /*

@@ -682,7 +682,7 @@ int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_
 }
 
 
-int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func check_read) {
+int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_decode_func check_read) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -702,7 +702,7 @@ int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_
     }
 
     if(tag->read_in_progress) {
-        rc = check_read(tag);
+        rc = check_read(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
