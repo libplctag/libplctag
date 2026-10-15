@@ -11,11 +11,20 @@ in its own command line. There's no local server lifecycle, no port
 allocation, nothing to tear down -- run_test() is just "run the command,
 capture the log, check the exit code."
 
-Sequential by default (like the shell script): these are real, shared lab
-devices of unknown concurrent-connection tolerance (some, like Micrologix/
-PLC5, are old hardware historically limited to a handful of simultaneous
-sessions), so parallelism here is opt-in via --workers, not the default the
-way it is for the local simulator.
+Parallel, with locks on what the tests share.  Unlike the simulator, where every
+test gets its own ab_server, these PLCs and their tags are shared, so:
+
+- functional tests run together on every device, even on the same tag, except
+  that a test which reads back what it wrote locks that tag exclusively, and one
+  that only writes locks it shared -- writers run alongside each other but never
+  between another test's write and its check;
+- a stress test locks the whole device it talks to, as the simulator runs that
+  group in a phase of its own;
+- the MicroLogix is always locked whole: run in parallel it acknowledged a write
+  to B3:0 and then read back the old value.
+
+A test that crosses devices -- a CIP bridge to the MicroLogix, DH+ to the PLC/5
+-- holds a lock on each.  Tests that want the same lock run in manifest order.
 
 Usage matches the bash script: run_hardware_tests.py TEST_DIR [LOG_DIR]
 """
@@ -27,7 +36,7 @@ import re
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +48,9 @@ class Test:
     cmd: list[str]
     log_file: str
     expect_failure: bool = False
+    group: str = "functional"
+    #: (device, tag, exclusive) locks; tag None locks the whole device.
+    resources: frozenset = frozenset()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,12 +88,80 @@ def exe(name: str) -> str:
     raise FileNotFoundError(f"{name} not found in {TEST_DIR}")
 
 
-def test(name: str, cmd: list[str], *, expect_failure: bool = False) -> Test:
+# Real lab devices -- see run_hardware_tests.sh for the same addresses.
+LOGIX_GW = "10.206.1.40"     # L81 Ethernet port, also the DH+ bridge
+ENBT_48_GW = "10.206.1.37"   # ENBT 4.8 in the same chassis
+ENBT_66_GW = "10.206.1.39"   # ENBT 6.6 in the same chassis
+MLGX_GW = "10.206.1.36"
+PLC5_GW = "10.206.1.38"
+
+#: which device each address belongs to.  The three chassis entry points are one device.
+DEVICE_OF_HOST = {LOGIX_GW: "logix", ENBT_48_GW: "logix", ENBT_66_GW: "logix", MLGX_GW: "micrologix", PLC5_GW: "plc5"}
+
+#: executables that name their gateways and tags in their own source: devices, chassis tags.
+TARGETS_OF_EXE = {
+    "test_special": (set(), set()),
+    "test_tag_attributes": ({"logix"}, {"TestDINTArray"}),
+    "test_tag_type_attribute": ({"logix"}, {"TestBigSINTArray", "TestManyBOOLFields"}),
+    "string_standard": ({"logix", "plc5"}, {"barcodes", "ST18"}),
+    "string_non_standard_udt": ({"logix"}, {"CB_Rpt"}),
+    "test_string": ({"logix"}, {"CB_Txt"}),
+    "test_raw_cip": ({"logix"}, set()),
+}
+
+
+#: devices that run one test at a time whatever the test: with several sessions open the
+#: MicroLogix 1100 acknowledged a write and did not keep it.
+WHOLE_DEVICES = {"micrologix"}
+
+#: executables that write a tag and read it back, so a concurrent writer breaks them.
+CHECKING_EXES = {"test_bit_write", "test_write_before_read"}
+
+
+def resources_of(cmd: list[str], group: str) -> frozenset:
+    """
+    The locks a command line needs.  A functional test locks the base name of each tag it
+    names, on each device it talks to, so TestINTArray[0].13 and TestINTArray[0] contend, as
+    do B3:0/6 and B3:0: exclusively if it checks what it wrote, shared if it only writes, not
+    at all if it only reads.  Any other group locks its devices whole.  A DH+ route (A:node)
+    ends at the PLC/5.
+    """
+    args = cmd[1:]
+    if args:
+        text = " ".join(args)
+        devices = {dev for host, dev in DEVICE_OF_HOST.items() if re.search(rf"\b{re.escape(host)}\b", text)}
+        if re.search(r"\bA:\d+:\d+", text):
+            devices.add("plc5")
+        tags = set(re.findall(r"(?:[&?]name=|^name=|--read=)([A-Za-z_][A-Za-z0-9_]*)", text.replace(" ", "\n"), re.M))
+        checks = "--check" in text or Path(cmd[0]).stem in CHECKING_EXES
+        if not checks and "--write" not in text:
+            tags = set()
+    else:
+        devices, tags = TARGETS_OF_EXE[Path(cmd[0]).stem]
+        checks = True
+
+    if group != "functional":
+        return frozenset((dev, None, True) for dev in devices)
+    whole = set(devices) & WHOLE_DEVICES
+    return frozenset({(dev, tag, checks) for dev in set(devices) - whole for tag in tags} | {(dev, None, True) for dev in whole})
+
+
+def conflicts(a: frozenset, b: frozenset) -> bool:
+    """Locks clash on one device and tag, or a whole device, unless both are shared."""
+    for dev_a, tag_a, excl_a in a:
+        for dev_b, tag_b, excl_b in b:
+            if dev_a == dev_b and (tag_a is None or tag_b is None or tag_a == tag_b) and (excl_a or excl_b):
+                return True
+    return False
+
+
+def test(name: str, cmd: list[str], *, expect_failure: bool = False, group: str = "functional") -> Test:
     tid = _next_id[0]
     _next_id[0] += 1
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
     log_file = str(LOG_DIR / f"{tid}_{slug}.log")
-    return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_failure=expect_failure)
+    return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_failure=expect_failure, group=group,
+                resources=resources_of(cmd, group))
 
 
 REQUIRED_EXECUTABLES = [
@@ -104,14 +184,13 @@ def check_executables_present() -> None:
 # ---------------------------------------------------------------------------
 
 def build_manifest() -> list[Test]:
-    # Real lab devices -- see run_hardware_tests.sh for the same addresses.
-    logix_gw = "10.206.1.40"
+    logix_gw = LOGIX_GW
     logix_path = "1,4"
-    mlgx_gw = "10.206.1.36"
-    plc5_gw = "10.206.1.38"
-    dhp_bridge_gw = "10.206.1.40"
-    cip_bridge_gw = "10.206.1.37"
-    cip_bridge_target = "10.206.1.39"
+    mlgx_gw = MLGX_GW
+    plc5_gw = PLC5_GW
+    dhp_bridge_gw = LOGIX_GW
+    cip_bridge_gw = ENBT_48_GW
+    cip_bridge_target = ENBT_66_GW
     cip_bridge_out = "1,4,18"  # backplane to the slot 4 Ethernet module, then out its port 2/A
 
     tests = [
@@ -380,17 +459,37 @@ def build_manifest() -> list[Test]:
              [exe("get_identity"),
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&plc=plc5&name=@identity&debug=3"],
              expect_failure=True),
+        # No plc: the connection reads the Identity object and picks the family from the
+        # product name.  Read-only, so they disturb nothing the other tests write.
+        test("no plc: L81 identified, read",
+             [exe("tag_rw2"), "--type=sint32",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&elem_count=10&name=TestBigArray", "--debug=4"]),
+        test("no plc: PLC/5 identified, read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&name=N7:0", "--debug=4"]),
+        test("no plc: MicroLogix identified, read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&name=N7:0", "--debug=4"]),
+        # An ENBT answers Identity as a 1756 module that is not a CPU, so the create is refused.
+        test("no plc: ENBT with no path is refused",
+             [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&name=TestBigArray",
+              "--debug=4"],
+             expect_failure=True),
+        # Identity cannot see past a DH+ bridge, so DH+ needs plc=.
+        test("no plc: DH+ path is refused",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&name=N7:0", "--debug=4"],
+             expect_failure=True),
         # Several ordinary tags read together, so the requests are bundled into one Multiple
         # Service Packet and the reply budget decides how many fit.  The raw CIP bundling test
         # covers the assembly; this covers it for tags that carry a reply size.
         test("bundled reads of several ordinary tags",
-             [exe("thread_stress"), "4",
+             group="stress", cmd=[exe("thread_stress"), "4",
               f"protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
         # Writing a tag the caller never read: the library fetches the type itself first.
         test("write before read",
              [exe("test_write_before_read"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray",
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1000&name=TestBigArray"]),
+        # Each @connection test watches its own connection, so they run alongside anything.
         test("connection tag connection state transitions (ControlLogix)",
              [exe("test_connection_tag"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
@@ -478,6 +577,9 @@ def build_logix_matrix() -> list[Test]:
                           [exe("test_raw_cip"), f"--tag={base}&use_connected_msg=0&name=@raw"]))
         tests.append(test(f"{target.label}: connection tag state transitions",
                           [exe("test_connection_tag"), f"--tag={base}&name=@connection"]))
+        # No plc, so each CPU is identified through its own route.  @raw names no tag.
+        tests.append(test(f"{target.label}: no plc, raw cip",
+                          [exe("test_raw_cip"), f"--tag=protocol=ab-eip&gateway={gw}&path={path}&name=@raw"]))
 
         if not target.has_test_tags:
             continue
@@ -519,6 +621,38 @@ def run_test(t: Test) -> Result:
     return Result(test=t, ok=ok, start=start, end=end)
 
 
+def run_all(tests: list[Test], workers: int) -> list[Result]:
+    """
+    Start each test once its locks clash with no running test and no earlier waiting test, so
+    tests that share a lock run one at a time and in manifest order.
+    """
+    pending = list(tests)
+    running: dict = {}
+    results: list[Result] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        while pending or running:
+            claimed = [t.resources for t in running.values()]
+            for t in list(pending):
+                if len(running) >= workers:
+                    break
+                blocked = any(conflicts(t.resources, c) for c in claimed)
+                claimed.append(t.resources)
+                if blocked:
+                    continue
+                pending.remove(t)
+                running[pool.submit(run_test, t)] = t
+
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for fut in done:
+                t = running.pop(fut)
+                r = fut.result()
+                _print_result(r)
+                results.append(r)
+
+    return results
+
+
 def _print_result(r: Result) -> None:
     status = "OK" if r.ok else "FAILURE"
     print(f"Test {r.test.id}: {r.test.name}... {status} ({r.elapsed:.0f}s)")
@@ -530,9 +664,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("test_dir")
     parser.add_argument("log_dir", nargs="?", default=".")
-    parser.add_argument("--workers", type=int, default=1,
-                         help="concurrent tests (default 1: sequential, matching the shell script -- these "
-                              "hit real, shared lab PLCs of unknown concurrent-connection tolerance)")
+    parser.add_argument("--workers", type=int, default=8,
+                         help="most tests at once (default 8).  The locks limit it further.  1 runs the whole "
+                              "suite sequentially.")
     args = parser.parse_args()
 
     TEST_DIR = Path(args.test_dir)
@@ -562,14 +696,7 @@ def main() -> int:
 
     script_start = time.monotonic()
     tests = build_manifest()
-    results: list[Result] = []
-
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futs = {pool.submit(run_test, t): t for t in tests}
-        for fut in as_completed(futs):
-            r = fut.result()
-            _print_result(r)
-            results.append(r)
+    results = run_all(tests, args.workers)
 
     total = time.monotonic() - script_start
 
