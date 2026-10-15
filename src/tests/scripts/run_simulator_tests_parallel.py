@@ -999,13 +999,12 @@ def build_manifest() -> Manifest:
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
-    # No plc: no Micro800 Identity reply has been seen on hardware, so it is not in the prefix
-    # table and becomes generic CIP -- @identity works, a data tag does not.
-    sec.test("no plc: an unrecognised device still serves @identity",
-              [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&name=@identity&debug=3"], F)
-    sec.test("no plc: an unrecognised device refuses a data tag",
+    # No plc: identified from "2080-", connected, so the Message Router goes on the path.
+    no_plc_m800 = sec.test("no plc: identified as Micro800, read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&name=TestDINTArray",
-               "--debug=4"], F, expect_failure=True)
+               "--write=43", "--check", "--debug=4"], F)
+    sec.test("check: no plc identified the device as Micro800", None, F, depends_on=no_plc_m800.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_m800.log_file, pattern=r"Identified a Micro800, connected\.", expected=1))
     # A real Micro800 packs its strings: a one-byte count and exactly that many characters, no
     # terminator, no padding to a capacity, so an array of them has no element stride.
     # VSHORTSTRING is the simulator's version of that, and cip_short_string_byte_order is what lets

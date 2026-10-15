@@ -194,8 +194,8 @@ int cip_plc_entries_max_payload_capacity(void) {
  * short of the CPU.  Device type is no help: a MicroLogix 1100 reports itself as a
  * communications adapter, as an ENBT does.
  *
- * ponytail: only names seen on bench hardware.  Anything else is generic CIP and needs plc=;
- * add a prefix when a device's Identity reply has been seen.
+ * ponytail: only names seen in real Identity replies, on the bench or published by pylogix and
+ * pycomm3.  Anything else is generic CIP and needs plc=; add a prefix when a reply has been seen.
  */
 static const struct {
     uint16_t vendor_id;
@@ -204,6 +204,9 @@ static const struct {
 } identity_map[] = {
     {CIP_VENDOR_ROCKWELL, "1756-L", CIP_PLC_LGX},
     {CIP_VENDOR_ROCKWELL, "1756-", CIP_PLC_NONE},
+    {CIP_VENDOR_ROCKWELL, "1769-L", CIP_PLC_LGX},
+    {CIP_VENDOR_ROCKWELL, "5069-L", CIP_PLC_LGX},
+    {CIP_VENDOR_ROCKWELL, "2080-", CIP_PLC_MICRO800},
     {CIP_VENDOR_ROCKWELL, "PLC-5", CIP_PLC_PLC5},
     {CIP_VENDOR_ROCKWELL, "1763-", CIP_PLC_MLGX},
 };

@@ -413,7 +413,7 @@ static util_err_t dedup_table_add(dedup_table_t *tbl, uint32_t ip, uint32_t seri
 
 static util_err_t parse_list_identity_item(buf_t *item_buf, uint32_t sender_ip, dedup_table_t *dedup) {
     char product_name_buf[256];
-    uint16_t port_net;
+    uint16_t port;
     uint32_t ipv4_addr_net;
     uint16_t vendor_id;
     uint16_t device_type;
@@ -430,7 +430,7 @@ static util_err_t parse_list_identity_item(buf_t *item_buf, uint32_t sender_ip, 
     buf_read_advance(item_buf, 2); /* skip protocol_version */
     buf_read_advance(item_buf, 2); /* skip sin_family */
 
-    if(!buf_read_u16_be(item_buf, "port", &port_net) || !buf_read_u32_be(item_buf, "ipv4_addr", &ipv4_addr_net)) {
+    if(!buf_read_u16_be(item_buf, "port", &port) || !buf_read_u32_be(item_buf, "ipv4_addr", &ipv4_addr_net)) {
         return buf_get_error(item_buf);
     }
 
@@ -463,14 +463,13 @@ static util_err_t parse_list_identity_item(buf_t *item_buf, uint32_t sender_ip, 
     dedup_table_add(dedup, sender_ip, serial_number);
 
     /* buf_read_u32_be() returns host-order, but inet_ntop() expects network order */
-    uint16_t port_host = ntohs(port_net); /* convert from network to host order */
     struct in_addr addr;
     addr.s_addr = htonl(ipv4_addr_net); /* convert from host back to network order for inet_ntop */
     char addr_str[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &addr, addr_str, sizeof(addr_str));
 
     /* Print device line */
-    printf("%s\t%u\t%u\t%u\t%u\t%u.%u\t%u\t%u\t%s\t%u\n", addr_str, port_host, vendor_id, device_type, product_code,
+    printf("%s\t%u\t%u\t%u\t%u\t%u.%u\t%u\t%u\t%s\t%u\n", addr_str, port, vendor_id, device_type, product_code,
            revision_major, revision_minor, status_word, serial_number, product_name_buf, state);
 
     return UTIL_OK;

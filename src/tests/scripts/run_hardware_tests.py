@@ -47,7 +47,8 @@ class Test:
     name: str
     cmd: list[str]
     log_file: str
-    expect_failure: bool = False
+    #: the error the test must fail with; None means it must succeed.
+    expect_error: Optional[str] = None
     group: str = "functional"
     #: (device, tag, exclusive) locks; tag None locks the whole device.
     resources: frozenset = frozenset()
@@ -155,12 +156,12 @@ def conflicts(a: frozenset, b: frozenset) -> bool:
     return False
 
 
-def test(name: str, cmd: list[str], *, expect_failure: bool = False, group: str = "functional") -> Test:
+def test(name: str, cmd: list[str], *, expect_error: Optional[str] = None, group: str = "functional") -> Test:
     tid = _next_id[0]
     _next_id[0] += 1
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
     log_file = str(LOG_DIR / f"{tid}_{slug}.log")
-    return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_failure=expect_failure, group=group,
+    return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_error=expect_error, group=group,
                 resources=resources_of(cmd, group))
 
 
@@ -295,7 +296,7 @@ def build_manifest() -> list[Test]:
         test("L bit data file Micrologix tag write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
               "--write=1", "--debug=4"],
-             expect_failure=True),  # this write should NOT succeed
+             expect_error="PLCTAG_ERR_UNSUPPORTED"),  # this write should NOT succeed
         # A data file the PLC does not have. This is the only way to reach the PCCC
         # remote-error path: the PLC answers with a PCCC status byte rather than data,
         # so the response checkers must report the error AND clear the tag's
@@ -304,7 +305,7 @@ def build_manifest() -> list[Test]:
         test("missing data file Micrologix tag read",
              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N250:0",
               "--debug=4"],
-             expect_failure=True),  # N250 does not exist
+             expect_error="PLCTAG_ERR_REMOTE_ERR"),  # N250 does not exist
         test("B data file PLC5 tag read/write",
              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=B3:0",
               "--debug=4", "--write=0", "--check"]),
@@ -335,7 +336,7 @@ def build_manifest() -> list[Test]:
         test("missing data file PLC5 tag read",
              [exe("tag_rw2"), "--type=sint16",
               f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N250:0", "--debug=4"],
-             expect_failure=True),  # N250 does not exist
+             expect_error="PLCTAG_ERR_NOT_FOUND"),  # N250 does not exist
         # PCCC-mapped Logix tag (plc=lgxpccc): talks PCCC file-based addressing
         # (N7:0 etc.) to a ControlLogix CPU instead of native CIP tag names --
         # exercises eip_lgx_pccc.c, which no other test in this suite reaches.
@@ -369,7 +370,7 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=uint8",
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N250:0",
               "--debug=4"],
-             expect_failure=True),  # N250 does not exist
+             expect_error="PLCTAG_ERR_NOT_FOUND"),  # N250 does not exist
         test("basic CIP bridging",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
@@ -458,7 +459,7 @@ def build_manifest() -> list[Test]:
         test("identity, PLC/5 via DH+ is refused",
              [exe("get_identity"),
               f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&plc=plc5&name=@identity&debug=3"],
-             expect_failure=True),
+             expect_error="PLCTAG_ERR_UNSUPPORTED"),
         # No plc: the connection reads the Identity object and picks the family from the
         # product name.  Read-only, so they disturb nothing the other tests write.
         test("no plc: L81 identified, read",
@@ -472,12 +473,12 @@ def build_manifest() -> list[Test]:
         test("no plc: ENBT with no path is refused",
              [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&name=TestBigArray",
               "--debug=4"],
-             expect_failure=True),
+             expect_error="PLCTAG_ERR_BAD_PARAM"),
         # Identity cannot see past a DH+ bridge, so DH+ needs plc=.
         test("no plc: DH+ path is refused",
              [exe("tag_rw2"), "--type=sint16",
               f"--tag=protocol=ab-eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&name=N7:0", "--debug=4"],
-             expect_failure=True),
+             expect_error="PLCTAG_ERR_BAD_PARAM"),
         # Several ordinary tags read together, so the requests are bundled into one Multiple
         # Service Packet and the reply budget decides how many fit.  The raw CIP bundling test
         # covers the assembly; this covers it for tags that carry a reply size.
@@ -616,7 +617,11 @@ def run_test(t: Test) -> Result:
     start = time.monotonic()
     with open(t.log_file, "w") as log:
         proc = subprocess.run(t.cmd, stdout=log, stderr=subprocess.STDOUT)
-    ok = (proc.returncode == 0) != t.expect_failure
+    if t.expect_error is None:
+        ok = proc.returncode == 0
+    else:
+        ok = proc.returncode != 0 and re.search(rf"^ERROR.*\b{t.expect_error}\b",
+                                                 Path(t.log_file).read_text(errors="replace"), re.M) is not None
     end = time.monotonic()
     return Result(test=t, ok=ok, start=start, end=end)
 

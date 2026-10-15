@@ -319,7 +319,7 @@ static cip_plc_type_t identified_as(uint16_t vendor_id, const char *product_name
 }
 
 
-/* the product names are the Identity replies of the bench hardware. */
+/* the product names are Identity replies from the bench hardware, pylogix and pycomm3. */
 static void test_identity_picks_the_row(void **state) {
     (void)state;
 
@@ -328,6 +328,10 @@ static void test_identity_picks_the_row(void **state) {
     assert_int_equal(identified_as(1, "1756-L61/B LOGIX5561", true), CIP_PLC_LGX);
     assert_int_equal(identified_as(1, "PLC-5/30 C/K - 1785-ENET 2.17 ", false), CIP_PLC_PLC5);
     assert_int_equal(identified_as(1, "1763-L16BWA B/12.00", false), CIP_PLC_MLGX);
+    assert_int_equal(identified_as(1, "1769-L23E-QBFC1 LOGIX5323E-QBFC1", false), CIP_PLC_LGX);
+    assert_int_equal(identified_as(1, "1769-L30ER/A LOGIX5330ER", false), CIP_PLC_LGX);
+    assert_int_equal(identified_as(1, "5069-L310ER/A", false), CIP_PLC_LGX);
+    assert_int_equal(identified_as(1, "2080-LC50-48QWBS", false), CIP_PLC_MICRO800);
 
     /* a chassis module is not a CPU, with or without a path that stops at it. */
     assert_int_equal(identified_as(1, "1756-ENBT/A", false), CIP_PLC_NONE);
