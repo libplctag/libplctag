@@ -115,13 +115,13 @@ extern int pccc_tag_write_start(cip_tag_p tag);
  * Write the request prefix and return the first byte after it.  is_dhp picks the DH+ routing
  * header over the Execute PCCC header; PCCC-mapped Logix is never DH+ and passes false.
  */
-extern uint8_t *pccc_write_prefix(cip_tag_p tag, cip_request_p req, bool is_dhp);
+extern uint8_t *pccc_write_prefix(cip_tag_p tag, uint8_t *dest, bool is_dhp);
 
 /*
  * Attach a submitted request to the tag under api_mutex, or roll the operation back and
  * release the request.  Every PCCC start function ends here.
  */
-extern int pccc_finish_request(cip_tag_p tag, cip_request_p req, int rc, bool is_write);
+extern int pccc_finish_request(cip_tag_p tag, int rc, bool is_write);
 
 /*
  * Check that a request needing overhead + payload bytes fits what the session will carry.

@@ -63,11 +63,7 @@
 #include <utils/debug.h>
 
 
-static int build_read_request(cip_tag_p tag, int byte_offset);
-static int build_write_request(cip_tag_p tag, int byte_offset);
-static int build_write_bit_request(cip_tag_p tag);
-static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int calculate_write_data_per_packet(cip_tag_p tag);
 
 
@@ -164,7 +160,7 @@ int cip_standard_tag_tickler(plc_tag_p tag_arg) {
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->read_in_progress) {
-        rc = check_read_status(tag, tag->req->data, tag->req->request_size);
+        rc = cip_standard_tag_decode_read(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
@@ -182,7 +178,7 @@ int cip_standard_tag_tickler(plc_tag_p tag_arg) {
     }
 
     if(tag->write_in_progress) {
-        rc = check_write_status(tag, tag->req->data, tag->req->request_size);
+        rc = cip_standard_tag_decode_write(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
@@ -226,7 +222,7 @@ int cip_standard_tag_read_start(plc_tag_p tag_arg) {
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
 
-    rc = build_read_request(tag, tag->offset);
+    rc = cip_tag_send(tag, cip_standard_tag_encode_read);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
@@ -269,7 +265,7 @@ int cip_standard_tag_write_start(plc_tag_p tag_arg) {
     /* the write is now in flight */
     tag->write_in_progress = 1;
 
-    rc = build_write_request(tag, tag->offset);
+    rc = cip_tag_send(tag, cip_standard_tag_encode_write);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
@@ -285,28 +281,24 @@ int cip_standard_tag_write_start(plc_tag_p tag_arg) {
 
 
 /*
- * Build the CIP read request.
+ * Encode the CIP read request.
  *
  * The request is the CIP message alone; the connection adds the EIP encapsulation and the CPF
  * framing, and that framing was the only thing that ever separated the connected form of this
  * function from the unconnected one.
  */
-int build_read_request(cip_tag_p tag, int byte_offset) {
-    cip_request_p req = NULL;
-    uint8_t *data = NULL;
-    int rc = PLCTAG_STATUS_OK;
+int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    uint8_t *data = dest;
+    int32_t offset_size = 0;
+    int32_t fixed_size = 1 + (int32_t)tag->encoded_name_size + (int32_t)sizeof(uint16_le);
     debug_module_t dbg = tag_debug_module(tag);
 
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!", plc_tag_decode_error(rc));
-        return rc;
+    if(fixed_size > capacity) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Read request of %d bytes does not fit in %d bytes!", fixed_size, capacity);
+        return PLCTAG_ERR_TOO_SMALL;
     }
-
-    data = req->data;
 
     /*
      * The CIP Read Tag request:
@@ -330,57 +322,157 @@ int build_read_request(cip_tag_p tag, int byte_offset) {
     *((uint16_le *)data) = h2le16((uint16_t)tag->elem_count);
     data += sizeof(uint16_le);
 
-    {
-        int32_t offset_size =
-            tag->std_ops->encode_read_offset(data, (int32_t)(req->request_capacity - (int)(data - req->data)), byte_offset);
-
-        if(offset_size < 0) {
-            pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to encode the read offset!");
-            return (int)offset_size;
-        }
-
-        data += offset_size;
+    offset_size = tag->std_ops->encode_read_offset(data, capacity - (int32_t)(data - dest), tag->offset);
+    if(offset_size < 0) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to encode the read offset!");
+        return (int)offset_size;
     }
+
+    data += offset_size;
 
     /*
-     * What this read will cost in the shared reply packet, so process_requests() can budget it
-     * when bundling.  tag->size is what the previous read returned, which is the best estimate
-     * of what this one will.  A first read has no previous size, so it cannot be budgeted and
-     * must not be packed.
+     * What this read will cost in the shared reply packet, so it can be budgeted when bundled.
+     * tag->size is what the previous read returned, which is the best estimate of what this one
+     * will.  A first read has no previous size, so it cannot be budgeted and must not be packed.
      */
-    req->response_size = tag->size;
-    req->first_read = (tag->create_read_status == PLCTAG_STATUS_PENDING);
+    plan->req_size = (int32_t)(data - dest);
+    plan->reply_size = tag->size;
+    plan->packable = (tag->allow_packing && tag->create_read_status != PLCTAG_STATUS_PENDING);
 
-    /* hand the finished request to the connection. */
-    rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Done");
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 /*
- * Build the CIP Read-Modify-Write request that sets or clears a single bit.
+ * Encode the CIP write request, or the next fragment of one.
+ *
+ * Nothing here moves tag->offset.  The decoder advances it once the PLC has accepted the
+ * piece, so a request that is encoded and then not sent costs nothing.
+ */
+int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    uint8_t *data = dest;
+    int rc = PLCTAG_STATUS_OK;
+    bool multiple_requests = false;
+    int32_t write_size = 0;
+    int32_t pad_size = 0;
+    int32_t needed = 0;
+    int str_pad_to_multiple_bytes = 1;
+    debug_module_t dbg = tag_debug_module(tag);
+
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
+
+    if(tag->is_bit) { return encode_write_bit(tag, dest, capacity, plan); }
+
+    rc = calculate_write_data_per_packet(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if(tag->write_data_per_packet < tag->size) { multiple_requests = true; }
+
+    /* a family limited to one packet cannot split the transfer, so it has to refuse it. */
+    if(multiple_requests && !tag_can_split_transfer(tag)) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Tag too large for an unfragmented write on this PLC!");
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    /* a write has to carry the tag's encoded type, which comes from the first read of the tag. */
+    if(!tag->encoded_type_info_size) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* how much data goes in this piece? */
+    write_size = tag->size - tag->offset;
+
+    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
+
+    /*
+     * Pad the data out to a multiple of 1, 2 or 4 bytes.  On some PLCs (OmronNJ) padding a
+     * counted string breaks it, because the padding makes the data longer than the count says,
+     * so str_pad_to_multiple_bytes can turn this off.
+     */
+    str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
+    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0
+       && write_size % str_pad_to_multiple_bytes != 0) {
+        pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
+    }
+
+    needed = 1 + (int32_t)tag->encoded_name_size + (int32_t)tag->encoded_type_info_size + (int32_t)sizeof(uint16_le)
+             + (multiple_requests ? (int32_t)sizeof(uint32_le) : 0) + write_size + pad_size;
+
+    if(needed > capacity) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Write request of %d bytes does not fit in %d bytes!", needed, capacity);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    /*
+     * The CIP Write Tag request:
+     *
+     *   uint8_t    service code
+     *   uint8_t[]  the tag name, as an encoded path
+     *   uint8_t[]  the encoded data type
+     *   uint16_t   number of elements to write
+     *   uint32_t   byte offset, on the fragmented service only
+     *   uint8_t[]  the data
+     *
+     * The plain service is used when the whole tag fits in one request.  Fragmented writes of
+     * a single boolean have been seen not to work, and a single boolean always fits, so this
+     * is not merely an optimisation.
+     */
+    *data = (multiple_requests) ? tag->std_ops->write_service_split : tag->std_ops->write_service;
+    data++;
+
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
+    data += tag->encoded_type_info_size;
+
+    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+    data += sizeof(uint16_le);
+
+    if(multiple_requests) {
+        *((uint32_le *)data) = h2le32((uint32_t)tag->offset);
+        data += sizeof(uint32_le);
+    }
+
+    mem_copy(data, tag->data + tag->offset, write_size);
+    data += write_size;
+
+    for(int32_t i = 0; i < pad_size; i++) {
+        *data = 0;
+        data++;
+    }
+
+    plan->req_size = (int32_t)(data - dest);
+    plan->reply_size = 0;
+    plan->packable = (tag->allow_packing != 0);
+
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Encode the CIP Read-Modify-Write request that sets or clears a single bit.
  *
  * RMW takes a pair of masks the size of one element: the OR mask turns bits on and the AND
  * mask leaves them alone, so a bit is set by putting it in the OR mask and cleared by leaving
  * it out of the AND mask.
  */
-int build_write_bit_request(cip_tag_p tag) {
-    cip_request_p req = NULL;
-    uint8_t *data = NULL;
+static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    uint8_t *data = dest;
     int rc = PLCTAG_STATUS_OK;
+    int32_t needed = 1 + (int32_t)tag->encoded_name_size + 2 + (2 * (int32_t)tag->elem_size);
     debug_module_t dbg = tag_debug_module(tag);
 
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     rc = calculate_write_data_per_packet(tag);
     if(rc != PLCTAG_STATUS_OK) {
@@ -394,14 +486,10 @@ int build_write_bit_request(cip_tag_p tag) {
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!", plc_tag_decode_error(rc));
-        return rc;
+    if(needed > capacity) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Bit write request of %d bytes does not fit in %d bytes!", needed, capacity);
+        return PLCTAG_ERR_TOO_SMALL;
     }
-
-    data = req->data;
 
     /*
      * The CIP Read-Modify-Write request:
@@ -453,148 +541,17 @@ int build_write_bit_request(cip_tag_p tag) {
         data++;
     }
 
-    /* let the rest of the system know that the write is complete after this. */
-    tag->offset = tag->size;
+    plan->req_size = (int32_t)(data - dest);
+    plan->reply_size = 0;
+    plan->packable = (tag->allow_packing != 0);
 
-    /* hand the finished request to the connection. */
-    rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Done");
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
-/*
- * Build the CIP write request, or the next fragment of one.
- */
-int build_write_request(cip_tag_p tag, int byte_offset) {
-    cip_request_p req = NULL;
-    uint8_t *data = NULL;
-    int rc = PLCTAG_STATUS_OK;
-    int multiple_requests = 0;
-    int write_size = 0;
-    int str_pad_to_multiple_bytes = 1;
-    debug_module_t dbg = tag_debug_module(tag);
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->is_bit) { return build_write_bit_request(tag); }
-
-    rc = calculate_write_data_per_packet(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Unable to calculate valid write data per packet!.  rc=%s",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    if(tag->write_data_per_packet < tag->size) { multiple_requests = 1; }
-
-    /* a family limited to one packet cannot split the transfer, so it has to refuse it. */
-    if(multiple_requests && !tag_can_split_transfer(tag)) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Tag too large for an unfragmented write on this PLC!");
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /*
-     * A write has to carry the tag's encoded type, so reject a tag that has none before
-     * anything is allocated.  The type comes from the first read of the tag.
-     */
-    if(!tag->encoded_type_info_size) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Data type unsupported!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    data = req->data;
-
-    /*
-     * The CIP Write Tag request:
-     *
-     *   uint8_t    service code
-     *   uint8_t[]  the tag name, as an encoded path
-     *   uint8_t[]  the encoded data type
-     *   uint16_t   number of elements to write
-     *   uint32_t   byte offset, on the fragmented service only
-     *   uint8_t[]  the data
-     *
-     * The plain service is used when the whole tag fits in one request.  Fragmented writes of
-     * a single boolean have been seen not to work, and a single boolean always fits, so this
-     * is not merely an optimisation.
-     */
-    *data = (multiple_requests) ? tag->std_ops->write_service_split : tag->std_ops->write_service;
-    data++;
-
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-    data += tag->encoded_type_info_size;
-
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
-    data += sizeof(uint16_le);
-
-    if(multiple_requests) {
-        *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
-        data += sizeof(uint32_le);
-    }
-
-    /* how much data to write? */
-    write_size = tag->size - tag->offset;
-
-    if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
-
-    mem_copy(data, tag->data + tag->offset, write_size);
-    data += write_size;
-    tag->offset += write_size;
-
-    /*
-     * Pad the data out to a multiple of 1, 2 or 4 bytes.  On some PLCs (OmronNJ) padding a
-     * counted string breaks it, because the padding makes the data longer than the count says,
-     * so str_pad_to_multiple_bytes can turn this off.
-     */
-    str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
-    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0) {
-        if(write_size % str_pad_to_multiple_bytes != 0) {
-            int pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
-
-            for(int i = 0; i < pad_size; i++) {
-                *data = 0;
-                data++;
-            }
-        }
-    }
-
-    /* hand the finished request to the connection. */
-    rc = cip_submit_payload(tag->session, req, (int)(data - req->data), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Done");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     cip_header *cip_resp;
     uint8_t *data;
@@ -801,7 +758,7 @@ static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
 }
 
 
-static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+int cip_standard_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     cip_header *cip_resp;
     int rc = PLCTAG_STATUS_OK;
     debug_module_t dbg = tag_debug_module(tag);
@@ -837,6 +794,15 @@ static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size)
     cip_tag_abort_request_only(tag);
 
     if(rc == PLCTAG_STATUS_OK) {
+        /* the PLC took the piece the encoder sized, or the whole bit write. */
+        if(cip_resp->reply_service == (CIP_SVC_RMW | CIP_SVC_REPLY)) {
+            tag->offset = tag->size;
+        } else if(tag->size - tag->offset > tag->write_data_per_packet) {
+            tag->offset += tag->write_data_per_packet;
+        } else {
+            tag->offset = tag->size;
+        }
+
         if(tag->offset < tag->size) {
             pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Write not complete, triggering next round.");
             rc = cip_standard_tag_write_start((plc_tag_p)tag);

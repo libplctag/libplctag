@@ -63,6 +63,8 @@ extern tag_byte_order_t cip_raw_tag_byte_order;
 /* the two vtable entry points; the family supplies the rest of its vtable. */
 extern int cip_raw_tag_tickler(cip_tag_p tag);
 extern int cip_raw_tag_write_start(cip_tag_p tag);
+extern int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+extern int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
 /* set a freshly created tag up as a raw tag of this family. */
 extern int cip_raw_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module);

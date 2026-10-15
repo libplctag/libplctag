@@ -648,7 +648,50 @@ int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *r
 }
 
 
-int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func build_request) {
+int cip_tag_send(cip_tag_p tag, cip_tag_encode_func encode) {
+    int rc = PLCTAG_STATUS_OK;
+    cip_request_p req = NULL;
+    tag_op_plan_t plan = {0};
+    debug_module_t dbg = tag->debug_module;
+
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
+
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to get a request buffer, %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    rc = encode(tag, req->data, (int32_t)req->request_capacity, &plan);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to encode the request, %s!", plc_tag_decode_error(rc));
+        rc_dec(req);
+        return rc;
+    }
+
+    req->response_size = (int)plan.reply_size;
+
+    /* the submit releases the request when it fails. */
+    if(tag->unrouted) {
+        rc = cip_submit_unrouted_payload(tag->session, req, (int)plan.req_size);
+    } else {
+        rc = cip_submit_payload(tag->session, req, (int)plan.req_size, plan.packable);
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    critical_block(tag->api_mutex) { tag->req = req; }
+
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_encode_func encode) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Starting");
@@ -667,7 +710,7 @@ int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_
 
     tag->read_in_progress = 1;
 
-    rc = build_request(tag);
+    rc = cip_tag_send(tag, encode);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
 

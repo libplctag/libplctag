@@ -58,6 +58,26 @@ typedef struct tag_registry_t *tag_registry_p;
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
 /*
+ * What one encoded request will cost, filled in by the encoder.  A handler that bundles
+ * several requests into one exchange budgets them with it.
+ */
+typedef struct {
+    int32_t req_size;   /* bytes the encoder wrote */
+    int32_t reply_size; /* expected reply bytes, 0 when not known yet */
+    bool packable;      /* may share an exchange with other requests */
+} tag_op_plan_t;
+
+/*
+ * Write one request into dest, which holds capacity bytes, and describe it in plan.  Returns
+ * PLCTAG_ERR_TOO_SMALL when it does not fit.  Encoding has no side effects on the tag's
+ * progress, so a request that did not fit can be encoded again later.
+ */
+typedef int (*tag_encode_func)(plc_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+
+/* Apply one reply to the tag.  Returns OK when the operation is done, PENDING when it needs another exchange. */
+typedef int (*tag_decode_func)(plc_tag_p tag, uint8_t *reply, int32_t reply_size);
+
+/*
  * Runtime attribute descriptors.  The core and each protocol publish a NULL-name-terminated
  * table.  Lookup is by name; the entry's type selects the live union branch.
  *
@@ -143,6 +163,15 @@ struct tag_vtable_t {
      * Called while api_mutex is held.  NULL if not implemented.
      */
     tag_vtable_func tag_data_written;
+
+    /*
+     * The protocol's wire format, for a handler that drives the tag's operations itself.  NULL
+     * where the protocol does not use them or the tag does not support that direction.
+     */
+    tag_encode_func encode_read;
+    tag_decode_func decode_read;
+    tag_encode_func encode_write;
+    tag_decode_func decode_write;
 
     /* Runtime attributes this protocol publishes, NULL-name-terminated.  Consulted before
      * the core table, so a protocol can override or suppress a core attribute. */

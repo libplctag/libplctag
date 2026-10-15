@@ -1630,13 +1630,14 @@ int process_requests(cip_conn_p conn) {
 
                     /*
                      * A first read does not know how large its own reply will be, so it
-                     * cannot be budgeted against the reply space and must not be packed.
+                     * cannot be budgeted against the reply space; its encoder marks it not
+                     * packable.
                      *
                      * Multiple Service Packet also only ever goes out on a connection.
                      * pack_requests() reads the connected framing out of the first request,
                      * so bundling unconnected requests would have it parse the wrong layout.
                      */
-                    allow_packing = request->allow_packing && !request->first_read && conn->use_connected_msg;
+                    allow_packing = request->allow_packing && conn->use_connected_msg;
 
                     /* If the first request is packable, try to pack more requests */
                     if(allow_packing && vector_length(conn->requests) > 0) {
@@ -1656,7 +1657,7 @@ int process_requests(cip_conn_p conn) {
                              * and it is framed the same way as the first one -- pack_requests()
                              * handles one format per packet.
                              */
-                            allow_packing = request->allow_packing && !request->first_read
+                            allow_packing = request->allow_packing
                                             && (request->unrouted == bundled_requests[0]->unrouted);
                             if(!allow_packing) { break; }
 

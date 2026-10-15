@@ -42,8 +42,6 @@
 #include <utils/debug.h>
 
 
-static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-static int raw_tag_build_write_request(cip_tag_p tag);
 
 
 tag_byte_order_t cip_raw_tag_byte_order = {.is_allocated = 0,
@@ -104,7 +102,7 @@ int cip_raw_tag_tickler(cip_tag_p tag) {
     }
 
     if(tag->write_in_progress) {
-        rc = raw_tag_check_write_status(tag, tag->req->data, tag->req->request_size);
+        rc = cip_raw_tag_decode_write(tag, tag->req->data, tag->req->request_size);
 
         tag->status = (int8_t)rc;
 
@@ -158,7 +156,7 @@ int cip_raw_tag_write_start(cip_tag_p tag) {
     /* the write is now in flight */
     tag->write_in_progress = 1;
 
-    rc = raw_tag_build_write_request(tag);
+    rc = cip_tag_send(tag, cip_raw_tag_encode_write);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
@@ -180,7 +178,7 @@ int cip_raw_tag_write_start(cip_tag_p tag) {
  * stripped, so nothing here depends on whether the request went out connected or
  * unconnected.
  */
-static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
     uint8_t *tag_data_buffer = NULL;
@@ -195,6 +193,7 @@ static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t rep
 
     if(data_size <= 0) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Response carries no CIP data!");
+        tag->size = 0;
         cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
@@ -209,6 +208,7 @@ static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t rep
         mem_copy(tag->data, reply, data_size);
     } else {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
+        tag->size = 0;
         rc = PLCTAG_ERR_NO_MEM;
     }
 
@@ -227,14 +227,12 @@ static int raw_tag_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t rep
  * the only thing that ever differed between the connected and unconnected forms of this
  * function.
  */
-static int raw_tag_build_write_request(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    cip_request_p req = NULL;
-    int payload_size = tag->size;
-    int max_payload = 0;
+int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    int32_t payload_size = tag->size;
+    int32_t max_payload = 0;
     debug_module_t dbg = tag->debug_module;
 
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     if(payload_size <= 0) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Raw tag has no CIP request to send!");
@@ -249,32 +247,18 @@ static int raw_tag_build_write_request(cip_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!", plc_tag_decode_error(rc));
-        return rc;
+    if(payload_size > capacity) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Request of %d bytes does not fit in %d bytes!", payload_size, capacity);
+        return PLCTAG_ERR_TOO_SMALL;
     }
 
-    mem_copy(req->data, tag->data, payload_size);
+    mem_copy(dest, tag->data, payload_size);
 
-    /* reset the tag size so that incoming data overwrites the old. */
-    tag->size = 0;
+    plan->req_size = payload_size;
+    plan->reply_size = 0;
+    plan->packable = (tag->allow_packing != 0);
 
-    /*
-     * Hand the finished request to the connection, and only then publish it on the tag.
-     * cip_submit_payload() releases the request if it fails, so a tag that already held a
-     * pointer to it would be left holding a dangling one.
-     */
-    rc = cip_submit_payload(tag->session, req, payload_size, tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    tag->req = req;
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Done");
+    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
 }

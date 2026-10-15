@@ -52,8 +52,6 @@
  ******************************************************************/
 
 /* identity tag functions */
-static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-static int build_read_request(cip_tag_p tag);
 
 
 int cip_identity_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module) {
@@ -63,46 +61,41 @@ int cip_identity_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t de
      * read a length of hundreds of millions and fail the range check -- the name was only
      * ever readable by picking it apart a byte at a time.
      */
+    /* with no path the request goes to the device at the gateway itself. */
+    tag->unrouted = (tag->session->conn_path_size == 0);
+
     return cip_setup_special_tag(tag, CIP_TYPE_TAG_IDENTITY, &cip_short_string_byte_order, vtable, debug_module);
 }
 
 
 /* the request travels however the connection does, connected or not. */
 int cip_identity_tag_read_start(cip_tag_p tag) {
-    return cip_readonly_read_start(tag, tag->debug_module, build_read_request);
+    return cip_readonly_read_start(tag, tag->debug_module, cip_identity_tag_encode_read);
 }
 
 
 int cip_identity_tag_tickler(cip_tag_p tag) {
-    return cip_readonly_tickler(tag, tag->debug_module, check_read_status);
+    return cip_readonly_tickler(tag, tag->debug_module, cip_identity_tag_decode_read);
 }
 
 
 /*
- * Build the request that reads the Identity object.
+ * Encode the request that reads the Identity object.
  *
  * The CIP message is the same every way; what differs is how it is addressed.  A connected
  * connection carries it as it does any request.  Otherwise, with a connection path, the
  * transport wraps it in an Unconnected Send and appends the path, and without one it is
- * addressed to the device at the gateway itself.  The framings live in the transport, so all
- * this has to do is say whether there is a path.
+ * addressed to the device at the gateway itself, which tag->unrouted records.
  */
-static int build_read_request(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    cip_request_p req = NULL;
-    uint8_t *data = NULL;
+int cip_identity_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    uint8_t *data = dest;
 
-    pdebug(tag->debug_module, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(tag->debug_module, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(tag->debug_module, DEBUG_ERROR, tag->tag_id, "Unable to get new request. Error %s!",
-               plc_tag_decode_error(rc));
-        return rc;
+    if(capacity < 6) {
+        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "The 6 byte Identity request does not fit in %d bytes!", capacity);
+        return PLCTAG_ERR_TOO_SMALL;
     }
-
-    data = req->data;
 
     /*
      * Get_Attributes_All against the Identity object:
@@ -127,28 +120,17 @@ static int build_read_request(cip_tag_p tag) {
     *data = 0x01;
     data++;
 
-    if(tag->session->conn_path_size > 0) {
-        rc = cip_submit_payload(tag->session, req, (int)(data - req->data), false);
-    } else {
-        rc = cip_submit_unrouted_payload(tag->session, req, (int)(data - req->data));
-    }
+    plan->req_size = (int32_t)(data - dest);
+    plan->reply_size = 0;
+    plan->packable = false;
 
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    critical_block(tag->api_mutex) { tag->req = req; }
-
-    pdebug(tag->debug_module, DEBUG_INFO, tag->tag_id, "Done.");
+    pdebug(tag->debug_module, DEBUG_DETAIL, tag->tag_id, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
-static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *cip_response = reply;
     uint8_t *data_end = reply + reply_size;

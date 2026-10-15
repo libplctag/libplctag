@@ -99,6 +99,10 @@ static struct tag_vtable_t raw_tag_vtable = {
     .write = (tag_vtable_func)cip_raw_tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = NULL,
+    .decode_read = NULL,
+    .encode_write = (tag_encode_func)cip_raw_tag_encode_write,
+    .decode_write = (tag_decode_func)cip_raw_tag_decode_write,
 
     /* attribute accessors */
     .attribs = ab_attribs,
@@ -114,6 +118,10 @@ static struct tag_vtable_t identity_tag_vtable = {
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = (tag_encode_func)cip_identity_tag_encode_read,
+    .decode_read = (tag_decode_func)cip_identity_tag_decode_read,
+    .encode_write = NULL,
+    .decode_write = NULL,
 
     /* attribute accessors */
     .attribs = ab_attribs,
@@ -173,6 +181,9 @@ static int setup_pccc_name(cip_tag_p tag, attr attribs, int (*encode)(uint8_t *,
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "Unable to parse data file %s!", name);
         return rc;
     }
+
+    /* with no path and no DH+ the request goes to the PLC at the gateway itself. */
+    tag->unrouted = (tag->plc_type != CIP_PLC_LGX_PCCC && !tag->session->is_dhp && tag->session->conn_path_size == 0);
 
     tag->elem_size = addr.element_size_bytes;
     tag->file_type = addr.file_type;
@@ -544,6 +555,10 @@ struct tag_vtable_t cip_standard_tag_vtable_ab = {
     .write = (tag_vtable_func)cip_standard_tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = (tag_encode_func)cip_standard_tag_encode_read,
+    .decode_read = (tag_decode_func)cip_standard_tag_decode_read,
+    .encode_write = (tag_encode_func)cip_standard_tag_encode_write,
+    .decode_write = (tag_decode_func)cip_standard_tag_decode_write,
 
     /* attribute accessors */
     .attribs = ab_attribs,

@@ -70,7 +70,7 @@ static int listing_tag_read_start(cip_tag_p tag);
 static int listing_tag_tickler(cip_tag_p tag);
 // static int listing_tag_write_start(cip_tag_p tag);
 static int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-static int listing_tag_build_read_request_connected(cip_tag_p tag);
+static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 
 /* define the vtable for listing tag type. */
 static struct tag_vtable_t listing_tag_vtable = {
@@ -81,6 +81,10 @@ static struct tag_vtable_t listing_tag_vtable = {
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = (tag_encode_func)listing_tag_encode_read,
+    .decode_read = (tag_decode_func)listing_tag_check_read_status_connected,
+    .encode_write = NULL,
+    .decode_write = NULL,
 
     /* attribute accessors */
     .attribs = ab_attribs,
@@ -223,7 +227,7 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
  */
 
 int listing_tag_read_start(cip_tag_p tag) {
-    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, listing_tag_build_read_request_connected);
+    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, listing_tag_encode_read);
 }
 
 
@@ -418,8 +422,9 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
         } else if(partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "calling listing_tag_build_read_request_connected() to get the next chunk.");
-            rc = listing_tag_build_read_request_connected(tag);
+                   "Sending the request for the next chunk.");
+            tag->read_in_progress = 1;
+            rc = cip_tag_send(tag, listing_tag_encode_read);
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -456,25 +461,20 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
 }
 
 
-int listing_tag_build_read_request_connected(cip_tag_p tag) {
-    // tag_list_req *list_req = NULL;
-    cip_request_p req = NULL;
-    int rc = PLCTAG_STATUS_OK;
-    uint8_t *data_start = NULL;
-    uint8_t *data = NULL;
+int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    uint8_t *data = dest;
     uint16_le tmp_u16 = UINT16_LE_INIT(0);
+    int32_t name_size = (tag->encoded_name_size > 1) ? (int32_t)tag->encoded_name_size - 1 : 0;
+    /* service, path size, the name without its word count, class and instance, then six words */
+    int32_t needed = 2 + name_size + 4 + (int32_t)sizeof(tmp_u16) * 6;
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
+    if(needed > capacity) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Listing request of %d bytes does not fit in %d bytes!",
+               needed, capacity);
+        return PLCTAG_ERR_TOO_SMALL;
     }
-
-    /* point the request struct at the buffer */
-    data_start = data = req->data;
 
     /*
      * set up the embedded CIP tag list request packet
@@ -548,19 +548,11 @@ int listing_tag_build_read_request_connected(cip_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
-    tag->read_in_progress = 1;
+    plan->req_size = (int32_t)(data - dest);
+    plan->reply_size = 0;
+    plan->packable = (tag->allow_packing != 0);
 
-    /* hand the finished request to the connection. */
-    rc = cip_submit_payload(tag->session, req, (int)(data - data_start), tag->allow_packing);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done");
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done");
 
     return PLCTAG_STATUS_OK;
 }

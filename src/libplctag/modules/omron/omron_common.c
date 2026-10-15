@@ -89,6 +89,10 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
     .write = (tag_vtable_func)cip_raw_tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = NULL,
+    .decode_read = NULL,
+    .encode_write = (tag_encode_func)cip_raw_tag_encode_write,
+    .decode_write = (tag_decode_func)cip_raw_tag_decode_write,
 
     /* attribute accessors */
     .attribs = omron_attribs,
@@ -104,6 +108,10 @@ static struct tag_vtable_t identity_tag_vtable = {
     .write = NULL,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = (tag_encode_func)cip_identity_tag_encode_read,
+    .decode_read = (tag_decode_func)cip_identity_tag_decode_read,
+    .encode_write = NULL,
+    .decode_write = NULL,
 
     /* attribute accessors */
     .attribs = omron_attribs,
@@ -389,6 +397,10 @@ struct tag_vtable_t cip_standard_tag_vtable_omron = {
     .write = (tag_vtable_func)cip_standard_tag_write_start,
     .wake_plc = NULL,
     .tag_data_written = NULL,
+    .encode_read = (tag_encode_func)cip_standard_tag_encode_read,
+    .decode_read = (tag_decode_func)cip_standard_tag_decode_read,
+    .encode_write = (tag_encode_func)cip_standard_tag_encode_write,
+    .decode_write = (tag_decode_func)cip_standard_tag_decode_write,
 
     /* attribute accessors */
     .attribs = omron_attribs,

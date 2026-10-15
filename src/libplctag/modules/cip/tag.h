@@ -191,6 +191,13 @@ struct cip_tag_t {
      * applied to whatever operation is in flight now.
      */
     uint16_t req_pccc_seq_num;
+
+    /*
+     * The request goes to the device at the gateway itself, with no Unconnected Send wrapper
+     * and no route path: PCCC with no path and no DH+, and @identity with no path.  Fixed
+     * once the tag is set up.
+     */
+    bool unrouted;
 };
 
 typedef struct cip_tag_t *cip_tag_p;
@@ -304,18 +311,28 @@ extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_b
                                  tag_vtable_p vtable, debug_module_t debug_module);
 
 
+/* Write one request for the tag; the CIP form of tag_encode_func. */
+typedef int (*cip_tag_encode_func)(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+
+
+/*
+ * Encode a request for the tag and hand it to the connection, which holds it until it can go
+ * out.  The encoder is the CIP form of the vtable's encode_read / encode_write.  On success
+ * the tag holds the request in tag->req.
+ */
+extern int cip_tag_send(cip_tag_p tag, cip_tag_encode_func encode);
+
+
 /*
  * A read-only special tag (@tags, @udt, @identity) differs from the others only in which
  * request it builds and which reply checker it runs.  The surrounding state machine -- the
  * busy guards, the read_in_progress flag, the write rejection, the completion note -- is the
  * same in all of them, so it lives here and takes the two differing steps as parameters.
  */
-typedef int (*cip_tag_op_func)(cip_tag_p tag);
-
 /* Parse a reply: the CIP message the connection delivered for this tag, framing stripped. */
 typedef int (*cip_tag_decode_func)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
-extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_op_func build_request);
+extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_encode_func encode);
 extern int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_decode_func check_read);
 
 

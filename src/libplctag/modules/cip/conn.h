@@ -452,8 +452,6 @@ struct cip_request_t {
     /* how much reply space this request expects to consume, for packing against the reply budget */
     int response_size;
 
-    /* a first read does not know its own size yet, so it cannot be packed */
-    int first_read;
 
     /*
      * A request holds only the CIP message; the transport adds the EIP encapsulation and CPF
@@ -558,7 +556,7 @@ extern int receive_forward_open_response(cip_conn_p conn);
  * plus the offset entry and the worst-case inter-packet padding.  A request
  * whose reply size is not yet known -- response_size of zero, typically because
  * the tag has never been read -- cannot be budgeted, so it draws nothing here
- * and is kept out of a bundle by the first_read gate instead.
+ * and its encoder keeps it out of a bundle by marking it not packable.
  */
 static inline int reply_budget_cost(cip_request_p request) {
     if(request->response_size <= 0) { return 0; }
