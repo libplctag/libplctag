@@ -303,7 +303,7 @@ REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
-    "test_callback_destroy",
+    "test_callback_destroy", "test_cip_ops",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
@@ -618,6 +618,26 @@ def build_manifest() -> Manifest:
     sec.test("destroy tag from inside its own callback (AB/EIP)",
               [exe("test_callback_destroy"),
                f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
+    # An operation queued, packed or on the wire.  Each test gets its own simulator, because
+    # each writes TestBigArray first and checks every element it reads back.  The delay holds
+    # each exchange open long enough for the next reads to queue behind it and pack.
+    def cip_ops_server(delay_ms: int) -> ServerSpec:
+        return ServerSpec(exe_path=exe("ab_server"),
+                          args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                                         "--tag=TestBigArray:DINT[2000]", f"--delay={delay_ms}"],
+                          startup_wait_s=1)
+    cip_ops_base = f"--base=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix"
+    abort_packed = sec.test("abort one of several packed reads; the rest complete",
+              [exe("test_cip_ops"), "--mode=abort-packed", "--count=20", cip_ops_base], F, server=cip_ops_server(100))
+    sec.test("check: the abort test's reads were packed", None, F, depends_on=abort_packed.id, ports_needed=0,
+              check=CheckSpec(log_file=abort_packed.server_log_file, pattern=r"Multi-service request contains",
+                              expected=1, at_least=True))
+    sec.test("destroy tags while their reads are queued or on the wire",
+              [exe("test_cip_ops"), "--mode=destroy-in-flight", "--count=10", cip_ops_base], F, server=cip_ops_server(50))
+    sec.test("450 tags read at once, more than one packet holds",
+              [exe("test_cip_ops"), "--mode=many-tags", "--count=450", cip_ops_base], F, server=cip_ops_server(0))
+    sec.test("a reply arrives while the tag's callback holds its API mutex",
+              [exe("test_cip_ops"), "--mode=callback-holds-mutex", cip_ops_base], F, server=cip_ops_server(0))
     sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
@@ -1497,6 +1517,8 @@ def build_manifest() -> Manifest:
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
     sec.test("callback events Modbus",
               [exe("test_callback_ex_async"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=10&name=hr1"], F)
+    sec.test("destroy tag from inside its own callback (Modbus)",
+              [exe("test_callback_destroy"), f"protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
     sec.test("@connection tag late join (Modbus)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
