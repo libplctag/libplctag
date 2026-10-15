@@ -35,6 +35,9 @@
 #pragma once
 
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <libplctag/api/libplctag.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
@@ -221,6 +224,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
 #define TAG_BASE_STRUCT                                                                 \
     int64_t auto_sync_next_read;                                                        \
     int64_t auto_sync_next_write;                                                       \
+    /* When the protocol handler next needs to act on this tag; see tag_schedule.h. */   \
+    int64_t op_time;                                                                    \
     int64_t read_cache_expire;                                                          \
     int64_t read_cache_ms;                                                              \
     uint8_t *data;                                                                      \
@@ -245,6 +250,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
      * lock domain. Packing it into the bitfield run below would race with writes to    \
      * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */ \
     atomic_bool skip_tickler;                                                           \
+    /* On its handler's active list.  Written under the handler's own mutex. */         \
+    bool in_active_vector;                                                              \
     int8_t event_creation_complete_status;                                              \
     int8_t event_deletion_started_status;                                               \
     int8_t event_operation_aborted_status;                                              \

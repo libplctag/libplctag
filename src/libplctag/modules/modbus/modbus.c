@@ -39,6 +39,8 @@
 #include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/connection_tag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/lib/tag_schedule.h>
 #include <libplctag/modules/modbus/modbus.h>
 #include <limits.h>
 #include <platform.h>
@@ -276,14 +278,6 @@ struct modbus_tag_t {
     /* timestamp when the operation last changed */
     int64_t op_changed_time;
 
-    /* Scheduled absolute time (ms) for next operation.
-     * Set to now on first insertion; advanced by interval on reschedule. */
-    int64_t op_time;
-
-    /* True if this tag is currently in plc->active_tags.
-     * Prevents duplicate insertion from concurrent API and auto-sync paths. */
-    bool in_active_vector;
-
     /* request timing - tracks time from entering REQUEST state to receiving response */
     int64_t request_start_time;
     int64_t request_sent_time; /* timestamp when request was sent over wire */
@@ -362,9 +356,6 @@ static int add_tag(modbus_plc_p plc, modbus_tag_p tag);
 static int remove_tag(modbus_plc_p plc, modbus_tag_p tag);
 
 /* active tag vector management -- all callers must hold plc->mutex */
-static void insert_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int64_t op_time);
-static void move_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int current_index, int64_t new_op_time);
-static void remove_tag_from_active(modbus_plc_p plc, modbus_tag_p tag);
 static modbus_tag_p find_response_tag(modbus_plc_p plc, uint16_t transaction_id);
 
 /* atomic decrement of pending_request_count, clamped at zero */
@@ -1860,7 +1851,8 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
         if(tag->auto_sync_read_ms > 0) {
             int64_t now_for_sched = time_ms();
             if(tag->auto_sync_next_read == 0) { tag->auto_sync_next_read = now_for_sched; }
-            do { tag->auto_sync_next_read += tag->auto_sync_read_ms; } while(tag->auto_sync_next_read <= now_for_sched);
+            tag->auto_sync_next_read = tag_schedule_next_period(tag->auto_sync_next_read + tag->auto_sync_read_ms,
+                                                                tag->auto_sync_read_ms, now_for_sched);
         }
 
         /* Flip to RESPONSE state in-place (no movement in active_tags required). */
@@ -2011,19 +2003,16 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
              * One-shot explicit reads: remove -- tag returns to idle. */
             critical_block(plc->mutex) {
                 if(tag->auto_sync_read_ms > 0) {
-                    while(tag->auto_sync_next_read <= now) { tag->auto_sync_next_read += tag->auto_sync_read_ms; }
+                    tag->auto_sync_next_read = tag_schedule_next_period(tag->auto_sync_next_read, tag->auto_sync_read_ms, now);
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Rescheduling auto-sync tag %d for next read in %dms.",
                            tag->tag_id, (int)(tag->auto_sync_next_read - now));
                     /* armed, not in flight -- see TAG_OP_READ_SCHEDULED. */
                     tag->op = TAG_OP_READ_SCHEDULED;
                     tag->op_changed_time = now;
                     tag->request_start_time = now;
-                    int idx = vector_find_index(plc->active_tags, tag);
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id,
-                           "Rotating tag %d from index %d to new index based on auto_sync_next_read.", tag->tag_id, idx);
-                    move_tag_sorted(plc, tag, idx, tag->auto_sync_next_read);
+                    tag_schedule_move(plc->active_tags, (plc_tag_p)tag, tag->auto_sync_next_read);
                 } else {
-                    remove_tag_from_active(plc, tag);
+                    tag_schedule_remove(plc->active_tags, (plc_tag_p)tag);
                 }
             }
 
@@ -2174,10 +2163,9 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                 if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
                     tag->op = TAG_OP_WRITE_REQUEST;
                     tag->op_changed_time = now;
-                    int idx = vector_find_index(plc->active_tags, tag);
-                    move_tag_sorted(plc, tag, idx, now + tag->auto_sync_write_ms);
+                    tag_schedule_move(plc->active_tags, (plc_tag_p)tag, now + tag->auto_sync_write_ms);
                 } else {
-                    remove_tag_from_active(plc, tag);
+                    tag_schedule_remove(plc->active_tags, (plc_tag_p)tag);
                 }
             }
 
@@ -3124,112 +3112,6 @@ static void decrement_request_count(modbus_plc_p plc) {
 
 
 /*
- * insert_tag_sorted
- *
- * Insert a tag into active_tags at the correct sorted position by op_time.
- * For equal op_times, insert after existing entries (FIFO fairness).
- * Must be called while holding plc->mutex.
- */
-static void insert_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int64_t op_time) {
-    int lo = 0;
-    int hi = vector_length(plc->active_tags);
-
-    tag->op_time = op_time;
-    tag->in_active_vector = true;
-
-    /* Binary search: find first index where op_time is strictly greater than new tag's op_time.
-     * Inserting after all existing equal-time entries preserves FIFO order. */
-    while(lo < hi) {
-        int mid = lo + (hi - lo) / 2;
-        modbus_tag_p mid_tag = vector_get(plc->active_tags, mid);
-        if(mid_tag && mid_tag->op_time <= op_time) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-
-    if(vector_insert(plc->active_tags, lo, tag) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Failed to insert tag %" PRId32 " into active vector!", tag->tag_id);
-        tag->in_active_vector = false;
-    }
-}
-
-
-/*
- * move_tag_sorted
- *
- * Reposition a tag that is already in active_tags to its correct sorted position
- * for the given new_op_time, using vector_swap_element for efficiency (single
- * memmove instead of remove + reinsert).
- * Must be called while holding plc->mutex.
- */
-static void move_tag_sorted(modbus_plc_p plc, modbus_tag_p tag, int current_index, int64_t new_op_time) {
-    int count = vector_length(plc->active_tags);
-    int lo = 0;
-    int hi = count;
-    int new_index = 0;
-
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Moving tag %" PRId32 " from index %d to new op_time %" PRId64 ".",
-           tag->tag_id, current_index, new_op_time);
-
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Current active vector length: %d.", count);
-
-    if(current_index < 0 || current_index >= count) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Tag %" PRId32 " not found in active_tags (index=%d)!", tag->tag_id,
-               current_index);
-        tag->in_active_vector = false;
-        return;
-    }
-
-    /* Binary search: find the insert-before index for new_op_time. */
-    while(lo < hi) {
-        int mid = lo + (hi - lo) / 2;
-        modbus_tag_p mid_tag = vector_get(plc->active_tags, mid);
-        if(mid_tag && mid_tag->op_time <= new_op_time) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    /* lo is the insert-before index: the element belongs just before index lo.
-     * This works correctly in both directions without any correction:
-     *   moving right (current_index < lo): element lands at lo-1, shifting [cur+1..lo-1] left.
-     *   moving left  (current_index > lo): element lands at lo,   shifting [lo..cur-1]  right. */
-    new_index = lo;
-
-    tag->op_time = new_op_time;
-
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "New index for tag %" PRId32 " is %d.", tag->tag_id, new_index);
-
-    vector_swap_element(plc->active_tags, current_index, new_index);
-}
-
-
-/*
- * remove_tag_from_active
- *
- * Remove a tag from active_tags by linear scan.
- * If in_active_vector is false, returns immediately without scanning.
- * Must be called while holding plc->mutex.
- */
-static void remove_tag_from_active(modbus_plc_p plc, modbus_tag_p tag) {
-    if(!tag->in_active_vector) { return; }
-
-    int idx = vector_find_index(plc->active_tags, tag);
-    if(idx >= 0) {
-        vector_remove(plc->active_tags, idx);
-    } else {
-        /* in_active_vector was set but tag was not found -- fix the flag. */
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id,
-               "Tag %" PRId32 " had in_active_vector set but was not found in active_tags!", tag->tag_id);
-    }
-
-    tag->in_active_vector = false;
-}
-
-
-/*
  * find_response_tag
  *
  * Scan RESPONSE-state tags at the front of active_tags for one whose
@@ -3271,7 +3153,7 @@ static int add_tag(modbus_plc_p plc, modbus_tag_p tag) {
             tag->op = TAG_OP_READ_REQUEST;
             tag->op_changed_time = now;
             tag->request_start_time = now;
-            insert_tag_sorted(plc, tag, now);
+            tag_schedule_insert(plc->active_tags, (plc_tag_p)tag, now);
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id,
                    "Auto-sync tag %" PRId32 " inserted into active_tags with op_time=now.", tag->tag_id);
         }
@@ -3299,7 +3181,7 @@ static int remove_tag(modbus_plc_p plc, modbus_tag_p tag) {
 
     critical_block(plc->mutex) {
         /* Remove from active_tags if present (uses in_active_vector flag for fast skip). */
-        remove_tag_from_active(plc, tag);
+        tag_schedule_remove(plc->active_tags, (plc_tag_p)tag);
 
         /* Decrement total tag count. */
         atomic_add_int32(&plc->tag_count, -1);
@@ -3348,7 +3230,7 @@ int mb_abort(plc_tag_p p_tag) {
      * so lock ordering (plc->mutex -> api_mutex) is not violated.
      */
     critical_block(tag->plc->mutex) {
-        remove_tag_from_active(tag->plc, tag);
+        tag_schedule_remove(tag->plc->active_tags, (plc_tag_p)tag);
 
         /* Clear any in-flight request counter slot this tag occupied. */
         if(tag->pending_transaction_id != 0) {
@@ -3434,12 +3316,7 @@ int mb_read_start(plc_tag_p p_tag) {
             tag->request_start_time = now;
             tag->read_complete = 0; /* clear stale completion flag from previous cycle */
 
-            if(tag->in_active_vector) {
-                int idx = vector_find_index(tag->plc->active_tags, tag);
-                move_tag_sorted(tag->plc, tag, idx, now);
-            } else {
-                insert_tag_sorted(tag->plc, tag, now);
-            }
+            tag_schedule_insert(tag->plc->active_tags, (plc_tag_p)tag, now);
         }
     }
 
@@ -3527,12 +3404,7 @@ static int mb_write_start(plc_tag_p p_tag) {
              * If the tag is already in active_tags (e.g., auto-sync waiting for a
              * future op_time), move it to now (single rotate); otherwise insert fresh.
              */
-            if(tag->in_active_vector) {
-                int idx = vector_find_index(tag->plc->active_tags, tag);
-                move_tag_sorted(tag->plc, tag, idx, now);
-            } else {
-                insert_tag_sorted(tag->plc, tag, now);
-            }
+            tag_schedule_insert(tag->plc->active_tags, (plc_tag_p)tag, now);
         }
     }
 
@@ -3623,17 +3495,16 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
                 /* Insert as a new WRITE_REQUEST. */
                 tag->op = TAG_OP_WRITE_REQUEST;
                 tag->op_changed_time = now;
-                insert_tag_sorted(tag->plc, tag, write_time);
+                tag_schedule_insert(tag->plc->active_tags, (plc_tag_p)tag, write_time);
                 wake_plc_thread(tag->plc);
                 break;
 
             case TAG_OP_READ_SCHEDULED: /* fall through */
             case TAG_OP_READ_REQUEST: {
                 /* Auto-sync read queued but not yet sent; replace with write. */
-                int idx = vector_find_index(tag->plc->active_tags, tag);
                 tag->op = TAG_OP_WRITE_REQUEST;
                 tag->op_changed_time = now;
-                move_tag_sorted(tag->plc, tag, idx, write_time);
+                tag_schedule_move(tag->plc->active_tags, (plc_tag_p)tag, write_time);
                 wake_plc_thread(tag->plc);
                 break;
             }
@@ -3644,10 +3515,9 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
                  * the re-verify check will fail and the response is discarded. */
                 decrement_request_count(tag->plc);
                 tag->pending_transaction_id = 0;
-                int idx = vector_find_index(tag->plc->active_tags, tag);
                 tag->op = TAG_OP_WRITE_REQUEST;
                 tag->op_changed_time = now;
-                move_tag_sorted(tag->plc, tag, idx, write_time);
+                tag_schedule_move(tag->plc->active_tags, (plc_tag_p)tag, write_time);
                 wake_plc_thread(tag->plc);
                 break;
             }
