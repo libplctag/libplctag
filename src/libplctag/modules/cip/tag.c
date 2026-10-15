@@ -144,6 +144,11 @@ void cip_tag_destroy(cip_tag_p tag) {
         tag->data = NULL;
     }
 
+    if(tag->deferred_attribs) {
+        attr_destroy(tag->deferred_attribs);
+        tag->deferred_attribs = NULL;
+    }
+
     if(tag->instance) {
         rc_dec(tag->instance);
         tag->instance = NULL;

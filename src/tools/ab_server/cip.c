@@ -295,8 +295,11 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
  *
  * A real device reports these out of flash.  Here they only have to be plausible, distinct
  * and stable: distinct so a test can tell one simulated PLC from another, stable so the
- * expected values can be written down.  The MicroLogix entry matches the 1763-L16BWA on the
- * bench, which makes the simulator and hardware cases directly comparable.
+ * expected values can be written down.  The ControlLogix, PLC/5 and MicroLogix entries copy
+ * the 1756-L81E, the PLC-5/30 behind a 1785-ENET and the 1763-L16BWA on the bench, serial
+ * numbers aside, so a classifier tested here is tested on what those PLCs send.  Note the
+ * MicroLogix reports itself as a communications adapter, not a PLC, and the PLC/5 name is the
+ * ENET module's and ends in a space.
  */
 typedef struct {
     uint16_t vendor_id;
@@ -312,6 +315,7 @@ typedef struct {
 #define CIP_VENDOR_ROCKWELL ((uint16_t)0x0001)
 #define CIP_VENDOR_OMRON ((uint16_t)0x002F)
 #define CIP_DEVICE_TYPE_PLC ((uint16_t)0x000E)
+#define CIP_DEVICE_TYPE_COMM_ADAPTER ((uint16_t)0x000C)
 #define CIP_IDENTITY_STATUS_OWNED ((uint16_t)0x0060)
 
 /* the fixed attributes are 14 bytes; the product name follows as a SHORT_STRING. */
@@ -319,18 +323,19 @@ typedef struct {
 
 /* indexed by plc_type_t. */
 static const cip_identity_s cip_identities[] = {
-    [PLC_CONTROL_LOGIX] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00A6, 31, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C01756,
+    [PLC_CONTROL_LOGIX] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00A4, 31, 11, 0x3060, 0x00C01756,
                            "1756-L81E/B"},
     [PLC_MICRO800] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00C8, 12, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C02080,
                       "2080-LC50-24QWB"},
     [PLC_OMRON] = {CIP_VENDOR_OMRON, CIP_DEVICE_TYPE_PLC, 0x008E, 1, 3, CIP_IDENTITY_STATUS_OWNED, 0x00C00102,
                    "NX102-9000"},
-    [PLC_PLC5] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0036, 6, 1, CIP_IDENTITY_STATUS_OWNED, 0x00C01785, "1785-L80E"},
+    [PLC_PLC5] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0012, 3, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C01785,
+                  "PLC-5/30 C/K - 1785-ENET 2.17 "},
     [PLC_SLC] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0039, 10, 0, CIP_IDENTITY_STATUS_OWNED, 0x00C01747, "1747-L553"},
-    [PLC_MICROLOGIX] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x0056, 2, 12, CIP_IDENTITY_STATUS_OWNED, 0x00C01763,
-                        "1763-L16BWA"},
+    [PLC_MICROLOGIX] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_COMM_ADAPTER, 0x00B9, 2, 12, 0x0064, 0x00C01763,
+                        "1763-L16BWA B/12.00"},
     /* a ControlLogix reached through the PCCC mapping is still a ControlLogix. */
-    [PLC_LGX_PCCC] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00A6, 31, 11, CIP_IDENTITY_STATUS_OWNED, 0x00C01756,
+    [PLC_LGX_PCCC] = {CIP_VENDOR_ROCKWELL, CIP_DEVICE_TYPE_PLC, 0x00A4, 31, 11, 0x3060, 0x00C01756,
                       "1756-L81E/B"},
 };
 

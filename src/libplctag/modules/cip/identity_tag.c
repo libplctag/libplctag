@@ -47,14 +47,6 @@
 #include <utils/debug.h>
 #include <utils/vector.h>
 
-/*
- * size of the fixed-size fields preceding the CIP response in an identity reply:
- * interface_handle (one uint32_le) followed by timeout, item_count, NAI type, NAI length,
- * UDI type, and UDI length (six uint16_le fields).
- */
-/* CIP Get_Attributes_All, the service that reads the whole Identity object. */
-#define CIP_GET_ATTRIBUTES_ALL ((uint8_t)0x01)
-
 /******************************************************************
  ******************* identity tag functions ***********************
  ******************************************************************/

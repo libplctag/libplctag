@@ -150,6 +150,24 @@ static void test_an_omron_failure_leaks_nothing(void **state) {
 }
 
 
+/* no plc, so the tag waits on a probe that never answers, holding a copy of its attributes. */
+static void test_a_waiting_probed_tag_leaks_nothing(void **state) {
+    int32_t tag = 0;
+
+    (void)state;
+
+    assert_true(conns_drained());
+
+    tag = plc_tag_create("protocol=ab-eip&gateway=" DEAD_GATEWAY "&elem_size=4&elem_count=1&name=Dummy", 0);
+    assert_true(tag > 0);
+    assert_int_equal(plc_tag_status(tag), PLCTAG_STATUS_PENDING);
+    assert_int_equal(cip_conn_live_count(), 1);
+
+    plc_tag_destroy(tag);
+    assert_true(conns_drained());
+}
+
+
 int main(void) {
     int32_t rc = 0;
 
@@ -158,6 +176,7 @@ int main(void) {
         cmocka_unit_test(test_an_oversized_element_count_leaks_nothing),
         cmocka_unit_test(test_a_bad_tag_name_leaks_nothing),
         cmocka_unit_test(test_an_omron_failure_leaks_nothing),
+        cmocka_unit_test(test_a_waiting_probed_tag_leaks_nothing),
     };
 
     rc = cmocka_run_group_tests(tests, NULL, NULL);

@@ -51,6 +51,7 @@
 #include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <platform.h>
+#include <libplctag/lib/byte_order.h>
 #include <libplctag/lib/connection_tag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/connection_tag.h>
@@ -62,6 +63,11 @@
 #include <utils/debug.h>
 #include <utils/rc.h>
 
+
+static int setup_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+static int deferred_abort(plc_tag_p tag);
+static int deferred_status(plc_tag_p tag);
+static int deferred_tickler(plc_tag_p tag);
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PCCC_MSG_SIZE (244)
@@ -167,8 +173,80 @@ const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t
 }
 
 
+int cip_plc_entries_max_payload_capacity(void) {
+    int max_capacity = 0;
+
+    for(size_t index = 0; index < (sizeof(cip_plc_entries) / sizeof(cip_plc_entries[0])); index++) {
+        if(cip_plc_entries[index].max_payload_capacity > max_capacity) {
+            max_capacity = cip_plc_entries[index].max_payload_capacity;
+        }
+    }
+
+    return max_capacity;
+}
+
+
+#define CIP_VENDOR_ROCKWELL ((uint16_t)0x0001)
+
+/*
+ * Identity product-name prefixes, first match wins.  CIP_PLC_NONE refuses the device: every
+ * 1756 part that is not a CPU is a chassis module, and reaching one means the path stops
+ * short of the CPU.  Device type is no help: a MicroLogix 1100 reports itself as a
+ * communications adapter, as an ENBT does.
+ *
+ * ponytail: only names seen on bench hardware.  Anything else is generic CIP and needs plc=;
+ * add a prefix when a device's Identity reply has been seen.
+ */
+static const struct {
+    uint16_t vendor_id;
+    const char *prefix;
+    cip_plc_type_t plc_type;
+} identity_map[] = {
+    {CIP_VENDOR_ROCKWELL, "1756-L", CIP_PLC_LGX},
+    {CIP_VENDOR_ROCKWELL, "1756-", CIP_PLC_NONE},
+    {CIP_VENDOR_ROCKWELL, "PLC-5", CIP_PLC_PLC5},
+    {CIP_VENDOR_ROCKWELL, "1763-", CIP_PLC_MLGX},
+};
+
+
+int cip_plc_entry_from_identity(uint16_t vendor_id, const char *product_name, bool has_path,
+                                const cip_plc_entry_t **entry_out) {
+    cip_plc_type_t plc_type = CIP_PLC_GENERIC;
+
+    for(size_t index = 0; index < (sizeof(identity_map) / sizeof(identity_map[0])); index++) {
+        const char *prefix = identity_map[index].prefix;
+
+        if(identity_map[index].vendor_id == vendor_id && str_cmp_i_n(product_name, prefix, str_length(prefix)) == 0) {
+            plc_type = identity_map[index].plc_type;
+            break;
+        }
+    }
+
+    if(plc_type == CIP_PLC_NONE) {
+        if(has_path) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "The path reaches a %s, not a CPU!", product_name);
+        } else {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "The gateway is a %s.  A path to the CPU's slot is required!",
+                   product_name);
+        }
+
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    *entry_out = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Vendor %u \"%s\" is a %s.", (unsigned int)vendor_id, product_name,
+           (*entry_out)->name);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 cip_plc_type_t cip_plc_type_from_attributes(attr attribs) {
-    const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
+    const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", NULL));
+
+    /* not an error: the connection identifies the device instead. */
+    if(!cpu_type) { return CIP_PLC_NONE; }
 
     if(!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found PLC/5 PLC.");
@@ -260,18 +338,38 @@ static struct tag_vtable_t unimplemented_vtable = {
 
 
 /*
- * Build a tag from its row, on a connection the caller has settled.  Takes ownership of the
- * connection reference, on failure as well as success.
+ * What a tag dispatches through while its connection identifies the device.  The tickler
+ * finishes the create once the row is known.
+ */
+static struct tag_vtable_t deferred_vtable = {
+    .abort = deferred_abort,
+    .read = cip_tag_unimplemented_read,
+    .status = deferred_status,
+    .tickler = deferred_tickler,
+    .write = cip_tag_unimplemented_write,
+    .wake_plc = NULL,
+    .tag_data_written = NULL,
+    .attribs = NULL,
+};
+
+
+/*
+ * Allocate a tag on a connection the caller has settled, then set it up from the row.  Takes
+ * ownership of the connection reference, on failure as well as success.
+ *
+ * Two steps because they need different things: the tag needs only the connection, the setup
+ * needs the connection's row.  With no row yet -- a probed connection still identifying the
+ * device -- the setup waits for the tickler, on a copy of the attributes.
  */
 static int create_tag(const cip_plc_entry_t *entry, cip_conn_p conn, attr attribs,
                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
                       plc_tag_p *tag_out) {
     cip_tag_p tag = NULL;
-    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
 
-    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, entry->protocol, &unimplemented_vtable, DEBUG_MODULE_CIP);
+    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, (entry ? entry->protocol : TAG_PROTOCOL_AB),
+                        &unimplemented_vtable, DEBUG_MODULE_CIP);
     if(!tag) {
         /* nothing owns the connection yet, so this is the one failure that has to say so. */
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing connection reference.");
@@ -286,8 +384,75 @@ static int create_tag(const cip_plc_entry_t *entry, cip_conn_p conn, attr attrib
     tag->session = conn;
     *tag_out = (plc_tag_p)tag;
 
+    if(entry) { return setup_tag(entry, tag, attribs); }
+
+    tag->deferred_attribs = attr_copy(attribs);
+    if(!tag->deferred_attribs) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "Unable to copy the attributes!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    tag->vtable = &deferred_vtable;
+    tag->create_read_status = PLCTAG_STATUS_PENDING;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Waiting for the connection to identify the device.");
+
+    return PLCTAG_STATUS_PENDING;
+}
+
+
+static int deferred_abort(plc_tag_p tag) {
+    if(((cip_tag_p)tag)->create_read_status == PLCTAG_STATUS_PENDING) { cip_tag_fail_create((cip_tag_p)tag, PLCTAG_ERR_ABORT); }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int deferred_status(plc_tag_p tag) { return ((cip_tag_p)tag)->create_read_status; }
+
+
+/*
+ * Finish a create once the connection knows its row.  The library applied its byte-order
+ * overrides before the tag had a byte order, so they are applied here.  Runs under the tag's
+ * api_mutex, like every tickler.
+ */
+static int deferred_tickler(plc_tag_p raw_tag) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+    attr attribs = tag->deferred_attribs;
+    const cip_plc_entry_t *entry = NULL;
+    int identify_rc = PLCTAG_STATUS_OK;
+    int rc = PLCTAG_STATUS_OK;
+
+    if(tag->create_read_status != PLCTAG_STATUS_PENDING || !attribs) { return PLCTAG_STATUS_OK; }
+
+    entry = cip_conn_plc_entry(tag->session, &identify_rc);
+    if(!entry) {
+        if(identify_rc != PLCTAG_STATUS_OK) { cip_tag_fail_create(tag, (plctag_error_code_t)identify_rc); }
+        return PLCTAG_STATUS_OK;
+    }
+
+    tag->deferred_attribs = NULL;
+    tag->protocol_type = entry->protocol;
+
+    rc = setup_tag(entry, tag, attribs);
+    if(rc == PLCTAG_STATUS_OK) { rc = set_tag_byte_order((plc_tag_p)tag, attribs); }
+
+    attr_destroy(attribs);
+
+    if(rc != PLCTAG_STATUS_OK) { cip_tag_fail_create(tag, (plctag_error_code_t)rc); }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* Everything about a tag that comes from its family's row, ending with the create read. */
+static int setup_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Setting up %s tag.", entry->name);
+
     tag->plc_type = entry->plc_type;
-    tag->use_connected_msg = conn->use_connected_msg;
+    tag->use_connected_msg = tag->session->use_connected_msg;
     if(entry->vtable) { tag->vtable = entry->vtable; }
     tag->byte_order = entry->byte_order;
     tag->std_ops = entry->std_ops;
@@ -376,11 +541,10 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return PLCTAG_ERR_NOT_FOUND;
         }
 
-        entry = conn->plc_entry;
-        plc_type = entry->plc_type;
+        entry = cip_conn_plc_entry(conn, &rc);
 
         /* the connection decides use_connected_msg, so a clone cannot ask for the other setting. */
-        if(attr_get_str(attribs, "use_connected_msg", NULL)
+        if(entry && attr_get_str(attribs, "use_connected_msg", NULL)
            && (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0) != conn->use_connected_msg) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
             return PLCTAG_ERR_BAD_PARAM;
@@ -415,7 +579,13 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return rc;
         }
 
-        entry = conn->plc_entry;
+        entry = cip_conn_plc_entry(conn, &rc);
+    }
+
+    /* a probed connection's refusal is the answer, so a tag created after it fails at once. */
+    if(!entry && rc != PLCTAG_STATUS_OK) {
+        rc_dec(conn);
+        return rc;
     }
 
     return create_tag(entry, conn, attribs, tag_callback_func, userdata, tag_out);

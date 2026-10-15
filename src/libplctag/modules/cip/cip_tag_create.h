@@ -133,6 +133,17 @@ extern bool cip_entry_use_connected_msg(const cip_plc_entry_t *entry, attr attri
 /* NULL if no row matches, which is a configuration error and not an internal one. */
 extern const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t dialect);
 
+/* The largest receive buffer any row asks for, for a connection that does not know its row yet. */
+extern int cip_plc_entries_max_payload_capacity(void);
+
+/*
+ * The row for a device, from its Identity vendor ID and product name.  A device that is not
+ * recognised gets the generic CIP row.  A chassis module that is not a CPU is refused with
+ * PLCTAG_ERR_BAD_PARAM: the path stops short of the CPU, or there is no path at all.
+ */
+extern int cip_plc_entry_from_identity(uint16_t vendor_id, const char *product_name, bool has_path,
+                                       const cip_plc_entry_t **entry_out);
+
 /*
  * Which CIP family the plc (or legacy cpu) attribute names, for every family the library
  * speaks.

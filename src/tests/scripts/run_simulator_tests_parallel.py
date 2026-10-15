@@ -460,6 +460,14 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=10&name=TestBigArray",
                "--debug=4", "--write=1,2,3,4,5,6,7,8,9"], F)
+    # No plc: the connection reads the Identity object and takes the Logix row from the reply,
+    # then appends the Message Router to the path for the Forward Open.
+    no_plc_lgx = sec.test("no plc: identified as Logix, connected read/write",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&elem_count=10&name=TestBigArray",
+               "--debug=4", "--write=1,2,3,4,5,6,7,8,9", "--check"], F)
+    sec.test("check: no plc identified the device as Logix", None, F, depends_on=no_plc_lgx.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_lgx.log_file, pattern=r"Identified a Logix, connected\.", expected=1))
     sec.test("basic connected large tag read/write",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=TestBigArray",
@@ -516,6 +524,11 @@ def build_manifest() -> Manifest:
     sec.test("async create of a missing tag fails for good",
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=No_Such_Tag"], F,
+              server=create_fail_server)
+    # the same with no plc, so the create waits on the probe before its read can fail.
+    sec.test("no plc: async create of a missing tag fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&elem_count=1&name=No_Such_Tag"], F,
               server=create_fail_server)
     # @udt reads its definition at create, so an id the server does not answer fails there.
     sec.test("async create of a @udt the server refuses fails for good",
@@ -986,6 +999,13 @@ def build_manifest() -> Manifest:
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
+    # No plc: no Micro800 Identity reply has been seen on hardware, so it is not in the prefix
+    # table and becomes generic CIP -- @identity works, a data tag does not.
+    sec.test("no plc: an unrecognised device still serves @identity",
+              [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&name=@identity&debug=3"], F)
+    sec.test("no plc: an unrecognised device refuses a data tag",
+              [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&name=TestDINTArray",
+               "--debug=4"], F, expect_failure=True)
     # A real Micro800 packs its strings: a one-byte count and exactly that many characters, no
     # terminator, no padding to a capacity, so an array of them has no element stride.
     # VSHORTSTRING is the simulator's version of that, and cip_short_string_byte_order is what lets
@@ -1201,6 +1221,11 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0", "--write=42", "--check", "--debug=4"], F)
+    # No plc: identified from "1763-L16BWA", unconnected, so no Message Router on the path.
+    no_plc_mlgx = sec.test("no plc: identified as MicroLogix, N read/write",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&name=N7:1", "--write=43", "--check", "--debug=4"], F)
+    sec.test("check: no plc identified the device as MicroLogix", None, F, depends_on=no_plc_mlgx.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_mlgx.log_file, pattern=r"Identified a MicroLogix, unconnected\.", expected=1))
     sec.test("N bit data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=1", "--check=1", "--debug=4"], F)
     # Clearing matters as much as setting: a mask that turns on too much still passes a
@@ -1399,6 +1424,10 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=0", "--check=0"], F)
     sec.test("N data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0", "--check"], F)
+    no_plc_plc5 = sec.test("no plc: identified as PLC/5, N read/write",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&elem_count=1&name=N7:1", "--debug=4", "--write=44", "--check"], F)
+    sec.test("check: no plc identified the device as PLC/5", None, F, depends_on=no_plc_plc5.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_plc5.log_file, pattern=r"Identified a PLC/5, unconnected\.", expected=1))
     sec.test("N bit data file PLC5 tag read/write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1", "--check=1"], F)
     # --check on a bit tag re-reads only that bit, so a mask that also clobbered its

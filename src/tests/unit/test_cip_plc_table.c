@@ -302,7 +302,41 @@ static void test_the_path_rules(void **state) {
                                    "0&plc=controllogix&name=X"),
                      PLCTAG_ERR_TOO_LARGE);
 
+    /* with no plc the connection identifies the device, except across DH+, where it cannot. */
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&name=X"), PLCTAG_STATUS_OK);
+    assert_int_equal(create_status("protocol=ab-eip&gateway=127.0.0.1:1&path=1,2,A:27:1&name=X"), PLCTAG_ERR_BAD_PARAM);
+
     plc_tag_shutdown();
+}
+
+
+static cip_plc_type_t identified_as(uint16_t vendor_id, const char *product_name, bool has_path) {
+    const cip_plc_entry_t *entry = NULL;
+
+    if(cip_plc_entry_from_identity(vendor_id, product_name, has_path, &entry) != PLCTAG_STATUS_OK) { return CIP_PLC_NONE; }
+
+    return entry->plc_type;
+}
+
+
+/* the product names are the Identity replies of the bench hardware. */
+static void test_identity_picks_the_row(void **state) {
+    (void)state;
+
+    assert_int_equal(identified_as(1, "1756-L81E/B", false), CIP_PLC_LGX);
+    assert_int_equal(identified_as(1, "1756-L55/A 1756-M22/A LOGIX5555", true), CIP_PLC_LGX);
+    assert_int_equal(identified_as(1, "1756-L61/B LOGIX5561", true), CIP_PLC_LGX);
+    assert_int_equal(identified_as(1, "PLC-5/30 C/K - 1785-ENET 2.17 ", false), CIP_PLC_PLC5);
+    assert_int_equal(identified_as(1, "1763-L16BWA B/12.00", false), CIP_PLC_MLGX);
+
+    /* a chassis module is not a CPU, with or without a path that stops at it. */
+    assert_int_equal(identified_as(1, "1756-ENBT/A", false), CIP_PLC_NONE);
+    assert_int_equal(identified_as(1, "1756-ENBT/A", true), CIP_PLC_NONE);
+
+    /* anything else is generic CIP, which serves only special tags. */
+    assert_int_equal(identified_as(1, "1734-AENT/B", false), CIP_PLC_GENERIC);
+    assert_int_equal(identified_as(99, "1756-L81E/B", false), CIP_PLC_GENERIC);
+    assert_int_equal(identified_as(47, "NX102-9000", false), CIP_PLC_GENERIC);
 }
 
 
@@ -361,6 +395,7 @@ int main(void) {
         cmocka_unit_test(test_an_unparseable_path_is_rejected),
         cmocka_unit_test(test_a_path_bridges_when_it_leaves_the_chassis),
         cmocka_unit_test(test_the_path_rules),
+        cmocka_unit_test(test_identity_picks_the_row),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

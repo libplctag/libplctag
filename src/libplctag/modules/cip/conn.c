@@ -76,6 +76,9 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
  */
 static cip_conn_list_t conn_list = {0};
 
+/* the Message Router, which a connected path ends at.  Not const: mem_copy() takes a mutable source. */
+static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
+
 
 int cip_conn_startup(void) { return session_list_init(&conn_list); }
 
@@ -88,6 +91,10 @@ int32_t cip_conn_live_count(void) { return session_list_count(&conn_list); }
 
 int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
     cip_plc_type_t plc_type = cip_plc_type_from_attributes(attribs);
+    bool names_plc = (attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", NULL)) != NULL);
+
+    /* no PLC named: the connection reads the Identity object to find out. */
+    if(!names_plc) { return find_or_create_on_list(&conn_list, CIP_PLC_NONE, attribs, tag_conn, is_new_conn); }
 
     if(!cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT)) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unknown PLC type %d!", (int)plc_type);
@@ -95,6 +102,18 @@ int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn
     }
 
     return find_or_create_on_list(&conn_list, plc_type, attribs, tag_conn, is_new_conn);
+}
+
+
+const cip_plc_entry_t *cip_conn_plc_entry(cip_conn_p conn, int *identify_rc) {
+    const cip_plc_entry_t *entry = NULL;
+
+    critical_block(conn->session_mutex) {
+        entry = conn->plc_entry;
+        *identify_rc = conn->identify_rc;
+    }
+
+    return entry;
 }
 
 
@@ -366,7 +385,7 @@ cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *h
              * payload sizing, the messaging and the tag setup the connection hands out.  The
              * path is in the key too, so the dialect the path chose matches as well.
              */
-            if(conn->connection_group_id == connection_group_id && conn->plc_entry->plc_type == plc_type
+            if(conn->connection_group_id == connection_group_id && conn->plc_type == plc_type
                && session_match_valid(host, path, conn)) {
                 return conn;
             }
@@ -1433,6 +1452,70 @@ void session_destroy(void *conn_arg) {
 }
 
 
+/*
+ * Read the Identity object and take the family's row from it.  Runs on the handler thread
+ * before any tag request, so nothing else is using the buffer.
+ *
+ * A network failure is retried like any other connect failure.  An answer is not: a CIP
+ * error, or a device the classifier refuses, is recorded so the waiting tags fail with it.
+ */
+static int session_identify(cip_conn_p conn) {
+    const cip_plc_entry_t *entry = NULL;
+    uint16_t vendor_id = 0;
+    char product_name[256];
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    rc = cip_encode_identity_request(conn);
+    if(rc == PLCTAG_STATUS_OK) { rc = prepare_request(conn); }
+    if(rc == PLCTAG_STATUS_OK) {
+        conn->data_offset = 0;
+        rc = send_eip_request(conn, SESSION_DEFAULT_TIMEOUT);
+    }
+    if(rc == PLCTAG_STATUS_OK) { rc = recv_eip_response(conn, SESSION_DEFAULT_TIMEOUT); }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to exchange the Identity request, %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    rc = cip_decode_identity_response(conn, &vendor_id, product_name, sizeof(product_name));
+    if(rc == PLCTAG_STATUS_OK) { rc = cip_plc_entry_from_identity(vendor_id, product_name, conn->conn_path_size > 0, &entry); }
+
+    critical_block(conn->session_mutex) {
+        if(rc != PLCTAG_STATUS_OK) {
+            conn->identify_rc = rc;
+        } else {
+            conn->plc_entry = entry;
+            conn->only_use_old_forward_open = (conn->only_use_old_forward_open || entry->only_use_old_forward_open);
+            conn->max_payload_size = (uint16_t)entry->fo_conn_size;
+            /* ponytail: Logix's -1 means connected; unconnected Logix needs plc=lgx. */
+            conn->use_connected_msg = (entry->use_connected_msg != 0);
+
+            /*
+             * What cip_encode_path() appends for a connected family.  It could not when the
+             * connection was created, and the Identity request had to go without it.
+             */
+            if(conn->use_connected_msg) {
+                mem_copy(conn->conn_path + conn->conn_path_size, cip_router_path, (int)sizeof(cip_router_path));
+                conn->conn_path_size = (uint8_t)(conn->conn_path_size + sizeof(cip_router_path));
+            }
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Device refused, %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Identified a %s, %s.", entry->name,
+           (conn->use_connected_msg ? "connected" : "unconnected"));
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int receive_forward_open_response(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -1976,6 +2059,8 @@ THREAD_FUNC(session_handler) {
                 if((rc = session_register(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session registration failed %s!", plc_tag_decode_error(rc));
                     conn->state = SESSION_CLOSE_SOCKET;
+                } else if(!conn->plc_entry) {
+                    conn->state = SESSION_IDENTIFY;
                 } else {
                     if(conn->use_connected_msg) {
                         /* a fresh session gets a fresh set of Forward Open retries. */
@@ -1985,6 +2070,21 @@ THREAD_FUNC(session_handler) {
                     } else {
                         conn->state = SESSION_IDLE;
                     }
+                }
+                cond_signal(conn->session_wait_cond);
+                break;
+
+            case SESSION_IDENTIFY:
+                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_IDENTIFY state.");
+                session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
+
+                if((rc = session_identify(conn)) != PLCTAG_STATUS_OK) {
+                    conn->state = SESSION_UNREGISTER;
+                } else if(conn->use_connected_msg) {
+                    forward_open_reset_negotiation(conn);
+                    conn->state = SESSION_SEND_FORWARD_OPEN;
+                } else {
+                    conn->state = SESSION_IDLE;
                 }
                 cond_signal(conn->session_wait_cond);
                 break;
@@ -2388,10 +2488,21 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s connection, %s.", plc_entry->name,
-           (use_connected_msg ? "connected" : "unconnected"));
+    if(plc_entry) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s connection, %s.", plc_entry->name,
+               (use_connected_msg ? "connected" : "unconnected"));
 
-    data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)plc_entry->max_payload_capacity;
+        data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)plc_entry->max_payload_capacity;
+    } else {
+        /*
+         * No PLC named, so the Identity probe picks the row.  The buffer has to exist before
+         * that, so it is sized for the largest family.  The DH+ path the encoder rejected
+         * above is the one route Identity cannot see past.
+         */
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating a connection that will identify the device.");
+
+        data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)cip_plc_entries_max_payload_capacity();
+    }
 
     /* add in space for the data buffer. */
     if(data_buffer_is_static) {
@@ -2415,8 +2526,9 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
         path_offset = 0;
     }
 
+    /* a probed connection may turn out to need the router suffix the encoder left off. */
     conn_path_offset = total_allocation_size;
-    total_allocation_size += (size_t)tmp_conn_path_size;
+    total_allocation_size += (size_t)tmp_conn_path_size + (plc_entry ? 0 : sizeof(cip_router_path));
 
     /* allocate the conn struct and the buffer in the same allocation. */
     pdebug(
@@ -2485,18 +2597,21 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
 
     /* fix up the rest of teh fields */
     conn->owner_list = list;
+    conn->plc_type = plc_type;
     conn->plc_entry = plc_entry;
+    conn->identify_rc = PLCTAG_STATUS_OK;
 
     /* the one value off the row the negotiation is allowed to change */
-    conn->only_use_old_forward_open = plc_entry->only_use_old_forward_open;
+    conn->only_use_old_forward_open = (plc_entry ? plc_entry->only_use_old_forward_open : false);
 
     /* the opening ask comes from the row above, so the fallback ladder has not been touched yet. */
     conn->fo_ladder_idx = -1;
     conn->fo_offered_size = 0;
     conn->fo_dup_retries = 0;
     conn->fo_tried_plain = false;
-    conn->max_payload_size = (uint16_t)plc_entry->fo_conn_size;
-    conn->use_connected_msg = use_connected_msg;
+    /* a probed connection frames the Identity request unconnected; the row decides after. */
+    conn->max_payload_size = (uint16_t)(plc_entry ? plc_entry->fo_conn_size : 0);
+    conn->use_connected_msg = (plc_entry ? use_connected_msg : false);
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     conn->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
@@ -2554,7 +2669,8 @@ static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type
      * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.  A
      * DH+ path forces it on when the connection is created.
      */
-    int use_connected_msg = (cip_entry_use_connected_msg(cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT), attribs) ? 1 : 0);
+    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
+    int use_connected_msg = (plc_entry ? cip_entry_use_connected_msg(plc_entry, attribs) : 0);
     cip_conn_p session = NULL;
     int new_session = 0;
     /*
@@ -2600,10 +2716,15 @@ static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type
         if(shared_session) {
             session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_type);
 
-            /* one connection cannot be both connected and unconnected.  Asked of its own row, which may be DH+. */
-            if(session) { use_connected_msg = (cip_entry_use_connected_msg(session->plc_entry, attribs) ? 1 : 0); }
+            /*
+             * One connection cannot be both connected and unconnected.  Asked of its own row,
+             * which may be DH+.  A probed connection has no request to compare: the row decides.
+             */
+            if(session && session->plc_type != CIP_PLC_NONE) {
+                use_connected_msg = (cip_entry_use_connected_msg(session->plc_entry, attribs) ? 1 : 0);
+            }
 
-            if(session && session->use_connected_msg != use_connected_msg) {
+            if(session && session->plc_type != CIP_PLC_NONE && session->use_connected_msg != use_connected_msg) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                        "use_connected_msg=%d conflicts with the existing connection's %d!  Use a different "
                        "connection_group_id.",

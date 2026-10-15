@@ -49,6 +49,9 @@ extern const char *attr_get_str(attr attrs, const char *name, const char *def);
 extern int attr_get_int(attr attrs, const char *name, int def);
 extern void attr_destroy(attr attrs);
 
+/* A deep copy, for a holder that has to outlive the set it was given.  NULL on failure. */
+extern attr attr_copy(attr src);
+
 /*
  * Bring an attribute value inside its range.
  *

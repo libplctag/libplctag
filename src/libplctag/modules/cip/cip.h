@@ -43,6 +43,7 @@
  */
 
 #include <libplctag/modules/cip/conn.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -72,3 +73,12 @@ extern int cip_decode_forward_open_response(cip_conn_p conn);
 
 /* Decode a Forward Close reply. */
 extern int cip_decode_forward_close_response(cip_conn_p conn);
+
+/* Build an unconnected Get_Attributes_All on the Identity object into conn->data. */
+extern int cip_encode_identity_request(cip_conn_p conn);
+
+/*
+ * Decode the Identity reply into the vendor ID and the NUL-terminated product name.  A CIP
+ * error comes back as the library error for its status.
+ */
+extern int cip_decode_identity_response(cip_conn_p conn, uint16_t *vendor_id, char *product_name, size_t name_capacity);

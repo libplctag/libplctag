@@ -161,6 +161,12 @@ struct cip_tag_t {
      * library resets tag->status at the start of every operation.
      */
     plctag_error_code_t create_read_status;
+
+    /*
+     * A copy of the tag string's attributes, kept while the tag waits for a probed connection
+     * to identify the device and so pick its row.  NULL otherwise.
+     */
+    attr deferred_attribs;
     int offset;
     int allow_packing;
 

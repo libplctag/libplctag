@@ -875,8 +875,11 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     /* See if we are allowed to resize fields */
     tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
 
-    /* set up the tag byte order if there are any overrides. */
-    rc = set_tag_byte_order(tag, attribs);
+    /*
+     * Set up the tag byte order if there are any overrides.  A tag still waiting to learn its
+     * PLC has no byte order to override yet; its module applies them when it does.
+     */
+    rc = (tag->byte_order ? set_tag_byte_order(tag, attribs) : PLCTAG_STATUS_OK);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Unable to correctly set tag data byte order: %s!", plc_tag_decode_error(rc));
         attr_destroy(attribs);

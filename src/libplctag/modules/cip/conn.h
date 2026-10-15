@@ -188,6 +188,7 @@ typedef enum {
     SESSION_OPEN_SOCKET_START,
     SESSION_OPEN_SOCKET_WAIT,
     SESSION_REGISTER,
+    SESSION_IDENTIFY,
     SESSION_SEND_FORWARD_OPEN,
     SESSION_RECEIVE_FORWARD_OPEN,
     SESSION_IDLE,
@@ -345,9 +346,29 @@ typedef struct cip_conn_t {
     int connection_group_id;
 
     /*
+     * The PLC type the tag string named, CIP_PLC_NONE when it named none.  Part of the match
+     * key, and fixed for the connection's life: a probed connection stays NONE after it has
+     * identified the device, so later tags that also name no PLC still find it.
+     */
+    cip_plc_type_t plc_type;
+
+    /*
+     * Why the Identity probe refused the device, PLCTAG_STATUS_OK if it has not.  A refusal is
+     * an answer about the device rather than a network failure, so the tags waiting on the
+     * connection fail with it instead of waiting out their timeouts.  Read and written under
+     * session_mutex, as plc_entry is on a probed connection.
+     */
+    int identify_rc;
+
+    /*
      * The family and routing dialect this connection was created for, with its sizing and
      * its tag setup.  Rows are static constants with program lifetime, so this is never
-     * dangling and never written through, and never NULL.
+     * dangling and never written through.
+     *
+     * NULL on a probed connection until the handler has read the Identity object.  The
+     * handler writes it once, under session_mutex, before any request goes out; a tag reads
+     * it through cip_conn_plc_entry().  Everything else that reads it runs after a tag has
+     * been set up, or on the handler thread itself.
      *
      * Shared code reads what the family implies -- min_payload_size, the dialect -- rather
      * than plc_type, so it never has to know which family this is.  A tag asks the
@@ -555,6 +576,12 @@ extern void cip_conn_teardown(void);
 
 /* find a shared connection matching the tag's attributes, or create one. */
 extern int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn);
+
+/*
+ * The connection's row, safe to call from any thread.  NULL while a probed connection is
+ * still identifying the device; *identify_rc then says whether it refused the device.
+ */
+extern const cip_plc_entry_t *cip_conn_plc_entry(cip_conn_p conn, int *identify_rc);
 
 /*
  * How many connections the list currently holds.  Nothing in the library needs this; it

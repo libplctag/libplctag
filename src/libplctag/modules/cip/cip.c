@@ -44,6 +44,7 @@
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <libplctag/modules/cip/wire.h>
 #include <inttypes.h>
 #include <platform.h>
@@ -851,6 +852,83 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
     }
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/*
+ * Get_Attributes_All on the Identity object, unconnected.  A path wraps it in an Unconnected
+ * Send to the CPU; without one it goes to the device at the gateway.
+ */
+int cip_encode_identity_request(cip_conn_p conn) {
+    bool unrouted = (conn->conn_path_size == 0);
+    uint8_t *payload = conn->data + cip_framing_size(conn, unrouted);
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    payload[0] = CIP_GET_ATTRIBUTES_ALL;
+    payload[1] = 0x02; /* path size in 16-bit words */
+    payload[2] = 0x20; /* class segment */
+    payload[3] = 0x01; /* Identity */
+    payload[4] = 0x24; /* instance segment */
+    payload[5] = 0x01; /* instance 1 */
+
+    rc = write_request_framing(conn, 6, unrouted);
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
+
+    return rc;
+}
+
+
+int cip_decode_identity_response(cip_conn_p conn, uint16_t *vendor_id, char *product_name, size_t name_capacity) {
+    uint8_t *buf_end = conn->data + conn->data_size;
+    uint8_t *reply = conn->data + offsetof(eip_cip_uc_resp, reply_service);
+    uint8_t *data = NULL;
+    size_t name_len = 0;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    rc = validate_response_cpf(conn);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    /* a routing failure comes back as the Unconnected Send's own reply. */
+    if(reply[0] != (uint8_t)(CIP_GET_ATTRIBUTES_ALL | CIP_SVC_REPLY) || reply[2] != CIP_STATUS_OK) {
+        size_t status_size = cip_error_data_size(reply + 2, buf_end);
+
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Identity request failed, service 0x%02x: %s", (unsigned int)reply[0],
+               decode_cip_error_long(reply + 2, status_size));
+
+        return (reply[2] == CIP_STATUS_OK) ? PLCTAG_ERR_BAD_REPLY : decode_cip_error_code(reply + 2, status_size);
+    }
+
+    /*
+     * The four-byte reply header and its status words, then vendor (2), device type (2),
+     * product code (2), revision (2), status (2), serial number (4) and the product name as
+     * a SHORT_STRING.
+     */
+    data = reply + 4 + ((size_t)reply[3] * 2);
+
+    if(cip_error_data_size(data, buf_end) < 15) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Identity reply is too short!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    *vendor_id = (uint16_t)(data[0] | (data[1] << 8));
+    name_len = data[14];
+
+    if(cip_error_data_size(data + 15, buf_end) < name_len || name_len >= name_capacity) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Identity product name of %zu bytes does not fit!", name_len);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    mem_copy(product_name, data + 15, (int)name_len);
+    product_name[name_len] = 0;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Device is vendor %u, \"%s\".", (unsigned int)*vendor_id, product_name);
 
     return PLCTAG_STATUS_OK;
 }

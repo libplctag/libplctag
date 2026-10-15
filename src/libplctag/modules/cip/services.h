@@ -63,6 +63,9 @@
 /* OR'd into the service code in a reply. */
 #define CIP_SVC_REPLY ((uint8_t)0x80)
 
+/* Get_Attributes_All, which reads a whole object such as Identity. */
+#define CIP_GET_ATTRIBUTES_ALL ((uint8_t)0x01)
+
 /* reply status codes. */
 #define CIP_STATUS_OK ((uint8_t)0x00)
 #define CIP_STATUS_FRAG ((uint8_t)0x06) /* more data follows; ask again at the next offset */
