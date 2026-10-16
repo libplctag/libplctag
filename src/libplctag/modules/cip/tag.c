@@ -241,7 +241,7 @@ void cip_tag_finish_create(cip_tag_p tag, int rc) {
     }
 
     tag->create_read_status = PLCTAG_STATUS_OK;
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+    tag_created((plc_tag_p)tag, rc);
     plc_tag_generic_wake_tag((plc_tag_p)tag);
 }
 
@@ -252,10 +252,9 @@ void cip_tag_fail_create(cip_tag_p tag, plctag_error_code_t rc) {
     tag->create_read_status = rc;
     tag->status = (int8_t)rc;
 
-    /* the create read is over; completing it is what clears the library's in-flight flag. */
-    if(tag->read_in_flight) { tag->read_complete = 1; }
-
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+    /* the create read is over; ending it queues CREATED. */
+    tag_op_end((plc_tag_p)tag, rc);
+    tag_created((plc_tag_p)tag, rc);
 
     /* a sync create may be waiting; it should see the answer now, not when its timeout ends. */
     plc_tag_generic_wake_tag((plc_tag_p)tag);
@@ -282,7 +281,7 @@ int cip_tag_status(cip_tag_p tag) {
 
     if(tag->create_read_status == PLCTAG_STATUS_PENDING) { return PLCTAG_STATUS_PENDING; }
 
-    if(tag->read_in_progress || tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
+    if(tag_op_busy(tag)) { return PLCTAG_STATUS_PENDING; }
 
     rc = tag->status;
 
@@ -296,7 +295,7 @@ int cip_tag_status(cip_tag_p tag) {
  *
  * The connection forgets the tag first, under its own mutex, so the handler cannot be part way
  * through encoding or decoding for it when the flags below change.  It aborts even when nothing
- * is in flight: a tag can be left with a direction flag set and nothing queued -- that is
+ * is in flight: a tag can be left with an op state set and nothing queued -- that is
  * exactly the state an abort exists to clear.
  */
 int cip_tag_abort(cip_tag_p tag) {
@@ -309,8 +308,7 @@ int cip_tag_abort(cip_tag_p tag) {
 
     if(tag->session) { cip_conn_forget_tag(tag->session, tag); }
 
-    tag->read_in_progress = 0;
-    tag->write_in_progress = 0;
+    tag_op_set(tag, TAG_OP_IDLE);
     tag->offset = 0;
     tag->status = PLCTAG_ERR_ABORT;
 
@@ -502,24 +500,9 @@ int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module) {
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
-    if(tag->write_in_progress) {
-        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "A write is in progress on a read-only tag!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->read_in_progress) {
-        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Read operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    tag->read_in_progress = 1;
-
     rc = cip_tag_send(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
-
-        tag->read_in_progress = 0;
-
         return rc;
     }
 
@@ -677,18 +660,16 @@ int cip_tag_parse_elem_type(cip_tag_p tag, attr attribs, debug_module_t debug_mo
 }
 
 
-/* An operation is over: record how it ended and tell the library, which raises the event. */
-void cip_tag_op_done(cip_tag_p tag, int rc, bool is_read) {
+/* An operation is over: end it, which queues its event, and finish the create if it was the create read. */
+void cip_tag_op_done(cip_tag_p tag, int rc) {
+    bool is_read = tag_op_is_read(tag);
+
     pdebug(tag->debug_module, DEBUG_DETAIL, tag->tag_id, "%s done with status %s.", (is_read ? "Read" : "Write"),
            plc_tag_decode_error(rc));
 
-    tag->status = (int8_t)rc;
+    /* the op ends first, so that the create read ending queues CREATED rather than READ_COMPLETED. */
+    tag_op_end((plc_tag_p)tag, rc);
 
-    if(is_read) {
-        /* the first read completing is what completes the create. */
-        cip_tag_finish_create(tag, rc);
-        tag->read_complete = 1;
-    } else {
-        tag->write_complete = 1;
-    }
+    /* the first read completing is what completes the create. */
+    if(is_read) { cip_tag_finish_create(tag, rc); }
 }

@@ -51,6 +51,11 @@
 /* Tag path from command line */
 static char *tag_path = NULL;
 
+/* every event in arrival order; callbacks for one tag never run concurrently. */
+#define MAX_EVENTS (32)
+static int events[MAX_EVENTS];
+static int event_count = 0;
+
 typedef int32_t TAG_ELEMENT;
 
 
@@ -76,6 +81,8 @@ static void set_elem(int32_t tag, int offset, int32_t val) {
 void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     static int create_seen = 0; /* this is HORRIBLY unsafe for threading! */
     TAG_ELEMENT *data = (TAG_ELEMENT *)userdata;
+
+    if(event_count < MAX_EVENTS) { events[event_count++] = event; }
 
     /* handle the events. */
     switch(event) {
@@ -271,6 +278,14 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* a read refused as busy queues no events. */
+    rc = plc_tag_read(tag, 0);
+    if(rc != PLCTAG_ERR_BUSY) {
+        printf("ERROR: A read during a read returned %s, not BUSY.\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
     printf("Waiting for tag read to complete.\n");
     wait_for_ok(tag, DATA_TIMEOUT);
 
@@ -282,6 +297,26 @@ int main(int argc, char **argv) {
      * it when the tag is destroyed.
      */
     plc_tag_destroy(tag);
+
+    /* destroy aborts first, so ABORTED comes just before DESTROYED. */
+    {
+        static const int expected[] = {PLCTAG_EVENT_CREATED,         PLCTAG_EVENT_READ_STARTED,  PLCTAG_EVENT_READ_COMPLETED,
+                                       PLCTAG_EVENT_WRITE_STARTED,   PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_EVENT_READ_STARTED,
+                                       PLCTAG_EVENT_READ_COMPLETED,  PLCTAG_EVENT_ABORTED,       PLCTAG_EVENT_DESTROYED};
+        int expected_count = (int)(sizeof(expected) / sizeof(expected[0]));
+        bool match = (event_count == expected_count);
+
+        for(i = 0; match && i < expected_count; i++) { match = (events[i] == expected[i]); }
+
+        printf("Events:");
+        for(i = 0; i < event_count; i++) { printf(" %d", events[i]); }
+        printf("\n");
+
+        if(!match) {
+            printf("ERROR: The events were not the expected sequence 7 1 2 3 4 1 2 5 6.\n");
+            return 1;
+        }
+    }
 
     printf("SUCCESS!\n");
 

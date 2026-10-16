@@ -237,6 +237,29 @@ struct tag_byte_order_s {
 typedef struct tag_byte_order_s tag_byte_order_t;
 
 
+typedef enum {
+    TAG_OP_IDLE = 0,
+    TAG_OP_READ_REQUEST,  /* waiting to be sent */
+    TAG_OP_READ_RESPONSE, /* sent, waiting for the reply */
+    TAG_OP_WRITE_REQUEST,
+    TAG_OP_WRITE_RESPONSE
+} tag_op_state_t;
+
+
+/*
+ * ponytail: fixed 16 entries.  The tag's handler dispatches every pass, so a full ring means the
+ * dispatcher is starved; the push logs ERROR and drops the event.  Grow it if a real workload
+ * hits that.
+ */
+#define TAG_EVENT_RING_SIZE (16)
+#define TAG_EVENT_RING_MASK (TAG_EVENT_RING_SIZE - 1)
+
+typedef struct {
+    uint8_t event; /* PLCTAG_EVENT_*, all below 256 */
+    int8_t status;
+} tag_event_t;
+
+
 typedef void (*tag_callback_func)(int32_t tag_id, int event, int status);
 typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status, void *user_data);
 
@@ -273,33 +296,19 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int bit;                                                                            \
     int protocol_type;                                                                  \
     atomic_bool abort_requested;                                                        \
+    /* tag_op_state_t; see tag_op_state(). */                                          \
+    atomic_int32_t op_state;                                                            \
+    tag_event_t events[TAG_EVENT_RING_SIZE];                                            \
     /* On its handler's active list.  Written under the handler's own mutex. */         \
     bool in_active_vector;                                                              \
-    int8_t event_creation_complete_status;                                              \
-    int8_t event_deletion_started_status;                                               \
-    int8_t event_operation_aborted_status;                                              \
-    int8_t event_read_complete_status;                                                  \
-    int8_t event_read_started_status;                                                   \
-    int8_t event_write_complete_status;                                                 \
-    int8_t event_write_started_status;                                                  \
+    /* CREATED has been queued. */                                                      \
+    bool created;                                                                       \
+    uint8_t event_head;  /* next event to dispatch */                                   \
+    uint8_t event_count; /* events queued */                                            \
     int8_t status;                                                                      \
     uint8_t allow_field_resize : 1;                                                     \
-    uint8_t event_creation_complete : 1;                                                \
-    uint8_t event_deletion_started : 1;                                                 \
-    uint8_t event_operation_aborted : 1;                                                \
-    uint8_t event_read_complete : 1;                                                    \
-    uint8_t event_read_complete_enable : 1;                                             \
-    uint8_t event_read_started : 1;                                                     \
-    uint8_t event_write_complete : 1;                                                   \
-    uint8_t event_write_complete_enable : 1;                                            \
-    uint8_t event_write_started : 1;                                                    \
-    uint8_t had_created_event : 1;                                                      \
     uint8_t is_bit : 1;                                                                 \
-    uint8_t read_complete : 1;                                                          \
-    uint8_t read_in_flight : 1;                                                         \
-    uint8_t tag_is_dirty : 1;                                                           \
-    uint8_t write_complete : 1;                                                         \
-    uint8_t write_in_flight : 1
+    uint8_t tag_is_dirty : 1
 
 
 struct plc_tag_t {
@@ -345,105 +354,42 @@ extern void destroy_tag_common(plc_tag_p tag);
 
 extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
-extern void plc_tag_generic_raise_completions(plc_tag_p tag);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
 extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                     void *userdata);
 
-static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
-    /* do not stack up events if there is no callback. */
-    if(!tag->callback) { return; }
 
-    switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_ABORTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_operation_aborted = 1;
-            tag->event_operation_aborted_status = status;
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising synthesized created event on abort event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-            break;
+/*
+ * Op state and events.
+ *
+ * The op state is what the tag is doing now.  Events are what happened, queued in order on the
+ * tag's ring and dispatched by plc_tag_generic_handle_event_callbacks().  The four transitions
+ * below are the only places that queue op and creation events.  All of them, and every write of
+ * op_state, happen with the tag's API mutex held.  op_state is atomic so that a handler holding
+ * only its connection mutex can read it.
+ */
+#define tag_op_state(tag) ((tag_op_state_t)atomic_get_int32(&(tag)->op_state))
+#define tag_op_set(tag, state) atomic_set_int32(&(tag)->op_state, (int32_t)(state))
+#define tag_op_busy(tag) (tag_op_state(tag) != TAG_OP_IDLE)
+#define tag_op_is_read(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST || tag_op_state(tag) == TAG_OP_READ_RESPONSE)
 
-        case PLCTAG_EVENT_CREATED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-                tag->had_created_event = 1;
-            } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED skipped due to duplication.");
-            }
-            break;
+/* queue one event; dropped when the tag has no callback. */
+extern void tag_event_push(plc_tag_p tag, int event, int status);
 
-        case PLCTAG_EVENT_DESTROYED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_DESTROYED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_deletion_started = 1;
-            tag->event_deletion_started_status = status;
-            break;
+/* IDLE -> READ_REQUEST or WRITE_REQUEST; queues READ_STARTED or WRITE_STARTED once the tag is created. */
+extern void tag_op_start(plc_tag_p tag, bool is_read);
 
-        case PLCTAG_EVENT_READ_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_READ_COMPLETED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising synthesized created event on read completed event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
+/*
+ * The op is over with rc: sets the tag status, goes IDLE, queues the COMPLETED event and wakes
+ * waiters.  An op that ends before the tag is created is its create read, and queues CREATED
+ * instead.  Does nothing on an IDLE tag.
+ */
+extern void tag_op_end(plc_tag_p tag, int rc);
 
-            if(tag->event_read_complete_enable) {
-                tag->event_read_complete = 1;
-                tag->event_read_complete_status = status;
-                tag->event_read_complete_enable = 0;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Disabled PLCTAG_EVENT_READ_COMPLETE.");
-            }
-            break;
+/* Go IDLE: CREATED(ABORT) if not yet created, COMPLETED(ABORT) if an op was running, then ABORTED. */
+extern void tag_op_abort(plc_tag_p tag);
 
-        case PLCTAG_EVENT_READ_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_READ_STARTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_read_started = 1;
-            tag->event_read_started_status = status;
-            tag->event_read_complete_enable = 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_READ_COMPLETE.");
-            break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_WRITE_COMPLETED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id,
-                       "Raising synthesized created event on write completed event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-
-            if(tag->event_write_complete_enable) {
-                tag->event_write_complete = 1;
-                tag->event_write_complete_status = status;
-                tag->event_write_complete_enable = 0;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Disabled PLCTAG_EVENT_WRITE_COMPLETE.");
-            }
-            break;
-
-        case PLCTAG_EVENT_WRITE_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_WRITE_STARTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_write_started = 1;
-            tag->event_write_started_status = status;
-            tag->event_write_complete_enable = 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_WRITE_COMPLETE.");
-            break;
-
-        default: pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported event %d!", status); break;
-    }
-}
+/* queue CREATED with rc, once. */
+extern void tag_created(plc_tag_p tag, int rc);

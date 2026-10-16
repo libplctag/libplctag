@@ -180,11 +180,9 @@ static int udt_tag_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t repl
 
 
 int udt_tag_read_start(cip_tag_p tag) {
-    /* a new read starts with the metadata, but a busy tag keeps its place. */
-    if(!tag->read_in_progress && !tag->write_in_progress) {
-        tag->udt_get_fields = 0;
-        tag->offset = 0;
-    }
+    /* a new read starts with the metadata. */
+    tag->udt_get_fields = 0;
+    tag->offset = 0;
 
     return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
 }

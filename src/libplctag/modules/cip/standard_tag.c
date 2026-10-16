@@ -243,21 +243,10 @@ int cip_standard_tag_read_start(plc_tag_p tag_arg) {
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
-    if(tag->read_in_progress || tag->write_in_progress) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* mark the tag read in progress */
-    tag->read_in_progress = 1;
-
     rc = cip_tag_send(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
-
-        tag->read_in_progress = 0;
-
         return rc;
     }
 
@@ -286,20 +275,15 @@ int cip_standard_tag_write_start(plc_tag_p tag_arg) {
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
     /* the create read is still out, so the type and size are not known yet. */
-    if(tag->read_in_progress || tag->write_in_progress || tag->create_read_status == PLCTAG_STATUS_PENDING) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "The create read is still in flight!");
         return PLCTAG_ERR_BUSY;
     }
-
-    /* the write is now in flight */
-    tag->write_in_progress = 1;
 
     rc = cip_tag_send(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
-        tag->write_in_progress = 0;
-
         return rc;
     }
 

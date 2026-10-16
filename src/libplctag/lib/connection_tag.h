@@ -61,7 +61,6 @@ typedef struct {
     int32_t last_conn_state;  /* last state delivered to the callback */
     int32_t ring_read_idx;    /* last ring entry this tag has processed */
     int32_t io_events;        /* 1 = report connection reads and writes, 0 = suppress */
-    bool first_tickler_run;   /* true until the first delivery after CREATED */
     debug_module_t debug_module;
 } connection_tag_t;
 

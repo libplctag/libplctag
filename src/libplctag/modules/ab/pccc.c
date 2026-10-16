@@ -1397,13 +1397,6 @@ int pccc_finish_request(cip_tag_p tag, int rc, bool is_write) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new %s request, %s!",
            (is_write ? "write" : "read"), plc_tag_decode_error(rc));
 
-    if(is_write) {
-        tag->write_in_progress = 0;
-        tag->write_complete = 1;
-    } else {
-        tag->read_in_progress = 0;
-    }
-
     tag->offset = 0;
 
     return rc;
@@ -1530,9 +1523,7 @@ int pccc_tag_status(cip_tag_p tag) {
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
-    if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
-
-    if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
+    if(tag_op_busy(tag)) { return PLCTAG_STATUS_PENDING; }
 
     return tag->status;
 }
@@ -1549,13 +1540,6 @@ int pccc_tag_read_start(cip_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    if(tag->read_in_progress || tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    tag->read_in_progress = 1;
 
     rc = pccc_finish_request(tag, cip_tag_send(tag), false);
 
@@ -1707,20 +1691,12 @@ int pccc_tag_write_start(cip_tag_p tag) {
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
-    if(tag->read_in_progress || tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read (%d) or write (%d) operation already in flight!",
-               tag->read_in_progress, tag->write_in_progress);
-        return PLCTAG_ERR_BUSY;
-    }
-
     /* the SLC masked write's mask is only 16 bits. */
     if(tag->is_bit && tag->plc_type != CIP_PLC_PLC5 && (tag->size != 2 || tag->elem_size != 2)) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Tag (%d bytes) and element size (%d bytes) must be 2 bytes!",
                tag->size, tag->elem_size);
         return PLCTAG_ERR_UNSUPPORTED;
     }
-
-    tag->write_in_progress = 1;
 
     rc = pccc_finish_request(tag, cip_tag_send(tag), true);
 

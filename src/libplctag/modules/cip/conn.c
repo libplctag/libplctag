@@ -74,7 +74,7 @@ static void tickle_tags_unsafe(cip_conn_p conn, cip_tag_p *tags, int32_t count, 
 static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now);
 static int dispatch_replies_unsafe(cip_conn_p conn);
 static void requeue_slots_unsafe(cip_conn_p conn);
-static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc, bool is_read);
+static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc);
 static void arm_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int64_t now);
 static void notify_later_unsafe(cip_conn_p conn, cip_tag_p tag);
 static void notify_tags(cip_conn_p conn);
@@ -1522,7 +1522,7 @@ static void tickle_due_tags_unsafe(cip_conn_p conn, int64_t now) {
 
         if(tag->op_time > now) { break; }
 
-        if(!tag->read_in_progress && !tag->write_in_progress) { due[count++] = tag; }
+        if(!tag_op_busy(tag)) { due[count++] = tag; }
     }
 
     tickle_tags_unsafe(conn, due, count, now);
@@ -1541,7 +1541,7 @@ static void tickle_waiting_creates_unsafe(cip_conn_p conn) {
     for(int32_t i = 0; i < vector_length(conn->active) && count < CIP_TICKLE_BATCH; i++) {
         cip_tag_p tag = vector_get(conn->active, i);
 
-        if(tag->create_read_status == PLCTAG_STATUS_PENDING && !tag->read_in_progress && !tag->write_in_progress) {
+        if(tag->create_read_status == PLCTAG_STATUS_PENDING && !tag_op_busy(tag)) {
             waiting[count++] = tag;
         }
     }
@@ -1566,7 +1566,7 @@ static void tickle_tags_unsafe(cip_conn_p conn, cip_tag_p *tags, int32_t count, 
 
         if(tag->vtable->tickler) { tag->vtable->tickler((plc_tag_p)tag); }
 
-        if(!tag->read_in_progress && !tag->write_in_progress) { arm_tag_unsafe(conn, tag, now); }
+        if(!tag_op_busy(tag)) { arm_tag_unsafe(conn, tag, now); }
 
         notify_later_unsafe(conn, tag);
 
@@ -1596,7 +1596,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
     while(index < vector_length(conn->active) && conn->slot_count < MAX_REQUESTS) {
         cip_tag_p tag = vector_get(conn->active, index);
         tag_op_plan_t plan = {0};
-        bool is_read = (tag->read_in_progress != 0);
+        bool is_read = tag_op_is_read(tag);
         tag_encode_func encode = is_read ? tag->vtable->encode_read : tag->vtable->encode_write;
         int32_t capacity = request_space;
         int rc = PLCTAG_STATUS_OK;
@@ -1605,7 +1605,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
         if(tag->op_time > now) { break; }
 
         /* armed for an auto-sync deadline, or waiting for its tickle: no request to send. */
-        if(!tag->read_in_progress && !tag->write_in_progress) {
+        if(!tag_op_busy(tag)) {
             index++;
             continue;
         }
@@ -1640,7 +1640,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
         if(rc == PLCTAG_ERR_TOO_SMALL) { rc = PLCTAG_ERR_TOO_LARGE; }
 
         if(rc != PLCTAG_STATUS_OK) {
-            finish_tag_unsafe(conn, tag, rc, is_read);
+            finish_tag_unsafe(conn, tag, rc);
             mutex_unlock(tag->api_mutex);
             continue;
         }
@@ -1725,7 +1725,7 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
             tag->status = (int8_t)PLCTAG_STATUS_PENDING;
             tag_schedule_insert(conn->active, (plc_tag_p)tag, time_ms());
         } else {
-            finish_tag_unsafe(conn, tag, rc, is_read);
+            finish_tag_unsafe(conn, tag, rc);
         }
 
         mutex_unlock(tag->api_mutex);
@@ -1756,12 +1756,8 @@ static void requeue_slots_unsafe(cip_conn_p conn) {
  * deadline if it has one, and its callbacks once session_mutex is released.  Called with
  * session_mutex and the tag's API mutex held.
  */
-static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc, bool is_read) {
-    tag->read_in_progress = 0;
-    tag->write_in_progress = 0;
-
-    cip_tag_op_done(tag, rc, is_read);
-    plc_tag_generic_raise_completions((plc_tag_p)tag);
+static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc) {
+    cip_tag_op_done(tag, rc);
 
     arm_tag_unsafe(conn, tag, time_ms());
     notify_later_unsafe(conn, tag);
@@ -1778,7 +1774,7 @@ static void arm_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int64_t now) {
     int64_t when = 0;
 
     /* a dirty tag reads after its write; a write in flight holds the read back too. */
-    if(tag->auto_sync_read_ms > 0 && !tag->tag_is_dirty && !tag->write_in_flight) {
+    if(tag->auto_sync_read_ms > 0 && !tag->tag_is_dirty && !tag_op_busy(tag)) {
         when = (tag->auto_sync_next_read > now) ? tag->auto_sync_next_read : now + 1;
     }
 
@@ -1848,7 +1844,7 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
     while(index < vector_length(conn->active)) {
         cip_tag_p tag = vector_get(conn->active, index);
 
-        if(!tag->read_in_progress && !tag->write_in_progress) {
+        if(!tag_op_busy(tag)) {
             index++;
             continue;
         }
@@ -1861,7 +1857,7 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
             continue;
         }
 
-        finish_tag_unsafe(conn, tag, rc, (tag->read_in_progress != 0));
+        finish_tag_unsafe(conn, tag, rc);
         failed++;
 
         mutex_unlock(tag->api_mutex);

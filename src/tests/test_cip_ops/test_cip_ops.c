@@ -46,7 +46,7 @@
  *   many-tags              create and read --count tags at once, more than fit in one
  *                          Multiple Service Packet; all complete with good data.
  *   callback-holds-mutex   a tag's reply arrives while its own callback is running, and so
- *                          holding the tag's API mutex; the read completes once it returns.
+ *                          holding the tag's API mutex; the write completes once it returns.
  *
  * Every tag is an element of TestBigArray, a DINT array the simulator must provide with at
  * least --count elements.  The test writes element i as i * 3 + 1 first, so each read checks
@@ -85,7 +85,7 @@ static int32_t ids[MAX_TAGS];
 
 static compat_atomic_int32_t callback_armed;
 static compat_atomic_int32_t callback_slept;
-static compat_atomic_int32_t reads_completed;
+static compat_atomic_int32_t writes_completed;
 
 
 static int32_t value_of(int32_t index) { return index * 3 + 1; }
@@ -271,7 +271,8 @@ static int32_t run_callback_holds_mutex(const char *base) {
     int32_t rc = PLCTAG_STATUS_OK;
     int64_t start = 0;
 
-    compat_snprintf(attrs, sizeof(attrs), "%s&elem_count=1&name=TestBigArray[%" PRId32 "]", base, index);
+    /* the cache lets a read finish at once while a write is still out. */
+    compat_snprintf(attrs, sizeof(attrs), "%s&elem_count=1&read_cache_ms=600000&name=TestBigArray[%" PRId32 "]", base, index);
 
     id = plc_tag_create_ex(attrs, callback, NULL, DATA_TIMEOUT);
     if(id < 0) {
@@ -279,25 +280,33 @@ static int32_t run_callback_holds_mutex(const char *base) {
         return 1;
     }
 
-    compat_atomic_store_int32(&reads_completed, 0);
+    rc = plc_tag_read(id, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAIL: the first read returned %s.\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(id);
+        return 1;
+    }
 
-    rc = plc_tag_read(id, 0);
+    compat_atomic_store_int32(&writes_completed, 0);
+
+    /* the value it already holds, so the element still checks afterwards. */
+    rc = plc_tag_write(id, 0);
     if(rc != PLCTAG_STATUS_PENDING) {
-        printf("FAIL: the first read returned %s, not PENDING.\n", plc_tag_decode_error(rc));
+        printf("FAIL: the write returned %s, not PENDING.\n", plc_tag_decode_error(rc));
         failures++;
     }
 
     /*
-     * A second read while the first is out raises READ_STARTED and runs the callback inside
-     * the tag's API mutex before it finds the tag busy.  The callback sleeps there, so the
-     * first read's reply arrives while the mutex is held.
+     * A cached read while the write is out raises READ_STARTED and runs the callback inside the
+     * tag's API mutex.  The callback sleeps there, so the write's reply arrives while the mutex
+     * is held.
      */
     start = compat_time_ms();
     compat_atomic_store_int32(&callback_armed, 1);
 
     rc = plc_tag_read(id, 0);
-    if(rc != PLCTAG_ERR_BUSY) {
-        printf("FAIL: the second read returned %s, not BUSY.\n", plc_tag_decode_error(rc));
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAIL: the cached read returned %s, not OK.\n", plc_tag_decode_error(rc));
         failures++;
     }
 
@@ -312,16 +321,16 @@ static int32_t run_callback_holds_mutex(const char *base) {
     failures += check_value(id, index);
 
     /* the completion event is raised by a library thread; give it the same budget. */
-    while(compat_atomic_load_int32(&reads_completed) < 1 && compat_time_ms() - start < DATA_TIMEOUT) {
+    while(compat_atomic_load_int32(&writes_completed) < 1 && compat_time_ms() - start < DATA_TIMEOUT) {
         compat_sleep_ms(10, NULL);
     }
 
-    if(compat_atomic_load_int32(&reads_completed) != 1) {
-        printf("FAIL: READ_COMPLETED fired %" PRId32 " times, expected 1.\n", compat_atomic_load_int32(&reads_completed));
+    if(compat_atomic_load_int32(&writes_completed) != 1) {
+        printf("FAIL: WRITE_COMPLETED fired %" PRId32 " times, expected 1.\n", compat_atomic_load_int32(&writes_completed));
         failures++;
     }
 
-    printf("The read completed %" PRId64 "ms after the callback took the mutex.\n", compat_time_ms() - start);
+    printf("The write completed %" PRId64 "ms after the callback took the mutex.\n", compat_time_ms() - start);
 
     plc_tag_destroy(id);
 
@@ -340,7 +349,7 @@ static void callback(int32_t tag_id, int event, int status, void *userdata) {
         compat_atomic_store_int32(&callback_slept, 1);
     }
 
-    if(event == PLCTAG_EVENT_READ_COMPLETED) { compat_atomic_add_int32(&reads_completed, 1); }
+    if(event == PLCTAG_EVENT_WRITE_COMPLETED) { compat_atomic_add_int32(&writes_completed, 1); }
 }
 
 

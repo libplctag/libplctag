@@ -134,241 +134,187 @@ int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag)
 /*
  * plc_tag_generic_tickler
  *
- * This implements the protocol-independent tickling functions such as handling
- * automatic tag operations and callbacks.
+ * The protocol-independent housekeeping a tag's handler runs for it: an abort request, and
+ * automatic reads and writes.  Called with the tag's API mutex held.
  */
 
 void plc_tag_generic_tickler(plc_tag_p tag) {
-    if(tag) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tickling tag %d.", tag->tag_id);
+    int rc = PLCTAG_STATUS_OK;
 
-        /* first check for aborts */
-        if(atomic_get_bool(&tag->abort_requested)) {
+    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tickling tag %d.", tag->tag_id);
+
+    if(atomic_get_bool(&tag->abort_requested)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting ongoing operation if any!");
+
+        tag_op_abort(tag);
+        if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+
+        atomic_set_bool(&tag->abort_requested, false);
+
+        return;
+    }
+
+    /* a dirty tag writes auto_sync_write_ms after it was first written to, ahead of any read. */
+    if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
+        if(tag_op_is_read(tag)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting in-flight automatic read!");
+
+            tag_op_abort(tag);
             if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
-
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting ongoing operation if any!");
-
-            tag->read_complete = 0;
-            tag->read_in_flight = 0;
-            tag->write_complete = 0;
-            tag->write_in_flight = 0;
-
-            /* clear the flag so we do not do this again. */
-            atomic_set_bool(&tag->abort_requested, false);
-
-            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
-
-            /* do not do anything else. */
-            return;
         }
 
-        /* if this tag has automatic writes, then there are many things we should check */
-        if(tag->auto_sync_write_ms > 0) {
-            /* has the tag been written to? */
-            if(tag->tag_is_dirty) {
-                /* abort any in flight read if the tag is dirty. */
-                if(tag->read_in_flight) {
-                    if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+        if(!tag->auto_sync_next_write) {
+            tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
 
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Aborting in-flight automatic read!");
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Queueing up automatic write in %dms.", tag->auto_sync_write_ms);
+        } else if(!tag_op_busy(tag) && tag->auto_sync_next_write <= time_ms()) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Triggering automatic write start.");
 
-                    tag->read_complete = 0;
-                    tag->read_in_flight = 0;
+            tag->tag_is_dirty = 0;
+            tag->auto_sync_next_write = 0;
 
-                    /* TODO - should we report an ABORT event here? */
-                    tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+            tag_op_start(tag, false);
+
+            rc = (tag->vtable && tag->vtable->write) ? tag->vtable->write(tag) : PLCTAG_ERR_NOT_IMPLEMENTED;
+            if(rc != PLCTAG_STATUS_PENDING) { tag_op_end(tag, rc); }
+        }
+    }
+
+    if(tag->auto_sync_read_ms > 0) {
+        int64_t current_time = time_ms();
+
+        if(tag->auto_sync_next_read < current_time) {
+            if(!tag_op_busy(tag) && !tag->tag_is_dirty) {
+                int64_t periods = 0;
+
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Triggering automatic read start.");
+
+                tag_op_start(tag, true);
+
+                rc = (tag->vtable && tag->vtable->read) ? tag->vtable->read(tag) : PLCTAG_ERR_NOT_IMPLEMENTED;
+                if(rc != PLCTAG_STATUS_PENDING) { tag_op_end(tag, rc); }
+
+                /*
+                 * Skip to the next read time that is a whole multiple of the period, so that
+                 * jitter does not slowly move the polling cycle.
+                 */
+                periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1)) / tag->auto_sync_read_ms;
+
+                if(periods > 1) {
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods,
+                           tag->auto_sync_read_ms);
                 }
 
-                /* have we already done something about automatic reads? */
-                if(!tag->auto_sync_next_write) {
-                    /* we need to queue up a new write. */
-                    tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
-
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Queueing up automatic write in %dms.",
-                           tag->auto_sync_write_ms);
-                } else if(!tag->write_in_flight && tag->auto_sync_next_write <= time_ms()) {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Triggering automatic write start.");
-
-                    /* clear out any outstanding reads. */
-                    if(tag->read_in_flight) {
-                        if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
-
-                        tag->read_in_flight = 0;
-                    }
-
-                    tag->tag_is_dirty = 0;
-                    tag->write_in_flight = 1;
-                    tag->auto_sync_next_write = 0;
-
-                    if(tag->vtable && tag->vtable->write) { tag->status = (int8_t)tag->vtable->write(tag); }
-
-                    tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
-                }
+                tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Scheduling next read at time %" PRId64 ".",
+                       tag->auto_sync_next_read);
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Unable to start auto read, op state %d, tag_is_dirty=%d!",
+                       (int)tag_op_state(tag), tag->tag_is_dirty);
             }
         }
-
-        /* if this tag has automatic reads, we need to check that state too. */
-        if(tag->auto_sync_read_ms > 0) {
-            int64_t current_time = time_ms();
-
-
-            /* do we need to read? */
-            if(tag->auto_sync_next_read < current_time) {
-                /* make sure that we do not have an outstanding read or write. */
-                if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
-                    int64_t periods = 0;
-
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Triggering automatic read start.");
-
-                    tag->read_in_flight = 1;
-
-                    if(tag->vtable && tag->vtable->read) { tag->status = (int8_t)tag->vtable->read(tag); }
-
-                    tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, tag->status);
-
-                    /*
-                     * schedule the next read.
-                     *
-                     * Note that there will be some jitter.  In that case we want to skip
-                     * to the next read time that is a whole multiple of the read period.
-                     *
-                     * This keeps the jitter from slowly moving the polling cycle.
-                     *
-                     * Round up to the next period.
-                     */
-                    periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1)) / tag->auto_sync_read_ms;
-
-                    /* warn if we need to skip more than one period. */
-                    if(periods > 1) {
-                        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Skipping %" PRId64 " periods of %" PRId32 "ms.",
-                               periods, tag->auto_sync_read_ms);
-                    }
-
-                    tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Scheduling next read at time %" PRId64 ".",
-                           tag->auto_sync_next_read);
-                } else {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id,
-                           "Unable to start auto read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!",
-                           tag->read_in_flight, tag->tag_is_dirty, tag->write_in_flight);
-                }
-            }
-        }
-    } else {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Called with null tag pointer!");
     }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Done.");
 }
 
 
-/*
- * Turn the completion flags a protocol sets into events, and wake anyone waiting on the tag.
- * Called with the tag's API mutex held, by whichever thread drives the tag.
- */
-void plc_tag_generic_raise_completions(plc_tag_p tag) {
-    if(tag->read_complete) {
-        tag->read_complete = 0;
-        tag->read_in_flight = 0;
+void tag_event_push(plc_tag_p tag, int event, int status) {
+    /* do not stack up events if there is no callback. */
+    if(!tag->callback) { return; }
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
-
-        tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
-
-        cond_signal(tag->tag_cond_wait);
+    if(tag->event_count >= TAG_EVENT_RING_SIZE) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, tag->tag_id, "Event ring full, dropping event %d with status %s!", event,
+               plc_tag_decode_error(status));
+        return;
     }
 
-    if(tag->write_complete) {
-        tag->write_complete = 0;
-        tag->write_in_flight = 0;
-        tag->auto_sync_next_write = 0;
-
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
-
-        tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
-
-        cond_signal(tag->tag_cond_wait);
-    }
+    tag->events[(tag->event_head + tag->event_count) & TAG_EVENT_RING_MASK] =
+        (tag_event_t){.event = (uint8_t)event, .status = (int8_t)status};
+    tag->event_count++;
 }
 
 
+void tag_created(plc_tag_p tag, int rc) {
+    if(tag->created) { return; }
+
+    tag->created = true;
+    tag_event_push(tag, PLCTAG_EVENT_CREATED, rc);
+}
+
+
+void tag_op_start(plc_tag_p tag, bool is_read) {
+    tag_op_set(tag, (is_read ? TAG_OP_READ_REQUEST : TAG_OP_WRITE_REQUEST));
+
+    if(tag->created) { tag_event_push(tag, (is_read ? PLCTAG_EVENT_READ_STARTED : PLCTAG_EVENT_WRITE_STARTED), PLCTAG_STATUS_OK); }
+}
+
+
+void tag_op_end(plc_tag_p tag, int rc) {
+    bool is_read = tag_op_is_read(tag);
+
+    if(!tag_op_busy(tag)) { return; }
+
+    tag->status = (int8_t)rc;
+    tag_op_set(tag, TAG_OP_IDLE);
+
+    if(!is_read) { tag->auto_sync_next_write = 0; }
+
+    if(tag->created) {
+        tag_event_push(tag, (is_read ? PLCTAG_EVENT_READ_COMPLETED : PLCTAG_EVENT_WRITE_COMPLETED), rc);
+    } else {
+        tag_created(tag, rc);
+    }
+
+    cond_signal(tag->tag_cond_wait);
+}
+
+
+void tag_op_abort(plc_tag_p tag) {
+    bool was_busy = tag_op_busy(tag);
+    bool is_read = tag_op_is_read(tag);
+
+    tag_op_set(tag, TAG_OP_IDLE);
+
+    if(!tag->created) {
+        tag_created(tag, PLCTAG_ERR_ABORT);
+    } else if(was_busy) {
+        tag_event_push(tag, (is_read ? PLCTAG_EVENT_READ_COMPLETED : PLCTAG_EVENT_WRITE_COMPLETED), PLCTAG_ERR_ABORT);
+    }
+
+    tag_event_push(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+
+    cond_signal(tag->tag_cond_wait);
+}
+
+
+/* Run the callback for each queued event, oldest first. */
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
-    /* punt if not needed. */
     if(!tag) { return; }
 
     critical_block(tag->api_mutex) {
-        /* Check the callback under the API mutex, not before: plc_tag_destroy() clears
-         * the callback (and userdata) under this same mutex while tearing the tag down.
-         * A handler thread holds its own reference and can call this function
-         * after plc_tag_destroy() has returned, so an unsynchronized pre-check here would
-         * race that clear -- benign in practice since this check alone re-runs properly
-         * guarded below, but still a real data race by the C11/TSan memory model. */
-        if(!tag->callback) { break; }
+        /*
+         * Under the API mutex, not before: plc_tag_destroy() clears the callback under this same
+         * mutex, and a handler thread holding its own reference can get here after that.
+         * A callback may queue more events, or unregister itself; the loop sees both.
+         */
+        while(tag->event_count > 0) {
+            tag_event_t event = tag->events[tag->event_head];
 
-        /* trigger this if there is any other event. Only once. */
-        if(tag->event_creation_complete) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag creation complete with status %s.",
-                   plc_tag_decode_error(tag->event_creation_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
-            tag->event_creation_complete = 0;
-            tag->event_creation_complete_status = PLCTAG_STATUS_OK;
+            if(!tag->callback) {
+                tag->event_count = 0;
+                break;
+            }
+
+            tag->event_head = (uint8_t)((tag->event_head + 1) & TAG_EVENT_RING_MASK);
+            tag->event_count--;
+
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Dispatching event %d with status %s.", (int)event.event,
+                   plc_tag_decode_error(event.status));
+
+            tag->callback(tag->tag_id, (int)event.event, (int)event.status, tag->userdata);
         }
-
-        /* was there a read start? */
-        if(tag->event_read_started) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag read started with status %s.",
-                   plc_tag_decode_error(tag->event_read_started_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
-            tag->event_read_started = 0;
-            tag->event_read_started_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there a write start? */
-        if(tag->event_write_started) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag write started with status %s.",
-                   plc_tag_decode_error(tag->event_write_started_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
-            tag->event_write_started = 0;
-            tag->event_write_started_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there an abort? */
-        if(tag->event_operation_aborted) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag operation aborted with status %s.",
-                   plc_tag_decode_error(tag->event_operation_aborted_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
-            tag->event_operation_aborted = 0;
-            tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there a read completion? */
-        if(tag->event_read_complete) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag read completed with status %s.",
-                   plc_tag_decode_error(tag->event_read_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
-            tag->event_read_complete = 0;
-            tag->event_read_complete_status = PLCTAG_STATUS_OK;
-        }
-
-        /* was there a write completion? */
-        if(tag->event_write_complete) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag write completed with status %s.",
-                   plc_tag_decode_error(tag->event_write_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
-            tag->event_write_complete = 0;
-            tag->event_write_complete_status = PLCTAG_STATUS_OK;
-        }
-
-        /* do this last so that we raise all other events first. we only start deletion events. */
-        if(tag->event_deletion_started) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag deletion started with status %s.",
-                   plc_tag_decode_error(tag->event_creation_complete_status));
-            tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
-            tag->event_deletion_started = 0;
-            tag->event_deletion_started_status = PLCTAG_STATUS_OK;
-        }
-
-    } /* end of API mutex critical area. */
+    }
 }
 
 
@@ -421,76 +367,31 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /*
-     * flag an abort request before we wait on the mutex.
-     * Otherwise we will wait until any long running operation
-     * completes (such as a plc_tag_read() call with a wait).
+     * Flag the abort before waiting on the mutex, so that a handler working on the tag sees
+     * it and lets go.  Otherwise this waits until any long running operation completes.
      */
-
     atomic_set_bool(&tag->abort_requested, true);
 
     /* wake the tag's handler so it can act on the flag. */
     if(tag->vtable && tag->vtable->wake_plc) { rc = tag->vtable->wake_plc(tag); }
 
-    /*
-     * this blocks until we get the mutex by which time any
-     * long running operation is done.
-     */
     critical_block(tag->api_mutex) {
         tag->read_cache_expire = (uint64_t)0;
 
-        /* Is the abort flag still set? This may be synchronous. */
+        /* the handler may have done the abort already, and a new op may have started since. */
         if(atomic_get_bool(&tag->abort_requested)) {
-            /* Clear the abort flag so the handler won't process it again */
             atomic_set_bool(&tag->abort_requested, false);
 
-            /*
-             * Operation-aware cleanup of in-flight flags.
-             *
-             * Handle flags BEFORE calling protocol abort, since the protocol
-             * abort function may modify these flags. We need to know what
-             * was in flight at the time of the abort.
-             *
-             * If a read was in flight, we need to signal completion with abort status
-             * so that any waiting thread (e.g. plc_tag_read with timeout) wakes up.
-             *
-             * If no operation was in flight, just clear the flags.
-             */
-            if(tag->read_in_flight) {
-                tag->read_in_flight = 0;
-                tag->read_complete = 1;
-                tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_ERR_ABORT);
-            } else {
-                tag->read_in_flight = 0;
-                tag->read_complete = 0;
-            }
+            /* the events first: the protocol abort changes nothing they report. */
+            tag_op_abort(tag);
 
-            if(tag->write_in_flight) {
-                tag->write_in_flight = 0;
-                tag->write_complete = 1;
-                tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_ERR_ABORT);
-            } else {
-                tag->write_in_flight = 0;
-                tag->write_complete = 0;
-            }
-
-            /* Call protocol-specific abort to clean up protocol state */
             if(tag->vtable && tag->vtable->abort) {
                 rc = tag->vtable->abort(tag);
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag does not have an abort function.");
                 rc = PLCTAG_ERR_NOT_IMPLEMENTED;
             }
-
-            /* Raise abort event */
-            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, (int8_t)rc);
-
-            /* Signal any waiting threads */
-            cond_signal(tag->tag_cond_wait);
         } else {
-            /*
-             * The abort was already handled by the tag's handler thread.
-             * Do not touch the flags - a new operation may have started.
-             */
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Abort flag is not set, so abort already completed.");
             rc = PLCTAG_STATUS_OK;
         }
@@ -510,41 +411,16 @@ static int plc_tag_status_impl(plc_tag_p tag) {
     critical_block(tag->api_mutex) {
         if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
-        /* If the vtable tickler just completed a read or write, finalize it
-         * here rather than waiting for the handler thread to do it, so async
-         * polling via plc_tag_status() sees completion in the same call. */
-        if(tag->read_complete) {
-            tag->read_complete = 0;
-            tag->read_in_flight = 0;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
-            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
-            cond_signal(tag->tag_cond_wait);
-        }
-
-        if(tag->write_complete) {
-            tag->write_complete = 0;
-            tag->write_in_flight = 0;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
-            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
-            cond_signal(tag->tag_cond_wait);
-        }
-
         if(tag->vtable && tag->vtable->status) {
             rc = tag->vtable->status(tag);
-            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "vtable->status returned %d (%s)", rc, plc_tag_decode_error(rc));
         } else {
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
 
-        if(rc == PLCTAG_STATUS_OK) {
-            if(tag->read_in_flight || tag->write_in_flight) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id,
-                       "rc was OK but read_in_flight=%d write_in_flight=%d, changing to PENDING", tag->read_in_flight,
-                       tag->write_in_flight);
-                rc = PLCTAG_STATUS_PENDING;
-            }
-        }
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "final rc=%d (%s)", rc, plc_tag_decode_error(rc));
+        if(rc == PLCTAG_STATUS_OK && tag_op_busy(tag)) { rc = PLCTAG_STATUS_PENDING; }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "status rc=%s, op state %d.", plc_tag_decode_error(rc),
+               (int)tag_op_state(tag));
     }
 
     plc_tag_generic_handle_event_callbacks(tag);
@@ -956,6 +832,11 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag status after creation is %s.", plc_tag_decode_error(rc));
 
+    /* a tag with nothing left to do is created now; one still working queues CREATED when it ends. */
+    if(rc == PLCTAG_STATUS_OK) {
+        critical_block(tag->api_mutex) { tag_created(tag, PLCTAG_STATUS_OK); }
+    }
+
     /*
      * if there is a timeout, then wait until we get
      * an error or we timeout.
@@ -1022,14 +903,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             return rc;
         }
 
-        /* clear up any remaining flags.  This should be refactored. */
-        critical_block(tag->api_mutex) {
-            tag->read_in_flight = 0;
-            tag->write_in_flight = 0;
-
-            /* raise create event. */
-            tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
-        }
+        /* the module queued CREATED when its create finished; this covers one that did not. */
+        critical_block(tag->api_mutex) { tag_created(tag, rc); }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "tag set up elapsed time %" PRId64 "ms", (time_ms() - start_time));
     }
@@ -1460,15 +1335,15 @@ void destroy_tag_common(plc_tag_p tag) {
 
     plc_tag_abort_impl(tag);
 
-    critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK); }
-
-    plc_tag_generic_handle_event_callbacks(tag);
-
-    /* A handler thread can still hold a reference and call
-     * plc_tag_generic_handle_event_callbacks() after this point,
-     * so clear the callback and userdata under the API mutex.
-     * This guarantees no stale callback fires after plc_tag_destroy(). */
+    /*
+     * DESTROYED, the dispatch and the clear in one block, so DESTROYED is the last event.  A
+     * handler thread can still hold a reference and queue an event after this; with no
+     * callback it is dropped.
+     */
     critical_block(tag->api_mutex) {
+        tag_event_push(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
+        plc_tag_generic_handle_event_callbacks(tag);
+
         tag->callback = NULL;
         tag->userdata = NULL;
     }
@@ -1516,6 +1391,56 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
 
 
 /*
+ * Wait for the tag's op to end, up to timeout ms.  A timeout aborts the op.  Returns the
+ * op's result, or PLCTAG_ERR_TIMEOUT.
+ */
+static int wait_for_op(plc_tag_p tag, int timeout) {
+    int rc = PLCTAG_STATUS_PENDING;
+    int64_t start_time = time_ms();
+    int64_t end_time = start_time + timeout;
+    bool busy = false;
+
+    do {
+        int64_t timeout_left = end_time - time_ms();
+
+        /* cond_wait() rejects a timeout that is not positive; that is the timeout itself. */
+        if(timeout_left <= 0) {
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+
+        if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
+
+        rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Wait ended with %s.", plc_tag_decode_error(rc));
+            break;
+        }
+
+        rc = plc_tag_status_impl(tag);
+    } while(rc == PLCTAG_STATUS_PENDING);
+
+    if(rc == PLCTAG_STATUS_PENDING) { rc = PLCTAG_ERR_TIMEOUT; }
+
+    /*
+     * The protocol layer may still be working on the request.  Without an abort the op stays in
+     * flight after the call returns, and the next one fails with PLCTAG_ERR_BUSY.
+     */
+    critical_block(tag->api_mutex) { busy = tag_op_busy(tag); }
+
+    if(busy) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Operation still in flight after %s, aborting it.",
+               plc_tag_decode_error(rc));
+        plc_tag_abort_impl(tag);
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "elapsed time %" PRId64 "ms", (time_ms() - start_time));
+
+    return rc;
+}
+
+
+/*
  * plc_tag_read()
  *
  * This function calls through the vtable in the passed tag to call
@@ -1529,7 +1454,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
 LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
-    int is_done = 0;
+    bool is_done = false;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
 
@@ -1540,42 +1465,42 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
 
     if(timeout < 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout must not be negative!");
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     critical_block(tag->api_mutex) {
-        tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
-        plc_tag_generic_handle_event_callbacks(tag);
-
-        /* check read cache, if not expired, return existing data. */
+        /* a cached read is a read that finished at once. */
         if(tag->read_cache_expire > time_ms()) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Returning cached data.");
+            tag_event_push(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+            tag_event_push(tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
             rc = PLCTAG_STATUS_OK;
-            is_done = 1;
+            is_done = true;
             break;
         }
 
-        if(tag->read_in_flight || tag->write_in_flight) {
+        if(tag_op_busy(tag)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "An operation is already in flight!");
             rc = PLCTAG_ERR_BUSY;
-            is_done = 1;
+            is_done = true;
             break;
         }
 
         if(tag->tag_is_dirty) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has locally updated data that will be overwritten!");
             rc = PLCTAG_ERR_BUSY;
-            is_done = 1;
+            is_done = true;
             break;
         }
 
-        tag->read_in_flight = 1;
         tag->status = PLCTAG_STATUS_PENDING;
 
-        /* clear the condition var */
+        /* cleared before the op starts, so an abort from the callback below is not missed. */
         cond_clear(tag->tag_cond_wait);
+
+        tag_op_start(tag, true);
+        plc_tag_generic_handle_event_callbacks(tag);
 
         /* the protocol implementation does not do the timeout. */
         if(tag->vtable && tag->vtable->read) {
@@ -1585,102 +1510,25 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
 
-        /* if not pending then check for success or error. */
         if(rc != PLCTAG_STATUS_PENDING) {
             if(rc != PLCTAG_STATUS_OK) {
-                /* not pending and not OK, so error. Abort and clean up. */
-
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from read command returned error %s!",
-                       plc_tag_decode_error(rc));
-
-                /* the abort's own result must not mask the error that caused it. */
-                plc_tag_abort_impl(tag);
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from read command returned error %s!", plc_tag_decode_error(rc));
             }
 
-            tag->read_in_flight = 0;
-            is_done = 1;
-            break;
+            tag_op_end(tag, rc);
+            is_done = true;
         }
     }
 
-    /*
-     * if there is a timeout, then wait until we get
-     * an error or we timeout.
-     */
-    if(!is_done && timeout > 0) {
-        int64_t start_time = time_ms();
-        int64_t end_time = start_time + timeout;
-
-        /* we loop as long as we have time left to wait. */
-        do {
-            int64_t timeout_left = end_time - time_ms();
-
-            /*
-             * The deadline has passed. cond_wait() rejects a zero or negative
-             * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
-             * a bad-parameter error instead of the timeout that actually
-             * happened, so stop here and report the timeout itself.
-             */
-            if(timeout_left <= 0) {
-                rc = PLCTAG_ERR_TIMEOUT;
-                break;
-            }
-
-            if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
-
-            /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag read to complete!",
-                       plc_tag_decode_error(rc));
-                plc_tag_abort_impl(tag);
-
-                break;
-            }
-
-            /* get the tag status. */
-            rc = plc_tag_status_impl(tag);
-
-            /* check to see if there was an error during tag read. */
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
-                plc_tag_abort_impl(tag);
-            }
-        } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
-
-        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag read to complete!");
-
-            /*
-             * The protocol layer is still working on the request.  Every other exit from this
-             * loop aborts it; without that here the operation stays in flight after the tag
-             * looks idle, and the next read fails with PLCTAG_ERR_BUSY out of nowhere.
-             */
-            plc_tag_abort_impl(tag);
-
-            rc = PLCTAG_ERR_TIMEOUT;
-        }
-
-        /* the read is not in flight anymore. */
-        critical_block(tag->api_mutex) {
-            tag->read_in_flight = 0;
-            tag->read_complete = 0;
-            /* is_done = 1; */
-            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
-        }
-
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "elapsed time %" PRId64 "ms", (time_ms() - start_time));
-    }
+    if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
 
     if(rc == PLCTAG_STATUS_OK) {
         /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
         tag->read_cache_expire = time_ms() + tag->read_cache_ms;
     }
 
-    /* fire any events that are pending. */
     plc_tag_generic_handle_event_callbacks(tag);
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done");
@@ -1741,9 +1589,9 @@ LIB_EXPORT int plc_tag_status(int32_t id) {
 LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
-    int is_done = 0;
+    bool is_done = false;
 
-    pdebug(DEBUG_MODULE_LIB, id, DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
 
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag not found.");
@@ -1752,37 +1600,25 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
 
     if(timeout < 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout must not be negative!");
-        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     critical_block(tag->api_mutex) {
-        if(tag->read_in_flight || tag->write_in_flight) {
+        if(tag_op_busy(tag)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
-            is_done = 1;
             rc = PLCTAG_ERR_BUSY;
+            is_done = true;
             break;
         }
 
-        /* a write is now in flight. */
-        tag->write_in_flight = 1;
         tag->status = PLCTAG_STATUS_OK;
 
-        /*
-         * This needs to be done before we raise the event below in case the user code
-         * tries to do something tricky like abort the write.   In that case, the condition
-         * variable will be set by the abort.   So we have to clear it here and then see
-         * if it gets raised afterward.
-         */
+        /* cleared before the op starts, so an abort from the callback below is not missed. */
         cond_clear(tag->tag_cond_wait);
 
-        /*
-         * This must be raised _before_ we start the write to enable
-         * application code to fill in the tag data buffer right before
-         * we start the write process.
-         */
-        tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
+        /* dispatched before the write starts, so the application can fill the buffer in it. */
+        tag_op_start(tag, false);
         plc_tag_generic_handle_event_callbacks(tag);
 
         /* the protocol implementation does not do the timeout. */
@@ -1793,95 +1629,20 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
 
-        /* if not pending then check for success or error. */
         if(rc != PLCTAG_STATUS_PENDING) {
             if(rc != PLCTAG_STATUS_OK) {
-                /* not pending and not OK, so error. Abort and clean up. */
-
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from write command returned error %s!",
-                       plc_tag_decode_error(rc));
-
-                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Response from write command returned error %s!", plc_tag_decode_error(rc));
             }
 
-            tag->write_in_flight = 0;
-            is_done = 1;
-            break;
+            tag_op_end(tag, rc);
+            is_done = true;
         }
-    } /* end of api mutex block */
-
-    /*
-     * if there is a timeout, then wait until we get
-     * an error or we timeout.
-     */
-    if(!is_done && timeout > 0) {
-        int64_t start_time = time_ms();
-        int64_t end_time = start_time + timeout;
-
-        /* we loop as long as we have time left to wait. */
-        do {
-            int64_t timeout_left = end_time - time_ms();
-
-            /*
-             * The deadline has passed. cond_wait() rejects a zero or negative
-             * timeout with PLCTAG_ERR_BAD_PARAM, which would reach the caller as
-             * a bad-parameter error instead of the timeout that actually
-             * happened, so stop here and report the timeout itself.
-             */
-            if(timeout_left <= 0) {
-                rc = PLCTAG_ERR_TIMEOUT;
-                break;
-            }
-
-            if(timeout_left > INT_MAX) { timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */ }
-
-            /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag write to complete!",
-                       plc_tag_decode_error(rc));
-                plc_tag_abort_impl(tag);
-
-                break;
-            }
-
-            /* get the tag status. */
-            rc = plc_tag_status_impl(tag);
-
-            /* check to see if there was an error during tag creation. */
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
-                plc_tag_abort_impl(tag);
-            }
-        } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
-
-        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag write to complete!");
-
-            /* see the matching comment in plc_tag_read(). */
-            plc_tag_abort_impl(tag);
-
-            rc = PLCTAG_ERR_TIMEOUT;
-        }
-
-        /* the write is not in flight anymore. */
-        critical_block(tag->api_mutex) {
-            tag->write_in_flight = 0;
-            tag->write_complete = 0;
-            is_done = 1;
-        }
-
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Write finshed with elapsed time %" PRId64 "ms", (time_ms() - start_time));
     }
 
-    if(is_done) {
-        critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc); }
-    }
+    if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
 
-    /* fire any events that are pending. */
     plc_tag_generic_handle_event_callbacks(tag);
 
-    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Done: status = %s.", plc_tag_decode_error(rc));

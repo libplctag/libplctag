@@ -328,7 +328,7 @@ static int setup_tag(const cip_family_t *family, cip_tag_p tag, attr attribs) {
 
     tag->plc_type = family->plc_type;
     tag->use_connected_msg = tag->session->use_connected_msg;
-    /* the create read checks the tag against the PLC; the tickler raises CREATED when it ends. */
+    /* the create read checks the tag against the PLC; ending it queues CREATED. */
     tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     rc = cip_tag_resolve_elem_count(tag, attribs, DEBUG_MODULE_CIP);
@@ -343,7 +343,7 @@ static int setup_tag(const cip_family_t *family, cip_tag_p tag, attr attribs) {
 
     if(tag->vtable->read) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Kicking off initial read.");
-        tag->read_in_flight = 1;
+        tag_op_start((plc_tag_p)tag, true);
         tag->vtable->read((plc_tag_p)tag);
     } else {
         /* @raw has nothing to read; its tickler completes the create when the connection is up. */

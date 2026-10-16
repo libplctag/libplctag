@@ -219,7 +219,7 @@ int omron_setup_udt_tag(cip_tag_p tag, const char *name) {
  * request per variable, so it waits for the first real read.
  */
 static int listing_tag_read_start(cip_tag_p tag) {
-    if(!tag->read_in_progress && !tag->write_in_progress) { reset_read(tag); }
+    reset_read(tag);
 
     return cip_readonly_read_start(tag, DEBUG_MODULE_OMRON_COMMON);
 }
@@ -423,7 +423,7 @@ static int decode_variable_attributes(cip_tag_p tag, uint8_t *data, int32_t data
  * instance and tag->offset the byte offset the next member lands at.
  */
 static int udt_tag_read_start(cip_tag_p tag) {
-    if(!tag->read_in_progress && !tag->write_in_progress) { reset_read(tag); }
+    reset_read(tag);
 
     return cip_readonly_read_start(tag, DEBUG_MODULE_OMRON_COMMON);
 }

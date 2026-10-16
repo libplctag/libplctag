@@ -96,13 +96,6 @@ int tag_read_start(cip_tag_p tag) {
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
-    if(tag->read_in_progress || tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    tag->read_in_progress = 1;
-
     rc = pccc_finish_request(tag, cip_tag_send(tag), false);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
@@ -300,13 +293,6 @@ int tag_write_start(cip_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    if(tag->read_in_progress || tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    tag->write_in_progress = 1;
 
     rc = pccc_finish_request(tag, cip_tag_send(tag), true);
 

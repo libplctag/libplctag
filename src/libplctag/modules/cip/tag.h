@@ -176,9 +176,6 @@ struct cip_tag_t {
     int offset;
     int allow_packing;
 
-    int read_in_progress;
-    int write_in_progress;
-
     /* how do we talk to this device? */
     cip_plc_type_t plc_type;
 
@@ -318,8 +315,8 @@ typedef int (*cip_tag_decode_func)(cip_tag_p tag, uint8_t *reply, int32_t reply_
 
 /*
  * Hand the tag to its connection, whose handler encodes the request the tag's read or write
- * flag calls for, sends it, and decodes the reply with the vtable's encode_* and decode_*.
- * The caller sets read_in_progress or write_in_progress first.
+ * op state calls for, sends it, and decodes the reply with the vtable's encode_* and decode_*.
+ * The caller has started the op (tag_op_start()) first.
  */
 extern int cip_tag_send(cip_tag_p tag);
 
@@ -329,14 +326,11 @@ extern int cip_tag_activate(plc_tag_p tag_arg);
 /* the vtable's wake_plc and tag_data_written: make the tag due so its handler looks at it. */
 extern int cip_tag_wake_plc(plc_tag_p tag_arg);
 
-/* How the handler ends an operation: the tag's status, the create, and the completion flag. */
-extern void cip_tag_op_done(cip_tag_p tag, int rc, bool is_read);
+/* How the handler ends an operation: tag_op_end(), then the create if this was its read. */
+extern void cip_tag_op_done(cip_tag_p tag, int rc);
 
 
-/*
- * Start a read on a read-only special tag (@tags, @udt, @identity): the busy guards and the
- * read_in_progress flag, which are the same in all of them.
- */
+/* Start a read on a read-only special tag (@tags, @udt, @identity). */
 extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module);
 
 

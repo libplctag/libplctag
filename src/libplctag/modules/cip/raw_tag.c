@@ -93,25 +93,10 @@ int cip_raw_tag_write_start(cip_tag_p tag) {
         return PLCTAG_ERR_BUSY;
     }
 
-    if(tag->read_in_progress) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Raw tag found with a read in flight!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->write_in_progress) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* the write is now in flight */
-    tag->write_in_progress = 1;
-
     rc = cip_tag_send(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
-        tag->write_in_progress = 0;
-
         return rc;
     }
 

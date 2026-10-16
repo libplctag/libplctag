@@ -101,7 +101,7 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
         pdebug(args->debug_module, DEBUG_WARN, 0, "Unable to find or create connection, error %s!",
                plc_tag_decode_error(args->conn_rc));
         tag->status = (int8_t)args->conn_rc;
-        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)args->conn_rc);
+        tag_created((plc_tag_p)tag, args->conn_rc);
         return (plc_tag_p)tag;
     }
 
@@ -132,25 +132,28 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
         }
     }
 
-    tag->first_tickler_run = true;
-
     /*
-     * Watch from here.  The handler delivers nothing until CREATED has been dispatched (see
-     * connection_tag_deliver()), and that happens after the library has finished the tag.
+     * Watch from here.  The API mutex is held across the add and CREATED so that the handler,
+     * which delivers under it, can only queue connection events behind CREATED.  A connection
+     * already up when the tag joins it reports that state straight after CREATED.
      */
-    rc = conn_watch_add_watcher(tag->watch, tag->conn_mutex, (plc_tag_p)tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(args->debug_module, DEBUG_WARN, 0, "Unable to watch the connection, error %s!", plc_tag_decode_error(rc));
-        tag->status = (int8_t)rc;
-        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
-        return (plc_tag_p)tag;
+    critical_block(tag->api_mutex) {
+        rc = conn_watch_add_watcher(tag->watch, tag->conn_mutex, (plc_tag_p)tag);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(args->debug_module, DEBUG_WARN, 0, "Unable to watch the connection, error %s!", plc_tag_decode_error(rc));
+            tag->status = (int8_t)rc;
+            tag_created((plc_tag_p)tag, rc);
+            break;
+        }
+
+        tag_created((plc_tag_p)tag, PLCTAG_STATUS_OK);
+
+        if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN) {
+            tag_event_push((plc_tag_p)tag, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
+        }
     }
 
-    /*
-     * Queue the CREATED event.  plc_tag_create_ex() dispatches it via
-     * plc_tag_generic_handle_event_callbacks() once tag->tag_id is assigned.
-     */
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+    if(rc != PLCTAG_STATUS_OK) { return (plc_tag_p)tag; }
 
     pdebug(args->debug_module, DEBUG_DETAIL, 0, "Done with initial connection status=%s.",
            conn_status_name(tag->last_conn_state));
@@ -182,66 +185,43 @@ static int connection_tag_status(plc_tag_p raw_tag) {
 
 
 /*
- * Deliver the ring's new events to the tag's callback.  Called with the tag's API mutex held,
- * only by connection_tag_notify_watchers().
+ * Queue the connection ring's new events on the tag, behind whatever the tag already has.
+ * Called with the tag's API mutex held, only by connection_tag_notify_watchers(), which
+ * dispatches them.
  */
 static void connection_tag_deliver(connection_tag_p tag) {
-    if(!tag->conn) { return; }
-
-    /*
-     * Wait until the CREATED event has been dispatched before firing any connection state
-     * events, or CONNECTING would reach the callback before CREATED.
-     */
-    if(tag->event_creation_complete) { return; }
-
     int32_t read_idx = tag->ring_read_idx;
-
-    /*
-     * First tickler after CREATED: if the connection was already active at
-     * creation (late join), synthesise the creation-time state so the tag is
-     * not silently stuck.
-     */
-    if(tag->first_tickler_run) {
-        tag->first_tickler_run = false;
-        if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN && tag->callback) {
-            tag->callback(tag->tag_id, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK,
-                          tag->userdata);
-        }
-    }
-
     int32_t event_type = 0;
     int32_t status = 0;
 
-    /* api_mutex is already held, so dispatch each entry directly */
+    if(!tag->conn) { return; }
+
     while(conn_watch_next(tag->watch, &read_idx, &event_type, &status)) {
-        if(!tag->callback) { continue; }
+        int event = 0;
 
         switch(event_type) {
-            case TAG_CONN_EVENT_SEND_REQUEST_STARTED:
-                if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, (int)status, tag->userdata); }
-                break;
-
-            case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED:
-                if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, (int)status, tag->userdata); }
-                break;
-
-            case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED:
-                if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, (int)status, tag->userdata); }
-                break;
-
-            case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED:
-                if(tag->io_events) { tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, (int)status, tag->userdata); }
-                break;
+            case TAG_CONN_EVENT_SEND_REQUEST_STARTED: event = (tag->io_events ? PLCTAG_EVENT_WRITE_STARTED : 0); break;
+            case TAG_CONN_EVENT_SEND_REQUEST_COMPLETED: event = (tag->io_events ? PLCTAG_EVENT_WRITE_COMPLETED : 0); break;
+            case TAG_CONN_EVENT_RECEIVE_RESPONSE_STARTED: event = (tag->io_events ? PLCTAG_EVENT_READ_STARTED : 0); break;
+            case TAG_CONN_EVENT_RECEIVE_RESPONSE_COMPLETED: event = (tag->io_events ? PLCTAG_EVENT_READ_COMPLETED : 0); break;
 
             default:
                 if(event_type >= PLCTAG_EVENT_CONN_STATUS_OFFSET) {
                     tag->last_conn_state = event_type - PLCTAG_EVENT_CONN_STATUS_OFFSET;
-                    tag->callback(tag->tag_id, event_type, PLCTAG_STATUS_OK, tag->userdata);
+                    event = event_type;
+                    status = PLCTAG_STATUS_OK;
                 } else {
                     pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unsupported ring event type %d.", (int)event_type);
                 }
                 break;
         }
+
+        if(!event) { continue; }
+
+        tag_event_push((plc_tag_p)tag, event, status);
+
+        /* a busy connection can publish more in one pass than the tag's ring holds. */
+        if(tag->event_count >= TAG_EVENT_RING_SIZE) { plc_tag_generic_handle_event_callbacks((plc_tag_p)tag); }
     }
 
     tag->ring_read_idx = read_idx;
@@ -271,7 +251,6 @@ void connection_tag_notify_watchers(conn_event_ring_t *watch, mutex_p conn_mutex
 
         critical_block(tag->api_mutex) { connection_tag_deliver(tag); }
 
-        /* CREATED and anything else the library raised for the tag */
         plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
         rc_dec(tag);

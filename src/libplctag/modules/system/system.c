@@ -235,11 +235,6 @@ static int system_tag_read(plc_tag_p ptag) {
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    /* safe here because we are still within the API mutex. */
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
-    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
-
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done.");
 
     return rc;
@@ -258,10 +253,6 @@ static int system_tag_write(plc_tag_p ptag) {
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    /* raise this here so that the callback can update the tag buffer. */
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_PENDING);
-    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
-
     /* the version is static */
     if(str_cmp_i(&tag->name[0], "debug") == 0) {
         int res = 0;
@@ -275,9 +266,6 @@ static int system_tag_write(plc_tag_p ptag) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, tag->tag_id, "Unsupported system tag %s!", tag->name);
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
-
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
-    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done.");
 
