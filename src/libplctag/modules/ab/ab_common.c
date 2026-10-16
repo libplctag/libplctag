@@ -38,7 +38,8 @@
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/ab/eip_lgx_pccc.h>
 #include <libplctag/modules/ab/eip_plc5_pccc.h>
 #include <libplctag/modules/ab/eip_slc_pccc.h>
@@ -86,6 +87,15 @@
 /* forward declarations*/
 static int setup_special_tag(cip_tag_p tag, const char *name, bool *is_special);
 static int setup_pccc_name(cip_tag_p tag, attr attribs, int (*encode)(uint8_t *, int *, int, pccc_addr_t *));
+static void setup_ab_defaults(cip_tag_p tag, tag_vtable_p vtable, tag_byte_order_t *byte_order);
+static int setup_pccc_size(cip_tag_p tag, attr attribs);
+static int setup_plc5_tag(cip_tag_p tag, attr attribs);
+static int setup_slc_tag(cip_tag_p tag, attr attribs);
+static int setup_lgx_pccc_tag(cip_tag_p tag, attr attribs);
+static int setup_symbolic_name(cip_tag_p tag, attr attribs);
+static int setup_logix_tag(cip_tag_p tag, attr attribs);
+static int setup_micro800_tag(cip_tag_p tag, attr attribs);
+static int setup_generic_tag(cip_tag_p tag, attr attribs);
 
 
 /* vtables for different kinds of tags */
@@ -143,9 +153,9 @@ static int setup_special_tag(cip_tag_p tag, const char *name, bool *is_special) 
     *is_special = true;
 
     if(str_cmp_i(name, "@identity") == 0) {
-        if(tag->session->plc_entry->dialect == CIP_DIALECT_DHP) {
+        if(tag->session->family->via_dhp) {
             pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "@identity is not supported on %s!",
-                   tag->session->plc_entry->name);
+                   tag->session->family->name);
             return PLCTAG_ERR_UNSUPPORTED;
         }
 
@@ -203,25 +213,68 @@ static int setup_pccc_name(cip_tag_p tag, attr attribs, int (*encode)(uint8_t *,
 }
 
 
-/* PLC/5, and a Logix through its PCCC mapping, which takes PLC/5 addressing. */
-int ab_setup_plc5_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
-    (void)entry;
-    return setup_pccc_name(tag, attribs, plc5_encode_address);
+/* what every Rockwell tag starts with. */
+static void setup_ab_defaults(cip_tag_p tag, tag_vtable_p vtable, tag_byte_order_t *byte_order) {
+    tag->protocol_type = TAG_PROTOCOL_AB;
+    if(vtable) { tag->vtable = vtable; }
+    tag->byte_order = byte_order;
+    tag->std_ops = &cip_standard_tag_ops_ab;
+    tag->debug_module = DEBUG_MODULE_AB_EIP_CIP;
+    tag->allow_packing = 0;
 }
 
 
-int ab_setup_slc_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
-    (void)entry;
-    return setup_pccc_name(tag, attribs, slc_encode_address);
+/* a PCCC data file states its size; a special tag learns its size from the reply. */
+static int setup_pccc_size(cip_tag_p tag, attr attribs) {
+    if(tag->special_tag) { return cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP); }
+
+    return cip_tag_size_from_attributes(tag, attribs, DEBUG_MODULE_CIP);
 }
 
 
-int ab_setup_logix_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+static int setup_plc5_tag(cip_tag_p tag, attr attribs) {
+    int rc = PLCTAG_STATUS_OK;
+
+    setup_ab_defaults(tag, &pccc_vtable, &plc5_tag_byte_order);
+
+    rc = setup_pccc_name(tag, attribs, plc5_encode_address);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    return setup_pccc_size(tag, attribs);
+}
+
+
+/* SLC 500 and MicroLogix. */
+static int setup_slc_tag(cip_tag_p tag, attr attribs) {
+    int rc = PLCTAG_STATUS_OK;
+
+    setup_ab_defaults(tag, &pccc_vtable, &slc_tag_byte_order);
+
+    rc = setup_pccc_name(tag, attribs, slc_encode_address);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    return setup_pccc_size(tag, attribs);
+}
+
+
+/* a Logix through its PCCC mapping: SLC byte order, PLC/5 addressing. */
+static int setup_lgx_pccc_tag(cip_tag_p tag, attr attribs) {
+    int rc = PLCTAG_STATUS_OK;
+
+    setup_ab_defaults(tag, &lgx_pccc_vtable, &slc_tag_byte_order);
+
+    rc = setup_pccc_name(tag, attribs, plc5_encode_address);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    return setup_pccc_size(tag, attribs);
+}
+
+
+/* the symbolic name of a Logix or Micro800 tag, or one of their special tags. */
+static int setup_symbolic_name(cip_tag_p tag, attr attribs) {
     const char *name = attr_get_str(attribs, "name", NULL);
     bool is_special = false;
     int rc = setup_special_tag(tag, name, &is_special);
-
-    (void)entry;
 
     if(rc != PLCTAG_STATUS_OK || is_special) { return rc; }
 
@@ -239,20 +292,107 @@ int ab_setup_logix_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attrib
 }
 
 
-/* a generic device has only the special tags. */
-int ab_setup_generic_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+/* ControlLogix and CompactLogix: packing on unless the tag string turns it off. */
+static int setup_logix_tag(cip_tag_p tag, attr attribs) {
+    int rc = PLCTAG_STATUS_OK;
+
+    setup_ab_defaults(tag, &cip_standard_tag_vtable_ab, &logix_tag_byte_order);
+    tag->allow_packing = (attr_get_int(attribs, "allow_packing", 1) != 0);
+
+    rc = setup_symbolic_name(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    return cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP);
+}
+
+
+static int setup_micro800_tag(cip_tag_p tag, attr attribs) {
+    int rc = PLCTAG_STATUS_OK;
+
+    setup_ab_defaults(tag, &cip_standard_tag_vtable_ab, &cip_short_string_byte_order);
+
+    rc = setup_symbolic_name(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    return cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP);
+}
+
+
+/* a generic device has only the special tags, so no data-tag vtable. */
+static int setup_generic_tag(cip_tag_p tag, attr attribs) {
     const char *name = attr_get_str(attribs, "name", NULL);
     bool is_special = false;
-    int rc = setup_special_tag(tag, name, &is_special);
+    int rc = PLCTAG_STATUS_OK;
 
+    setup_ab_defaults(tag, NULL, &logix_tag_byte_order);
+
+    rc = setup_special_tag(tag, name, &is_special);
     if(rc == PLCTAG_STATUS_OK && !is_special) {
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "A %s device has only special tags, got: %s", entry->name,
-               name ? name : "");
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, tag->tag_id, "A %s device has only special tags, got: %s",
+               tag->session->family->name, name ? name : "");
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    return rc;
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    return cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP);
 }
+
+
+/*
+ * The Rockwell families.  Three of them -- PLC/5, SLC and MicroLogix -- can also be reached
+ * across a DH+ bridge, which needs a connection where the direct route does not.
+ *
+ * Micro800 supports the Extended Forward Open and asks for the same size *Logix does: the
+ * only published figure for anything larger traces back to a single forum post and no
+ * Rockwell document states one, while 4002 is measured -- 4082 comes back as an invalid
+ * connection size and 4002 succeeds.  Asking higher costs a failed round trip on every
+ * connection and sizes the per-connection buffer to match.  Raise it if a Micro800 is
+ * measured accepting more.  Generic CIP takes the *Logix sizing too.
+ */
+
+/* maximum for PCCC embedded within CIP. */
+#define MAX_CIP_PCCC_MSG_SIZE (244)
+
+#define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
+#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
+
+/*
+ * Smallest PCCC connection payload we can actually use.  A ForwardOpen error can offer a
+ * smaller size than we asked for and we accept it, but below the fixed per-request overhead
+ * there is no room left for a request.  PCCC needs about 92 bytes for its command header and
+ * addressing; MIN_PAYLOAD_SIZE_CIP is the CIP equivalent.
+ */
+#define MIN_PAYLOAD_SIZE_PCCC (92)
+
+#define PCCC_CONN                                                                                                       \
+    .max_payload_capacity = MAX_CIP_PCCC_MSG_SIZE, .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .fo_ex_conn_size = 0,         \
+    .only_use_old_forward_open = true, .min_payload_size = MIN_PAYLOAD_SIZE_PCCC
+
+#define LGX_CONN                                                                                                        \
+    .max_payload_capacity = MAX_CIP_LGX_MSG_SIZE_EX, .fo_conn_size = MAX_CIP_LGX_MSG_SIZE,                              \
+    .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .only_use_old_forward_open = false, .min_payload_size = MIN_PAYLOAD_SIZE_CIP
+
+static const cip_family_t ab_family_plc5_dhp = {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .via_dhp = true,
+                                         .use_connected_msg = 1, .setup_tag = setup_plc5_tag, PCCC_CONN};
+const cip_family_t ab_family_plc5 = {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dhp = &ab_family_plc5_dhp,
+                                     .use_connected_msg = 0, .setup_tag = setup_plc5_tag, PCCC_CONN};
+static const cip_family_t ab_family_slc_dhp = {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .via_dhp = true,
+                                        .use_connected_msg = 1, .setup_tag = setup_slc_tag, PCCC_CONN};
+const cip_family_t ab_family_slc = {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dhp = &ab_family_slc_dhp,
+                                    .use_connected_msg = 0, .setup_tag = setup_slc_tag, PCCC_CONN};
+static const cip_family_t ab_family_mlgx_dhp = {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .via_dhp = true,
+                                         .use_connected_msg = 1, .setup_tag = setup_slc_tag, PCCC_CONN};
+const cip_family_t ab_family_mlgx = {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dhp = &ab_family_mlgx_dhp,
+                                     .use_connected_msg = 0, .setup_tag = setup_slc_tag, PCCC_CONN};
+const cip_family_t ab_family_lgx_pccc = {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .use_connected_msg = 0,
+                                         .setup_tag = setup_lgx_pccc_tag, PCCC_CONN};
+const cip_family_t ab_family_logix = {.name = "Logix", .plc_type = CIP_PLC_LGX, .use_connected_msg = -1,
+                                      .setup_tag = setup_logix_tag, LGX_CONN};
+const cip_family_t ab_family_micro800 = {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .use_connected_msg = 1,
+                                         .setup_tag = setup_micro800_tag, LGX_CONN};
+const cip_family_t ab_family_generic = {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .use_connected_msg = 0,
+                                        .setup_tag = setup_generic_tag, LGX_CONN};
 
 
 /*

@@ -38,6 +38,7 @@
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/identity_tag.h>
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
@@ -61,6 +62,8 @@
 
 static int omron_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int omron_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int setup_njnx_tag(cip_tag_p tag, attr attribs);
+static int setup_njnx_name(cip_tag_p tag, attr attribs);
 
 /*
  * Externally visible global variables
@@ -303,22 +306,42 @@ const attr_def_t omron_attribs[] = {
 };
 
 
-/* an NJ/NX has the CIP special tags, and its own tag and UDT listing (omron_listing.c). */
-int omron_setup_njnx_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+/*
+ * An NJ/NX tag: the CIP special tags, its own tag and UDT listing (omron_listing.c), or a
+ * symbolic name.  Packing is off unless the tag string turns it on.
+ */
+static int setup_njnx_tag(cip_tag_p tag, attr attribs) {
     const char *name = attr_get_str(attribs, "name", NULL);
     int rc = PLCTAG_STATUS_OK;
 
-    (void)entry;
+    tag->protocol_type = TAG_PROTOCOL_OMRON;
+    tag->vtable = &cip_standard_tag_vtable_omron;
+    tag->byte_order = &omron_njnx_tag_byte_order;
+    tag->std_ops = &cip_standard_tag_ops_omron;
+    tag->debug_module = DEBUG_MODULE_OMRON_STANDARD_TAG;
+    tag->allow_packing = (attr_get_int(attribs, "allow_packing", 0) != 0);
 
     if(str_cmp_i(name, "@identity") == 0) {
-        return cip_identity_tag_setup(tag, &identity_tag_vtable, DEBUG_MODULE_OMRON_COMMON);
+        rc = cip_identity_tag_setup(tag, &identity_tag_vtable, DEBUG_MODULE_OMRON_COMMON);
+    } else if(str_cmp_i(name, "@raw") == 0) {
+        rc = cip_raw_tag_setup(tag, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG);
+    } else if(str_cmp_i(name, "@tags") == 0) {
+        rc = omron_setup_listing_tag(tag);
+    } else if(str_cmp_i_n(name, "@udt/", str_length("@udt/")) == 0) {
+        rc = omron_setup_udt_tag(tag, name);
+    } else {
+        rc = setup_njnx_name(tag, attribs);
     }
 
-    if(str_cmp_i(name, "@raw") == 0) { return cip_raw_tag_setup(tag, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG); }
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
 
-    if(str_cmp_i(name, "@tags") == 0) { return omron_setup_listing_tag(tag); }
+    return cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP);
+}
 
-    if(str_cmp_i_n(name, "@udt/", str_length("@udt/")) == 0) { return omron_setup_udt_tag(tag, name); }
+
+static int setup_njnx_name(cip_tag_p tag, attr attribs) {
+    const char *name = attr_get_str(attribs, "name", NULL);
+    int rc = PLCTAG_STATUS_OK;
 
     rc = cip_tag_parse_elem_type(tag, attribs, DEBUG_MODULE_OMRON_COMMON);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
@@ -502,3 +525,17 @@ static int omron_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t
     return PLCTAG_STATUS_PENDING;
 }
 
+
+#define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
+#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
+
+/* the OMRON NJ/NX family; see cip/family.h. */
+const cip_family_t omron_family_njnx = {.name = "OMRON NJ/NX",
+                                        .plc_type = CIP_PLC_OMRON_NJNX,
+                                        .use_connected_msg = 1,
+                                        .setup_tag = setup_njnx_tag,
+                                        .max_payload_capacity = MAX_CIP_OMRON_MSG_SIZE_EX,
+                                        .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE,
+                                        .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX,
+                                        .only_use_old_forward_open = false,
+                                        .min_payload_size = MIN_PAYLOAD_SIZE_CIP};

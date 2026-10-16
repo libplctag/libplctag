@@ -32,31 +32,20 @@
  ***************************************************************************/
 
 /*
- * The CIP PLC dispatch table.
- *
- * Eleven rows for eight PLC types, because three of them -- PLC/5, SLC and MicroLogix --
- * are reached either directly or across a DH+ bridge and the two cases set different
- * messaging.  Rows map many-to-one onto name parsers: PLC/5 addressing, SLC addressing,
- * Logix symbolic, generic and OMRON symbolic.
- *
- * Below the table is the one CIP tag constructor.  It finds the row and the connection, then
- * builds the tag from the row.
+ * The one CIP tag constructor.  It picks the family -- from the plc attribute, or from the
+ * Identity object a probed connection reads -- finds or makes the connection, and sets the tag
+ * up with the family that connection holds.  The families themselves live with their modules.
  */
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/eip_lgx_pccc.h>
-#include <libplctag/modules/ab/eip_plc5_pccc.h>
-#include <libplctag/modules/ab/eip_slc_pccc.h>
-#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/omron/omron_common.h>
 #include <platform.h>
 #include <libplctag/lib/byte_order.h>
 #include <libplctag/lib/connection_tag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/connection_tag.h>
-#include <libplctag/modules/cip/path.h>
-#include <libplctag/modules/cip/plc_type.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <stdint.h>
 #include <utils/attr.h>
@@ -64,132 +53,24 @@
 #include <utils/rc.h>
 
 
-static int setup_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+static int setup_tag(const cip_family_t *family, cip_tag_p tag, attr attribs);
 static int deferred_abort(plc_tag_p tag);
 static int deferred_status(plc_tag_p tag);
 static int deferred_tickler(plc_tag_p tag);
 
-/* maximum for PCCC embedded within CIP. */
-#define MAX_CIP_PCCC_MSG_SIZE (244)
 
-#define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
-
-#define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
-#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
-
-/*
- * Smallest PCCC connection payload we can actually use.  A ForwardOpen error can offer a
- * smaller size than we asked for and we accept it, but below the fixed per-request overhead
- * there is no room left for a request.  PCCC needs about 92 bytes for its command header and
- * addressing; MIN_PAYLOAD_SIZE_CIP is the CIP equivalent.
- */
-#define MIN_PAYLOAD_SIZE_PCCC (92)
-
-/* the three connection shapes, which the rows share. */
-#define PCCC_CONN                                                                                                       \
-    .max_payload_capacity = MAX_CIP_PCCC_MSG_SIZE, .fo_conn_size = MAX_CIP_PCCC_MSG_SIZE, .fo_ex_conn_size = 0,         \
-    .only_use_old_forward_open = true, .min_payload_size = MIN_PAYLOAD_SIZE_PCCC
-
-#define LGX_CONN                                                                                                        \
-    .max_payload_capacity = MAX_CIP_LGX_MSG_SIZE_EX, .fo_conn_size = MAX_CIP_LGX_MSG_SIZE,                              \
-    .fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX, .only_use_old_forward_open = false, .min_payload_size = MIN_PAYLOAD_SIZE_CIP
-
-#define OMRON_CONN                                                                                                      \
-    .max_payload_capacity = MAX_CIP_OMRON_MSG_SIZE_EX, .fo_conn_size = MAX_CIP_OMRON_MSG_SIZE,                          \
-    .fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX, .only_use_old_forward_open = false, .min_payload_size = MIN_PAYLOAD_SIZE_CIP
-
-/* what every Rockwell tag starts with; packing and size_from_plc default to false. */
-#define AB_TAG(vt, bo)                                                                                                  \
-    .protocol = TAG_PROTOCOL_AB, .vtable = (vt), .byte_order = (bo), .std_ops = &cip_standard_tag_ops_ab,               \
-    .debug_module = DEBUG_MODULE_AB_EIP_CIP
-
-/*
- * Micro800 supports the Extended Forward Open and asks for the same size *Logix does: the
- * only published figure for anything larger traces back to a single forum post and no
- * Rockwell document states one, while 4002 is measured -- 4082 comes back as an invalid
- * connection size and 4002 succeeds.  Asking higher costs a failed round trip on every
- * connection and sizes the per-connection buffer to match.  Raise it if a Micro800 is
- * measured accepting more.  Generic CIP takes the *Logix sizing too.
- */
-static const cip_plc_entry_t cip_plc_entries[] = {
-    {.name = "PLC/5", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     AB_TAG(&pccc_vtable, &plc5_tag_byte_order), .setup_name = ab_setup_plc5_name, PCCC_CONN},
-    {.name = "PLC/5 via DH+", .plc_type = CIP_PLC_PLC5, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
-     AB_TAG(&pccc_vtable, &plc5_tag_byte_order), .setup_name = ab_setup_plc5_name, PCCC_CONN},
-    {.name = "SLC 500", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
-    {.name = "SLC 500 via DH+", .plc_type = CIP_PLC_SLC, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
-     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
-    {.name = "MicroLogix", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
-    {.name = "MicroLogix via DH+", .plc_type = CIP_PLC_MLGX, .dialect = CIP_DIALECT_DHP, .use_connected_msg = 1,
-     AB_TAG(&pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_slc_name, PCCC_CONN},
-    /* SLC byte order, PLC/5 addressing. */
-    {.name = "PCCC-mapped Logix", .plc_type = CIP_PLC_LGX_PCCC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     AB_TAG(&lgx_pccc_vtable, &slc_tag_byte_order), .setup_name = ab_setup_plc5_name, PCCC_CONN},
-    {.name = "Logix", .plc_type = CIP_PLC_LGX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = -1,
-     AB_TAG(&cip_standard_tag_vtable_ab, &logix_tag_byte_order), .allow_packing = true, .packing_settable = true,
-     .size_from_plc = true, .setup_name = ab_setup_logix_name, LGX_CONN},
-    {.name = "Micro800", .plc_type = CIP_PLC_MICRO800, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1,
-     AB_TAG(&cip_standard_tag_vtable_ab, &cip_short_string_byte_order), .size_from_plc = true,
-     .setup_name = ab_setup_logix_name, LGX_CONN},
-    /* only special tags, so no data-tag vtable. */
-    {.name = "generic CIP", .plc_type = CIP_PLC_GENERIC, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 0,
-     AB_TAG(NULL, &logix_tag_byte_order), .size_from_plc = true, .setup_name = ab_setup_generic_name, LGX_CONN},
-    {.name = "OMRON NJ/NX", .plc_type = CIP_PLC_OMRON_NJNX, .dialect = CIP_DIALECT_DIRECT, .use_connected_msg = 1,
-     .protocol = TAG_PROTOCOL_OMRON, .vtable = &cip_standard_tag_vtable_omron, .byte_order = &omron_njnx_tag_byte_order,
-     .std_ops = &cip_standard_tag_ops_omron, .debug_module = DEBUG_MODULE_OMRON_STANDARD_TAG, .packing_settable = true,
-     .size_from_plc = true, .setup_name = omron_setup_njnx_name, OMRON_CONN},
-};
-
-
-bool cip_entry_use_connected_msg(const cip_plc_entry_t *entry, attr attribs) {
+bool cip_family_use_connected_msg(const cip_family_t *family, attr attribs) {
     /* the one family that lets the tag string decide, and it defaults to connected. */
-    if(entry->use_connected_msg < 0) { return (attr_get_int(attribs, "use_connected_msg", 1) != 0); }
+    if(family->use_connected_msg < 0) { return (attr_get_int(attribs, "use_connected_msg", 1) != 0); }
 
-    return (entry->use_connected_msg != 0);
-}
-
-
-const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t dialect) {
-    size_t index = 0;
-
-    for(index = 0; index < (sizeof(cip_plc_entries) / sizeof(cip_plc_entries[0])); index++) {
-        if(cip_plc_entries[index].plc_type == plc_type && cip_plc_entries[index].dialect == dialect) {
-            return &cip_plc_entries[index];
-        }
-    }
-
-    /*
-     * No warning here.  Connection creation asks this for a DH+ row on every new connection
-     * precisely to find out whether the family has one, so a miss is the normal answer rather
-     * than a problem.  The callers that do treat a miss as an error say so
-     * themselves, with the PLC type they were given.
-     */
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "No PLC table entry for PLC type %d, dialect %d.", (int)plc_type, (int)dialect);
-
-    return NULL;
-}
-
-
-int cip_plc_entries_max_payload_capacity(void) {
-    int max_capacity = 0;
-
-    for(size_t index = 0; index < (sizeof(cip_plc_entries) / sizeof(cip_plc_entries[0])); index++) {
-        if(cip_plc_entries[index].max_payload_capacity > max_capacity) {
-            max_capacity = cip_plc_entries[index].max_payload_capacity;
-        }
-    }
-
-    return max_capacity;
+    return (family->use_connected_msg != 0);
 }
 
 
 #define CIP_VENDOR_ROCKWELL ((uint16_t)0x0001)
 
 /*
- * Identity product-name prefixes, first match wins.  CIP_PLC_NONE refuses the device: every
+ * Identity product-name prefixes, first match wins.  A NULL family refuses the device: every
  * 1756 part that is not a CPU is a chassis module, and reaching one means the path stops
  * short of the CPU.  Device type is no help: a MicroLogix 1100 reports itself as a
  * communications adapter, as an ENBT does.
@@ -200,32 +81,31 @@ int cip_plc_entries_max_payload_capacity(void) {
 static const struct {
     uint16_t vendor_id;
     const char *prefix;
-    cip_plc_type_t plc_type;
+    const cip_family_t *family;
 } identity_map[] = {
-    {CIP_VENDOR_ROCKWELL, "1756-L", CIP_PLC_LGX},
-    {CIP_VENDOR_ROCKWELL, "1756-", CIP_PLC_NONE},
-    {CIP_VENDOR_ROCKWELL, "1769-L", CIP_PLC_LGX},
-    {CIP_VENDOR_ROCKWELL, "5069-L", CIP_PLC_LGX},
-    {CIP_VENDOR_ROCKWELL, "2080-", CIP_PLC_MICRO800},
-    {CIP_VENDOR_ROCKWELL, "PLC-5", CIP_PLC_PLC5},
-    {CIP_VENDOR_ROCKWELL, "1763-", CIP_PLC_MLGX},
+    {CIP_VENDOR_ROCKWELL, "1756-L", &ab_family_logix},
+    {CIP_VENDOR_ROCKWELL, "1756-", NULL},
+    {CIP_VENDOR_ROCKWELL, "1769-L", &ab_family_logix},
+    {CIP_VENDOR_ROCKWELL, "5069-L", &ab_family_logix},
+    {CIP_VENDOR_ROCKWELL, "2080-", &ab_family_micro800},
+    {CIP_VENDOR_ROCKWELL, "PLC-5", &ab_family_plc5},
+    {CIP_VENDOR_ROCKWELL, "1763-", &ab_family_mlgx},
 };
 
 
-int cip_plc_entry_from_identity(uint16_t vendor_id, const char *product_name, bool has_path,
-                                const cip_plc_entry_t **entry_out) {
-    cip_plc_type_t plc_type = CIP_PLC_GENERIC;
+int cip_family_from_identity(uint16_t vendor_id, const char *product_name, bool has_path, const cip_family_t **family_out) {
+    const cip_family_t *family = &ab_family_generic;
 
     for(size_t index = 0; index < (sizeof(identity_map) / sizeof(identity_map[0])); index++) {
         const char *prefix = identity_map[index].prefix;
 
         if(identity_map[index].vendor_id == vendor_id && str_cmp_i_n(product_name, prefix, str_length(prefix)) == 0) {
-            plc_type = identity_map[index].plc_type;
+            family = identity_map[index].family;
             break;
         }
     }
 
-    if(plc_type == CIP_PLC_NONE) {
+    if(!family) {
         if(has_path) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "The path reaches a %s, not a CPU!", product_name);
         } else {
@@ -236,54 +116,45 @@ int cip_plc_entry_from_identity(uint16_t vendor_id, const char *product_name, bo
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    *entry_out = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
+    *family_out = family;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Vendor %u \"%s\" is a %s.", (unsigned int)vendor_id, product_name,
-           (*entry_out)->name);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Vendor %u \"%s\" is a %s.", (unsigned int)vendor_id, product_name, family->name);
 
     return PLCTAG_STATUS_OK;
 }
 
 
-cip_plc_type_t cip_plc_type_from_attributes(attr attribs) {
+const cip_family_t *cip_family_from_attributes(attr attribs) {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", NULL));
 
     /* not an error: the connection identifies the device instead. */
-    if(!cpu_type) { return CIP_PLC_NONE; }
+    if(!cpu_type) { return NULL; }
 
     if(!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found PLC/5 PLC.");
-        return CIP_PLC_PLC5;
+        return &ab_family_plc5;
     } else if(!str_cmp_i(cpu_type, "slc") || !str_cmp_i(cpu_type, "slc500")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found SLC 500 PLC.");
-        return CIP_PLC_SLC;
+        return &ab_family_slc;
     } else if(!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5")
               || !str_cmp_i(cpu_type, "logixplc5") || !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc")
               || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found Logix-class PLC using PCCC protocol.");
-        return CIP_PLC_LGX_PCCC;
+        return &ab_family_lgx_pccc;
     } else if(!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found Micro8xx PLC.");
-        return CIP_PLC_MICRO800;
+        return &ab_family_micro800;
     } else if(!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found MicroLogix PLC.");
-        return CIP_PLC_MLGX;
+        return &ab_family_mlgx;
     } else if(!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx")
               || !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") || !str_cmp_i(cpu_type, "logix")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found ControlLogix/CompactLogix PLC.");
-        return CIP_PLC_LGX;
+        return &ab_family_logix;
     } else if(!str_cmp_i(cpu_type, "omron-njnx") || !str_cmp_i(cpu_type, "omron-nj") || !str_cmp_i(cpu_type, "omron-nx")
               || !str_cmp_i(cpu_type, "njnx") || !str_cmp_i(cpu_type, "nx1p2")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found OMRON NJ/NX Series PLC.");
-        return CIP_PLC_OMRON_NJNX;
+        return &omron_family_njnx;
     } else if(!str_cmp_i(cpu_type, "generic") || !str_cmp_i(cpu_type, "cip")) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Found generic CIP device.");
-        return CIP_PLC_GENERIC;
-    } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unsupported device type: %s", cpu_type);
-
-        return CIP_PLC_NONE;
+        return &ab_family_generic;
     }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unsupported device type: %s", cpu_type);
+
+    return NULL;
 }
 
 
@@ -312,7 +183,7 @@ static plc_tag_p create_connection_tag(attr attribs, bool is_omron,
  * Whether the tag string names a PLC that sits in a chassis behind a communication module,
  * so a tag without a path would reach the module rather than the CPU.
  *
- * A spelling and not a row: ControlLogix and CompactLogix are one family and share a row,
+ * A spelling and not a family: ControlLogix and CompactLogix are one family,
  * but a CompactLogix answers on its own Ethernet port.  The bare "lgx" and "logix" spellings
  * have always required a path, so they still do.
  */
@@ -325,7 +196,7 @@ static bool plc_needs_path(attr attribs) {
 
 
 /*
- * What a tag dispatches through until its row sets it up, so an abort during creation is
+ * What a tag dispatches through until its family sets it up, so an abort during creation is
  * safe.  No attributes: a tag that fails to create never reaches the caller.
  */
 static struct tag_vtable_t unimplemented_vtable = {
@@ -343,7 +214,7 @@ static struct tag_vtable_t unimplemented_vtable = {
 
 /*
  * What a tag dispatches through while its connection identifies the device.  The tickler
- * finishes the create once the row is known.
+ * finishes the create once the family is known.
  */
 static struct tag_vtable_t deferred_vtable = {
     .abort = deferred_abort,
@@ -359,22 +230,22 @@ static struct tag_vtable_t deferred_vtable = {
 
 
 /*
- * Allocate a tag on a connection the caller has settled, then set it up from the row.  Takes
- * ownership of the connection reference, on failure as well as success.
+ * Allocate a tag on a connection the caller has settled, then set it up with the connection's
+ * family.  Takes ownership of the connection reference, on failure as well as success.
  *
  * Two steps because they need different things: the tag needs only the connection, the setup
- * needs the connection's row.  With no row yet -- a probed connection still identifying the
- * device -- the setup waits for the tickler, on a copy of the attributes.
+ * needs the connection's family.  With no family yet -- a probed connection still identifying
+ * the device -- the setup waits for the tickler, on a copy of the attributes.  The family sets
+ * the tag's protocol, so the allocation's is only a placeholder.
  */
-static int create_tag(const cip_plc_entry_t *entry, cip_conn_p conn, attr attribs,
+static int create_tag(const cip_family_t *family, cip_conn_p conn, attr attribs,
                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
                       plc_tag_p *tag_out) {
     cip_tag_p tag = NULL;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
 
-    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, (entry ? entry->protocol : TAG_PROTOCOL_AB),
-                        &unimplemented_vtable, DEBUG_MODULE_CIP);
+    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_AB, &unimplemented_vtable, DEBUG_MODULE_CIP);
     if(!tag) {
         /* nothing owns the connection yet, so this is the one failure that has to say so. */
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing connection reference.");
@@ -389,7 +260,7 @@ static int create_tag(const cip_plc_entry_t *entry, cip_conn_p conn, attr attrib
     tag->session = conn;
     *tag_out = (plc_tag_p)tag;
 
-    if(entry) { return setup_tag(entry, tag, attribs); }
+    if(family) { return setup_tag(family, tag, attribs); }
 
     tag->deferred_attribs = attr_copy(attribs);
     if(!tag->deferred_attribs) {
@@ -417,29 +288,28 @@ static int deferred_status(plc_tag_p tag) { return ((cip_tag_p)tag)->create_read
 
 
 /*
- * Finish a create once the connection knows its row.  The library applied its byte-order
+ * Finish a create once the connection knows its family.  The library applied its byte-order
  * overrides before the tag had a byte order, so they are applied here.  Runs under the tag's
  * api_mutex, like every tickler, on the connection's handler thread.
  */
 static int deferred_tickler(plc_tag_p raw_tag) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
     attr attribs = tag->deferred_attribs;
-    const cip_plc_entry_t *entry = NULL;
+    const cip_family_t *family = NULL;
     int identify_rc = PLCTAG_STATUS_OK;
     int rc = PLCTAG_STATUS_OK;
 
     if(tag->create_read_status != PLCTAG_STATUS_PENDING || !attribs) { return PLCTAG_STATUS_OK; }
 
-    entry = cip_conn_plc_entry(tag->session, &identify_rc);
-    if(!entry) {
+    family = cip_conn_family(tag->session, &identify_rc);
+    if(!family) {
         if(identify_rc != PLCTAG_STATUS_OK) { cip_tag_fail_create(tag, (plctag_error_code_t)identify_rc); }
         return PLCTAG_STATUS_OK;
     }
 
     tag->deferred_attribs = NULL;
-    tag->protocol_type = entry->protocol;
 
-    rc = setup_tag(entry, tag, attribs);
+    rc = setup_tag(family, tag, attribs);
     if(rc == PLCTAG_STATUS_OK) { rc = set_tag_byte_order((plc_tag_p)tag, attribs); }
 
     attr_destroy(attribs);
@@ -450,42 +320,26 @@ static int deferred_tickler(plc_tag_p raw_tag) {
 }
 
 
-/* Everything about a tag that comes from its family's row, ending with the create read. */
-static int setup_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
+/* The setup every family shares, around the family's own, ending with the create read. */
+static int setup_tag(const cip_family_t *family, cip_tag_p tag, attr attribs) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Setting up %s tag.", entry->name);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Setting up %s tag.", family->name);
 
-    tag->plc_type = entry->plc_type;
+    tag->plc_type = family->plc_type;
     tag->use_connected_msg = tag->session->use_connected_msg;
-    if(entry->vtable) { tag->vtable = entry->vtable; }
-    tag->byte_order = entry->byte_order;
-    tag->std_ops = entry->std_ops;
-    tag->debug_module = entry->debug_module;
-    tag->allow_packing = (entry->packing_settable ? (attr_get_int(attribs, "allow_packing", entry->allow_packing) != 0)
-                                                  : entry->allow_packing);
     /* the create read checks the tag against the PLC; the tickler raises CREATED when it ends. */
     tag->create_read_status = PLCTAG_STATUS_PENDING;
 
     rc = cip_tag_resolve_elem_count(tag, attribs, DEBUG_MODULE_CIP);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
-    /* a special tag replaces the vtable, byte order and debug module set above. */
-    rc = entry->setup_name(entry, tag, attribs);
+    rc = family->setup_tag(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "Unable to set up %s tag, error %s!", entry->name,
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "Unable to set up %s tag, error %s!", family->name,
                plc_tag_decode_error(rc));
         return rc;
     }
-
-    /* a special tag learns its size from the reply. */
-    if(entry->size_from_plc || tag->special_tag) {
-        rc = cip_tag_size_from_plc(tag, DEBUG_MODULE_CIP);
-    } else {
-        rc = cip_tag_size_from_attributes(tag, attribs, DEBUG_MODULE_CIP);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(tag->vtable->read) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Kicking off initial read.");
@@ -511,9 +365,8 @@ static int setup_tag(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) 
  */
 int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                    void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
-    const cip_plc_entry_t *entry = NULL;
+    const cip_family_t *family = NULL;
     cip_conn_p conn = NULL;
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
     const char *path = attr_get_str(attribs, "path", NULL);
     int rc = PLCTAG_STATUS_OK;
 
@@ -522,7 +375,7 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
     if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
         bool is_omron = (src_tag ? (src_tag->protocol_type == TAG_PROTOCOL_OMRON
                                     || src_tag->protocol_type == TAG_PROTOCOL_OMRON_CONNECTION)
-                                 : (cip_plc_type_from_attributes(attribs) == CIP_PLC_OMRON_NJNX));
+                                 : (cip_family_from_attributes(attribs) == &omron_family_njnx));
 
         *tag_out = create_connection_tag(attribs, is_omron, tag_callback_func, userdata, src_tag);
 
@@ -546,11 +399,11 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return PLCTAG_ERR_NOT_FOUND;
         }
 
-        entry = cip_conn_plc_entry(conn, &rc);
+        family = cip_conn_family(conn, &rc);
 
         /* the connection decides use_connected_msg, so a clone cannot ask for the other setting. */
-        if(entry && attr_get_str(attribs, "use_connected_msg", NULL)
-           && (cip_entry_use_connected_msg(entry, attribs) ? 1 : 0) != conn->use_connected_msg) {
+        if(family && attr_get_str(attribs, "use_connected_msg", NULL)
+           && (cip_family_use_connected_msg(family, attribs) ? 1 : 0) != conn->use_connected_msg) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
             return PLCTAG_ERR_BAD_PARAM;
         }
@@ -562,8 +415,7 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return PLCTAG_ERR_NOT_FOUND;
         }
     } else {
-        /* the connection settles the family and its row; these two need only the PLC type. */
-        plc_type = cip_plc_type_from_attributes(attribs);
+        /* the connection settles the family; these two need only what the tag string named. */
 
         /*
          * str_length() rather than a NULL test: "path=" is a present but empty attribute and
@@ -574,7 +426,7 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return PLCTAG_ERR_BAD_PARAM;
         }
 
-        if(str_length(path) && plc_type == CIP_PLC_MICRO800) {
+        if(str_length(path) && cip_family_from_attributes(attribs) == &ab_family_micro800) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path is not supported for Micro800 PLCs.");
         }
 
@@ -584,14 +436,14 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
             return rc;
         }
 
-        entry = cip_conn_plc_entry(conn, &rc);
+        family = cip_conn_family(conn, &rc);
     }
 
     /* a probed connection's refusal is the answer, so a tag created after it fails at once. */
-    if(!entry && rc != PLCTAG_STATUS_OK) {
+    if(!family && rc != PLCTAG_STATUS_OK) {
         rc_dec(conn);
         return rc;
     }
 
-    return create_tag(entry, conn, attribs, tag_callback_func, userdata, tag_out);
+    return create_tag(family, conn, attribs, tag_callback_func, userdata, tag_out);
 }

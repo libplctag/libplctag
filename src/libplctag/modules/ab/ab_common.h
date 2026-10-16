@@ -38,7 +38,7 @@
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/plc_type.h>
-#include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
 
@@ -50,14 +50,14 @@
 /* Runtime attributes shared by every AB tag type. */
 extern const attr_def_t ab_attribs[];
 
-/*
- * The name parsers, one per kind of Rockwell addressing, reached through the rows in
- * modules/cip/cip_tag_create.c.  Each also handles the special tags its family has.
- */
-extern int ab_setup_plc5_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_slc_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_logix_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-extern int ab_setup_generic_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+/* the Rockwell families; see cip/family.h.  The DH+ forms are reached through .dhp. */
+extern const cip_family_t ab_family_plc5;
+extern const cip_family_t ab_family_slc;
+extern const cip_family_t ab_family_mlgx;
+extern const cip_family_t ab_family_lgx_pccc;
+extern const cip_family_t ab_family_logix;
+extern const cip_family_t ab_family_micro800;
+extern const cip_family_t ab_family_generic;
 
 /* special tag setup, see listing_tag.c and udt_tag.c */
 extern int setup_tag_listing_tag(cip_tag_p tag, const char *name);

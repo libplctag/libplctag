@@ -51,6 +51,7 @@
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
@@ -80,14 +81,14 @@ static void notify_tags(cip_conn_p conn);
 static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc);
 static bool has_due_tags_unsafe(cip_conn_p conn, int64_t now);
 static int64_t next_tag_time_unsafe(cip_conn_p conn);
-static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type, attr attribs, cip_conn_p *tag_conn,
+static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *family, attr attribs, cip_conn_p *tag_conn,
                                   int *is_new_conn);
-static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const char *host, const char *path,
+static int session_create(cip_conn_list_t *list, const cip_family_t *family, const char *host, const char *path,
                           int use_connected_msg, int connection_group_id, cip_conn_p *conn_out);
 
 
 /*
- * Every CIP connection, Rockwell and OMRON alike.  The family's table entry is part of the
+ * Every CIP connection, Rockwell and OMRON alike.  The family's PLC type is part of the
  * match key, so connections for two families never match each other.
  */
 static cip_conn_list_t conn_list = {0};
@@ -106,30 +107,25 @@ int32_t cip_conn_live_count(void) { return session_list_count(&conn_list); }
 
 
 int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn) {
-    cip_plc_type_t plc_type = cip_plc_type_from_attributes(attribs);
+    const cip_family_t *family = cip_family_from_attributes(attribs);
     bool names_plc = (attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", NULL)) != NULL);
 
     /* no PLC named: the connection reads the Identity object to find out. */
-    if(!names_plc) { return find_or_create_on_list(&conn_list, CIP_PLC_NONE, attribs, tag_conn, is_new_conn); }
+    if(names_plc && !family) { return PLCTAG_ERR_BAD_DEVICE; }
 
-    if(!cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT)) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unknown PLC type %d!", (int)plc_type);
-        return PLCTAG_ERR_BAD_DEVICE;
-    }
-
-    return find_or_create_on_list(&conn_list, plc_type, attribs, tag_conn, is_new_conn);
+    return find_or_create_on_list(&conn_list, family, attribs, tag_conn, is_new_conn);
 }
 
 
-const cip_plc_entry_t *cip_conn_plc_entry(cip_conn_p conn, int *identify_rc) {
-    const cip_plc_entry_t *entry = NULL;
+const cip_family_t *cip_conn_family(cip_conn_p conn, int *identify_rc) {
+    const cip_family_t *family = NULL;
 
     critical_block(conn->session_mutex) {
-        entry = conn->plc_entry;
+        family = conn->family;
         *identify_rc = conn->identify_rc;
     }
 
-    return entry;
+    return family;
 }
 
 
@@ -206,7 +202,7 @@ int session_get_available_cip_payload_space(cip_conn_p conn) {
 
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
                "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
-               conn->max_payload_size, conn->plc_entry->fo_conn_size, conn->plc_entry->fo_ex_conn_size, max_payload_size);
+               conn->max_payload_size, conn->family->fo_conn_size, conn->family->fo_ex_conn_size, max_payload_size);
 
         // Account for CPF data item overhead
         if(conn->use_connected_msg) {
@@ -614,7 +610,7 @@ int recv_eip_response(cip_conn_p conn, int timeout) {
 /*
  * Connection sizes to fall back to, largest first.
  *
- * These are not the opening ask -- that comes from the PLC family's own row, which is what
+ * These are not the opening ask -- that comes from the PLC family's own sizes, which is what
  * has been negotiating successfully all along.  This is only where to go after the PLC
  * refuses, so every rung is a size some real device is known to accept.
  *
@@ -659,11 +655,11 @@ static bool forward_open_step_size_down(cip_conn_p conn) {
 
     next_idx = forward_open_rung_at_or_below(limit);
 
-    if(next_idx < 0 || forward_open_size_ladder[next_idx] < conn->plc_entry->min_payload_size) {
+    if(next_idx < 0 || forward_open_size_ladder[next_idx] < conn->family->min_payload_size) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                "No connection size left to try at or below %u bytes that still clears the %u bytes this protocol needs "
                "for a single request!",
-               limit, conn->plc_entry->min_payload_size);
+               limit, conn->family->min_payload_size);
         return false;
     }
 
@@ -721,7 +717,7 @@ int send_forward_open_request(cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Flag prohibiting use of extended ForwardOpen is %d.",
            conn->only_use_old_forward_open);
 
-    max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->plc_entry->fo_conn_size : conn->plc_entry->fo_ex_conn_size);
+    max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->family->fo_conn_size : conn->family->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
     critical_block(conn->session_mutex) {
@@ -1162,14 +1158,14 @@ void session_destroy(void *conn_arg) {
 
 
 /*
- * Read the Identity object and take the family's row from it.  Runs on the handler thread
+ * Read the Identity object and take the family from it.  Runs on the handler thread
  * before any tag request, so nothing else is using the buffer.
  *
  * A network failure is retried like any other connect failure.  An answer is not: a CIP
  * error, or a device the classifier refuses, is recorded so the waiting tags fail with it.
  */
 static int session_identify(cip_conn_p conn) {
-    const cip_plc_entry_t *entry = NULL;
+    const cip_family_t *family = NULL;
     uint16_t vendor_id = 0;
     char product_name[256];
     int rc = PLCTAG_STATUS_OK;
@@ -1190,17 +1186,17 @@ static int session_identify(cip_conn_p conn) {
     }
 
     rc = cip_decode_identity_response(conn, &vendor_id, product_name, sizeof(product_name));
-    if(rc == PLCTAG_STATUS_OK) { rc = cip_plc_entry_from_identity(vendor_id, product_name, conn->conn_path_size > 0, &entry); }
+    if(rc == PLCTAG_STATUS_OK) { rc = cip_family_from_identity(vendor_id, product_name, conn->conn_path_size > 0, &family); }
 
     critical_block(conn->session_mutex) {
         if(rc != PLCTAG_STATUS_OK) {
             conn->identify_rc = rc;
         } else {
-            conn->plc_entry = entry;
-            conn->only_use_old_forward_open = (conn->only_use_old_forward_open || entry->only_use_old_forward_open);
-            conn->max_payload_size = (uint16_t)entry->fo_conn_size;
+            conn->family = family;
+            conn->only_use_old_forward_open = (conn->only_use_old_forward_open || family->only_use_old_forward_open);
+            conn->max_payload_size = (uint16_t)family->fo_conn_size;
             /* ponytail: Logix's -1 means connected; unconnected Logix needs plc=lgx. */
-            conn->use_connected_msg = (entry->use_connected_msg != 0);
+            conn->use_connected_msg = (family->use_connected_msg != 0);
 
             /*
              * What cip_encode_path() appends for a connected family.  It could not when the
@@ -1218,7 +1214,7 @@ static int session_identify(cip_conn_p conn) {
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Identified a %s, %s.", entry->name,
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Identified a %s, %s.", family->name,
            (conn->use_connected_msg ? "connected" : "unconnected"));
 
     return PLCTAG_STATUS_OK;
@@ -2027,7 +2023,7 @@ THREAD_FUNC(session_handler) {
                 if((rc = session_register(conn)) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Session registration failed %s!", plc_tag_decode_error(rc));
                     conn->state = SESSION_CLOSE_SOCKET;
-                } else if(!conn->plc_entry) {
+                } else if(!conn->family) {
                     conn->state = SESSION_IDENTIFY;
                 } else {
                     if(conn->use_connected_msg) {
@@ -2390,12 +2386,11 @@ THREAD_FUNC(session_handler) {
 
 /*
  * Create a connection for a PLC family.  The path is parsed here and only here, and the parse
- * picks the family's row: a DH+ path takes the DH+ row, anything else the direct one.
+ * picks the family: a DH+ path takes the family's DH+ form, anything else the family itself.
  */
-static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const char *host, const char *path,
+static int session_create(cip_conn_list_t *list, const cip_family_t *family, const char *host, const char *path,
                           int use_connected_msg, int connection_group_id, cip_conn_p *conn_out) {
-    const cip_plc_entry_t *dhp_entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DHP);
-    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
+    const cip_family_t *dhp_family = (family ? family->dhp : NULL);
     const bool data_buffer_is_static = true;
     static volatile uint32_t connection_id = 0;
 
@@ -2445,7 +2440,7 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
      * The encoder knows only whether the family can bridge DH+.  One that cannot rejects a
      * DH+ segment rather than ignoring it.  A DH+ path forces a connection.
      */
-    rc = cip_encode_path(path, &use_connected_msg, (dhp_entry ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER),
+    rc = cip_encode_path(path, &use_connected_msg, (dhp_family ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER),
                          &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest, &is_bridged);
     if(rc != PLCTAG_STATUS_OK) {
         /* BAD_PARAM for a segment that does not parse, TOO_LARGE for a path that encodes too long. */
@@ -2454,31 +2449,31 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
         return rc;
     }
 
-    if(is_dhp) { plc_entry = dhp_entry; }
+    if(is_dhp) { family = dhp_family; }
 
     /*
      * A PCCC CPU sits directly on a network, never in a ControlLogix chassis, so a path to one
      * must leave the gateway's chassis.  A DH+ path already does.
      */
-    if(dhp_entry && !is_dhp && str_length(path) && !is_bridged) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", plc_entry->name);
+    if(dhp_family && !is_dhp && str_length(path) && !is_bridged) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to a %s PLC must bridge out of the chassis!", family->name);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(plc_entry) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s connection, %s.", plc_entry->name,
+    if(family) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating %s connection, %s.", family->name,
                (use_connected_msg ? "connected" : "unconnected"));
 
-        data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)plc_entry->max_payload_capacity;
+        data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)family->max_payload_capacity;
     } else {
         /*
-         * No PLC named, so the Identity probe picks the row.  The buffer has to exist before
+         * No PLC named, so the Identity probe picks the family.  The buffer has to exist before
          * that, so it is sized for the largest family.  The DH+ path the encoder rejected
          * above is the one route Identity cannot see past.
          */
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating a connection that will identify the device.");
 
-        data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)cip_plc_entries_max_payload_capacity();
+        data_buffer_capacity = (size_t)CIP_MAX_FRAMING_SIZE + (size_t)CIP_FAMILY_MAX_PAYLOAD_CAPACITY;
     }
 
     /* add in space for the data buffer. */
@@ -2505,7 +2500,7 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
 
     /* a probed connection may turn out to need the router suffix the encoder left off. */
     conn_path_offset = total_allocation_size;
-    total_allocation_size += (size_t)tmp_conn_path_size + (plc_entry ? 0 : sizeof(cip_router_path));
+    total_allocation_size += (size_t)tmp_conn_path_size + (family ? 0 : sizeof(cip_router_path));
 
     /* allocate the conn struct and the buffer in the same allocation. */
     pdebug(
@@ -2583,21 +2578,21 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
 
     /* fix up the rest of teh fields */
     conn->owner_list = list;
-    conn->plc_type = plc_type;
-    conn->plc_entry = plc_entry;
+    conn->plc_type = (family ? family->plc_type : CIP_PLC_NONE);
+    conn->family = family;
     conn->identify_rc = PLCTAG_STATUS_OK;
 
-    /* the one value off the row the negotiation is allowed to change */
-    conn->only_use_old_forward_open = (plc_entry ? plc_entry->only_use_old_forward_open : false);
+    /* the one family value the negotiation is allowed to change */
+    conn->only_use_old_forward_open = (family ? family->only_use_old_forward_open : false);
 
-    /* the opening ask comes from the row above, so the fallback ladder has not been touched yet. */
+    /* the opening ask comes from the family, so the fallback ladder has not been touched yet. */
     conn->fo_ladder_idx = -1;
     conn->fo_offered_size = 0;
     conn->fo_dup_retries = 0;
     conn->fo_tried_plain = false;
-    /* a probed connection frames the Identity request unconnected; the row decides after. */
-    conn->max_payload_size = (uint16_t)(plc_entry ? plc_entry->fo_conn_size : 0);
-    conn->use_connected_msg = (plc_entry ? use_connected_msg : false);
+    /* a probed connection frames the Identity request unconnected; the family decides after. */
+    conn->max_payload_size = (uint16_t)(family ? family->fo_conn_size : 0);
+    conn->use_connected_msg = (family ? use_connected_msg : false);
     conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
     conn->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
@@ -2645,18 +2640,18 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
 
 
 
-static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type, attr attribs, cip_conn_p *tag_conn,
+static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *family, attr attribs, cip_conn_p *tag_conn,
                                   int *is_new_conn) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
     /*
-     * The family's row decides, so every tag on the connection, @connection included, gets
+     * The family decides, so every tag on the connection, @connection included, gets
      * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.  A
      * DH+ path forces it on when the connection is created.
      */
-    const cip_plc_entry_t *plc_entry = cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT);
-    int use_connected_msg = (plc_entry ? cip_entry_use_connected_msg(plc_entry, attribs) : 0);
+    cip_plc_type_t plc_type = (family ? family->plc_type : CIP_PLC_NONE);
+    int use_connected_msg = (family ? cip_family_use_connected_msg(family, attribs) : 0);
     cip_conn_p session = NULL;
     int new_session = 0;
     /*
@@ -2703,11 +2698,11 @@ static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type
             session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_type);
 
             /*
-             * One connection cannot be both connected and unconnected.  Asked of its own row,
-             * which may be DH+.  A probed connection has no request to compare: the row decides.
+             * One connection cannot be both connected and unconnected.  Asked of its own family,
+             * which may be DH+.  A probed connection has no request to compare: the family decides.
              */
             if(session && session->plc_type != CIP_PLC_NONE) {
-                use_connected_msg = (cip_entry_use_connected_msg(session->plc_entry, attribs) ? 1 : 0);
+                use_connected_msg = (cip_family_use_connected_msg(session->family, attribs) ? 1 : 0);
             }
 
             if(session && session->plc_type != CIP_PLC_NONE && session->use_connected_msg != use_connected_msg) {
@@ -2729,7 +2724,7 @@ static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type
         } else if(session == NULL) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Creating new session.");
 
-            rc = session_create(list, plc_type, session_gw, session_path, use_connected_msg, connection_group_id, &session);
+            rc = session_create(list, family, session_gw, session_path, use_connected_msg, connection_group_id, &session);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create a session, error %s!", plc_tag_decode_error(rc));
                 session = NULL;

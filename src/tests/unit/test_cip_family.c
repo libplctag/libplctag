@@ -32,146 +32,128 @@
  ***************************************************************************/
 
 /*
- * The CIP PLC dispatch table's own invariants.
+ * The CIP families' own invariants, and how one is picked.
  *
- * A dispatch table's failure mode is silent: a key that no row answers, or two rows
- * answering the same key, shows up as one PLC family behaving like another rather than as
- * an error.  Neither is reachable from a test that creates tags, because it would need a
- * PLC of every family to notice.  So the table is checked directly.
- *
- * Every row must carry what the constructor reads unconditionally: a name parser, a byte
- * order and standard-tag operations.
+ * A wrong family is silent: a spelling, an Identity reply or a DH+ path that picks the wrong
+ * one shows up as one PLC behaving like another rather than as an error, and no tag-creating
+ * test can see that without a PLC of every family.  So the picking is checked directly.
  */
 
 #include "mini_mock.h"
 
 #include <libplctag/api/libplctag.h>
 
-#include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/plc_type.h>
 #include <utils/attr.h>
 
 
-/* every dialect a row may legally carry. */
-static const cip_dialect_t all_dialects[] = {CIP_DIALECT_DIRECT, CIP_DIALECT_DHP};
+/* one spelling per family, and the PLC type it must come back as. */
+static const struct {
+    const char *plc;
+    cip_plc_type_t plc_type;
+    bool has_dhp;
+} spellings[] = {
+    {"plc5", CIP_PLC_PLC5, true},          {"slc500", CIP_PLC_SLC, true},         {"micrologix", CIP_PLC_MLGX, true},
+    {"lgxpccc", CIP_PLC_LGX_PCCC, false},  {"controllogix", CIP_PLC_LGX, false},  {"micro800", CIP_PLC_MICRO800, false},
+    {"omron-njnx", CIP_PLC_OMRON_NJNX, false}, {"generic", CIP_PLC_GENERIC, false},
+};
+
+#define NUM_SPELLINGS (sizeof(spellings) / sizeof(spellings[0]))
 
 
-static void test_every_plc_type_has_a_direct_row(void **state) {
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
+static const cip_family_t *family_named(const char *plc) {
+    const cip_family_t *family = NULL;
+    attr attribs = attr_create();
 
+    assert_non_null(attribs);
+    assert_int_equal(attr_set_str(attribs, "plc", plc), PLCTAG_STATUS_OK);
+
+    family = cip_family_from_attributes(attribs);
+
+    attr_destroy(attribs);
+
+    return family;
+}
+
+
+static void test_every_spelling_picks_its_family(void **state) {
     (void)state;
 
-    /*
-     * CIP_PLC_NONE is the unset value and must not resolve: a tag that never had its CPU
-     * type parsed would otherwise get whichever row sorted first.
-     */
-    assert_null(cip_plc_entry_find(CIP_PLC_NONE, CIP_DIALECT_DIRECT));
+    for(size_t i = 0; i < NUM_SPELLINGS; i++) {
+        const cip_family_t *family = family_named(spellings[i].plc);
 
-    for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
-        assert_non_null(cip_plc_entry_find(plc_type, CIP_DIALECT_DIRECT));
+        assert_non_null(family);
+        assert_int_equal(family->plc_type, spellings[i].plc_type);
+        assert_true(!family->via_dhp);
     }
+
+    /* the other spellings of one family are the same family. */
+    assert_true(family_named("compactlogix") == family_named("lgx"));
+    assert_true(family_named("slc") == family_named("slc500"));
+    assert_true(family_named("nx1p2") == family_named("omron-njnx"));
+
+    assert_null(family_named("no such plc"));
 }
 
 
-static void test_only_dhp_capable_families_have_a_dhp_row(void **state) {
+/* everything the connection and the tag setup read without checking. */
+static void test_every_family_is_complete(void **state) {
     (void)state;
 
-    /* the three PCCC families reachable across a DH+ bridge. */
-    assert_non_null(cip_plc_entry_find(CIP_PLC_PLC5, CIP_DIALECT_DHP));
-    assert_non_null(cip_plc_entry_find(CIP_PLC_SLC, CIP_DIALECT_DHP));
-    assert_non_null(cip_plc_entry_find(CIP_PLC_MLGX, CIP_DIALECT_DHP));
+    for(size_t i = 0; i < NUM_SPELLINGS; i++) {
+        const cip_family_t *family = family_named(spellings[i].plc);
+        const cip_family_t *forms[2] = {family, family->dhp};
 
-    /* nothing else bridges, so nothing else may answer that key. */
-    assert_null(cip_plc_entry_find(CIP_PLC_LGX_PCCC, CIP_DIALECT_DHP));
-    assert_null(cip_plc_entry_find(CIP_PLC_LGX, CIP_DIALECT_DHP));
-    assert_null(cip_plc_entry_find(CIP_PLC_MICRO800, CIP_DIALECT_DHP));
-    assert_null(cip_plc_entry_find(CIP_PLC_GENERIC, CIP_DIALECT_DHP));
-    assert_null(cip_plc_entry_find(CIP_PLC_OMRON_NJNX, CIP_DIALECT_DHP));
-}
-
-
-static void test_every_row_has_a_leaf(void **state) {
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
-    size_t dialect_index = 0;
-
-    (void)state;
-
-    /*
-     * The constructor calls through these without checking, so a missing one is a crash at
-     * the first tag create for that family.
-     */
-    for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
-        for(dialect_index = 0; dialect_index < (sizeof(all_dialects) / sizeof(all_dialects[0])); dialect_index++) {
-            const cip_plc_entry_t *entry = cip_plc_entry_find(plc_type, all_dialects[dialect_index]);
-
-            if(entry) {
-                assert_non_null(entry->setup_name);
-                assert_non_null(entry->byte_order);
-                assert_non_null(entry->std_ops);
-            }
+        for(size_t f = 0; f < 2 && forms[f]; f++) {
+            assert_non_null(forms[f]->name);
+            assert_non_null(forms[f]->setup_tag);
+            assert_true(forms[f]->max_payload_capacity > 0 && forms[f]->max_payload_capacity <= CIP_FAMILY_MAX_PAYLOAD_CAPACITY);
+            assert_true(forms[f]->fo_conn_size > 0);
+            assert_true(forms[f]->min_payload_size > 0);
+            assert_true(forms[f]->use_connected_msg >= -1 && forms[f]->use_connected_msg <= 1);
         }
     }
 }
 
 
-static void test_every_row_is_named(void **state) {
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
-    size_t dialect_index = 0;
-
+/* only PLC/5, SLC and MicroLogix can be reached across DH+, and that form is always connected. */
+static void test_only_dhp_capable_families_have_a_dhp_form(void **state) {
     (void)state;
 
-    /* the name is what a setup failure is reported with, so an empty one loses the message. */
-    for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
-        for(dialect_index = 0; dialect_index < (sizeof(all_dialects) / sizeof(all_dialects[0])); dialect_index++) {
-            const cip_plc_entry_t *entry = cip_plc_entry_find(plc_type, all_dialects[dialect_index]);
+    for(size_t i = 0; i < NUM_SPELLINGS; i++) {
+        const cip_family_t *family = family_named(spellings[i].plc);
 
-            if(entry) {
-                assert_non_null(entry->name);
-                assert_true(entry->name[0] != '\0');
-            }
+        if(!spellings[i].has_dhp) {
+            assert_null(family->dhp);
+            continue;
         }
-    }
-}
 
-
-static void test_the_key_is_what_the_row_answers_to(void **state) {
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
-    size_t dialect_index = 0;
-
-    (void)state;
-
-    /*
-     * A row whose own key disagrees with the key it was found under means two rows share a
-     * key and the first one shadows the second -- the duplicate-key check, without needing
-     * the table itself to be visible from here.
-     */
-    for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
-        for(dialect_index = 0; dialect_index < (sizeof(all_dialects) / sizeof(all_dialects[0])); dialect_index++) {
-            const cip_plc_entry_t *entry = cip_plc_entry_find(plc_type, all_dialects[dialect_index]);
-
-            if(entry) {
-                assert_int_equal((int)entry->plc_type, (int)plc_type);
-                assert_int_equal((int)entry->dialect, (int)all_dialects[dialect_index]);
-            }
-        }
+        assert_non_null(family->dhp);
+        assert_true(family->dhp->via_dhp);
+        assert_null(family->dhp->dhp);
+        assert_int_equal(family->dhp->plc_type, family->plc_type);
+        assert_true(family->dhp->setup_tag == family->setup_tag);
+        assert_int_equal((int)family->dhp->use_connected_msg, 1);
     }
 }
 
 
 /*
- * The dialect, which connection creation computes from the path: a DH+ path takes the DH+ row.
+ * Whether a path takes a family's DH+ form, the way connection creation decides it: the
+ * family can bridge DH+ exactly when it has a DH+ form.
  *
  * The simulator suite cannot reach it -- ab_server is not a DH+ bridge -- so only hardware
- * produces CIP_DIALECT_DHP, which is exactly why it is pinned here.  This runs the parser the
- * way connection creation does: DH+ capable exactly when the family has a DH+ row.
+ * produces a DH+ connection, which is exactly why it is pinned here.
  */
-static int parse_path(cip_plc_type_t plc_type, const char *path, int *is_dhp, bool *is_bridged) {
+static int parse_path(const char *plc, const char *path, int *is_dhp, bool *is_bridged) {
     uint8_t encoded[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
     int encoded_size = (int)sizeof(encoded);
     int needs_connection = 0;
     uint16_t dhp_dest = 0;
-    int kind = (cip_plc_entry_find(plc_type, CIP_DIALECT_DHP) ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
+    int kind = (family_named(plc)->dhp ? CIP_PLC_KIND_DHP_CAPABLE : CIP_PLC_KIND_OTHER);
 
     *is_dhp = 0;
     *is_bridged = false;
@@ -180,21 +162,21 @@ static int parse_path(cip_plc_type_t plc_type, const char *path, int *is_dhp, bo
 }
 
 
-static cip_dialect_t dialect_for(cip_plc_type_t plc_type, const char *path) {
+static bool takes_dhp(const char *plc, const char *path) {
     int is_dhp = 0;
     bool is_bridged = false;
 
-    assert_int_equal(parse_path(plc_type, path, &is_dhp, &is_bridged), PLCTAG_STATUS_OK);
+    assert_int_equal(parse_path(plc, path, &is_dhp, &is_bridged), PLCTAG_STATUS_OK);
 
-    return (is_dhp ? CIP_DIALECT_DHP : CIP_DIALECT_DIRECT);
+    return is_dhp != 0;
 }
 
 
-static bool rejects(cip_plc_type_t plc_type, const char *path) {
+static bool rejects(const char *plc, const char *path) {
     int is_dhp = 0;
     bool is_bridged = false;
 
-    return parse_path(plc_type, path, &is_dhp, &is_bridged) != PLCTAG_STATUS_OK;
+    return parse_path(plc, path, &is_dhp, &is_bridged) != PLCTAG_STATUS_OK;
 }
 
 
@@ -202,47 +184,47 @@ static bool bridges(const char *path) {
     int is_dhp = 0;
     bool is_bridged = false;
 
-    return parse_path(CIP_PLC_PLC5, path, &is_dhp, &is_bridged) == PLCTAG_STATUS_OK && is_bridged;
+    return parse_path("plc5", path, &is_dhp, &is_bridged) == PLCTAG_STATUS_OK && is_bridged;
 }
 
 
-static void test_a_dhp_path_is_a_dhp_dialect(void **state) {
+static void test_a_dhp_path_takes_the_dhp_form(void **state) {
     (void)state;
 
     /* the form the hardware tests use: a chassis path, then port:source:destination. */
-    assert_int_equal(dialect_for(CIP_PLC_PLC5, "1,2,A:27:1"), CIP_DIALECT_DHP);
-    assert_int_equal(dialect_for(CIP_PLC_SLC, "1,2,A:27:1"), CIP_DIALECT_DHP);
-    assert_int_equal(dialect_for(CIP_PLC_MLGX, "1,2,B:27:1"), CIP_DIALECT_DHP);
+    assert_true(takes_dhp("plc5", "1,2,A:27:1"));
+    assert_true(takes_dhp("slc500", "1,2,A:27:1"));
+    assert_true(takes_dhp("micrologix", "1,2,B:27:1"));
 }
 
 
 static void test_an_ordinary_path_is_direct(void **state) {
     (void)state;
 
-    assert_int_equal(dialect_for(CIP_PLC_PLC5, ""), CIP_DIALECT_DIRECT);
-    assert_int_equal(dialect_for(CIP_PLC_SLC, "1,0"), CIP_DIALECT_DIRECT);
-    assert_int_equal(dialect_for(CIP_PLC_LGX, "1,0"), CIP_DIALECT_DIRECT);
+    assert_true(!takes_dhp("plc5", ""));
+    assert_true(!takes_dhp("slc500", "1,0"));
+    assert_true(!takes_dhp("controllogix", "1,0"));
 }
 
 
 static void test_a_family_that_cannot_bridge_rejects_dhp(void **state) {
     (void)state;
 
-    /* a DH+ segment against a family with no DH+ row is a bad path, not a direct one. */
-    assert_true(rejects(CIP_PLC_LGX, "1,2,A:27:1"));
-    assert_true(rejects(CIP_PLC_LGX_PCCC, "1,2,A:27:1"));
-    assert_true(rejects(CIP_PLC_MICRO800, "1,2,A:27:1"));
-    assert_true(rejects(CIP_PLC_GENERIC, "1,2,A:27:1"));
+    /* a DH+ segment against a family with no DH+ form is a bad path, not a direct one. */
+    assert_true(rejects("controllogix", "1,2,A:27:1"));
+    assert_true(rejects("lgxpccc", "1,2,A:27:1"));
+    assert_true(rejects("micro800", "1,2,A:27:1"));
+    assert_true(rejects("generic", "1,2,A:27:1"));
 }
 
 
 static void test_an_unparseable_path_is_rejected(void **state) {
     (void)state;
 
-    assert_true(rejects(CIP_PLC_PLC5, "not a path at all"));
+    assert_true(rejects("plc5", "not a path at all"));
 
     /* a DH+ segment must be last. */
-    assert_true(rejects(CIP_PLC_PLC5, "1,A:27:1,2"));
+    assert_true(rejects("plc5", "1,A:27:1,2"));
 }
 
 
@@ -311,16 +293,16 @@ static void test_the_path_rules(void **state) {
 
 
 static cip_plc_type_t identified_as(uint16_t vendor_id, const char *product_name, bool has_path) {
-    const cip_plc_entry_t *entry = NULL;
+    const cip_family_t *family = NULL;
 
-    if(cip_plc_entry_from_identity(vendor_id, product_name, has_path, &entry) != PLCTAG_STATUS_OK) { return CIP_PLC_NONE; }
+    if(cip_family_from_identity(vendor_id, product_name, has_path, &family) != PLCTAG_STATUS_OK) { return CIP_PLC_NONE; }
 
-    return entry->plc_type;
+    return family->plc_type;
 }
 
 
 /* the product names are Identity replies from the bench hardware, pylogix and pycomm3. */
-static void test_identity_picks_the_row(void **state) {
+static void test_identity_picks_the_family(void **state) {
     (void)state;
 
     assert_int_equal(identified_as(1, "1756-L81E/B", false), CIP_PLC_LGX);
@@ -345,41 +327,24 @@ static void test_identity_picks_the_row(void **state) {
 
 
 /*
- * Whether requests are connected is row data now, not a line in each setup leaf, because the
- * connection is created before any tag exists.  Nothing in the simulator suite distinguishes
- * a wrong answer here from a working one until the PLC refuses the framing, so pin the two
- * rules the old leaves enforced in code.
+ * Whether requests are connected is the family's, because the connection is created before
+ * any tag exists.  Nothing in the simulator suite distinguishes a wrong answer here from a
+ * working one until the PLC refuses the framing, so pin the rule.
  */
-static void test_the_row_settles_connected_messaging(void **state) {
-    cip_plc_type_t plc_type = CIP_PLC_NONE;
-    size_t dialect_index = 0;
+static void test_the_family_settles_connected_messaging(void **state) {
     attr attribs = attr_create();
 
     (void)state;
 
     assert_non_null(attribs);
 
-    for(plc_type = CIP_PLC_PLC5; plc_type < CIP_PLC_TYPE_LAST; plc_type++) {
-        for(dialect_index = 0; dialect_index < (sizeof(all_dialects) / sizeof(all_dialects[0])); dialect_index++) {
-            const cip_plc_entry_t *entry = cip_plc_entry_find(plc_type, all_dialects[dialect_index]);
-
-            if(!entry) { continue; }
-
-            /* -1 means "ask the tag string"; anything else is a fixed yes or no. */
-            assert_true(entry->use_connected_msg >= -1 && entry->use_connected_msg <= 1);
-
-            /* a DH+ bridge is reached over a connection, and no tag string may say otherwise. */
-            if(entry->dialect == CIP_DIALECT_DHP) { assert_int_equal((int)entry->use_connected_msg, 1); }
-        }
-    }
-
     /* the one family that defers to the tag string, and what it does with no answer. */
-    assert_true(cip_entry_use_connected_msg(cip_plc_entry_find(CIP_PLC_LGX, CIP_DIALECT_DIRECT), attribs));
+    assert_true(cip_family_use_connected_msg(family_named("controllogix"), attribs));
     assert_int_equal(attr_set_str(attribs, "use_connected_msg", "0"), PLCTAG_STATUS_OK);
-    assert_true(!cip_entry_use_connected_msg(cip_plc_entry_find(CIP_PLC_LGX, CIP_DIALECT_DIRECT), attribs));
+    assert_true(!cip_family_use_connected_msg(family_named("controllogix"), attribs));
 
     /* and a family that does not defer ignores the same attribute. */
-    assert_true(cip_entry_use_connected_msg(cip_plc_entry_find(CIP_PLC_MICRO800, CIP_DIALECT_DIRECT), attribs));
+    assert_true(cip_family_use_connected_msg(family_named("micro800"), attribs));
 
     attr_destroy(attribs);
 }
@@ -387,19 +352,17 @@ static void test_the_row_settles_connected_messaging(void **state) {
 
 int main(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_every_plc_type_has_a_direct_row),
-        cmocka_unit_test(test_only_dhp_capable_families_have_a_dhp_row),
-        cmocka_unit_test(test_every_row_is_named),
-        cmocka_unit_test(test_every_row_has_a_leaf),
-        cmocka_unit_test(test_the_key_is_what_the_row_answers_to),
-        cmocka_unit_test(test_the_row_settles_connected_messaging),
-        cmocka_unit_test(test_a_dhp_path_is_a_dhp_dialect),
+        cmocka_unit_test(test_every_spelling_picks_its_family),
+        cmocka_unit_test(test_every_family_is_complete),
+        cmocka_unit_test(test_only_dhp_capable_families_have_a_dhp_form),
+        cmocka_unit_test(test_the_family_settles_connected_messaging),
+        cmocka_unit_test(test_a_dhp_path_takes_the_dhp_form),
         cmocka_unit_test(test_an_ordinary_path_is_direct),
         cmocka_unit_test(test_a_family_that_cannot_bridge_rejects_dhp),
         cmocka_unit_test(test_an_unparseable_path_is_rejected),
         cmocka_unit_test(test_a_path_bridges_when_it_leaves_the_chassis),
         cmocka_unit_test(test_the_path_rules),
-        cmocka_unit_test(test_identity_picks_the_row),
+        cmocka_unit_test(test_identity_picks_the_family),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

@@ -34,132 +34,52 @@
  ***************************************************************************/
 
 /*
- * Which family and dialect a CIP tag belongs to, and what to call to set one up.
+ * The composition root for CIP tag creation: the one place that knows both the Rockwell and
+ * the OMRON modules, so neither has to know the other.  It lives in modules/cip because what
+ * it dispatches is CIP and nothing else, but it is the one file here that sits *above* the
+ * families rather than below them -- the rest of modules/cip names no family and must keep it
+ * that way.
  *
- * This file is the composition root for CIP tag creation: it is the one place that knows
- * both the Rockwell and the OMRON modules, so neither has to know the other.  It lives in
- * modules/cip because what it dispatches is CIP and nothing else, but it is the one file
- * here that sits *above* the families rather than below them -- the rest of modules/cip
- * names no family and must keep it that way.
- *
- * A row is data -- what the connection needs before any tag exists, and what a new tag
- * starts with -- plus one function, for the name, because PCCC logical-address encoding,
- * Logix symbolic encoding and OMRON's are different code.  The connection holds its row, so
- * a tag asks the connection rather than the table.
+ * It picks a family (cip/family.h) from the tag string or the Identity object, finds or makes
+ * the connection, and sets the tag up with the family that connection holds.
  */
 
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/family.h>
 #include <stdbool.h>
-#include <libplctag/modules/cip/plc_type.h>
-#include <libplctag/modules/cip/standard_tag.h>
-#include <libplctag/modules/cip/tag.h>
-#include <utils/debug.h>
+#include <stdint.h>
 #include <utils/attr.h>
 
-/*
- * How the tag reaches the PLC, as opposed to which PLC it is.
- *
- * Part of the key rather than a branch inside a leaf.  cip_encode_path() decides DH+ purely
- * from the path string, before any connection exists, so (PLC/5, direct) and (PLC/5, DH+)
- * can be two rows instead of one row with an if.
- */
-typedef enum {
-    CIP_DIALECT_DIRECT = 0,
-    CIP_DIALECT_DHP,
-} cip_dialect_t;
-
-
-typedef struct cip_plc_entry_t cip_plc_entry_t;
-
-struct cip_plc_entry_t {
-    const char *name;
-    cip_plc_type_t plc_type;
-    cip_dialect_t dialect;
-
-    /*
-     * Whether a request to this family travels over a CIP connection.
-     *
-     * Data on the row rather than a line in the leaf, because the EtherNet/IP connection is
-     * created knowing the answer and no tag exists at that point.  -1 means the family lets
-     * the tag string decide and defaults to connected; every other answer is fixed and a tag
-     * string cannot change it.
-     */
-    int8_t use_connected_msg;
-
-    /*
-     * What a new tag of this family starts with.  A special tag (@identity, @raw, @tags,
-     * @udt) replaces the vtable, byte order and debug module while its name is parsed.
-     * vtable is NULL for a family that has only special tags.
-     */
-    tag_protocol_t protocol;
-    tag_vtable_p vtable;
-    tag_byte_order_t *byte_order;
-    const cip_standard_tag_ops_t *std_ops;
-    debug_module_t debug_module;
-
-    bool allow_packing;     /* the default */
-    bool packing_settable;  /* whether the tag string's allow_packing may change it */
-    bool size_from_plc;     /* the first read reports the size; otherwise elem_size states it */
-
-    /*
-     * The one piece of tag creation that is code: parse the name, special or data, and
-     * encode it.  Rows share these -- PCCC file addressing, Logix symbolic, OMRON symbolic.
-     * It runs after the element count is known, because a symbolic name encodes it.
-     */
-    int (*setup_name)(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
-
-    /*
-     * Connection sizing and negotiation.  Shared code reads these rather than plc_type, so
-     * it never has to know which family it is talking to.
-     */
-    int max_payload_capacity;       /* sizes the connection's receive buffer */
-    int fo_conn_size;               /* payload to ask for in a plain Forward Open */
-    int fo_ex_conn_size;            /* payload to ask for in an extended Forward Open, 0 if unsupported */
-    bool only_use_old_forward_open;
-    uint16_t min_payload_size;      /* refuse to negotiate below this */
-};
-
 
 /*
- * Whether a tag of this family uses a CIP connection, from the row and, for the one family
+ * Whether a tag of this family uses a CIP connection, from the family and, for the one family
  * that allows it, the tag string.
  *
  * Both the connection and the tag need this answer, and the connection needs it first, so it
- * is resolved here instead of inside the family's setup leaf.
+ * is resolved here instead of inside the family's setup.
  */
-extern bool cip_entry_use_connected_msg(const cip_plc_entry_t *entry, attr attribs);
-
-
-/* NULL if no row matches, which is a configuration error and not an internal one. */
-extern const cip_plc_entry_t *cip_plc_entry_find(cip_plc_type_t plc_type, cip_dialect_t dialect);
-
-/* The largest receive buffer any row asks for, for a connection that does not know its row yet. */
-extern int cip_plc_entries_max_payload_capacity(void);
+extern bool cip_family_use_connected_msg(const cip_family_t *family, attr attribs);
 
 /*
- * The row for a device, from its Identity vendor ID and product name.  A device that is not
- * recognised gets the generic CIP row.  A chassis module that is not a CPU is refused with
+ * The family for a device, from its Identity vendor ID and product name.  A device that is not
+ * recognised gets generic CIP.  A chassis module that is not a CPU is refused with
  * PLCTAG_ERR_BAD_PARAM: the path stops short of the CPU, or there is no path at all.
  */
-extern int cip_plc_entry_from_identity(uint16_t vendor_id, const char *product_name, bool has_path,
-                                       const cip_plc_entry_t **entry_out);
+extern int cip_family_from_identity(uint16_t vendor_id, const char *product_name, bool has_path,
+                                    const cip_family_t **family_out);
 
 /*
- * Which CIP family the plc (or legacy cpu) attribute names, for every family the library
- * speaks.
- *
- * One parser, here, because the answer decides which module handles the tag and so cannot
- * belong to either of them.  There were two: the Rockwell module's, which accepted the OMRON
- * spellings so it could hand those tags on, and the OMRON module's, which accepted only
- * those.  Each module's check_cpu() still decides what it will accept.
+ * The family the plc (or legacy cpu) attribute names, or NULL when it names none or one this
+ * library does not speak.  The family is the direct one; a DH+ path picks its DH+ form when
+ * the connection is created.
  */
-extern cip_plc_type_t cip_plc_type_from_attributes(attr attribs);
+extern const cip_family_t *cip_family_from_attributes(attr attribs);
 
 /*
  * The constructor the library dispatches protocol=ab-eip to.
  *
- * It settles the family and the connection, then hands both to the module that serves the
- * family.  Registered in lib/init.c's tag_type_map.
+ * It settles the family and the connection, then sets the tag up with the family the
+ * connection holds.  Registered in lib/init.c's tag_type_map.
  */
 extern int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
+                          void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);

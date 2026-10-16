@@ -170,7 +170,7 @@ struct cip_tag_t {
 
     /*
      * A copy of the tag string's attributes, kept while the tag waits for a probed connection
-     * to identify the device and so pick its row.  NULL otherwise.
+     * to identify the device and so pick its family.  NULL otherwise.
      */
     attr deferred_attribs;
     int offset;

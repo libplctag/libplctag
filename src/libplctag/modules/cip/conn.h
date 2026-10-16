@@ -273,10 +273,10 @@ typedef enum {
 
 
 /*
- * The dialect row cip_tag_create.h selects.  Named only as an opaque pointer here, so this
- * file still knows nothing about any particular family.
+ * The PLC family, cip/family.h.  Named only as an opaque pointer here, so this file still
+ * knows nothing about any particular family.
  */
-typedef struct cip_plc_entry_t cip_plc_entry_t;
+typedef struct cip_family_t cip_family_t;
 
 /* a CIP tag, defined in cip/tag.h, which includes this file */
 struct cip_tag_t;
@@ -321,8 +321,8 @@ typedef struct cip_conn_t {
     bool use_connected_msg;
 
     /*
-     * Which Forward Open service to use.  It starts at what the family's row says and
-     * the negotiation can change it, so unlike everything else the row supplies, this is
+     * Which Forward Open service to use.  It starts at what the family says and the
+     * negotiation can change it, so unlike everything else the family supplies, this is
      * state and not a constant.
      */
     bool only_use_old_forward_open;
@@ -364,26 +364,26 @@ typedef struct cip_conn_t {
      * Why the Identity probe refused the device, PLCTAG_STATUS_OK if it has not.  A refusal is
      * an answer about the device rather than a network failure, so the tags waiting on the
      * connection fail with it instead of waiting out their timeouts.  Read and written under
-     * session_mutex, as plc_entry is on a probed connection.
+     * session_mutex, as family is on a probed connection.
      */
     int identify_rc;
 
     /*
-     * The family and routing dialect this connection was created for, with its sizing and
-     * its tag setup.  Rows are static constants with program lifetime, so this is never
-     * dangling and never written through.
+     * The family this connection was created for -- the DH+ one for a DH+ path -- with its
+     * sizing and its tag setup.  Families are static constants with program lifetime, so this
+     * is never dangling and never written through.
      *
      * NULL on a probed connection until the handler has read the Identity object.  The
      * handler writes it once, under session_mutex, before any request goes out; a tag reads
-     * it through cip_conn_plc_entry().  Everything else that reads it runs after a tag has
+     * it through cip_conn_family().  Everything else that reads it runs after a tag has
      * been set up, or on the handler thread itself.
      *
-     * Shared code reads what the family implies -- min_payload_size, the dialect -- rather
-     * than plc_type, so it never has to know which family this is.  A tag asks the
-     * connection for its dialect instead of re-reading a path attribute it may not have --
-     * a cloned tag has no path of its own.
+     * Shared code reads what the family implies -- min_payload_size, DH+ -- rather than
+     * plc_type, so it never has to know which family this is.  A tag asks the connection
+     * whether it is DH+ instead of re-reading a path attribute it may not have -- a cloned
+     * tag has no path of its own.
      */
-    const cip_plc_entry_t *plc_entry;
+    const cip_family_t *family;
 
     /* EIP session handle, from RegisterSession */
     uint32_t session_handle;
@@ -467,7 +467,7 @@ typedef cip_conn_t *cip_conn_p;
 #define GET_MAX_PAYLOAD_SIZE(conn)    \
     (((conn)->max_payload_size > 0) ? \
          (conn)->max_payload_size :   \
-         (((conn)->plc_entry->fo_conn_size > 0) ? (conn)->plc_entry->fo_conn_size : (conn)->plc_entry->fo_ex_conn_size))
+         (((conn)->family->fo_conn_size > 0) ? (conn)->family->fo_conn_size : (conn)->family->fo_ex_conn_size))
 
 
 /* shared connection handling, see modules/cip/conn.c */
@@ -547,10 +547,10 @@ extern void cip_conn_teardown(void);
 extern int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn);
 
 /*
- * The connection's row, safe to call from any thread.  NULL while a probed connection is
+ * The connection's family, safe to call from any thread.  NULL while a probed connection is
  * still identifying the device; *identify_rc then says whether it refused the device.
  */
-extern const cip_plc_entry_t *cip_conn_plc_entry(cip_conn_p conn, int *identify_rc);
+extern const cip_family_t *cip_conn_family(cip_conn_p conn, int *identify_rc);
 
 /*
  * How many connections the list currently holds.  Nothing in the library needs this; it

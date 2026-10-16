@@ -36,7 +36,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/standard_tag.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -47,8 +47,8 @@
 
 
 
-/* the NJ/NX name parser, reached through its row in modules/cip/cip_tag_create.c. */
-extern int omron_setup_njnx_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs);
+/* the NJ/NX family; see cip/family.h. */
+extern const cip_family_t omron_family_njnx;
 
 /* Runtime attributes shared by every Omron tag type. */
 extern const attr_def_t omron_attribs[];
