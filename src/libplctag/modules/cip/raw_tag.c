@@ -61,14 +61,6 @@ int cip_raw_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_m
 
 
 int cip_raw_tag_tickler(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    debug_module_t dbg = tag->debug_module;
-
-    pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = cip_check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
     /* a raw tag has no target until the app writes one, so a connection that is up is its create. */
     if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
         int32_t conn_status = PLCTAG_CONN_STATUS_DOWN;
@@ -77,49 +69,7 @@ int cip_raw_tag_tickler(cip_tag_p tag) {
            && conn_status == PLCTAG_CONN_STATUS_UP) {
             cip_tag_finish_create(tag, PLCTAG_STATUS_OK);
         }
-
-        return tag->status;
     }
-
-    if(tag->read_in_progress) {
-        /*
-         * A raw tag is write-only: the application supplies a whole CIP request and gets
-         * the whole reply back, so there is nothing for a read to mean.
-         *
-         * Clear both flags and complete anyway.  Leaving read_in_flight set would block
-         * auto-read for the life of the tag (see lib.c), and not setting read_complete
-         * would leave a caller that asked for a read waiting out its whole timeout for an
-         * answer that is never coming.
-         */
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Something started a read on a raw tag.  This is not supported!");
-
-        cip_tag_abort_request(tag);
-
-        tag->read_in_flight = 0;
-        tag->read_complete = 1;
-
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    if(tag->write_in_progress) {
-        rc = cip_raw_tag_decode_write(tag, tag->req->data, tag->req->request_size);
-
-        tag->status = (int8_t)rc;
-
-        /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->write_in_progress) {
-            pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Write complete.");
-            tag->write_complete = 1;
-        } else {
-            pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Write in progress.");
-        }
-
-        pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done.");
-
-        return rc;
-    }
-
-    pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
 
     return tag->status;
 }
@@ -156,7 +106,7 @@ int cip_raw_tag_write_start(cip_tag_p tag) {
     /* the write is now in flight */
     tag->write_in_progress = 1;
 
-    rc = cip_tag_send(tag, cip_raw_tag_encode_write);
+    rc = cip_tag_send(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
@@ -186,15 +136,11 @@ int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    /* the write is over one way or another, whatever the response turns out to hold. */
-    tag->write_in_progress = 0;
-
     data_size = reply_size;
 
     if(data_size <= 0) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Response carries no CIP data!");
         tag->size = 0;
-        cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -211,9 +157,6 @@ int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
         tag->size = 0;
         rc = PLCTAG_ERR_NO_MEM;
     }
-
-    /* clean up the request regardless. */
-    cip_tag_abort_request(tag);
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done.");
 

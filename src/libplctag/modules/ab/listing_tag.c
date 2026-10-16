@@ -67,7 +67,6 @@ START_PACK typedef struct {
 
 /* listing tag functions. */
 static int listing_tag_read_start(cip_tag_p tag);
-static int listing_tag_tickler(cip_tag_p tag);
 // static int listing_tag_write_start(cip_tag_p tag);
 static int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
@@ -77,10 +76,11 @@ static struct tag_vtable_t listing_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)listing_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
-    .tickler = (tag_vtable_func)listing_tag_tickler,
+    .tickler = NULL,
     .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
     .encode_read = (tag_encode_func)listing_tag_encode_read,
     .decode_read = (tag_decode_func)listing_tag_check_read_status_connected,
     .encode_write = NULL,
@@ -227,12 +227,7 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
  */
 
 int listing_tag_read_start(cip_tag_p tag) {
-    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, listing_tag_encode_read);
-}
-
-
-int listing_tag_tickler(cip_tag_p tag) {
-    return cip_readonly_tickler(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, listing_tag_check_read_status_connected);
+    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
 }
 
 
@@ -395,9 +390,6 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
         }
     } while(0);
 
-    /* clean up the request as we are done with it. */
-    cip_tag_abort_request_only(tag);
-
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
@@ -413,18 +405,15 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
             tag->offset = 0;
             tag->next_id = 0;
             tag->fragment_retry_count = 0;
-            tag->read_in_progress = 0;
         } else if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
             rc = PLCTAG_ERR_PARTIAL;
         } else if(partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "Sending the request for the next chunk.");
-            tag->read_in_progress = 1;
-            rc = cip_tag_send(tag, listing_tag_encode_read);
+            /* there are more symbols; ask for the next page. */
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "The next chunk is needed.");
+            rc = PLCTAG_STATUS_PENDING;
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -437,9 +426,6 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
 
             tag->offset = 0;
             tag->next_id = 0;
-
-            /* this read is done. */
-            tag->read_in_progress = 0;
         }
     }
 
@@ -450,9 +436,6 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
 
         tag->offset = 0;
         tag->next_id = 0;
-
-        /* clean up everything in case we left something dangling. */
-        cip_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");

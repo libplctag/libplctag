@@ -62,7 +62,6 @@
 static int udt_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int udt_tag_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int udt_tag_read_start(cip_tag_p tag);
-static int udt_tag_tickler(cip_tag_p tag);
 // static int listing_tag_write_start(cip_tag_p tag);
 static int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int udt_tag_encode_read_metadata(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
@@ -74,10 +73,11 @@ static struct tag_vtable_t udt_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)udt_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
-    .tickler = (tag_vtable_func)udt_tag_tickler,
+    .tickler = NULL,
     .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
     .encode_read = (tag_encode_func)udt_tag_encode_read,
     .decode_read = (tag_decode_func)udt_tag_check_read_status,
     .encode_write = NULL,
@@ -186,12 +186,7 @@ int udt_tag_read_start(cip_tag_p tag) {
         tag->offset = 0;
     }
 
-    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, udt_tag_encode_read);
-}
-
-
-int udt_tag_tickler(cip_tag_p tag) {
-    return cip_readonly_tickler(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, udt_tag_check_read_status);
+    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
 }
 
 
@@ -336,9 +331,6 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, 
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* the old request is done */
-    cip_tag_abort_request(tag);
-
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         /* keep going if we are not done yet, unless we are getting nowhere. */
@@ -349,10 +341,8 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, 
             rc = PLCTAG_ERR_PARTIAL;
         } else if(partial_data) {
             /* call read start again to try again.  The data returned might be zero bytes if this is a packed result */
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "Sending the metadata request again.");
-            tag->read_in_progress = 1;
-            rc = cip_tag_send(tag, udt_tag_encode_read);
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "The metadata request is needed again.");
+            rc = PLCTAG_STATUS_PENDING;
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -363,13 +353,9 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, 
             tag->offset = 0;
             tag->udt_get_fields = 1;
 
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "Sending the field data request.");
-            tag->read_in_progress = 1;
-            rc = cip_tag_send(tag, udt_tag_encode_read);
-
-            /* an OK from the builder means that we need to return PENDING because we just queued the new request*/
-            if(rc == PLCTAG_STATUS_OK) { rc = PLCTAG_STATUS_PENDING; }
+            /* the field descriptors come next. */
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "The field data request is needed.");
+            rc = PLCTAG_STATUS_PENDING;
         }
     }
 
@@ -380,9 +366,6 @@ int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, 
 
         tag->offset = 0;
         tag->udt_get_fields = 0;
-
-        /* clean up everything in case we managed to create a request before failing. */
-        cip_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -585,9 +568,6 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, in
         }
     } while(0);
 
-    /* get rid of the old request. we are done with it. */
-    cip_tag_abort_request_only(tag);
-
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         /* keep going if we are not done yet, unless we are getting nowhere. */
@@ -598,13 +578,8 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, in
             rc = PLCTAG_ERR_PARTIAL;
         } else if(partial_data) {
             /* call read start again to try again.  The data returned might be zero bytes if this is a packed result */
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "Sending the field data request again.");
-            tag->read_in_progress = 1;
-            rc = cip_tag_send(tag, udt_tag_encode_read);
-
-            /* if we get OK, we need to return PENDING for the new request. */
-            if(rc == PLCTAG_STATUS_OK) { rc = PLCTAG_STATUS_PENDING; }
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "The next field data chunk is needed.");
+            rc = PLCTAG_STATUS_PENDING;
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -617,7 +592,6 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, in
 
             /* this read is done. */
             tag->udt_get_fields = 0;
-            tag->read_in_progress = 0;
             tag->offset = 0;
         }
     }
@@ -629,9 +603,6 @@ int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, in
 
         tag->offset = 0;
         tag->udt_get_fields = 0;
-
-        /* clean up everything. */
-        cip_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");

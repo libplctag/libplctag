@@ -1404,7 +1404,7 @@ int pccc_finish_request(cip_tag_p tag, int rc, bool is_write) {
         tag->read_in_progress = 0;
     }
 
-    cip_tag_abort_request(tag);
+    tag->offset = 0;
 
     return rc;
 }
@@ -1413,10 +1413,9 @@ int pccc_finish_request(cip_tag_p tag, int rc, bool is_write) {
 /*
  * pccc_check_response_header
  *
- * Every PCCC response handler casts the request buffer to a chain of headers and
- * then reads fields out of it.  The generic check in cip_check_request_status() only
- * knows about the CIP response headers, so validate the PCCC-specific chain here,
- * in one place, before any handler dereferences it.
+ * Every PCCC response handler casts the reply to a chain of headers and then reads fields
+ * out of it.  The connection only checks the EIP and CPF framing, so validate the
+ * PCCC-specific chain here, in one place, before any handler dereferences it.
  *
  * Three things are checked: that the reply is an answer to the service we asked
  * for, that the buffer is long enough for the headers the handler is about to walk,
@@ -1539,56 +1538,6 @@ int pccc_tag_status(cip_tag_p tag) {
 }
 
 
-int pccc_tickle(cip_tag_p tag, cip_tag_decode_func check_read, cip_tag_decode_func check_write) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = cip_check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->read_in_progress) {
-        rc = check_read(tag, tag->req->data, tag->req->request_size);
-        tag->status = (int8_t)rc;
-
-        /* check to see if the read finished. */
-        if(!tag->read_in_progress) {
-            /* the first read completing is what completes the create. */
-            cip_tag_finish_create(tag, rc);
-
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Read complete with status %s.",
-                   plc_tag_decode_error(tag->status));
-
-            tag->read_complete = 1;
-        }
-
-        return rc;
-    }
-
-    if(tag->write_in_progress) {
-        rc = check_write(tag, tag->req->data, tag->req->request_size);
-        tag->status = (int8_t)rc;
-
-        /* check to see if the write finished. */
-        if(!tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "Write complete with status %s.",
-                   plc_tag_decode_error(tag->status));
-
-            tag->write_complete = 1;
-        }
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return tag->status;
-}
-
-
-int pccc_tag_tickler(cip_tag_p tag) { return pccc_tickle(tag, pccc_check_read_status, pccc_check_write_status); }
-
-
 /*
  * tag_read_start
  *
@@ -1608,7 +1557,7 @@ int pccc_tag_read_start(cip_tag_p tag) {
 
     tag->read_in_progress = 1;
 
-    rc = pccc_finish_request(tag, cip_tag_send(tag, pccc_encode_read), false);
+    rc = pccc_finish_request(tag, cip_tag_send(tag), false);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
 
@@ -1745,12 +1694,6 @@ static int pccc_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_s
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    cip_tag_abort_request(tag);
-
-    /* the read is over whether it succeeded or failed. */
-    tag->read_in_progress = 0;
-    tag->read_complete = 1;
-
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
@@ -1779,7 +1722,7 @@ int pccc_tag_write_start(cip_tag_p tag) {
 
     tag->write_in_progress = 1;
 
-    rc = pccc_finish_request(tag, cip_tag_send(tag, pccc_encode_write), true);
+    rc = pccc_finish_request(tag, cip_tag_send(tag), true);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
 
@@ -2061,12 +2004,6 @@ static int pccc_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    cip_tag_abort_request(tag);
-
-    /* the write is over whether it succeeded or failed. */
-    tag->write_in_progress = 0;
-    tag->write_complete = 1;
-
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
@@ -2082,10 +2019,11 @@ struct tag_vtable_t pccc_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)pccc_tag_read_start,
     .status = (tag_vtable_func)pccc_tag_status,
-    .tickler = (tag_vtable_func)pccc_tag_tickler,
+    .tickler = NULL,
     .write = (tag_vtable_func)pccc_tag_write_start,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
     .encode_read = (tag_encode_func)pccc_encode_read,
     .decode_read = (tag_decode_func)pccc_check_read_status,
     .encode_write = (tag_encode_func)pccc_encode_write,

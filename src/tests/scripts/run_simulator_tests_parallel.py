@@ -541,6 +541,20 @@ def build_manifest() -> Manifest:
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,5&plc=ControlLogix&elem_count=1&name=Test_Array_1"], F,
               server=create_fail_server)
+    # A link that is offline (0x0800) is a PLC that is down for maintenance, not a missing route:
+    # the tag waits for the reconnect and succeeds once the link is back.
+    link_offline_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[10]", "--link_offline=2"],
+        startup_wait_s=1,
+    )
+    link_offline_test = sec.test("a network link offline at Forward Open is retried, not a failure",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=3"], F, server=link_offline_server)
+    sec.test("check the link offline refusals were seen", None, F, depends_on=link_offline_test.id, ports_needed=0,
+              check=CheckSpec(log_file=link_offline_test.log_file, pattern=r"\(0x01/0x0800\)", expected=2, at_least=True))
     refused_route_sync = sec.test("sync create through a refused route fails with the PLC's error",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,5&plc=ControlLogix&elem_count=1&name=Test_Array_1"], F,

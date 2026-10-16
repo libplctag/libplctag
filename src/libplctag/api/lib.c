@@ -275,6 +275,36 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
 }
 
 
+/*
+ * Turn the completion flags a protocol sets into events, and wake anyone waiting on the tag.
+ * Called with the tag's API mutex held, by whichever thread drives the tag.
+ */
+void plc_tag_generic_raise_completions(plc_tag_p tag) {
+    if(tag->read_complete) {
+        tag->read_complete = 0;
+        tag->read_in_flight = 0;
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
+
+        tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
+
+        cond_signal(tag->tag_cond_wait);
+    }
+
+    if(tag->write_complete) {
+        tag->write_complete = 0;
+        tag->write_in_flight = 0;
+        tag->auto_sync_next_write = 0;
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
+
+        tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
+
+        cond_signal(tag->tag_cond_wait);
+    }
+}
+
+
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
     /* punt if not needed. */
     if(!tag) { return; }

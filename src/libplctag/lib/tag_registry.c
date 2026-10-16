@@ -470,34 +470,7 @@ THREAD_FUNC(tag_tickler_func) {
                 /* call the tickler function if we can. */
                 if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
-                if(tag->read_complete) {
-                    tag->read_complete = 0;
-                    tag->read_in_flight = 0;
-
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
-
-                    // tag->event_read_complete = 1;
-                    tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
-
-                    /* wake immediately */
-                    // plc_tag_tickler_wake();
-                    cond_signal(tag->tag_cond_wait);
-                }
-
-                if(tag->write_complete) {
-                    tag->write_complete = 0;
-                    tag->write_in_flight = 0;
-                    tag->auto_sync_next_write = 0;
-
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising write complete event.");
-
-                    // tag->event_write_complete = 1;
-                    tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
-
-                    /* wake immediately */
-                    //  plc_tag_tickler_wake();
-                    cond_signal(tag->tag_cond_wait);
-                }
+                plc_tag_generic_raise_completions(tag);
 
                 /* wake up earlier if the time until the next write wake up is sooner. */
                 if(tag->auto_sync_next_write && tag->auto_sync_next_write < tag_tickler_wait_timeout_end) {

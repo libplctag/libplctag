@@ -315,6 +315,9 @@ static int32_t core_set_auto_sync_read_ms(plc_tag_p tag, int32_t value) {
 
     tag->auto_sync_read_ms = value;
 
+    /* a protocol that schedules its own tags has to hear about the new period. */
+    if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
+
     return PLCTAG_STATUS_OK;
 }
 
@@ -333,6 +336,9 @@ static int32_t core_set_auto_sync_write_ms(plc_tag_p tag, int32_t value) {
     }
 
     tag->auto_sync_write_ms = value;
+
+    /* a protocol that schedules its own tags has to hear about the new period. */
+    if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     return PLCTAG_STATUS_OK;
 }

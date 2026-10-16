@@ -59,7 +59,6 @@
 
 
 static int tag_read_start(cip_tag_p tag);
-static int tag_tickler(cip_tag_p tag);
 static int tag_write_start(cip_tag_p tag);
 static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
@@ -70,10 +69,11 @@ struct tag_vtable_t lgx_pccc_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)tag_read_start,
     .status = (tag_vtable_func)pccc_tag_status,
-    .tickler = (tag_vtable_func)tag_tickler,
+    .tickler = NULL,
     .write = (tag_vtable_func)tag_write_start,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
     .encode_read = (tag_encode_func)encode_read,
     .decode_read = (tag_decode_func)check_read_status,
     .encode_write = (tag_encode_func)encode_write,
@@ -82,9 +82,6 @@ struct tag_vtable_t lgx_pccc_vtable = {
     /* data accessors */
     .attribs = ab_attribs,
 };
-
-
-int tag_tickler(cip_tag_p tag) { return pccc_tickle(tag, check_read_status, check_write_status); }
 
 
 /*
@@ -106,7 +103,7 @@ int tag_read_start(cip_tag_p tag) {
 
     tag->read_in_progress = 1;
 
-    rc = pccc_finish_request(tag, cip_tag_send(tag, encode_read), false);
+    rc = pccc_finish_request(tag, cip_tag_send(tag), false);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
 
@@ -280,8 +277,6 @@ static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    cip_tag_abort_request(tag);
-
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 
     return rc;
@@ -313,7 +308,7 @@ int tag_write_start(cip_tag_p tag) {
 
     tag->write_in_progress = 1;
 
-    rc = pccc_finish_request(tag, cip_tag_send(tag, encode_write), true);
+    rc = pccc_finish_request(tag, cip_tag_send(tag), true);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
 
@@ -427,8 +422,6 @@ static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size)
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
-
-    cip_tag_abort_request(tag);
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, tag->tag_id, "Done.");
 

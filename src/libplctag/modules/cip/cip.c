@@ -289,6 +289,8 @@ int cip_decode_forward_open_response(cip_conn_p conn) {
     eip_forward_open_response_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
 
+    conn->fo_ext_status = 0;
+
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
 
     fo_resp = (eip_forward_open_response_t *)(conn->data);
@@ -332,6 +334,9 @@ int cip_decode_forward_open_response(cip_conn_p conn) {
                    decode_cip_error_long(status, status_size));
 
             rc = decode_cip_error_code(status, status_size);
+
+            /* the error code alone cannot tell a missing route from a link that is down. */
+            conn->fo_ext_status = extended_status;
 
             /*
              * A size rejection may name a size the PLC does support.  Only newer firmware
@@ -554,13 +559,16 @@ static int write_request_framing(cip_conn_p conn, int payload_size, bool unroute
 
 
 /*
- * Assemble payload-only requests into the connection buffer.  Each request holds
- * just its CIP message, so a single request is one copy and a bundle is the
- * Multiple Service Packet header followed by the messages back to back.  Nothing
- * here has to find or move a header, because none of the requests carries one.
+ * Assemble the exchange into the connection buffer.  The encoders wrote each request's CIP
+ * message into conn->staging, so a single request is one copy and a bundle is the Multiple
+ * Service Packet header followed by the messages back to back.
+ *
+ * Nothing here reads the slots' tags: one may have been aborted since the exchange was built,
+ * and its bytes go out anyway.  The reply to it is dropped.
  */
-int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
-    bool unrouted = requests[0]->unrouted;
+int pack_exchange(cip_conn_p conn) {
+    int num_requests = (int)conn->slot_count;
+    bool unrouted = conn->exchange_unrouted;
     int offset = cip_framing_size(conn, unrouted);
     uint8_t *payload = conn->data + offset;
     int payload_size = 0;
@@ -568,11 +576,11 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
     int route_path_size = (conn->use_connected_msg || unrouted) ? 0 : ((int)conn->conn_path_size + 3);
     size_t room = 0;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "Starting with %d request(s).", num_requests);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting with %d request(s).", num_requests);
 
     /* everything the framing does not use is what the messages have to fit in. */
     if((size_t)(offset + route_path_size) > (size_t)conn->data_capacity) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                "Framing of %d bytes does not fit the connection buffer of %u bytes!", offset + route_path_size,
                conn->data_capacity);
         return PLCTAG_ERR_TOO_LARGE;
@@ -581,15 +589,15 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
     room = (size_t)conn->data_capacity - (size_t)offset - (size_t)route_path_size;
 
     if(num_requests == 1) {
-        if((size_t)requests[0]->request_size > room) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+        if((size_t)conn->slots[0].size > room) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                    "CIP message of %d bytes does not fit the %zu bytes left in the connection buffer!",
-                   requests[0]->request_size, room);
+                   (int)conn->slots[0].size, room);
             return PLCTAG_ERR_TOO_LARGE;
         }
 
-        mem_copy(payload, requests[0]->data, requests[0]->request_size);
-        payload_size = requests[0]->request_size;
+        mem_copy(payload, conn->staging + conn->slots[0].offset, (int)conn->slots[0].size);
+        payload_size = (int)conn->slots[0].size;
     } else {
         cip_multi_req_header *multi = (cip_multi_req_header *)payload;
         size_t header_size = sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests);
@@ -597,7 +605,7 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
         uint8_t *next = payload + header_size;
 
         if(header_size > room) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[0]->tag_id,
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                    "Bundled request header does not fit the connection buffer!");
             return PLCTAG_ERR_TOO_LARGE;
         }
@@ -613,24 +621,24 @@ int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests) {
         for(int i = 0; i < num_requests; i++) {
             size_t used = (size_t)(next - payload);
 
-            if(requests[i]->request_size < 0 || (size_t)requests[i]->request_size > room - used) {
-                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, requests[i]->tag_id,
+            if(conn->slots[i].size < 0 || (size_t)conn->slots[i].size > room - used) {
+                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                        "Bundled requests do not fit the connection buffer of %u bytes!", conn->data_capacity);
                 return PLCTAG_ERR_TOO_LARGE;
             }
 
             multi->request_offsets[i] = h2le16((uint16_t)current_offset);
 
-            mem_copy(next, requests[i]->data, requests[i]->request_size);
+            mem_copy(next, conn->staging + conn->slots[i].offset, (int)conn->slots[i].size);
 
-            next += requests[i]->request_size;
-            current_offset += requests[i]->request_size;
+            next += conn->slots[i].size;
+            current_offset += (int)conn->slots[i].size;
         }
 
         payload_size = (int)(next - payload);
     }
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, requests[0]->tag_id, "CIP message is %d bytes.", payload_size);
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "CIP message is %d bytes.", payload_size);
 
     return write_request_framing(conn, payload_size, unrouted);
 }
@@ -731,18 +739,17 @@ static int validate_response_cpf(cip_conn_p conn) {
 
 
 /*
- * Hand a payload-only request its CIP response, stripped of the EIP and CPF
- * framing.  The framed path has to rebuild a header here so the tag can skip
- * past it; there is nothing to rebuild when the tag never sees one.
+ * Find the CIP reply to request sub_packet of the exchange, with the EIP and CPF framing
+ * stripped.  The reply stays in the connection buffer; it is valid until the next exchange.
  */
-int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
+int find_reply(cip_conn_p conn, int32_t sub_packet, uint8_t **reply, int32_t *reply_size) {
     int rc = PLCTAG_STATUS_OK;
     eip_encap *header = (eip_encap *)(conn->data);
     size_t resp_offset = 0;
     uint8_t *resp = NULL;
     int resp_size = 0;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Starting.");
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
 
     /* the tag never sees the framing, so check it here before throwing it away. */
     rc = validate_response_cpf(conn);
@@ -754,7 +761,7 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
                       : offsetof(eip_cip_uc_resp, reply_service);
 
     if(resp_offset > (size_t)conn->data_size) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Response of %u bytes is shorter than its own framing!",
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Response of %u bytes is shorter than its own framing!",
                conn->data_size);
         return PLCTAG_ERR_TOO_SMALL;
     }
@@ -772,7 +779,7 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
         uint8_t *buf_end = conn->data + conn->data_size;
 
         if((size_t)resp_size < sizeof(cip_multi_resp_header)) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Packed response is too short to hold its own header!");
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Packed response is too short to hold its own header!");
             return PLCTAG_ERR_TOO_SMALL;
         }
 
@@ -785,9 +792,9 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
         offsets_start = resp_offset + offsetof(cip_multi_resp_header, request_offsets);
         offsets_size = (size_t)total_responses * sizeof(uint16_le);
 
-        if(sub_packet < 0 || sub_packet >= (int)total_responses || offsets_start > (size_t)conn->data_size
+        if(sub_packet < 0 || sub_packet >= (int32_t)total_responses || offsets_start > (size_t)conn->data_size
            || offsets_size > (size_t)conn->data_size - offsets_start) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                    "Packed response sub-packet %d is out of bounds of the received data!", sub_packet);
             return PLCTAG_ERR_OUT_OF_BOUNDS;
         }
@@ -804,7 +811,7 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
         /* comparing the pointers directly would be undefined, so compare the values. */
         if((intptr_t)pkt_start < (intptr_t)(&multi->request_count) || (intptr_t)pkt_start > (intptr_t)buf_end
            || (intptr_t)pkt_end < (intptr_t)pkt_start || (intptr_t)pkt_end > (intptr_t)buf_end) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                    "Packed response sub-packet %d has an out of bounds data range!", sub_packet);
             return PLCTAG_ERR_OUT_OF_BOUNDS;
         }
@@ -812,46 +819,19 @@ int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet) {
         resp = pkt_start;
         resp_size = (int)(pkt_end - pkt_start);
 
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Sub-packet %d of %d is %d bytes.", sub_packet,
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Sub-packet %d of %d is %d bytes.", sub_packet,
                (int)total_responses, resp_size);
     } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "Single response of %d bytes.", resp_size);
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Single response of %d bytes.", resp_size);
     }
 
-    if(resp_size > request->request_capacity) {
-        int request_capacity = 0;
+    *reply = resp;
+    *reply_size = (int32_t)resp_size;
 
-        critical_block(conn->session_mutex) { request_capacity = (int)GET_MAX_PAYLOAD_SIZE(conn); }
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "CIP response:");
+    pdebug_dump_bytes(DEBUG_MODULE_CIP, DEBUG_INFO, 0, resp, resp_size);
 
-        if(resp_size > request_capacity) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id,
-                   "Response of %d bytes is larger than the %d bytes this connection can carry!", resp_size,
-                   request_capacity);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
-
-        rc = session_request_increase_buffer(request, request_capacity);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Unable to grow the request buffer to %d bytes!",
-                   request_capacity);
-            return rc;
-        }
-    }
-
-    mem_set(request->data, 0, request->request_capacity);
-    mem_copy(request->data, resp, resp_size);
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, "CIP response:");
-    pdebug_dump_bytes(DEBUG_MODULE_CIP, DEBUG_INFO, request->tag_id, request->data, resp_size);
-
-    /* notify the reading thread that the request is ready */
-    spin_block(&request->lock) {
-        request->status = PLCTAG_STATUS_OK;
-        request->request_size = resp_size;
-        request->resp_received = 1;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Done.");
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
 
     return PLCTAG_STATUS_OK;
 }

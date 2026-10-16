@@ -335,6 +335,7 @@ static struct tag_vtable_t unimplemented_vtable = {
     .tickler = cip_tag_unimplemented_tickler,
     .write = cip_tag_unimplemented_write,
     .wake_plc = NULL,
+    .activate = cip_tag_activate,
     .tag_data_written = NULL,
     .attribs = NULL,
 };
@@ -351,6 +352,7 @@ static struct tag_vtable_t deferred_vtable = {
     .tickler = deferred_tickler,
     .write = cip_tag_unimplemented_write,
     .wake_plc = NULL,
+    .activate = cip_tag_activate,
     .tag_data_written = NULL,
     .attribs = NULL,
 };
@@ -417,7 +419,7 @@ static int deferred_status(plc_tag_p tag) { return ((cip_tag_p)tag)->create_read
 /*
  * Finish a create once the connection knows its row.  The library applied its byte-order
  * overrides before the tag had a byte order, so they are applied here.  Runs under the tag's
- * api_mutex, like every tickler.
+ * api_mutex, like every tickler, on the connection's handler thread.
  */
 static int deferred_tickler(plc_tag_p raw_tag) {
     cip_tag_p tag = (cip_tag_p)raw_tag;

@@ -47,7 +47,6 @@
 
 
 extern int cip_identity_tag_read_start(cip_tag_p tag);
-extern int cip_identity_tag_tickler(cip_tag_p tag);
 extern int cip_identity_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 extern int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 

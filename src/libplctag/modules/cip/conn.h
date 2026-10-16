@@ -206,6 +206,9 @@ typedef enum {
 /* the most requests that may be bundled into one Multiple Service Packet */
 #define MAX_REQUESTS (400)
 
+/* the most tags the handler starts auto-sync work for in one pass */
+#define CIP_TICKLE_BATCH (64)
+
 #define CIP_ERR_UNSUPPORTED_SERVICE ((uint8_t)0x08)
 #define CIP_ERR_PARTIAL_ERROR ((uint8_t)0x1e)
 
@@ -225,6 +228,7 @@ typedef enum {
 #define CIP_EXT_ERR_BAD_PORT ((uint16_t)0x0311)
 #define CIP_EXT_ERR_BAD_LINK_ADDR ((uint16_t)0x0312)
 #define CIP_EXT_ERR_BAD_SEGMENT ((uint16_t)0x0315)
+#define CIP_EXT_ERR_LINK_OFFLINE ((uint16_t)0x0800)
 #define CIP_EXT_ERR_BAD_OT_SIZE ((uint16_t)0x0127)
 #define CIP_EXT_ERR_BAD_TO_SIZE ((uint16_t)0x0128)
 
@@ -273,6 +277,9 @@ typedef enum {
  * file still knows nothing about any particular family.
  */
 typedef struct cip_plc_entry_t cip_plc_entry_t;
+
+/* a CIP tag, defined in cip/tag.h, which includes this file */
+struct cip_tag_t;
 
 
 /*
@@ -332,6 +339,7 @@ typedef struct cip_conn_t {
     uint32_t fo_dup_retries;  /* duplicate connection ID retries spent */
     bool fo_tried_plain;      /* the plain Forward Open has already been refused */
     bool fo_plc_answered;     /* the last Forward Open got a reply, as opposed to no reply at all */
+    uint16_t fo_ext_status;   /* extended status of the last Forward Open refusal, 0 if it had none */
 
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;
@@ -383,8 +391,34 @@ typedef struct cip_conn_t {
     /* sequence ID for requests */
     uint64_t session_seq_id;
 
-    /* list of outstanding requests for this connection */
-    vector_p requests;
+    /*
+     * The tags the handler has to act on, in order of when: a tag with an operation to send is
+     * due when it was started, and a tag armed for auto-sync is due at its next deadline.  Kept
+     * sorted with lib/tag_schedule.h.  Raw pointers under session_mutex: a tag unlinks itself
+     * before it is freed (cip_conn_forget_tag()), so the list never holds a reference.
+     */
+    vector_p active;
+
+    /*
+     * Tags with events to report, each holding a reference, whose callbacks run once the handler
+     * has released session_mutex.  Only the handler thread touches it.
+     */
+    vector_p notify;
+
+    /*
+     * The exchange being built or in flight.  The encoders write the requests back to back
+     * into staging, and slots records where each one is.  A slot whose tag is NULL was
+     * aborted or destroyed while the exchange was on the wire; its reply is dropped.
+     */
+    uint8_t *staging;
+    struct {
+        struct cip_tag_t *tag;
+        int32_t offset;
+        int32_t size;
+        bool is_read;
+    } slots[MAX_REQUESTS];
+    int32_t slot_count;
+    bool exchange_unrouted;
 
     uint64_t resp_seq_id;
 
@@ -424,50 +458,6 @@ typedef struct cip_conn_t {
 typedef cip_conn_t *cip_conn_p;
 
 
-/* One request in flight on a cip_conn_t. */
-struct cip_request_t {
-    /* used to force interlocks with other threads. */
-    lock_t lock;
-
-    int status;
-
-    /* flags for communicating with background thread */
-    int resp_received;
-    atomic_int32_t abort_request;
-
-    /* debugging info */
-    int tag_id;
-
-    /* allow requests to be packed into one packet */
-    int allow_packing;
-    int packing_num;
-
-    /* time stamp for debugging output */
-    int64_t time_sent;
-
-    /* used by the background thread for incrementally getting data */
-    int request_size; /* total bytes, not just data */
-    int request_capacity;
-
-    /* how much reply space this request expects to consume, for packing against the reply budget */
-    int response_size;
-
-
-    /*
-     * A request holds only the CIP message; the transport adds the EIP encapsulation and CPF
-     * framing on the way out and strips it on the way back.
-     *
-     * True when that message is addressed to the device at the gateway itself rather than
-     * routed onward, so the CPF carries it directly with no Unconnected Send wrapper and no
-     * route path.  PCCC and the Identity object are addressed this way.
-     */
-    bool unrouted;
-
-    uint8_t *data;
-};
-
-typedef struct cip_request_t cip_request_t;
-typedef cip_request_t *cip_request_p;
 
 
 /*
@@ -495,8 +485,6 @@ extern uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn);
 extern uint64_t session_get_new_seq_id(cip_conn_p conn);
 extern int session_match_valid(const char *host, const char *path, cip_conn_p conn);
 extern int session_close_socket(cip_conn_p conn);
-extern void cip_request_destroy(void *req_arg);
-extern int session_request_increase_buffer(cip_request_p request, int new_capacity);
 extern int session_get_available_cip_payload_space(cip_conn_p conn);
 
 /*
@@ -519,49 +507,33 @@ extern int perform_forward_close(cip_conn_p conn);
 extern int session_open_socket(cip_conn_p conn);
 extern int prepare_request(cip_conn_p conn);
 extern int session_unregister(cip_conn_p conn);
-extern int get_payload_size(cip_request_p request);
-extern int purge_aborted_requests_unsafe(cip_conn_p conn);
-extern int pack_requests(cip_conn_p conn, cip_request_p *requests, int num_requests);
-extern int unpack_response(cip_conn_p conn, cip_request_p request, int sub_packet);
-extern int session_add_request_unsafe(cip_conn_p conn, cip_request_p req);
-extern int session_add_request(cip_conn_p conn, cip_request_p req);
+
+/* frame the exchange in conn->slots, and find one reply in what came back. */
+extern int pack_exchange(cip_conn_p conn);
+extern int find_reply(cip_conn_p conn, int32_t index, uint8_t **reply, int32_t *reply_size);
 
 /*
- * Set the final size and packing flag on a built request and add it to the connection's
- * request queue.  Releases the request and returns non-OK if it cannot be queued, so the
- * caller never has to unwind a failed submission.
+ * Make a tag due now and wake the handler; or take it off the list and out of any exchange in
+ * flight.  The handler encodes, sends and decodes for a tag with an operation started, and runs
+ * the library's auto-sync for one without.
  */
-extern int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_size, bool allow_packing);
+extern int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag);
+extern void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag);
 
-/*
- * Submit a request whose buffer holds only the CIP message, starting at offset
- * zero.  The transport owns the EIP and CPF framing from here on.  Releases the
- * request and returns non-OK if the payload does not fit or cannot be queued.
- */
-extern int cip_submit_payload(cip_conn_p conn, cip_request_p req, int payload_size, bool allow_packing);
-
-/*
- * Submit a payload-only request addressed to the device at the gateway rather than routed
- * onward -- no Unconnected Send wrapper and no route path.  Never packed: the services that
- * use this (PCCC, Identity) are single-request by nature.
- */
-extern int cip_submit_unrouted_payload(cip_conn_p conn, cip_request_p req, int payload_size);
-extern int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req);
 extern int session_register(cip_conn_p conn);
 extern void session_destroy(void *conn_arg);
 extern int receive_forward_open_response(cip_conn_p conn);
 
 /*
- * How much of the single reply packet this request will consume: its own reply
- * plus the offset entry and the worst-case inter-packet padding.  A request
- * whose reply size is not yet known -- response_size of zero, typically because
- * the tag has never been read -- cannot be budgeted, so it draws nothing here
- * and its encoder keeps it out of a bundle by marking it not packable.
+ * How much of the single reply packet a request expecting reply_size bytes will consume: its
+ * own reply plus the offset entry and the worst-case inter-packet padding.  A reply size of
+ * zero is not known yet -- typically the tag has never been read -- so it draws nothing here,
+ * and the encoder keeps such a request out of a bundle by marking it not packable.
  */
-static inline int reply_budget_cost(cip_request_p request) {
-    if(request->response_size <= 0) { return 0; }
+static inline int32_t reply_budget_cost(int32_t reply_size) {
+    if(reply_size <= 0) { return 0; }
 
-    return request->response_size + CIP_MSP_MAX_PACKET_PADDING + CIP_MSP_OFFSET_ENTRY_SIZE;
+    return reply_size + CIP_MSP_MAX_PACKET_PADDING + CIP_MSP_OFFSET_ENTRY_SIZE;
 }
 extern int process_requests(cip_conn_p conn);
 extern THREAD_FUNC(session_handler);

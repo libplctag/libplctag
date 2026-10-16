@@ -149,53 +149,6 @@ static bool tag_elements_are_variable(cip_tag_p tag) {
  ************************************************************************/
 
 
-int cip_standard_tag_tickler(plc_tag_p tag_arg) {
-    int rc = PLCTAG_STATUS_OK;
-    cip_tag_p tag = (cip_tag_p)tag_arg;
-    debug_module_t dbg = tag_debug_module(tag);
-
-    pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = cip_check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->read_in_progress) {
-        rc = cip_standard_tag_decode_read(tag, tag->req->data, tag->req->request_size);
-
-        tag->status = (int8_t)rc;
-
-        /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->read_in_progress) {
-            /* done! */
-            cip_tag_finish_create(tag, rc);
-
-            tag->read_complete = 1;
-        }
-
-        pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
-
-        return rc;
-    }
-
-    if(tag->write_in_progress) {
-        rc = cip_standard_tag_decode_write(tag, tag->req->data, tag->req->request_size);
-
-        tag->status = (int8_t)rc;
-
-        /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->write_in_progress) { tag->write_complete = 1; }
-
-        pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
-
-        return rc;
-    }
-
-    pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
-
-    return tag->status;
-}
-
-
 /*
  * cip_standard_tag_read_start
  *
@@ -222,7 +175,7 @@ int cip_standard_tag_read_start(plc_tag_p tag_arg) {
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
 
-    rc = cip_tag_send(tag, cip_standard_tag_encode_read);
+    rc = cip_tag_send(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
@@ -265,7 +218,7 @@ int cip_standard_tag_write_start(plc_tag_p tag_arg) {
     /* the write is now in flight */
     tag->write_in_progress = 1;
 
-    rc = cip_tag_send(tag, cip_standard_tag_encode_write);
+    rc = cip_tag_send(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
@@ -718,9 +671,6 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* clean up the request */
-    cip_tag_abort_request_only(tag);
-
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
         if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
@@ -729,9 +679,9 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
                    tag->fragment_retry_count);
             rc = PLCTAG_ERR_PARTIAL;
         } else if(partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "calling cip_standard_tag_read_start() to get the next chunk.");
-            rc = cip_standard_tag_read_start((plc_tag_p)tag);
+            /* the PLC split the reply; ask for the next piece. */
+            pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Reply was partial, the next chunk is needed.");
+            rc = PLCTAG_STATUS_PENDING;
         } else {
             tag->offset = 0;
 
@@ -743,13 +693,11 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
     }
 
     /* this is not an else clause because the above if could result in bad rc. */
-    if(rc != PLCTAG_STATUS_PENDING) {
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(dbg, DEBUG_WARN, tag->tag_id, "Error reading tag data! rc=%d %s", rc, plc_tag_decode_error(rc));
-        }
+    if(rc_is_error(rc)) {
+        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Error reading tag data! rc=%d %s", rc, plc_tag_decode_error(rc));
 
-        /* clean up everything if this tag is not pending. */
-        cip_tag_abort_request(tag);
+        /* a failed transfer starts over next time. */
+        tag->offset = 0;
     }
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -791,8 +739,6 @@ int cip_standard_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_s
         }
     } while(0);
 
-    cip_tag_abort_request_only(tag);
-
     if(rc == PLCTAG_STATUS_OK) {
         /* the PLC took the piece the encoder sized, or the whole bit write. */
         if(cip_resp->reply_service == (CIP_SVC_RMW | CIP_SVC_REPLY)) {
@@ -804,8 +750,8 @@ int cip_standard_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_s
         }
 
         if(tag->offset < tag->size) {
-            pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Write not complete, triggering next round.");
-            rc = cip_standard_tag_write_start((plc_tag_p)tag);
+            pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Write not complete, the next piece is needed.");
+            rc = PLCTAG_STATUS_PENDING;
         } else {
             /* only clear this if we are done. */
             tag->offset = 0;

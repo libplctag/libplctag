@@ -252,9 +252,14 @@ typedef struct plc_s {
      * reject_size_count makes the next N ForwardOpen requests fail with extended status
      * 0x0109 (connection size not supported) and offer a smaller size, which is how a real
      * PLC negotiates the client down.
+     *
+     * link_offline_count makes the next N ForwardOpen requests fail with extended status
+     * 0x0800 (network link offline): the route exists but the link to the target is down, as
+     * when a PLC is out for maintenance.
      */
     atomic_int32_t *empty_frag_count;
     atomic_int32_t *reject_size_count;
+    atomic_int32_t *link_offline_count;
 
     /*
      * As above.  no_reply_count swallows the next N connected CIP requests whole: the response is

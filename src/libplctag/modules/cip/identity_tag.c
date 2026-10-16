@@ -70,12 +70,7 @@ int cip_identity_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t de
 
 /* the request travels however the connection does, connected or not. */
 int cip_identity_tag_read_start(cip_tag_p tag) {
-    return cip_readonly_read_start(tag, tag->debug_module, cip_identity_tag_encode_read);
-}
-
-
-int cip_identity_tag_tickler(cip_tag_p tag) {
-    return cip_readonly_tickler(tag, tag->debug_module, cip_identity_tag_decode_read);
+    return cip_readonly_read_start(tag, tag->debug_module);
 }
 
 
@@ -149,7 +144,6 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
      */
     if((data_end - cip_response) < 4) {
         pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Identity response is too short for a CIP reply!");
-        cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -161,8 +155,7 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
         if(cip_status != CIP_STATUS_OK) {
             pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unconnected Send CIP status is not OK: 0x%02x",
                    cip_status);
-            cip_tag_abort_request(tag);
-            return PLCTAG_ERR_REMOTE_ERR;
+                return PLCTAG_ERR_REMOTE_ERR;
         }
 
         /* step over the Unconnected Send reply header to the embedded one. */
@@ -171,8 +164,7 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
         if((data_end - cip_response) < 4) {
             pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id,
                    "Identity response is too short for the embedded CIP reply!");
-            cip_tag_abort_request(tag);
-            return PLCTAG_ERR_TOO_SMALL;
+                return PLCTAG_ERR_TOO_SMALL;
         }
 
         reply_service = cip_response[0];
@@ -182,7 +174,6 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
         pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id,
                "CIP response service unexpected: 0x%02x (expected 0x%02x)", reply_service,
                (unsigned int)(CIP_GET_ATTRIBUTES_ALL | CIP_SVC_REPLY));
-        cip_tag_abort_request(tag);
         return PLCTAG_ERR_BAD_DATA;
     }
 
@@ -190,7 +181,6 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
 
     if(cip_status != CIP_STATUS_OK) {
         pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_status);
-        cip_tag_abort_request(tag);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -200,7 +190,6 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
 
     if(data_size <= 0) {
         pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Identity response carries no data!");
-        cip_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -216,9 +205,6 @@ int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
         pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
         rc = PLCTAG_ERR_NO_MEM;
     }
-
-    /* clean up the request */
-    cip_tag_abort_request(tag);
 
     pdebug(tag->debug_module, DEBUG_SPEW, tag->tag_id, "Done.");
 

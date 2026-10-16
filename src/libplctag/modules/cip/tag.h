@@ -179,8 +179,6 @@ struct cip_tag_t {
     /* pointer back to the connection */
     cip_conn_p session;
 
-    /* the in-flight request object */
-    cip_request_p req;
 
     /* PCCC only: the data file this tag addresses. */
     pccc_file_t file_type;
@@ -198,18 +196,15 @@ struct cip_tag_t {
      * once the tag is set up.
      */
     bool unrouted;
+
+    /*
+     * The library has finished creating the tag, so the connection's handler may see it.  A
+     * request started before then waits for vtable->activate to queue it.
+     */
+    bool activated;
 };
 
 typedef struct cip_tag_t *cip_tag_p;
-
-
-/*
- * Abort the request this tag has in flight, if any, and leave the tag idle.
- * The _only form keeps tag->offset, so a fragmented transfer can resume; the other
- * resets it, discarding the partial transfer.
- */
-extern int cip_tag_abort_request_only(cip_tag_p tag);
-extern int cip_tag_abort_request(cip_tag_p tag);
 
 
 /*
@@ -247,9 +242,8 @@ extern int cip_data_tag_abort(cip_tag_p tag);
 extern int cip_tag_status(cip_tag_p tag);
 
 /*
- * The vtable's abort entry: stop anything in flight and leave the tag at
- * PLCTAG_ERR_ABORT.  Unlike cip_tag_abort_request() it also sets tag->status, and it
- * aborts even with no request in flight.
+ * The vtable's abort entry: take the tag off its connection's list and out of any exchange in
+ * flight, and leave it at PLCTAG_ERR_ABORT.  It aborts even with nothing in flight.
  */
 extern int cip_tag_abort(cip_tag_p tag);
 
@@ -284,8 +278,6 @@ extern int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int
 /* true when a status code is a failure rather than OK or PENDING. */
 #define rc_is_error(rc) ((rc) < PLCTAG_STATUS_OK)
 
-/* Collect the result of the tag's in-flight request; PENDING while it is still out. */
-extern int cip_check_request_status(cip_tag_p tag);
 
 /* Encode a tag's symbolic name into tag->encoded_name as a CIP path. */
 extern int cip_encode_tag_name(cip_tag_p tag, const char *name);
@@ -315,25 +307,32 @@ extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_b
 typedef int (*cip_tag_encode_func)(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 
 
-/*
- * Encode a request for the tag and hand it to the connection, which holds it until it can go
- * out.  The encoder is the CIP form of the vtable's encode_read / encode_write.  On success
- * the tag holds the request in tag->req.
- */
-extern int cip_tag_send(cip_tag_p tag, cip_tag_encode_func encode);
-
-
-/*
- * A read-only special tag (@tags, @udt, @identity) differs from the others only in which
- * request it builds and which reply checker it runs.  The surrounding state machine -- the
- * busy guards, the read_in_progress flag, the write rejection, the completion note -- is the
- * same in all of them, so it lives here and takes the two differing steps as parameters.
- */
 /* Parse a reply: the CIP message the connection delivered for this tag, framing stripped. */
 typedef int (*cip_tag_decode_func)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
-extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_encode_func encode);
-extern int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_decode_func check_read);
+
+/*
+ * Hand the tag to its connection, whose handler encodes the request the tag's read or write
+ * flag calls for, sends it, and decodes the reply with the vtable's encode_* and decode_*.
+ * The caller sets read_in_progress or write_in_progress first.
+ */
+extern int cip_tag_send(cip_tag_p tag);
+
+/* the vtable's activate: the library has finished the tag, so the handler may now see it. */
+extern int cip_tag_activate(plc_tag_p tag_arg);
+
+/* the vtable's wake_plc and tag_data_written: make the tag due so its handler looks at it. */
+extern int cip_tag_wake_plc(plc_tag_p tag_arg);
+
+/* How the handler ends an operation: the tag's status, the create, and the completion flag. */
+extern void cip_tag_op_done(cip_tag_p tag, int rc, bool is_read);
+
+
+/*
+ * Start a read on a read-only special tag (@tags, @udt, @identity): the busy guards and the
+ * read_in_progress flag, which are the same in all of them.
+ */
+extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module);
 
 
 /*

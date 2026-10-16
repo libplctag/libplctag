@@ -80,13 +80,6 @@ tag_byte_order_t cip_short_string_byte_order = {.is_allocated = 0,
 
 
 /*
- * Abort the request this tag has in flight, if any, and leave the tag idle.
- *
- * tag->offset is deliberately untouched: a fragmented transfer calls this between
- * fragments and has to keep its place.  cip_tag_abort_request() is the one that resets it.
- */
-
-/*
  * Release everything a CIP tag owns.
  *
  * Called by the refcount machinery when the last reference goes, so it must tolerate being
@@ -155,166 +148,6 @@ void cip_tag_destroy(cip_tag_p tag) {
     }
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Done.");
-}
-
-
-int cip_tag_abort_request_only(cip_tag_p tag) {
-    if(!tag) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Called with a null tag pointer.");
-        return PLCTAG_STATUS_OK;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Starting.");
-
-    if(tag->req) {
-        cip_request_p req = NULL;
-
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
-
-        if(req) {
-            spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
-
-            critical_block(tag->api_mutex) {
-                if(tag->req == req) {
-                    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id,
-                           "rc_dec: Releasing tag-owned reference to request of tag %" PRId32 ".", tag->tag_id);
-                    tag->req = NULL;
-                    rc_dec(req);
-                } else {
-                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id,
-                           "Request changed out from underneath us during abort process!");
-                }
-            }
-
-            /* release this function's own reference. */
-            req = rc_dec(req);
-        }
-    } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Called without a request in flight.");
-    }
-
-    tag->read_in_progress = 0;
-    tag->write_in_progress = 0;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/* Abort the in-flight request and discard any partial transfer with it. */
-int cip_tag_abort_request(cip_tag_p tag) {
-    if(!tag) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Called with a null tag pointer.");
-        return PLCTAG_STATUS_OK;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Starting.");
-
-    tag->offset = 0;
-
-    cip_tag_abort_request_only(tag);
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * Collect the result of the tag's in-flight request, if it has finished.
- *
- * Returns PLCTAG_STATUS_PENDING while the request is still out, PLCTAG_STATUS_OK when
- * there is nothing in flight or the reply is ready to be parsed, and the request's own
- * error otherwise.  The caller owns tag->status: this never writes it, because it returns
- * OK for an idle tag and that would erase the result of the operation that just finished.
- */
-int cip_check_request_status(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    cip_request_p request = NULL;
-
-    /* check early for null pointers */
-    if(!tag) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Called with null tag pointer!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    do {
-        /* do we have an abort outstanding? */
-        if(atomic_get_bool(&tag->abort_requested)) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Abort requested on tag %" PRId32 ".", tag->tag_id);
-            cip_tag_abort_request(tag);
-            atomic_set_bool(&tag->abort_requested, false);
-            rc = PLCTAG_ERR_ABORT;
-            break;
-        }
-
-        /* make sure the request cannot be pulled out from underneath us. */
-        if(tag->req) {
-            critical_block(tag->api_mutex) { request = rc_inc(tag->req); }
-        }
-
-        /* it was already gone. */
-        if(!request) {
-            if(tag->read_in_progress || tag->write_in_progress) {
-                tag->read_in_progress = 0;
-                tag->write_in_progress = 0;
-                tag->offset = 0;
-
-                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "A request was in progress, but no request in flight!");
-            }
-
-            rc = PLCTAG_STATUS_OK;
-            break;
-        }
-
-        /* request can be used by more than one thread at once. */
-        spin_block(&request->lock) {
-            if(!request->resp_received) {
-                rc = PLCTAG_STATUS_PENDING;
-                break;
-            }
-
-            /* check to see if it was an abort on the session side. */
-            if(request->status != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "Request completed with error status %s.",
-                       plc_tag_decode_error(request->status));
-                rc = request->status;
-                break;
-            }
-        }
-
-        /* if we failed above, punt out of the do/while loop. */
-        if(rc != PLCTAG_STATUS_OK) { break; }
-
-
-        /*
-         * The connection has already checked the EIP status and the CPF layer and stripped
-         * them, so what is left here is the CIP reply and there is no framing to inspect.
-         * The tag's own status checker parses it from the first byte.
-         */
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Received a %d byte CIP response.", request->request_size);
-    } while(0);
-
-    /* if this is still hanging around, release the reference */
-    if(request) { request = rc_dec(request); }
-
-    if(rc_is_error(rc)) {
-        /* the request is dead, from session side. */
-        cip_tag_abort_request(tag);
-
-        /* an abort, or the PLC refusing the connection, ends a create read for good. */
-        if(tag->create_read_status == PLCTAG_STATUS_PENDING) { cip_tag_fail_create(tag, (plctag_error_code_t)rc); }
-
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Response not OK with status %s.", plc_tag_decode_error(rc));
-    }
-
-    /* FIXME - This is not correct */
-    // tag->status = (int8_t)rc;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, tag->tag_id, "Done with tag status %s.", plc_tag_decode_error(rc));
-
-    return rc;
 }
 
 
@@ -468,18 +301,12 @@ int cip_tag_status(cip_tag_p tag) {
  * The tag vtable's abort entry point: stop whatever is in flight and leave the tag
  * reporting PLCTAG_ERR_ABORT.
  *
- * Distinct from the two internal helpers above.  cip_tag_abort_request_only() drops the
- * in-flight request and clears the direction flags; cip_tag_abort_request() also rewinds
- * the transfer offset; this one is what a caller's plc_tag_abort() reaches, and it is the
- * only one that touches tag->status.
- *
- * It aborts even when no request is in flight.  A tag can be left with a direction flag
- * set and nothing on the wire -- that is exactly the state an abort exists to clear -- so
- * returning early would leave the caller unable to recover it.
+ * The connection forgets the tag first, under its own mutex, so the handler cannot be part way
+ * through encoding or decoding for it when the flags below change.  It aborts even when nothing
+ * is in flight: a tag can be left with a direction flag set and nothing queued -- that is
+ * exactly the state an abort exists to clear.
  */
 int cip_tag_abort(cip_tag_p tag) {
-    cip_request_p req = NULL;
-
     if(!tag) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Called with a null tag pointer.");
         return PLCTAG_STATUS_OK;
@@ -487,23 +314,53 @@ int cip_tag_abort(cip_tag_p tag) {
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+    if(tag->session) { cip_conn_forget_tag(tag->session, tag); }
 
-    if(req) {
-        spin_block(&req->lock) { atomic_set_int32(&req->abort_request, 1); }
-
-        cip_tag_abort_request(tag);
-
-        req = rc_dec(req);
-    } else {
-        cip_tag_abort_request(tag);
-    }
-
+    tag->read_in_progress = 0;
+    tag->write_in_progress = 0;
+    tag->offset = 0;
     tag->status = PLCTAG_ERR_ABORT;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Done.");
 
     return tag->status;
+}
+
+
+int cip_tag_send(cip_tag_p tag) {
+    /* a tag the library is still building waits for activate to queue it. */
+    if(!tag->activated) { return PLCTAG_STATUS_OK; }
+
+    return cip_conn_queue_tag(tag->session, tag);
+}
+
+
+int cip_tag_activate(plc_tag_p tag_arg) {
+    cip_tag_p tag = (cip_tag_p)tag_arg;
+
+    tag->activated = true;
+
+    /* the connection's handler drives the tag from here on, the kind's own tickler included. */
+    atomic_set_bool(&tag->skip_tickler, true);
+
+    /* the handler starts what the create started while the tag was being built, and arms auto-sync. */
+    if(!tag->session) { return PLCTAG_STATUS_OK; }
+
+    return cip_conn_queue_tag(tag->session, tag);
+}
+
+
+/*
+ * The vtable's wake_plc and tag_data_written: something about the tag changed that its
+ * handler has to look at -- an abort request, a new auto-sync period, data to write.  Making
+ * the tag due now has the handler run the library's housekeeping for it.
+ */
+int cip_tag_wake_plc(plc_tag_p tag_arg) {
+    cip_tag_p tag = (cip_tag_p)tag_arg;
+
+    if(!tag->activated || !tag->session) { return PLCTAG_STATUS_OK; }
+
+    return cip_conn_queue_tag(tag->session, tag);
 }
 
 
@@ -648,50 +505,7 @@ int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *r
 }
 
 
-int cip_tag_send(cip_tag_p tag, cip_tag_encode_func encode) {
-    int rc = PLCTAG_STATUS_OK;
-    cip_request_p req = NULL;
-    tag_op_plan_t plan = {0};
-    debug_module_t dbg = tag->debug_module;
-
-    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
-
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to get a request buffer, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    rc = encode(tag, req->data, (int32_t)req->request_capacity, &plan);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to encode the request, %s!", plc_tag_decode_error(rc));
-        rc_dec(req);
-        return rc;
-    }
-
-    req->response_size = (int)plan.reply_size;
-
-    /* the submit releases the request when it fails. */
-    if(tag->unrouted) {
-        rc = cip_submit_unrouted_payload(tag->session, req, (int)plan.req_size);
-    } else {
-        rc = cip_submit_payload(tag->session, req, (int)plan.req_size, plan.packable);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to submit the request, %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    critical_block(tag->api_mutex) { tag->req = req; }
-
-    pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_encode_func encode) {
+int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Starting");
@@ -710,7 +524,7 @@ int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_
 
     tag->read_in_progress = 1;
 
-    rc = cip_tag_send(tag, encode);
+    rc = cip_tag_send(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
 
@@ -722,48 +536,6 @@ int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module, cip_tag_
     pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Done.");
 
     return PLCTAG_STATUS_PENDING;
-}
-
-
-int cip_readonly_tickler(cip_tag_p tag, debug_module_t debug_module, cip_tag_decode_func check_read) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = cip_check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->write_in_progress) {
-        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Something started a write on a read-only tag.  This is not supported!");
-
-        cip_tag_abort_request(tag);
-
-        /* fire the event anyway so that a waiting caller is not left hanging. */
-        tag->write_complete = 1;
-
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    if(tag->read_in_progress) {
-        rc = check_read(tag, tag->req->data, tag->req->request_size);
-
-        tag->status = (int8_t)rc;
-
-        /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->read_in_progress) {
-            pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Read complete.");
-            cip_tag_finish_create(tag, rc);
-            tag->read_complete = 1;
-        } else {
-            pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Done. Read in progress.");
-        }
-
-        return rc;
-    }
-
-    pdebug(debug_module, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
-
-    return tag->status;
 }
 
 
@@ -912,4 +684,21 @@ int cip_tag_parse_elem_type(cip_tag_p tag, attr attribs, debug_module_t debug_mo
 
     pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unknown tag element type %s!", elem_type);
     return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
+/* An operation is over: record how it ended and tell the library, which raises the event. */
+void cip_tag_op_done(cip_tag_p tag, int rc, bool is_read) {
+    pdebug(tag->debug_module, DEBUG_DETAIL, tag->tag_id, "%s done with status %s.", (is_read ? "Read" : "Write"),
+           plc_tag_decode_error(rc));
+
+    tag->status = (int8_t)rc;
+
+    if(is_read) {
+        /* the first read completing is what completes the create. */
+        cip_tag_finish_create(tag, rc);
+        tag->read_complete = 1;
+    } else {
+        tag->write_complete = 1;
+    }
 }

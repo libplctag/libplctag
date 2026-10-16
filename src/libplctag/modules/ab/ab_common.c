@@ -71,7 +71,6 @@
 /* request/response handling thread */
 
 
-
 /*
  * Generic Rockwell/Allen-Bradley protocol functions.
  *
@@ -89,7 +88,6 @@ static int setup_special_tag(cip_tag_p tag, const char *name, bool *is_special);
 static int setup_pccc_name(cip_tag_p tag, attr attribs, int (*encode)(uint8_t *, int *, int, pccc_addr_t *));
 
 
-
 /* vtables for different kinds of tags */
 static struct tag_vtable_t raw_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
@@ -98,6 +96,7 @@ static struct tag_vtable_t raw_tag_vtable = {
     .tickler = (tag_vtable_func)cip_raw_tag_tickler,
     .write = (tag_vtable_func)cip_raw_tag_write_start,
     .wake_plc = NULL,
+    .activate = cip_tag_activate,
     .tag_data_written = NULL,
     .encode_read = NULL,
     .decode_read = NULL,
@@ -114,10 +113,11 @@ static struct tag_vtable_t identity_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)cip_identity_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
-    .tickler = (tag_vtable_func)cip_identity_tag_tickler,
+    .tickler = NULL,
     .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
     .encode_read = (tag_encode_func)cip_identity_tag_encode_read,
     .decode_read = (tag_decode_func)cip_identity_tag_decode_read,
     .encode_write = NULL,
@@ -255,24 +255,6 @@ int ab_setup_generic_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
 }
 
 
-
-
-
-/*
- * cip_tag_abort_request_only
- *
- * clean up the tag state for the request but not the offset.
- */
-
-/*
- * cip_tag_abort_request
- *
- * This does the work of stopping any inflight requests.
- * This is not thread-safe.  It must be called from a function
- * that locks the tag's mutex or only from a single thread.
- */
-
-
 /*
  * cip_tag_status
  *
@@ -377,7 +359,6 @@ static int32_t ab_get_plc_size(plc_tag_p raw_tag) {
 
     return attr_string_size(ab_plc_type_name(tag->plc_type));
 }
-
 
 
 /* The encoded CIP path, not the "1,0" text it was built from. */
@@ -486,7 +467,6 @@ const attr_def_t ab_attribs[] = {
  */
 
 
-
 /* default string types used for ControlLogix-class PLCs. */
 tag_byte_order_t logix_tag_byte_order = {.is_allocated = 0,
 
@@ -551,10 +531,11 @@ struct tag_vtable_t cip_standard_tag_vtable_ab = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
     .read = (tag_vtable_func)cip_standard_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
-    .tickler = (tag_vtable_func)cip_standard_tag_tickler,
+    .tickler = NULL,
     .write = (tag_vtable_func)cip_standard_tag_write_start,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
     .encode_read = (tag_encode_func)cip_standard_tag_encode_read,
     .decode_read = (tag_decode_func)cip_standard_tag_decode_read,
     .encode_write = (tag_encode_func)cip_standard_tag_encode_write,

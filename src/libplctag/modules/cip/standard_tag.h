@@ -107,7 +107,6 @@ extern int32_t cip_encode_no_offset(uint8_t *dest, int32_t capacity, int32_t byt
  */
 extern int cip_standard_tag_read_start(plc_tag_p tag_arg);
 extern int cip_standard_tag_write_start(plc_tag_p tag_arg);
-extern int cip_standard_tag_tickler(plc_tag_p tag_arg);
 
 /* the wire format, for the vtables of the families that use the standard tag */
 extern int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);

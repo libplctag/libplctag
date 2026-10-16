@@ -102,6 +102,7 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 #define CIP_ERR_EXTENDED ((uint8_t)0xff)
 
 #define CIP_ERR_EX_DUPLICATE_CONN ((uint16_t)0x0100)
+#define CIP_ERR_EX_LINK_OFFLINE ((uint16_t)0x0800)
 #define CIP_ERR_EX_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_INVALID_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_TOO_LONG ((uint16_t)0x2105)
@@ -717,6 +718,15 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
             log_info("Rejecting the connection size for debugging, offering %u bytes. %d to go.", plc->reject_size_supported,
                      reject_size_remaining - 1);
             return make_cip_log_error_size(output, cip_service, plc->reject_size_supported);
+        }
+    }
+
+    {
+        int32_t offline_remaining = atomic_dec_int32(plc->link_offline_count);
+
+        if(offline_remaining > 0) {
+            log_info("Forward open refused, network link offline, for debugging. %d to go.", offline_remaining - 1);
+            return make_cip_log_error(output, cip_service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_LINK_OFFLINE);
         }
     }
 

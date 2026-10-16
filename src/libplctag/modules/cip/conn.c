@@ -45,11 +45,13 @@
 #include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/lib/tag_schedule.h>
 #include <libplctag/modules/cip/cip.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
 #include <limits.h>
 #include <platform.h>
@@ -64,6 +66,19 @@
 static int session_list_init(cip_conn_list_t *list);
 static int32_t session_list_count(cip_conn_list_t *list);
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
+static void tickle_due_tags_unsafe(cip_conn_p conn, int64_t now);
+static void tickle_waiting_creates_unsafe(cip_conn_p conn);
+static void tickle_tags_unsafe(cip_conn_p conn, cip_tag_p *tags, int32_t count, int64_t now);
+static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now);
+static int dispatch_replies_unsafe(cip_conn_p conn);
+static void requeue_slots_unsafe(cip_conn_p conn);
+static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc, bool is_read);
+static void arm_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int64_t now);
+static void notify_later_unsafe(cip_conn_p conn, cip_tag_p tag);
+static void notify_tags(cip_conn_p conn);
+static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc);
+static bool has_due_tags_unsafe(cip_conn_p conn, int64_t now);
+static int64_t next_tag_time_unsafe(cip_conn_p conn);
 static int find_or_create_on_list(cip_conn_list_t *list, cip_plc_type_t plc_type, attr attribs, cip_conn_p *tag_conn,
                                   int *is_new_conn);
 static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const char *host, const char *path,
@@ -174,45 +189,7 @@ int session_close_socket(cip_conn_p conn) {
     return PLCTAG_STATUS_OK;
 }
 
-void cip_request_destroy(void *req_arg) {
-    cip_request_p req = req_arg;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
-
-    atomic_set_int32(&req->abort_request, 1);
-
-    if(req->data) {
-        mem_free(req->data);
-        req->data = NULL;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
-}
-
-int session_request_increase_buffer(cip_request_p request, int new_capacity) {
-    uint8_t *old_buffer = NULL;
-    uint8_t *new_buffer = NULL;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Starting.");
-
-    new_buffer = (uint8_t *)mem_alloc(new_capacity);
-    if(!new_buffer) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request->tag_id, "Unable to allocate larger request buffer!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    spin_block(&request->lock) {
-        old_buffer = request->data;
-        request->request_capacity = new_capacity;
-        request->data = new_buffer;
-    }
-
-    mem_free(old_buffer);
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, request->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
 
 int session_get_available_cip_payload_space(cip_conn_p conn) {
     int result = 0;
@@ -723,8 +700,14 @@ static bool forward_open_step_size_down(cip_conn_p conn) {
  * PLCTAG_ERR_TOO_SMALL is deliberately not one of them.  Running out of connection sizes
  * to offer says what the PLC answered this time, not what it is configured to do, and a
  * device that refuses every size while it is busy starting up will accept one later.
+ *
+ * Nor is a network link that is offline (0x0800), though it maps to the same error as a port
+ * that does not exist.  It is no different from a PLC that does not answer at its address: it
+ * may be in maintenance or down for repair, and it will be back.
  */
-static bool forward_open_error_is_configuration(int rc) {
+static bool forward_open_error_is_configuration(cip_conn_p conn, int rc) {
+    if(conn->fo_ext_status == CIP_EXT_ERR_LINK_OFFLINE) { return false; }
+
     return (rc == PLCTAG_ERR_BAD_DEVICE || rc == PLCTAG_ERR_BAD_PARAM || rc == PLCTAG_ERR_UNSUPPORTED);
 }
 
@@ -999,283 +982,18 @@ int session_unregister(cip_conn_p conn) {
 }
 
 
-int get_payload_size(cip_request_p request) {
-    if(!request || !request->data || request->request_size <= 0) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, request ? request->tag_id : 0, "Null request pointer or empty request data!");
-        return INT_MAX;
-    }
 
-    /*
-     * A request holds its CIP message and nothing else, so its size is the payload size.
-     * This used to re-parse the length back out of the CPF header the builder had just
-     * written, and warn when the two disagreed.
-     */
-    return request->request_size;
-}
 
 
-/*
- * Fail every queued request with rc.  For a Forward Open the PLC refused: the requests were
- * waiting for a connection the PLC has said it will not give, so its answer is theirs.
- */
-static void fail_queued_requests_unsafe(cip_conn_p conn, int rc) {
-    cip_request_p request = NULL;
 
-    while(vector_length(conn->requests) > 0) {
-        request = vector_remove(conn->requests, 0);
-        if(!request) { continue; }
 
-        spin_block(&request->lock) {
-            request->status = rc;
-            request->request_size = 0;
-            request->resp_received = 1;
-        }
 
-        rc_dec(request);
-    }
-}
 
 
-int purge_aborted_requests_unsafe(cip_conn_p conn) {
-    int purge_count = 0;
-    cip_request_p request = NULL;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Starting.");
 
-    /* remove the aborted requests. */
-    for(int i = 0; i < vector_length(conn->requests); i++) {
-        request = vector_get(conn->requests, i);
 
-        /* filter out the aborts. */
-        if(request && atomic_get_int32(&request->abort_request)) {
-            purge_count++;
 
-            /* remove it from the queue. */
-            vector_remove(conn->requests, i);
-
-            /* set the debug tag to the owning tag. */
-
-            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Session thread releasing aborted request %p.", request);
-
-            request->status = PLCTAG_ERR_ABORT;
-            request->request_size = 0;
-            request->resp_received = 1;
-
-            /* release our hold on it. */
-            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing request reference.");
-            rc_dec(request);
-
-            /* vector size has changed, back up one. */
-            i--;
-        }
-    }
-
-    if(purge_count > 0) { pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Removed %d aborted requests.", purge_count); }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Done.");
-
-    return purge_count;
-}
-int session_add_request_unsafe(cip_conn_p conn, cip_request_p req) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Starting.");
-
-    if(!conn) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id, "Session is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "rc_inc: Acquiring request reference.");
-    req = rc_inc(req);
-
-    if(!req) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Request is either null or in the process of being deleted.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* insert into the requests vector */
-    vector_set(conn->requests, vector_length(conn->requests), req);
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Total requests in the queue: %d",
-           vector_length(conn->requests));
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Done.");
-
-    return rc;
-}
-
-
-int session_add_request(cip_conn_p conn, cip_request_p req) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, req->tag_id, "Starting. session=%p, req=%p", conn, req);
-
-    /*
-     * Check before taking the mutex: critical_block() has to dereference
-     * conn to lock it, and an early return from inside the block would skip
-     * the unlock in its loop increment.
-     */
-    if(!conn) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id, "Session is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    critical_block(conn->session_mutex) { rc = session_add_request_unsafe(conn, req); }
-
-    /* wake up the conn thread because we added something to process. */
-    cond_signal(conn->session_wait_cond);
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, req->tag_id, "Done.");
-
-    return rc;
-}
-
-
-/*
- * Finish a request that a tag-level builder has filled in and hand it to the
- * connection's request queue.
- *
- * The caller owns the only reference on entry.  On success the queue holds a
- * reference of its own and the caller keeps theirs.  On failure the request is
- * released here and the caller must not touch it again, so a failed submission
- * leaves the caller nothing to roll back.
- */
-int cip_submit_request(cip_conn_p conn, cip_request_p req, int request_size, bool allow_packing) {
-    int rc = PLCTAG_STATUS_OK;
-
-    if(!req) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Called with a null request!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Starting.");
-
-    /*
-     * The builder walked a cursor across the request buffer to arrive at this size.  Nothing
-     * up to this point has checked that the cursor stayed inside the buffer, so check it here
-     * before the request goes anywhere.
-     */
-    if(request_size <= 0 || request_size > req->request_capacity) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id,
-               "Built request of %d bytes does not fit the %d byte request buffer!", request_size, req->request_capacity);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    req->request_size = request_size;
-    req->allow_packing = allow_packing;
-
-    rc = session_add_request(conn, req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id, "Unable to add the request to the connection, %s!",
-               plc_tag_decode_error(rc));
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "rc_dec: Releasing the unsubmitted request.");
-        rc_dec(req);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int cip_submit_payload(cip_conn_p conn, cip_request_p req, int payload_size, bool allow_packing) {
-    int max_payload = 0;
-
-    if(!req) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Called with a null request!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Starting.");
-
-    max_payload = cip_conn_max_cip_payload(conn);
-
-    if(payload_size > max_payload) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id,
-               "CIP payload of %d bytes exceeds the %d bytes this connection can carry!", payload_size, max_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    return cip_submit_request(conn, req, payload_size, allow_packing);
-}
-
-
-int cip_submit_unrouted_payload(cip_conn_p conn, cip_request_p req, int payload_size) {
-    int max_payload = 0;
-
-    if(!req) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Called with a null request!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, req->tag_id, "Starting.");
-
-    /*
-     * Nothing is routed onward, so the Unconnected Send wrapper and the route path that
-     * cip_conn_max_cip_payload() subtracts are not in the way here.  Hand those bytes back.
-     */
-    max_payload = cip_conn_max_cip_payload(conn);
-
-    if(!conn->use_connected_msg) { max_payload += CIP_EIP_UC_SEND_OVERHEAD + (int)conn->conn_path_size + 2; }
-
-    if(payload_size > max_payload) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, req->tag_id,
-               "CIP message of %d bytes exceeds the %d bytes this connection can carry!", payload_size, max_payload);
-        rc_dec(req);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    req->unrouted = true;
-
-    /* these are single-request services; nothing bundles them. */
-    return cip_submit_request(conn, req, payload_size, false);
-}
-
-
-int session_create_request(cip_conn_p conn, int tag_id, cip_request_p *req) {
-    int rc = PLCTAG_STATUS_OK;
-    cip_request_p res;
-    size_t request_capacity = 0;
-    uint8_t *buffer = NULL;
-
-    /*
-     * A request holds a CIP message and nothing else, going out or coming back, so the most
-     * it ever needs is the largest CIP payload this connection can carry.  That bounds the
-     * reply as well as the request, which is why unpack_response() never has to grow it.
-     */
-    critical_block(conn->session_mutex) { request_capacity = (size_t)GET_MAX_PAYLOAD_SIZE(conn); }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
-
-    buffer = (uint8_t *)mem_alloc((int)request_capacity);
-    if(!buffer) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate request buffer!");
-        *req = NULL;
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    res = (cip_request_p)rc_alloc((int)sizeof(cip_request_t), cip_request_destroy);
-    if(!res) {
-        mem_free(buffer);
-        *req = NULL;
-        rc = PLCTAG_ERR_NO_MEM;
-    } else {
-        res->data = buffer;
-        res->tag_id = tag_id;
-        res->request_capacity = (int)request_capacity;
-        res->lock = LOCK_INIT;
-
-        *req = res;
-    }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
-
-    return rc;
-}
 
 
 int session_register(cip_conn_p conn) {
@@ -1411,19 +1129,20 @@ void session_destroy(void *conn_arg) {
 
         if(conn->sock) { session_close_socket(conn); }
 
-        /* release all the requests that are in the queue. */
-        if(conn->requests) {
-            for(int i = 0; i < vector_length(conn->requests); i++) {
-                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing request reference.");
-                cip_request_p req = vector_get(conn->requests, i);
+        /* every tag holds a reference to its connection, so no tag is left on the list. */
+        if(conn->active) {
+            vector_destroy(conn->active);
+            conn->active = NULL;
+        }
 
-                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing request for tag %" PRId32 ".", req->tag_id);
+        if(conn->notify) {
+            vector_destroy(conn->notify);
+            conn->notify = NULL;
+        }
 
-                rc_dec(req);
-            }
-
-            vector_destroy(conn->requests);
-            conn->requests = NULL;
+        if(conn->staging) {
+            mem_free(conn->staging);
+            conn->staging = NULL;
         }
     }
 
@@ -1546,13 +1265,7 @@ int receive_forward_open_response(cip_conn_p conn) {
 
 int process_requests(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
-    cip_request_p request = NULL;
-    cip_request_p bundled_requests[MAX_REQUESTS] = {NULL};
-    int num_bundled_requests = 0;
-    int remaining_request_space = 0;
-    int remaining_response_space = 0;
-    int allow_packing = 0;
-
+    int32_t slot_count = 0;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Starting.");
 
@@ -1561,141 +1274,21 @@ int process_requests(cip_conn_p conn) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Checking for requests to process.");
-
-    rc = PLCTAG_STATUS_OK;
-    request = NULL;
     conn->data_size = 0;
     conn->data_offset = 0;
 
-    /* grab a request off the front of the list. */
     critical_block(conn->session_mutex) {
-        // FIXME - no logging in a mutex!
-        // pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
+        int64_t now = time_ms();
 
-        /* is there anything to do? */
-        if(vector_length(conn->requests)) {
-            /* get rid of all aborted requests. */
-            purge_aborted_requests_unsafe(conn);
-
-            /* if there are still requests after purging all the aborted requests, process them. */
-
-            /*
-             * The total allowed space for requests is the negotiated packet capacity
-             * less the overhead of the CPF data item. The rest of the space is for
-             * the EIP encapsulation header and the CPF header and the CPF address item,
-             * which are already accounted for in the buffer structure.
-             */
-            remaining_request_space = session_get_available_cip_payload_space(conn);
-
-            /*
-             * The reply has its own budget.  Everything the packed responses need
-             * has to fit in one response packet, and the PLC will simply fail the
-             * whole exchange if it does not, so track it alongside the request side.
-             */
-            remaining_response_space = GET_MAX_PAYLOAD_SIZE(conn) - CIP_MSP_REPLY_OVERHEAD - CIP_MSP_REPLY_SLACK;
-
-            pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Available payload space is %d bytes, reply space is %d bytes.",
-                   remaining_request_space, remaining_response_space);
-
-            /*
-             * The logic below is a bit convoluted.
-             *
-             * - If the first request takes up all the space, we cannot pack any more requests.
-             *
-             * - If the first request is packable, we can keep packing requests
-             *   until we run out of space or we reach the maximum number of requests.  We need to make sure
-             *   that the overhead of the CIP packed request header is accounted for in the remaining space as well as the
-             *   two-byte offset entry for each request.
-             *
-             * - If we are packing requests, and the next one is not packable, we stop packing.
-             *
-             * - If the first request is not packable, we can only pack it
-             *   if it is the first one in the queue. And then can pack no more
-             *   requests after that.
-             */
-
-            if(vector_length(conn->requests)) {
-                /* Always process the first request, regardless of packability */
-                request = vector_get(conn->requests, 0);
-                int first_request_size = get_payload_size(request);
-
-                /* Check if the first request fits at all */
-                if(first_request_size <= remaining_request_space) {
-                    bundled_requests[num_bundled_requests] = request;
-                    num_bundled_requests++;
-                    remaining_request_space -= first_request_size;
-                    remaining_response_space -= reply_budget_cost(request);
-                    vector_remove(conn->requests, 0);
-
-                    /*
-                     * A first read does not know how large its own reply will be, so it
-                     * cannot be budgeted against the reply space; its encoder marks it not
-                     * packable.
-                     *
-                     * Multiple Service Packet also only ever goes out on a connection.
-                     * pack_requests() reads the connected framing out of the first request,
-                     * so bundling unconnected requests would have it parse the wrong layout.
-                     */
-                    allow_packing = request->allow_packing && conn->use_connected_msg;
-
-                    /* If the first request is packable, try to pack more requests */
-                    if(allow_packing && vector_length(conn->requests) > 0) {
-                        /* Account for CIP multi-request overhead now that we know we'll have multiple requests */
-                        remaining_request_space -= (int)sizeof(cip_multi_req_header);
-
-                        /* Account for 2-byte offset entry per request (including the first one already processed) */
-                        int multi_request_overhead = CIP_MSP_OFFSET_ENTRY_SIZE;
-                        remaining_request_space -= multi_request_overhead; /* for the first request */
-
-                        while(vector_length(conn->requests) > 0 && num_bundled_requests < MAX_REQUESTS) {
-
-                            request = vector_get(conn->requests, 0);
-
-                            /*
-                             * Only pack if this request is packable, its reply can be budgeted,
-                             * and it is framed the same way as the first one -- pack_requests()
-                             * handles one format per packet.
-                             */
-                            allow_packing = request->allow_packing
-                                            && (request->unrouted == bundled_requests[0]->unrouted);
-                            if(!allow_packing) { break; }
-
-                            int next_request_size = get_payload_size(request) + multi_request_overhead;
-
-                            /* Check if this request fits in remaining space */
-                            if(next_request_size > remaining_request_space) { break; }
-
-                            /* and that its reply still fits in the single response packet */
-                            int next_response_space = remaining_response_space - reply_budget_cost(request);
-                            if(next_response_space < 0) { break; }
-
-                            bundled_requests[num_bundled_requests] = request;
-                            num_bundled_requests++;
-                            remaining_request_space -= next_request_size;
-                            remaining_response_space = next_response_space;
-                            vector_remove(conn->requests, 0);
-                        }
-                    }
-                    /* If first request is not packable, we stop here (only the first request is packed) */
-                } else {
-                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-                           "First request size %d exceeds remaining space %d, cannot process any requests.", first_request_size,
-                           remaining_request_space);
-                }
-            } else {
-                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "All requests in queue were aborted, nothing to do.");
-            }
-        }
+        tickle_due_tags_unsafe(conn, now);
+        slot_count = build_exchange_unsafe(conn, now);
     }
 
-    if(num_bundled_requests > 0) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "%d requests to process.", num_bundled_requests);
+    if(slot_count > 0) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "%d requests to process.", (int)slot_count);
 
         do {
-            /* copy and pack the requests into the conn buffer. */
-            /* FIXME - pack_requests() only returns PLCTAG_STATUS_OK */
-            rc = pack_requests(conn, bundled_requests, num_bundled_requests);
+            rc = pack_exchange(conn);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error while packing requests, %s!", plc_tag_decode_error(rc));
                 break;
@@ -1748,7 +1341,7 @@ int process_requests(cip_conn_p conn) {
              * response.   If it is a singleton, then we pass the
              * status back to the tag.
              */
-            if(num_bundled_requests > 1) {
+            if(conn->slot_count > 1) {
                 cip_multi_resp_header *multi_resp = NULL;
 
                 if(le2h16(((eip_encap *)(conn->data))->encap_command) == CIP_EIP_UNCONNECTED_SEND) {
@@ -1863,25 +1456,25 @@ int process_requests(cip_conn_p conn) {
                 {
                     size_t offsets_start =
                         (size_t)((uint8_t *)multi_resp - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
-                    size_t offsets_size = (size_t)num_bundled_requests * sizeof(uint16_le);
+                    size_t offsets_size = (size_t)conn->slot_count * sizeof(uint16_le);
 
                     if(offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                                "Response of %d bytes is too short to hold %d packed response offsets!", conn->data_size,
-                               num_bundled_requests);
+                               conn->slot_count);
                         rc = PLCTAG_ERR_TOO_SMALL;
                         break;
                     }
                 }
 
                 /* we have multiple requests, sanity check the data. */
-                if(le2h16(multi_resp->request_count) == num_bundled_requests) {
+                if(le2h16(multi_resp->request_count) == conn->slot_count) {
                     size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - conn->data);
 
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
 
                     /* check all the offsets */
-                    for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
+                    for(int resp_index = 0; resp_index < conn->slot_count; resp_index++) {
                         size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
 
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
@@ -1896,57 +1489,441 @@ int process_requests(cip_conn_p conn) {
                     }
                 } else {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
-                           num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                           conn->slot_count, (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
             }
 
+        } while(0);
+
+        critical_block(conn->session_mutex) {
+            if(rc == PLCTAG_STATUS_OK) { rc = dispatch_replies_unsafe(conn); }
+
+            /* a failed exchange is not an answer; whatever is left goes again once the connection is back. */
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Got error %s when processing incoming response(s)!",
                        plc_tag_decode_error(rc));
-                break;
+                requeue_slots_unsafe(conn);
             }
 
-            /* copy the results back out. Every request gets a copy. */
-            for(int i = 0; i < num_bundled_requests; i++) {
-                rc = unpack_response(conn, bundled_requests[i], i);
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, bundled_requests[i]->tag_id, "Unable to unpack response!");
-                    break;
-                }
-
-                /* release our reference */
-                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, bundled_requests[i]->tag_id,
-                       "rc_dec: Releasing request reference.");
-                bundled_requests[i] = rc_dec(bundled_requests[i]);
-            }
-
-            rc = PLCTAG_STATUS_OK;
-        } while(0);
-
-        /* problem? push the requests back on the queue. */
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error sending or receiving requests!");
-
-            pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Pushing %d requests back into the queue.", num_bundled_requests);
-
-            /* conn->requests is also written by session_add_request() (tickler thread)
-             * under conn->session_mutex, so this push-back needs the same lock. */
-            critical_block(conn->session_mutex) {
-                for(int i = num_bundled_requests - 1; i >= 0; i--) {
-                    if(bundled_requests[i]) { vector_insert(conn->requests, 0, bundled_requests[i]); }
-                }
-            }
+            conn->slot_count = 0;
         }
-
-        /* tickle the main tickler thread to note that we have responses. */
-        plc_tag_tickler_wake();
     }
+
+    notify_tags(conn);
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Done.");
 
     return rc;
+}
+
+
+/*
+ * Run the library's per-tag housekeeping for the tags whose time has come but which have no
+ * operation in flight: start an auto-sync read or write when one is due, act on an abort
+ * request.  What it starts lands back on the list as an operation; anything else is re-armed
+ * for its next deadline, or dropped if it has none.
+ *
+ * Holds session_mutex and only tries each tag's API mutex.  A busy tag stays due.
+ */
+static void tickle_due_tags_unsafe(cip_conn_p conn, int64_t now) {
+    cip_tag_p due[CIP_TICKLE_BATCH];
+    int32_t count = 0;
+
+    for(int32_t i = 0; i < vector_length(conn->active) && count < CIP_TICKLE_BATCH; i++) {
+        cip_tag_p tag = vector_get(conn->active, i);
+
+        if(tag->op_time > now) { break; }
+
+        if(!tag->read_in_progress && !tag->write_in_progress) { due[count++] = tag; }
+    }
+
+    tickle_tags_unsafe(conn, due, count, now);
+}
+
+
+/*
+ * The tags waiting for their create to finish when the connection cannot get to IDLE, where
+ * tickle_due_tags_unsafe() would reach them: a probed connection the device refused, whose
+ * deferred tags fail with the refusal.
+ */
+static void tickle_waiting_creates_unsafe(cip_conn_p conn) {
+    cip_tag_p waiting[CIP_TICKLE_BATCH];
+    int32_t count = 0;
+
+    for(int32_t i = 0; i < vector_length(conn->active) && count < CIP_TICKLE_BATCH; i++) {
+        cip_tag_p tag = vector_get(conn->active, i);
+
+        if(tag->create_read_status == PLCTAG_STATUS_PENDING && !tag->read_in_progress && !tag->write_in_progress) {
+            waiting[count++] = tag;
+        }
+    }
+
+    tickle_tags_unsafe(conn, waiting, count, time_ms());
+}
+
+
+/*
+ * Run the library's housekeeping and the kind's own tickler, if it has one, for each tag:
+ * @raw finishes its create once the connection is up, and a deferred tag sets itself up once
+ * the device is identified.  Holds session_mutex and only tries each tag's API mutex; a busy
+ * tag stays on the list for next time.
+ */
+static void tickle_tags_unsafe(cip_conn_p conn, cip_tag_p *tags, int32_t count, int64_t now) {
+    for(int32_t i = 0; i < count; i++) {
+        cip_tag_p tag = tags[i];
+
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
+
+        plc_tag_generic_tickler((plc_tag_p)tag);
+
+        if(tag->vtable->tickler) { tag->vtable->tickler((plc_tag_p)tag); }
+
+        if(!tag->read_in_progress && !tag->write_in_progress) { arm_tag_unsafe(conn, tag, now); }
+
+        notify_later_unsafe(conn, tag);
+
+        mutex_unlock(tag->api_mutex);
+    }
+}
+
+
+/*
+ * Build the next exchange from the tags whose operations are due: encode them into
+ * conn->staging until one does not fit or cannot share the packet.  Returns the number of
+ * requests in it.
+ *
+ * Encoding needs the tag's API mutex, and this holds session_mutex, so it only tries for it.
+ * A tag whose mutex is busy keeps its place and is taken next time.  A tag that cannot be
+ * encoded at all is finished with the error.
+ */
+static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
+    int32_t request_space = session_get_available_cip_payload_space(conn);
+    int32_t reply_space = (int32_t)GET_MAX_PAYLOAD_SIZE(conn) - CIP_MSP_REPLY_OVERHEAD - CIP_MSP_REPLY_SLACK;
+    int32_t used = 0;
+    int32_t index = 0;
+    bool bundle = false;
+
+    conn->slot_count = 0;
+
+    while(index < vector_length(conn->active) && conn->slot_count < MAX_REQUESTS) {
+        cip_tag_p tag = vector_get(conn->active, index);
+        tag_op_plan_t plan = {0};
+        bool is_read = (tag->read_in_progress != 0);
+        tag_encode_func encode = is_read ? tag->vtable->encode_read : tag->vtable->encode_write;
+        int32_t capacity = request_space;
+        int rc = PLCTAG_STATUS_OK;
+
+        /* the list is in time order, so nothing after this is due either. */
+        if(tag->op_time > now) { break; }
+
+        /* armed for an auto-sync deadline, or waiting for its tickle: no request to send. */
+        if(!tag->read_in_progress && !tag->write_in_progress) {
+            index++;
+            continue;
+        }
+
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+            index++;
+            continue;
+        }
+
+        /* a bundle charges its header once and an offset entry for every request in it. */
+        if(conn->slot_count > 0) {
+            capacity = request_space - used - (int32_t)sizeof(cip_multi_req_header)
+                       - (CIP_MSP_OFFSET_ENTRY_SIZE * (conn->slot_count + 1));
+        }
+
+        if(!encode) {
+            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This tag cannot %s!", (is_read ? "read" : "write"));
+            rc = PLCTAG_ERR_UNSUPPORTED;
+        } else if(capacity <= 0) {
+            rc = PLCTAG_ERR_TOO_SMALL;
+        } else {
+            rc = ((cip_tag_encode_func)encode)(tag, conn->staging + used, capacity, &plan);
+        }
+
+        /* it may fit next time, at the front of a packet of its own. */
+        if(rc == PLCTAG_ERR_TOO_SMALL && conn->slot_count > 0) {
+            mutex_unlock(tag->api_mutex);
+            break;
+        }
+
+        /* alone in an empty packet, it never will. */
+        if(rc == PLCTAG_ERR_TOO_SMALL) { rc = PLCTAG_ERR_TOO_LARGE; }
+
+        if(rc != PLCTAG_STATUS_OK) {
+            finish_tag_unsafe(conn, tag, rc, is_read);
+            mutex_unlock(tag->api_mutex);
+            continue;
+        }
+
+        if(conn->slot_count > 0
+           && (!bundle || !plan.packable || tag->unrouted != conn->exchange_unrouted
+               || reply_space - reply_budget_cost(plan.reply_size) < 0)) {
+            mutex_unlock(tag->api_mutex);
+            break;
+        }
+
+        if(conn->slot_count == 0) {
+            /* Multiple Service Packet only ever goes out on a connection. */
+            bundle = (plan.packable && conn->use_connected_msg);
+            conn->exchange_unrouted = tag->unrouted;
+        }
+
+        conn->slots[conn->slot_count].tag = tag;
+        conn->slots[conn->slot_count].offset = used;
+        conn->slots[conn->slot_count].size = plan.req_size;
+        conn->slots[conn->slot_count].is_read = is_read;
+        conn->slot_count++;
+
+        used += plan.req_size;
+        reply_space -= reply_budget_cost(plan.reply_size);
+
+        /* off the list while it is on the wire; it keeps its op_time in case it has to go again. */
+        tag_schedule_remove(conn->active, (plc_tag_p)tag);
+        mutex_unlock(tag->api_mutex);
+
+        if(!bundle) { break; }
+    }
+
+    return conn->slot_count;
+}
+
+
+/*
+ * Hand each reply in the exchange to its tag's decoder.  A decoder that needs another
+ * exchange puts the tag back on the list, due now; otherwise the operation is over.
+ *
+ * Decoding needs the tag's API mutex.  When it is busy this lets go of session_mutex while it
+ * waits, so that whoever holds the API mutex can take session_mutex to abort the tag: never
+ * blocking on one while holding the other is what keeps the two from deadlocking.
+ */
+static int dispatch_replies_unsafe(cip_conn_p conn) {
+    int rc = PLCTAG_STATUS_OK;
+    int bad_packet_rc = PLCTAG_STATUS_OK;
+
+    for(int32_t i = 0; i < conn->slot_count; i++) {
+        cip_tag_p tag = conn->slots[i].tag;
+        bool is_read = conn->slots[i].is_read;
+        tag_decode_func decode = NULL;
+        uint8_t *reply = NULL;
+        int32_t reply_size = 0;
+
+        while(tag && mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+            mutex_unlock(conn->session_mutex);
+            sleep_ms(1);
+            mutex_lock(conn->session_mutex);
+            tag = conn->slots[i].tag;
+        }
+
+        /* aborted or destroyed while the exchange was out. */
+        if(!tag) { continue; }
+
+        conn->slots[i].tag = NULL;
+
+        /*
+         * A reply that fails its own framing checks is the device's answer, and asking again
+         * gets the same one, so it ends the operation.  The caller drops the connection.
+         */
+        rc = find_reply(conn, i, &reply, &reply_size);
+        if(rc != PLCTAG_STATUS_OK) {
+            bad_packet_rc = rc;
+        } else {
+            decode = is_read ? tag->vtable->decode_read : tag->vtable->decode_write;
+            rc = decode ? ((cip_tag_decode_func)decode)(tag, reply, reply_size) : PLCTAG_ERR_UNSUPPORTED;
+        }
+
+        if(rc == PLCTAG_STATUS_PENDING) {
+            tag->status = (int8_t)PLCTAG_STATUS_PENDING;
+            tag_schedule_insert(conn->active, (plc_tag_p)tag, time_ms());
+        } else {
+            finish_tag_unsafe(conn, tag, rc, is_read);
+        }
+
+        mutex_unlock(tag->api_mutex);
+    }
+
+    return bad_packet_rc;
+}
+
+
+/* put what is left of a failed exchange back where it was on the list, in order. */
+static void requeue_slots_unsafe(cip_conn_p conn) {
+    for(int32_t i = 0; i < conn->slot_count; i++) {
+        cip_tag_p tag = conn->slots[i].tag;
+
+        if(tag) {
+            tag_schedule_insert(conn->active, (plc_tag_p)tag, tag->op_time);
+            conn->slots[i].tag = NULL;
+        }
+    }
+}
+
+
+/*
+ * End the tag's operation with rc: its status and completion events, its next auto-sync
+ * deadline if it has one, and its callbacks once session_mutex is released.  Called with
+ * session_mutex and the tag's API mutex held.
+ */
+static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc, bool is_read) {
+    tag->read_in_progress = 0;
+    tag->write_in_progress = 0;
+
+    cip_tag_op_done(tag, rc, is_read);
+    plc_tag_generic_raise_completions((plc_tag_p)tag);
+
+    arm_tag_unsafe(conn, tag, time_ms());
+    notify_later_unsafe(conn, tag);
+}
+
+
+/*
+ * Put a tag with no operation in flight on the list at its next auto-sync deadline, or take it
+ * off when it has none.  The library starts the operation when the deadline comes
+ * (tickle_due_tags_unsafe()), which is why a deadline already past is set just after now
+ * rather than at it: the library only starts a read whose time is strictly past.
+ */
+static void arm_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int64_t now) {
+    int64_t when = 0;
+
+    /* a dirty tag reads after its write; a write in flight holds the read back too. */
+    if(tag->auto_sync_read_ms > 0 && !tag->tag_is_dirty && !tag->write_in_flight) {
+        when = (tag->auto_sync_next_read > now) ? tag->auto_sync_next_read : now + 1;
+    }
+
+    if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
+        int64_t write_time = (tag->auto_sync_next_write > now) ? tag->auto_sync_next_write : now + 1;
+
+        if(!when || write_time < when) { when = write_time; }
+    }
+
+    /* a create its kind's tickler finishes -- @raw, a deferred tag -- is looked at again shortly. */
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING && tag->vtable->tickler) {
+        int64_t create_time = now + SESSION_IDLE_WAIT_TIME;
+
+        if(!when || create_time < when) { when = create_time; }
+    }
+
+    if(when) {
+        tag_schedule_insert(conn->active, (plc_tag_p)tag, when);
+    } else {
+        tag_schedule_remove(conn->active, (plc_tag_p)tag);
+    }
+}
+
+
+/*
+ * Callbacks run inside the tag's API mutex, which the handler may not wait for while it holds
+ * session_mutex.  So a tag that has events to report is remembered here, with a reference that
+ * keeps it alive, and notify_tags() runs its callbacks after session_mutex is released.  The
+ * tag is linked to the connection, so its reference count cannot have reached zero unless its
+ * destructor is already waiting on session_mutex, and then rc_inc() refuses.
+ */
+static void notify_later_unsafe(cip_conn_p conn, cip_tag_p tag) {
+    cip_tag_p held = rc_inc(tag);
+
+    if(held) { vector_set(conn->notify, vector_length(conn->notify), held); }
+}
+
+
+/*
+ * Run the callbacks remembered by notify_later_unsafe().  Only the handler thread adds to or
+ * drains the list, and it calls this with session_mutex released.  Dropping the reference can
+ * be the tag's last; its destructor then runs on the rc cleanup thread.
+ */
+static void notify_tags(cip_conn_p conn) {
+    while(vector_length(conn->notify) > 0) {
+        plc_tag_p tag = vector_remove(conn->notify, 0);
+
+        plc_tag_generic_handle_event_callbacks(tag);
+        rc_dec(tag);
+    }
+}
+
+
+/*
+ * Fail every tag waiting to send on the connection with rc.  For a Forward Open the PLC
+ * refused: the tags were waiting for a connection the PLC has said it will not give, so its
+ * answer is theirs.  Tags only armed for an auto-sync deadline have nothing waiting and stay.
+ *
+ * The refusal comes once and the next attempt may be a long backoff away, so a tag whose API
+ * mutex is busy is waited for rather than skipped -- with session_mutex released, as in
+ * dispatch_replies_unsafe(), and the scan restarted because the list may have changed.
+ */
+static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
+    int32_t failed = 0;
+    int32_t index = 0;
+
+    while(index < vector_length(conn->active)) {
+        cip_tag_p tag = vector_get(conn->active, index);
+
+        if(!tag->read_in_progress && !tag->write_in_progress) {
+            index++;
+            continue;
+        }
+
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+            mutex_unlock(conn->session_mutex);
+            sleep_ms(1);
+            mutex_lock(conn->session_mutex);
+            index = 0;
+            continue;
+        }
+
+        finish_tag_unsafe(conn, tag, rc, (tag->read_in_progress != 0));
+        failed++;
+
+        mutex_unlock(tag->api_mutex);
+
+        /* finishing may have re-armed it further along the list or taken it off; start over. */
+        index = 0;
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Failed %d waiting tags with %s.", (int)failed, plc_tag_decode_error(rc));
+
+    return failed;
+}
+
+
+/* is there a tag whose time has come?  Called with session_mutex held. */
+static bool has_due_tags_unsafe(cip_conn_p conn, int64_t now) {
+    plc_tag_p first = (vector_length(conn->active) > 0) ? vector_get(conn->active, 0) : NULL;
+
+    return (first && first->op_time <= now);
+}
+
+
+/* when the handler next has to look at a tag, 0 for nothing scheduled.  Called with session_mutex held. */
+static int64_t next_tag_time_unsafe(cip_conn_p conn) {
+    plc_tag_p first = (vector_length(conn->active) > 0) ? vector_get(conn->active, 0) : NULL;
+
+    return first ? first->op_time : 0;
+}
+
+
+int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag) {
+    if(!conn || !tag) { return PLCTAG_ERR_NULL_PTR; }
+
+    critical_block(conn->session_mutex) { tag_schedule_insert(conn->active, (plc_tag_p)tag, time_ms()); }
+
+    cond_signal(conn->session_wait_cond);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag) {
+    if(!conn || !tag) { return; }
+
+    critical_block(conn->session_mutex) {
+        tag_schedule_remove(conn->active, (plc_tag_p)tag);
+
+        for(int32_t i = 0; i < conn->slot_count; i++) {
+            if(conn->slots[i].tag == tag) { conn->slots[i].tag = NULL; }
+        }
+    }
 }
 void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
     conn_watch_set_status(&conn->watch, conn->session_mutex, new_status);
@@ -1986,9 +1963,6 @@ THREAD_FUNC(session_handler) {
          * Make sure we get rid of all the aborted requests queued.
          * This keeps the overall memory usage lower.
          */
-
-        pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
-        critical_block(conn->session_mutex) { purge_aborted_requests_unsafe(conn); }
 
         switch(conn->state) {
             case SESSION_OPEN_SOCKET_START:
@@ -2080,6 +2054,10 @@ THREAD_FUNC(session_handler) {
                 session_set_connection_status(conn, PLCTAG_CONN_STATUS_CONNECTING);
 
                 if((rc = session_identify(conn)) != PLCTAG_STATUS_OK) {
+                    /* a refusal is the answer for the tags waiting to be set up. */
+                    critical_block(conn->session_mutex) { tickle_waiting_creates_unsafe(conn); }
+                    notify_tags(conn);
+
                     conn->state = SESSION_UNREGISTER;
                 } else if(conn->use_connected_msg) {
                     forward_open_reset_negotiation(conn);
@@ -2183,17 +2161,21 @@ THREAD_FUNC(session_handler) {
                      * reconnect at its slowest rate.  Still not permanent -- a route can come
                      * back and an empty slot can be filled.
                      */
-                    if(forward_open_error_is_configuration(rc)) { backoff_saturate(&retry_backoff); }
+                    if(forward_open_error_is_configuration(conn, rc)) { backoff_saturate(&retry_backoff); }
 
                     /*
-                     * The PLC's refusal is the answer for every request waiting on this
-                     * connection.  Two kinds wait for the reconnect instead: no reply at all,
-                     * which is not an answer, and running out of connections or sizes, which
-                     * says the PLC has nothing to give right now, not that it never will.
+                     * Only a refusal that says the request can never succeed is the answer for
+                     * the tags waiting on this connection: no such route, a bad path, a device
+                     * with no connected messaging.  The refusals that have a remedy -- a
+                     * duplicate connection ID, a size too large, no extended Forward Open --
+                     * were retried above, and running out of those retries, a timeout, or no
+                     * reply at all says the PLC has nothing to give right now, not that it
+                     * never will.  Those tags wait for the reconnect.
                      */
-                    if(conn->fo_plc_answered && rc != PLCTAG_ERR_NO_RESOURCES && rc != PLCTAG_ERR_TOO_SMALL) {
-                        critical_block(conn->session_mutex) { fail_queued_requests_unsafe(conn, rc); }
-                        plc_tag_tickler_wake();
+                    if(conn->fo_plc_answered && forward_open_error_is_configuration(conn, rc)) {
+                        critical_block(conn->session_mutex) { fail_waiting_tags_unsafe(conn, rc); }
+
+                        notify_tags(conn);
                     }
                 }
 
@@ -2224,10 +2206,8 @@ THREAD_FUNC(session_handler) {
 
                 /* if there is work to do, make sure we do not disconnect. */
                 critical_block(conn->session_mutex) {
-                    int num_reqs = vector_length(conn->requests);
-                    if(num_reqs > 0) {
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                               "There are %d requests pending before cleanup and sending.", num_reqs);
+                    if(has_due_tags_unsafe(conn, now)) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "There are tags due before sending.");
                         inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
                         auto_disconnect_time = now + inactivity_timeout_ms;
                     }
@@ -2259,15 +2239,6 @@ THREAD_FUNC(session_handler) {
                     cond_signal(conn->session_wait_cond);
                 }
 
-                /* if there is work to do, make sure we signal the condition var. */
-                critical_block(conn->session_mutex) {
-                    int num_reqs = vector_length(conn->requests);
-                    if(num_reqs > 0) {
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                               "There are %d requests still pending after abort purge and sending.", num_reqs);
-                        cond_signal(conn->session_wait_cond);
-                    }
-                }
 
                 break;
 
@@ -2357,9 +2328,8 @@ THREAD_FUNC(session_handler) {
                 /* if there is work to do, reconnect.. */
                 pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
                 critical_block(conn->session_mutex) {
-                    if(vector_length(conn->requests) > 0) {
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
-                               "There are requests waiting, reopening connection to PLC.");
+                    if(has_due_tags_unsafe(conn, now)) {
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "There are tags due, reopening connection to PLC.");
 
                         conn->state = SESSION_OPEN_SOCKET_START;
                         cond_signal(conn->session_wait_cond);
@@ -2389,6 +2359,21 @@ THREAD_FUNC(session_handler) {
          * give up the CPU a bit, but only if we are not
          * doing some linked states.
          */
+        /*
+         * Wake for the next tag deadline if it comes first, in the states that act on tags; a tag
+         * already due that could not be served waits a tick.  The connecting states keep their
+         * own pace, so a due tag does not spin the handler through a backoff.
+         */
+        if(conn->state == SESSION_IDLE || conn->state == SESSION_WAIT_IDLE_RECONNECT) {
+            critical_block(conn->session_mutex) {
+                int64_t next_tag_time = next_tag_time_unsafe(conn);
+
+                if(next_tag_time > 0 && wait_until_time > 0 && next_tag_time < wait_until_time) {
+                    wait_until_time = (next_tag_time > now) ? next_tag_time : now + 1;
+                }
+            }
+        }
+
         if(wait_until_time > 0) {
             int64_t time_left = wait_until_time - now;
 
@@ -2399,11 +2384,6 @@ THREAD_FUNC(session_handler) {
             }
         }
     }
-
-    /*
-     * One last time before we exit.
-     */
-    critical_block(conn->session_mutex) { purge_aborted_requests_unsafe(conn); }
 
     /* Decrement the count of active conn handlers */
     atomic_add_int32(&(conn->owner_list->handler_count), -1);
@@ -2585,10 +2565,19 @@ static int session_create(cip_conn_list_t *list, cip_plc_type_t plc_type, const 
             remove mem_free from destructor for host, path, and conn_path.
     */
 
-    conn->requests = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
-    if(!conn->requests) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate vector for requests!");
+    conn->active = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
+    conn->notify = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
+    if(!conn->active || !conn->notify) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate the tag lists!");
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
+        rc_dec(conn);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /* the encoders write a whole exchange here; it can be no larger than the packet buffer. */
+    conn->staging = (uint8_t *)mem_alloc((int)conn->data_capacity);
+    if(!conn->staging) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate the staging buffer!");
         rc_dec(conn);
         return PLCTAG_ERR_NO_MEM;
     }
