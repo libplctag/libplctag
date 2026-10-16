@@ -48,6 +48,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
+#include <utils/vector.h>
 
 
 #define CONN_EVENT_RING_SIZE (64)
@@ -65,6 +66,13 @@ typedef struct {
      */
     tag_conn_event_t ring[CONN_EVENT_RING_SIZE];
     atomic_int32_t ring_write_idx;
+
+    /*
+     * The connection tags reading this ring.  The connection's handler delivers their events
+     * (connection_tag_notify_watchers()).  Raw pointers under the connection's mutex: a tag
+     * removes itself before it is freed.  Created on first use.
+     */
+    vector_p watchers;
 } conn_event_ring_t;
 
 
@@ -97,3 +105,10 @@ extern bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t
 
 /* index a newly created reader should start from to see only future events. */
 extern int32_t conn_watch_read_idx(conn_event_ring_t *watch);
+
+/* add or remove a connection tag reading the ring, under the connection's own mutex. */
+extern int32_t conn_watch_add_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag);
+extern void conn_watch_remove_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag);
+
+/* free what the watch allocated.  Call from the connection's destructor, when no tag is left. */
+extern void conn_watch_destroy(conn_event_ring_t *watch);

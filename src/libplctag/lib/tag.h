@@ -47,8 +47,8 @@
 
 typedef struct plc_tag_t *plc_tag_p;
 
-/* Opaque handle to the library-scoped instance (tag hashtable, its lookup mutex,
- * and the tag tickler thread/condvar). Full definition lives in lib.c. A tag holds
+/* Opaque handle to the library-scoped instance (tag hashtable and its lookup
+ * mutex). Full definition lives in tag_registry.c. A tag holds
  * a reference for its whole lifetime (see plc_tag_create_impl()/each protocol
  * destructor), so any code reachable from a valid plc_tag_p may use
  * tag->instance->tags / tag->instance->tag_lookup_mutex directly: those objects
@@ -152,8 +152,7 @@ struct tag_vtable_t {
      * do so here rather than during the protocol's own tag_create_function, since
      * that runs before the generic layer finishes setting up the tag object --
      * publishing any earlier lets the worker thread observe a half-initialized tag.
-     * NULL for protocols that only rely on the generic tag_tickler_func()/tag lookup
-     * hashtable, since add_tag_lookup() already runs after generic setup completes.
+     * NULL for tags with no worker thread to publish to.
      */
     tag_vtable_func activate;
 
@@ -274,11 +273,6 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int bit;                                                                            \
     int protocol_type;                                                                  \
     atomic_bool abort_requested;                                                        \
-    /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
-     * field below is written under this tag's own per-tag api_mutex -- a different     \
-     * lock domain. Packing it into the bitfield run below would race with writes to    \
-     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */ \
-    atomic_bool skip_tickler;                                                           \
     /* On its handler's active list.  Written under the handler's own mutex. */         \
     bool in_active_vector;                                                              \
     int8_t event_creation_complete_status;                                              \
@@ -352,8 +346,6 @@ extern void destroy_tag_common(plc_tag_p tag);
 extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 extern void plc_tag_generic_raise_completions(plc_tag_p tag);
-#define plc_tag_tickler_wake() plc_tag_tickler_wake_impl(__func__, __LINE__)
-extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
 extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,

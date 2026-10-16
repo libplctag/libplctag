@@ -103,19 +103,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 #endif
 
 
-/*
- * Initialize the library.  This is called in a threadsafe manner and
- * only called once.
- *
- * Builds the tag hashtable, its lookup mutex, and the tag tickler condition
- * variable, and stages the result in building_instance for initialize_modules()
- * to either publish (lib_instance_publish(), once cip_conn_startup()/mb_init()
- * have also succeeded) or discard (lib_instance_discard_pending(), if one of them
- * fails). Deliberately does not start the tickler thread -- see the comment on
- * lib_instance_publish() above.
- */
-
-
 int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -312,7 +299,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
     critical_block(tag->api_mutex) {
         /* Check the callback under the API mutex, not before: plc_tag_destroy() clears
          * the callback (and userdata) under this same mutex while tearing the tag down.
-         * The tag tickler thread holds its own reference and can call this function
+         * A handler thread holds its own reference and can call this function
          * after plc_tag_destroy() has returned, so an unsynchronized pre-check here would
          * race that clear -- benign in practice since this check alone re-runs properly
          * guarded below, but still a real data race by the C11/TSan memory model. */
@@ -441,11 +428,8 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
 
     atomic_set_bool(&tag->abort_requested, true);
 
-    /* if the tag does not use a tickler, then wake the PLC thread */
+    /* wake the tag's handler so it can act on the flag. */
     if(tag->vtable && tag->vtable->wake_plc) { rc = tag->vtable->wake_plc(tag); }
-
-    /* wake the tag tickler */
-    plc_tag_tickler_wake();
 
     /*
      * this blocks until we get the mutex by which time any
@@ -456,7 +440,7 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
 
         /* Is the abort flag still set? This may be synchronous. */
         if(atomic_get_bool(&tag->abort_requested)) {
-            /* Clear the abort flag so the tickler won't process it again */
+            /* Clear the abort flag so the handler won't process it again */
             atomic_set_bool(&tag->abort_requested, false);
 
             /*
@@ -504,7 +488,7 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
             cond_signal(tag->tag_cond_wait);
         } else {
             /*
-             * The abort was already handled by the tickler or PLC thread.
+             * The abort was already handled by the tag's handler thread.
              * Do not touch the flags - a new operation may have started.
              */
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Abort flag is not set, so abort already completed.");
@@ -527,11 +511,8 @@ static int plc_tag_status_impl(plc_tag_p tag) {
         if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
         /* If the vtable tickler just completed a read or write, finalize it
-         * here rather than waiting for the background tickler thread to wake
-         * up and do it.  This mirrors what tag_tickler_func does after calling
-         * both ticklers, and is what allows async polling via plc_tag_status()
-         * to observe completion in the same call instead of paying an extra OS
-         * scheduling round-trip. */
+         * here rather than waiting for the handler thread to do it, so async
+         * polling via plc_tag_status() sees completion in the same call. */
         if(tag->read_complete) {
             tag->read_complete = 0;
             tag->read_in_flight = 0;
@@ -983,9 +964,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         int64_t start_time = time_ms();
         int64_t end_time = start_time + timeout;
 
-        /* wake up the tickler in case it is needed to create the tag. */
-        plc_tag_tickler_wake();
-
         /* we loop as long as we have time left to wait. */
         do {
             int64_t timeout_left = end_time - time_ms();
@@ -1096,14 +1074,6 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 
     /* close all tags. */
     tag_registry_destroy_all_tags(inst);
-
-    /*
-     * Join the tag tickler thread now, before the protocol modules are torn down: the
-     * tickler calls into protocol vtable functions for every active tag, so it must not
-     * still be running once cip_conn_teardown()/mb_teardown() (called from
-     * destroy_modules() below) start freeing protocol-level globals.
-     */
-    tag_registry_stop_tickler(inst);
 
     /* Stage the registry for tag_registry_teardown() (called via destroy_modules() below) to
      * drop the last ("genesis") reference, once refcount_teardown() has drained
@@ -1492,12 +1462,9 @@ void destroy_tag_common(plc_tag_p tag) {
 
     critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK); }
 
-    /* wake the tickler */
-    plc_tag_tickler_wake();
-
     plc_tag_generic_handle_event_callbacks(tag);
 
-    /* The tickler thread can still hold a reference and call
+    /* A handler thread can still hold a reference and call
      * plc_tag_generic_handle_event_callbacks() after this point,
      * so clear the callback and userdata under the API mutex.
      * This guarantees no stale callback fires after plc_tag_destroy(). */
@@ -1643,9 +1610,6 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     if(!is_done && timeout > 0) {
         int64_t start_time = time_ms();
         int64_t end_time = start_time + timeout;
-
-        /* wake up the tickler in case it is needed to read the tag. */
-        plc_tag_tickler_wake();
 
         /* we loop as long as we have time left to wait. */
         do {
@@ -1853,9 +1817,6 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
     if(!is_done && timeout > 0) {
         int64_t start_time = time_ms();
         int64_t end_time = start_time + timeout;
-
-        /* wake up the tickler in case it is needed to write the tag. */
-        plc_tag_tickler_wake();
 
         /* we loop as long as we have time left to wait. */
         do {
@@ -2313,8 +2274,7 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
 
 /*
  * tag_set_dirty - mark a tag as having locally-modified data and notify
- * the protocol layer so it can schedule a write without waiting for the
- * generic tickler (which is not called for some protocols, e.g. Modbus).
+ * the protocol layer so its handler can schedule a write.
  * Must be called while tag->api_mutex is held.
  */
 static void tag_set_dirty(plc_tag_p tag) {

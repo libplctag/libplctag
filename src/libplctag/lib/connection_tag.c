@@ -42,11 +42,12 @@
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
+#include <utils/vector.h>
 
 
 static int connection_tag_abort(plc_tag_p tag);
 static int connection_tag_status(plc_tag_p tag);
-static int connection_tag_tickler(plc_tag_p tag);
+static void connection_tag_deliver(connection_tag_p tag);
 static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result);
 static void connection_tag_destructor(void *ptr);
 static const char *conn_status_name(int32_t conn_status);
@@ -67,7 +68,7 @@ static struct tag_vtable_t connection_tag_vtable = {
     .abort = connection_tag_abort,     /* not used */
     .read = NULL,                      /* not used */
     .status = connection_tag_status,   /* returns the last connection status value */
-    .tickler = connection_tag_tickler, /* drains the event ring, raises events */
+    .tickler = NULL,                   /* the connection's handler delivers events instead */
     .write = NULL,                     /* not used */
     .wake_plc = NULL,                  /* not used */
     .tag_data_written = NULL,          /* not used */
@@ -106,6 +107,7 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
 
     tag->conn = args->conn;
     tag->watch = args->watch;
+    tag->conn_mutex = args->conn_mutex;
 
     if(args->conn_is_new) {
         /*
@@ -133,6 +135,18 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
     tag->first_tickler_run = true;
 
     /*
+     * Watch from here.  The handler delivers nothing until CREATED has been dispatched (see
+     * connection_tag_deliver()), and that happens after the library has finished the tag.
+     */
+    rc = conn_watch_add_watcher(tag->watch, tag->conn_mutex, (plc_tag_p)tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(args->debug_module, DEBUG_WARN, 0, "Unable to watch the connection, error %s!", plc_tag_decode_error(rc));
+        tag->status = (int8_t)rc;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+        return (plc_tag_p)tag;
+    }
+
+    /*
      * Queue the CREATED event.  plc_tag_create_ex() dispatches it via
      * plc_tag_generic_handle_event_callbacks() once tag->tag_id is assigned.
      */
@@ -155,30 +169,30 @@ static int connection_tag_status(plc_tag_p raw_tag) {
     connection_tag_p tag = (connection_tag_p)raw_tag;
 
     /*
-     * Do NOT tickle here.  connection_tag_tickler() must have exactly one
-     * caller -- the generic tag_tickler_func() loop -- since it advances
-     * ring_read_idx past whatever is in the ring on every call.
-     * plc_tag_create_impl() calls ->status() synchronously, in a tight loop, on
-     * the creating thread while waiting for creation to finish; if that also
-     * ticked, it could mark ring entries as seen before the tickler thread
-     * delivered them, silently dropping the earliest events such as CONNECTING.
+     * Do NOT deliver here.  connection_tag_deliver() must have exactly one
+     * caller -- the connection's handler -- since it advances ring_read_idx
+     * past whatever is in the ring on every call.  plc_tag_create_impl() calls
+     * ->status() synchronously, in a tight loop, on the creating thread while
+     * waiting for creation to finish; if that also delivered, it could mark ring
+     * entries as seen before the handler delivered them, silently dropping the
+     * earliest events such as CONNECTING.
      */
     return tag->status;
 }
 
 
-static int connection_tag_tickler(plc_tag_p raw_tag) {
-    connection_tag_p tag = (connection_tag_p)raw_tag;
-
-    if(!tag->conn) { return PLCTAG_STATUS_OK; }
+/*
+ * Deliver the ring's new events to the tag's callback.  Called with the tag's API mutex held,
+ * only by connection_tag_notify_watchers().
+ */
+static void connection_tag_deliver(connection_tag_p tag) {
+    if(!tag->conn) { return; }
 
     /*
-     * Wait until the CREATED event has been dispatched before firing any
-     * connection state events.  The generic tickler calls vtable->tickler
-     * before plc_tag_generic_handle_event_callbacks(), so draining the ring
-     * here would dispatch CONNECTING before CREATED.
+     * Wait until the CREATED event has been dispatched before firing any connection state
+     * events, or CONNECTING would reach the callback before CREATED.
      */
-    if(raw_tag->event_creation_complete) { return PLCTAG_STATUS_OK; }
+    if(tag->event_creation_complete) { return; }
 
     int32_t read_idx = tag->ring_read_idx;
 
@@ -198,7 +212,7 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
     int32_t event_type = 0;
     int32_t status = 0;
 
-    /* api_mutex is already held by the generic tickler, so dispatch each entry directly */
+    /* api_mutex is already held, so dispatch each entry directly */
     while(conn_watch_next(tag->watch, &read_idx, &event_type, &status)) {
         if(!tag->callback) { continue; }
 
@@ -231,8 +245,37 @@ static int connection_tag_tickler(plc_tag_p raw_tag) {
     }
 
     tag->ring_read_idx = read_idx;
+}
 
-    return PLCTAG_STATUS_OK;
+
+void connection_tag_notify_watchers(conn_event_ring_t *watch, mutex_p conn_mutex) {
+    /*
+     * One tag at a time, each taken under the connection's mutex with a reference so it outlives
+     * the delivery.  rc_inc() refuses a tag already being destroyed; its destructor is waiting on
+     * the mutex to remove itself, so it is skipped.
+     */
+    for(int32_t index = 0;; index++) {
+        connection_tag_p tag = NULL;
+        bool more = false;
+
+        critical_block(conn_mutex) {
+            if(watch->watchers && index < vector_length(watch->watchers)) {
+                more = true;
+                tag = rc_inc(vector_get(watch->watchers, index));
+            }
+        }
+
+        if(!more) { break; }
+
+        if(!tag) { continue; }
+
+        critical_block(tag->api_mutex) { connection_tag_deliver(tag); }
+
+        /* CREATED and anything else the library raised for the tag */
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+
+        rc_dec(tag);
+    }
 }
 
 
@@ -254,6 +297,10 @@ static void connection_tag_destructor(void *ptr) {
 
     if(tag->conn) {
         pdebug(tag->debug_module, DEBUG_DETAIL, tag->tag_id, "Releasing the connection.");
+
+        /* stop being delivered to before anything is freed. */
+        conn_watch_remove_watcher(tag->watch, tag->conn_mutex, (plc_tag_p)tag);
+
         rc_dec(tag->conn);
         tag->conn = NULL;
         tag->watch = NULL;

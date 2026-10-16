@@ -60,7 +60,7 @@ extern plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id
  *
  * init() builds the registry but deliberately does NOT publish it: no tag may
  * find it until every device module has started, or a module that fails to
- * start would leave a live tickler behind.  initialize_modules() calls
+ * start would leave tags no handler can serve.  initialize_modules() calls
  * publish() once they have all succeeded, or discard_pending() if one did not.
  */
 extern int tag_registry_init(void);
@@ -83,6 +83,3 @@ extern void tag_registry_stage_shutdown(tag_registry_p registry);
 
 /* Destroy every tag still registered.  Only valid after tag_registry_close(). */
 extern void tag_registry_destroy_all_tags(tag_registry_p registry);
-
-/* Wake the tickler thread and wait for it to exit. */
-extern void tag_registry_stop_tickler(tag_registry_p registry);

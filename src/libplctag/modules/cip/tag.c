@@ -340,9 +340,6 @@ int cip_tag_activate(plc_tag_p tag_arg) {
 
     tag->activated = true;
 
-    /* the connection's handler drives the tag from here on, the kind's own tickler included. */
-    atomic_set_bool(&tag->skip_tickler, true);
-
     /* the handler starts what the create started while the tag was being built, and arms auto-sync. */
     if(!tag->session) { return PLCTAG_STATUS_OK; }
 

@@ -44,6 +44,7 @@
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
+#include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_schedule.h>
 #include <libplctag/modules/cip/cip.h>
@@ -1144,6 +1145,8 @@ void session_destroy(void *conn_arg) {
             mem_free(conn->staging);
             conn->staging = NULL;
         }
+
+        conn_watch_destroy(&conn->watch);
     }
 
     /* we are done with the condition variable, finally destroy it. */
@@ -2359,6 +2362,9 @@ THREAD_FUNC(session_handler) {
          * give up the CPU a bit, but only if we are not
          * doing some linked states.
          */
+        /* this pass's connection events, to the @connection tags watching. */
+        connection_tag_notify_watchers(&conn->watch, conn->session_mutex);
+
         /*
          * Wake for the next tag deadline if it comes first, in the states that act on tags; a tag
          * already due that could not be served waits a tick.  The connecting states keep their

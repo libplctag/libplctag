@@ -544,9 +544,6 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
     /* initialize the operation changed time for fairness sorting */
     (*tag)->op_changed_time = time_ms();
 
-    /* make sure the generic tag tickler thread does not call the generic tickler. */
-    atomic_set_bool(&(*tag)->skip_tickler, true);
-
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0, "Done.");
 
     return PLCTAG_STATUS_OK;
@@ -882,6 +879,9 @@ void modbus_plc_destructor(void *plc_arg) {
         plc->handler_thread = NULL;
     }
 
+    /* every connection tag holds a reference to the PLC, so none is left watching. */
+    conn_watch_destroy(&plc->watch);
+
     if(plc->mutex) {
         mutex_destroy(&plc->mutex);
         plc->mutex = NULL;
@@ -1055,6 +1055,9 @@ THREAD_FUNC(modbus_plc_handler) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Error %s tickling tags!", plc_tag_decode_error(rc));
             /* FIXME - what should we do here? */
         }
+
+        /* the last pass's connection events, to the @connection tags watching. */
+        connection_tag_notify_watchers(&plc->watch, plc->mutex);
 
         /* if there is still a response marked ready, clean it up.
          * We must protect this with the mutex because responses can be received

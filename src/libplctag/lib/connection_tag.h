@@ -57,10 +57,11 @@ typedef struct {
 
     void *conn;               /* the connection object, held by refcount; NULL if creation failed */
     conn_event_ring_t *watch; /* &conn->watch */
+    mutex_p conn_mutex;       /* the connection's own mutex, which guards watch->watchers */
     int32_t last_conn_state;  /* last state delivered to the callback */
     int32_t ring_read_idx;    /* last ring entry this tag has processed */
     int32_t io_events;        /* 1 = report connection reads and writes, 0 = suppress */
-    bool first_tickler_run;   /* true until the first post-CREATED tickler */
+    bool first_tickler_run;   /* true until the first delivery after CREATED */
     debug_module_t debug_module;
 } connection_tag_t;
 
@@ -83,3 +84,9 @@ typedef struct {
 extern plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
                                        void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                        void *userdata);
+
+/*
+ * Deliver the ring's new events to every connection tag watching it.  The connection's handler
+ * calls this once per pass, holding no lock: each tag's callbacks run inside its API mutex.
+ */
+extern void connection_tag_notify_watchers(conn_event_ring_t *watch, mutex_p conn_mutex);

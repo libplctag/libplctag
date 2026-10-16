@@ -39,6 +39,7 @@
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
+#include <utils/vector.h>
 
 
 void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status) {
@@ -72,8 +73,6 @@ void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t st
 
     /* the atomic store is the release point; readers cannot see the slot before it */
     atomic_set_int32(&watch->ring_write_idx, write_idx);
-
-    plc_tag_tickler_wake();
 }
 
 
@@ -101,5 +100,40 @@ void conn_watch_set_status(conn_event_ring_t *watch, mutex_p mutex, int32_t new_
         atomic_set_int32(&watch->status, new_status);
 
         if(old_status != new_status) { conn_watch_publish(watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+    }
+}
+
+
+int32_t conn_watch_add_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag) {
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    critical_block(mutex) {
+        if(!watch->watchers) { watch->watchers = vector_create(4, 4); }
+
+        if(!watch->watchers) {
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        rc = vector_set(watch->watchers, vector_length(watch->watchers), tag);
+    }
+
+    return rc;
+}
+
+
+void conn_watch_remove_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag) {
+    critical_block(mutex) {
+        int32_t index = (watch->watchers ? vector_find_index(watch->watchers, tag) : -1);
+
+        if(index >= 0) { vector_remove(watch->watchers, index); }
+    }
+}
+
+
+void conn_watch_destroy(conn_event_ring_t *watch) {
+    if(watch->watchers) {
+        vector_destroy(watch->watchers);
+        watch->watchers = NULL;
     }
 }
