@@ -58,8 +58,6 @@
 #include <utils/debug.h>
 
 
-static int tag_read_start(cip_tag_p tag);
-static int tag_write_start(cip_tag_p tag);
 static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
@@ -67,10 +65,10 @@ static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_p
 
 struct tag_vtable_t lgx_pccc_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)tag_read_start,
-    .status = (tag_vtable_func)pccc_tag_status,
+    .read = cip_tag_read_start,
+    .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
-    .write = (tag_vtable_func)tag_write_start,
+    .write = cip_tag_write_start,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,
@@ -82,26 +80,6 @@ struct tag_vtable_t lgx_pccc_vtable = {
     /* data accessors */
     .attribs = ab_attribs,
 };
-
-
-/*
- * tag_read_start
- *
- * Start a PCCC typed read against a Logix controller.
- */
-int tag_read_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    rc = pccc_finish_request(tag, cip_tag_send(tag), false);
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return rc;
-}
 
 
 /*
@@ -277,33 +255,13 @@ static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
 
 
 /*
- * tag_write_start
- *
- * Build and submit the PCCC typed write of the whole buffer.
+ * Encode a PCCC typed write of the whole buffer against a Logix controller.
  *
  * This family has no masked write.  A ControlLogix's PCCC emulation serves only the typed
  * pair 0x68/0x67 -- the PLC/5 read-modify-write function 0x26 is not mapped -- and the
  * logical address it takes has no bit field.  So a bit write sends the whole word, and the
  * other fifteen bits are whatever the tag last read.  The library does not read first: the
  * app owns the buffer and must refresh it before a bit write if the word can change.
- */
-int tag_write_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    rc = pccc_finish_request(tag, cip_tag_send(tag), true);
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-
-/*
- * Encode a PCCC typed write against a Logix controller.
  */
 static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
     int rc = PLCTAG_STATUS_OK;

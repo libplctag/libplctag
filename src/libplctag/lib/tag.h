@@ -58,6 +58,17 @@ typedef struct tag_registry_t *tag_registry_p;
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
 /*
+ * A module's tag constructor.
+ *
+ * The return value is the error channel: PLCTAG_STATUS_OK and *tag_out set, or an error
+ * code.  A constructor that allocated a tag before it failed hands that tag back anyway so
+ * the caller can release it, so *tag_out may be non-NULL on an error return.
+ */
+typedef int (*tag_create_function)(attr attributes,
+                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
+
+/*
  * What one encoded request will cost, filled in by the encoder.  A handler that bundles
  * several requests into one exchange budgets them with it.
  */
@@ -285,6 +296,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     mutex_p api_mutex;                                                                  \
     mutex_p ext_mutex;                                                                  \
     tag_extended_callback_func callback;                                                \
+    /* what made this tag; a clone of it is made the same way. */                       \
+    tag_create_function create_func;                                                    \
     tag_vtable_p vtable;                                                                \
     tag_registry_p instance;                                                            \
     void *userdata;                                                                     \
@@ -292,9 +305,11 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t auto_sync_write_ms;                                                         \
     int32_t size;                                                                       \
     int32_t tag_id;                                                                     \
-    int connection_group_id;                                                            \
-    int bit;                                                                            \
-    int protocol_type;                                                                  \
+    int32_t elem_count;                                                                 \
+    int32_t elem_size; /* bytes, except Modbus: bits */                                 \
+    int32_t connection_group_id;                                                        \
+    int32_t bit;                                                                        \
+    tag_protocol_t protocol_type;                                                       \
     atomic_bool abort_requested;                                                        \
     /* tag_op_state_t; see tag_op_state(). */                                          \
     atomic_int32_t op_state;                                                            \

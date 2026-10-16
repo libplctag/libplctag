@@ -106,9 +106,7 @@ START_PACK typedef struct {
 
 /* generic direct ethernet tag functions */
 extern int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size, bool is_dhp);
-extern int pccc_tag_status(cip_tag_p tag);
-extern int pccc_tag_read_start(cip_tag_p tag);
-extern int pccc_tag_write_start(cip_tag_p tag);
+extern int pccc_tag_write_start(plc_tag_p tag_arg);
 
 /*
  * Write the request prefix and return the first byte after it.  is_dhp picks the DH+ routing
@@ -120,7 +118,6 @@ extern uint8_t *pccc_write_prefix(cip_tag_p tag, uint8_t *dest, bool is_dhp);
  * Attach a submitted request to the tag under api_mutex, or roll the operation back and
  * release the request.  Every PCCC start function ends here.
  */
-extern int pccc_finish_request(cip_tag_p tag, int rc, bool is_write);
 
 /*
  * Check that a request needing overhead + payload bytes fits what the session will carry.

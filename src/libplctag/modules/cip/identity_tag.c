@@ -68,12 +68,6 @@ int cip_identity_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t de
 }
 
 
-/* the request travels however the connection does, connected or not. */
-int cip_identity_tag_read_start(cip_tag_p tag) {
-    return cip_readonly_read_start(tag, tag->debug_module);
-}
-
-
 /*
  * Encode the request that reads the Identity object.
  *

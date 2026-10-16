@@ -1386,23 +1386,6 @@ int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload) {
 }
 
 
-
-/*
- * Finish starting an operation: PENDING once the request is with the connection, otherwise
- * roll the operation back.
- */
-int pccc_finish_request(cip_tag_p tag, int rc, bool is_write) {
-    if(rc == PLCTAG_STATUS_OK) { return PLCTAG_STATUS_PENDING; }
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Failed to generate new %s request, %s!",
-           (is_write ? "write" : "read"), plc_tag_decode_error(rc));
-
-    tag->offset = 0;
-
-    return rc;
-}
-
-
 /*
  * pccc_check_response_header
  *
@@ -1506,46 +1489,6 @@ int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size
     }
 
     return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * tag_status
- *
- * get the tag status.
- */
-int pccc_tag_status(cip_tag_p tag) {
-    if(!tag->session) {
-        /* this is not OK.  This is fatal! */
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "Returning PLCTAG_ERR_CREATE, no session!");
-        return PLCTAG_ERR_CREATE;
-    }
-
-    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    if(tag_op_busy(tag)) { return PLCTAG_STATUS_PENDING; }
-
-    return tag->status;
-}
-
-
-/*
- * tag_read_start
- *
- * Start a PCCC tag read (PLC5 or SLC, plain or over a DH+ bridge).
- */
-int pccc_tag_read_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    rc = pccc_finish_request(tag, cip_tag_send(tag), false);
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return rc;
 }
 
 
@@ -1684,12 +1627,8 @@ static int pccc_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_s
 }
 
 
-int pccc_tag_write_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+int pccc_tag_write_start(plc_tag_p tag_arg) {
+    cip_tag_p tag = (cip_tag_p)tag_arg;
 
     /* the SLC masked write's mask is only 16 bits. */
     if(tag->is_bit && tag->plc_type != CIP_PLC_PLC5 && (tag->size != 2 || tag->elem_size != 2)) {
@@ -1698,11 +1637,7 @@ int pccc_tag_write_start(cip_tag_p tag) {
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    rc = pccc_finish_request(tag, cip_tag_send(tag), true);
-
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return rc;
+    return cip_tag_write_start(tag_arg);
 }
 
 
@@ -1993,10 +1928,10 @@ static int pccc_check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_
  */
 struct tag_vtable_t pccc_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)pccc_tag_read_start,
-    .status = (tag_vtable_func)pccc_tag_status,
+    .read = cip_tag_read_start,
+    .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
-    .write = (tag_vtable_func)pccc_tag_write_start,
+    .write = pccc_tag_write_start,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,

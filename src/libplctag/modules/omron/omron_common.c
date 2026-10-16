@@ -96,7 +96,7 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
     .read = NULL,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = (tag_vtable_func)cip_raw_tag_tickler,
-    .write = (tag_vtable_func)cip_raw_tag_write_start,
+    .write = cip_tag_write_start,
     .wake_plc = NULL,
     .activate = cip_tag_activate,
     .tag_data_written = NULL,
@@ -113,7 +113,7 @@ static struct tag_vtable_t omron_raw_tag_vtable = {
 /* @identity: the body is shared, see modules/cip/identity_tag.c. */
 static struct tag_vtable_t identity_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)cip_identity_tag_read_start,
+    .read = cip_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
     .write = NULL,
@@ -413,10 +413,10 @@ const cip_standard_tag_ops_t cip_standard_tag_ops_omron = {.read_service = CIP_S
 /* the standard (symbolic, named) tag type.  The engine is shared; see modules/cip/standard_tag.c. */
 struct tag_vtable_t cip_standard_tag_vtable_omron = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)cip_standard_tag_read_start,
+    .read = cip_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
-    .write = (tag_vtable_func)cip_standard_tag_write_start,
+    .write = cip_tag_write_start,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,

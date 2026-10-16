@@ -108,24 +108,22 @@ typedef enum {
 struct cip_tag_t {
     TAG_BASE_STRUCT;
 
-    int use_connected_msg;
+    int32_t use_connected_msg;
 
     /* the encoded symbolic name */
     uint8_t encoded_name[MAX_TAG_NAME];
-    int encoded_name_size;
+    int32_t encoded_name_size;
 
     /* the encoded type, as it came off the wire */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
-    int encoded_type_info_size;
+    int32_t encoded_type_info_size;
 
     cip_elem_type_t elem_type;
-    int elem_count;
-    int elem_size;
 
-    int special_tag;
+    bool special_tag;
 
     /* standard tags: how much data may one packet carry? */
-    int write_data_per_packet;
+    int32_t write_data_per_packet;
 
     /*
      * What this tag's family can do, set once at creation.  The shared engines read this
@@ -158,7 +156,7 @@ struct cip_tag_t {
      * asking for the same fragment, so count them and give up rather than loop.  Reset
      * whenever a response actually delivers data.
      */
-    int fragment_retry_count;
+    int32_t fragment_retry_count;
 
 
     /*
@@ -173,8 +171,8 @@ struct cip_tag_t {
      * to identify the device and so pick its family.  NULL otherwise.
      */
     attr deferred_attribs;
-    int offset;
-    int allow_packing;
+    int32_t offset;
+    bool allow_packing;
 
     /* how do we talk to this device? */
     cip_plc_type_t plc_type;
@@ -330,8 +328,12 @@ extern int cip_tag_wake_plc(plc_tag_p tag_arg);
 extern void cip_tag_op_done(cip_tag_p tag, int rc);
 
 
-/* Start a read on a read-only special tag (@tags, @udt, @identity). */
-extern int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module);
+/*
+ * The vtable's read and write for every CIP tag kind: queue the tag with its connection.  The
+ * caller has started the op.  A write waits for the create to finish.
+ */
+extern int cip_tag_read_start(plc_tag_p tag_arg);
+extern int cip_tag_write_start(plc_tag_p tag_arg);
 
 
 /*

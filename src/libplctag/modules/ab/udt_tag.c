@@ -61,8 +61,7 @@
 /* UDT tag functions. */
 static int udt_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int udt_tag_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-static int udt_tag_read_start(cip_tag_p tag);
-// static int listing_tag_write_start(cip_tag_p tag);
+static int udt_tag_read_start(plc_tag_p tag_arg);
 static int udt_tag_check_read_metadata_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int udt_tag_encode_read_metadata(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int udt_tag_check_read_fields_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
@@ -71,7 +70,7 @@ static int udt_tag_encode_read_fields(cip_tag_p tag, uint8_t *dest, int32_t capa
 /* define the vtable for udt tag type. */
 static struct tag_vtable_t udt_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)udt_tag_read_start,
+    .read = udt_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
     .write = NULL,
@@ -138,7 +137,7 @@ int setup_udt_tag(cip_tag_p tag, const char *name) {
 
     /*fill in the blanks. */
     tag->udt_id = (uint16_t)(unsigned int)tag_id;
-    tag->special_tag = 1;
+    tag->special_tag = true;
     tag->elem_type = CIP_TYPE_TAG_UDT;
     tag->elem_count = 1;
     tag->elem_size = 1;
@@ -179,12 +178,14 @@ static int udt_tag_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t repl
 }
 
 
-int udt_tag_read_start(cip_tag_p tag) {
+int udt_tag_read_start(plc_tag_p tag_arg) {
+    cip_tag_p tag = (cip_tag_p)tag_arg;
+
     /* a new read starts with the metadata. */
     tag->udt_get_fields = 0;
     tag->offset = 0;
 
-    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
+    return cip_tag_read_start(tag_arg);
 }
 
 

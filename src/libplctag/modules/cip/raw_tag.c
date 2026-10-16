@@ -76,37 +76,6 @@ int cip_raw_tag_tickler(cip_tag_p tag) {
 
 
 /*
- * Start writing a raw tag.
- *
- * This must be called from one thread alone, or while the tag mutex is locked.
- */
-int cip_raw_tag_write_start(cip_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    debug_module_t dbg = tag->debug_module;
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Starting");
-
-    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
-        pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "The connection is not up yet.");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    rc = cip_tag_send(tag);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
-        return rc;
-    }
-
-    pdebug(dbg, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_PENDING;
-}
-
-
-/*
  * Check on a write in flight.  Must be called with the tag mutex locked.
  *
  * The connection hands back the CIP response with the EIP and CPF framing already

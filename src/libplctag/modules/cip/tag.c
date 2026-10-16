@@ -181,7 +181,7 @@ int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_ord
     pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     tag->debug_module = debug_module;
-    tag->special_tag = 1;
+    tag->special_tag = true;
     tag->elem_type = elem_type;
     tag->elem_count = 1;
     tag->elem_size = 1;
@@ -493,20 +493,41 @@ int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *r
 }
 
 
-int cip_readonly_read_start(cip_tag_p tag, debug_module_t debug_module) {
+int cip_tag_read_start(plc_tag_p tag_arg) {
+    cip_tag_p tag = (cip_tag_p)tag_arg;
     int rc = PLCTAG_STATUS_OK;
-
-    pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Starting");
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
     rc = cip_tag_send(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
+        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to queue the read, %s!", plc_tag_decode_error(rc));
+        tag->offset = 0;
         return rc;
     }
 
-    pdebug(debug_module, DEBUG_INFO, tag->tag_id, "Done.");
+    return PLCTAG_STATUS_PENDING;
+}
+
+
+int cip_tag_write_start(plc_tag_p tag_arg) {
+    cip_tag_p tag = (cip_tag_p)tag_arg;
+    int rc = PLCTAG_STATUS_OK;
+
+    if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
+
+    /* the create is not done: the type and size, or for @raw the connection, are not known yet. */
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "The create is still in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
+
+    rc = cip_tag_send(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to queue the write, %s!", plc_tag_decode_error(rc));
+        tag->offset = 0;
+        return rc;
+    }
 
     return PLCTAG_STATUS_PENDING;
 }

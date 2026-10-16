@@ -100,12 +100,12 @@ typedef struct {
     uint32_t nesting_id;
 } omron_vto_t;
 
-static int listing_tag_read_start(cip_tag_p tag);
+static int listing_tag_read_start(plc_tag_p tag_arg);
 static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int listing_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int decode_instance_list(cip_tag_p tag, uint8_t *data, int32_t data_size);
 static int decode_variable_attributes(cip_tag_p tag, uint8_t *data, int32_t data_size);
-static int udt_tag_read_start(cip_tag_p tag);
+static int udt_tag_read_start(plc_tag_p tag_arg);
 static int udt_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int udt_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int decode_udt_header(cip_tag_p tag, omron_vto_t *vto);
@@ -117,7 +117,7 @@ static void reset_read(cip_tag_p tag);
 
 static struct tag_vtable_t listing_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)listing_tag_read_start,
+    .read = listing_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
     .write = NULL,
@@ -133,7 +133,7 @@ static struct tag_vtable_t listing_tag_vtable = {
 
 static struct tag_vtable_t udt_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)udt_tag_read_start,
+    .read = udt_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
     .write = NULL,
@@ -218,10 +218,10 @@ int omron_setup_udt_tag(cip_tag_p tag, const char *name) {
  * The create read is a probe: one page shows the Tag Name Server answers.  The full walk is a
  * request per variable, so it waits for the first real read.
  */
-static int listing_tag_read_start(cip_tag_p tag) {
-    reset_read(tag);
+static int listing_tag_read_start(plc_tag_p tag_arg) {
+    reset_read((cip_tag_p)tag_arg);
 
-    return cip_readonly_read_start(tag, DEBUG_MODULE_OMRON_COMMON);
+    return cip_tag_read_start(tag_arg);
 }
 
 
@@ -422,10 +422,10 @@ static int decode_variable_attributes(cip_tag_p tag, uint8_t *data, int32_t data
  * next member.  tag->udt_get_fields counts the members read, tag->next_id is the next member's
  * instance and tag->offset the byte offset the next member lands at.
  */
-static int udt_tag_read_start(cip_tag_p tag) {
-    reset_read(tag);
+static int udt_tag_read_start(plc_tag_p tag_arg) {
+    reset_read((cip_tag_p)tag_arg);
 
-    return cip_readonly_read_start(tag, DEBUG_MODULE_OMRON_COMMON);
+    return cip_tag_read_start(tag_arg);
 }
 
 

@@ -66,15 +66,13 @@ START_PACK typedef struct {
 } END_PACK tag_list_entry;
 
 /* listing tag functions. */
-static int listing_tag_read_start(cip_tag_p tag);
-// static int listing_tag_write_start(cip_tag_p tag);
 static int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 
 /* define the vtable for listing tag type. */
 static struct tag_vtable_t listing_tag_vtable = {
     .abort = (tag_vtable_func)cip_data_tag_abort,
-    .read = (tag_vtable_func)listing_tag_read_start,
+    .read = cip_tag_read_start,
     .status = (tag_vtable_func)cip_tag_status,
     .tickler = NULL,
     .write = NULL,
@@ -197,7 +195,7 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
     /* did we find a listing tag? */
     if(rc == PLCTAG_STATUS_OK) {
         /* yes we did */
-        tag->special_tag = 1;
+        tag->special_tag = true;
         tag->elem_type = CIP_TYPE_TAG_ENTRY;
         tag->elem_count = 1;
         tag->elem_size = 1;
@@ -214,20 +212,6 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
     }
 
     return rc;
-}
-
-
-/*
- * listing_tag_read_start
- *
- * This function must be called only from within one thread, or while
- * the tag's mutex is locked.
- *
- * The function starts the process of getting tag data from the PLC.
- */
-
-int listing_tag_read_start(cip_tag_p tag) {
-    return cip_readonly_read_start(tag, DEBUG_MODULE_AB_EIP_CIP_SPECIAL);
 }
 
 

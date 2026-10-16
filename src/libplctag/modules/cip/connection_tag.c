@@ -46,10 +46,9 @@
 #include <utils/rc.h>
 
 
-/* plc_tag_p::protocol_type is a bare int, so compare as one. */
-static bool is_source_protocol(const cip_connection_tag_ops_t *ops, int protocol) {
+static bool is_source_protocol(const cip_connection_tag_ops_t *ops, tag_protocol_t protocol) {
     for(size_t i = 0; i < (sizeof(ops->source_protocols) / sizeof(ops->source_protocols[0])); i++) {
-        if((int)ops->source_protocols[i] == protocol) { return true; }
+        if(ops->source_protocols[i] == protocol) { return true; }
     }
 
     return false;
@@ -68,7 +67,7 @@ plc_tag_p cip_connection_tag_create(attr attribs, const cip_connection_tag_ops_t
     if(src_tag) {
         if(is_source_protocol(ops, src_tag->protocol_type)) {
             conn = rc_inc(((cip_tag_p)src_tag)->session);
-        } else if(src_tag->protocol_type == (int)ops->connection_protocol) {
+        } else if(src_tag->protocol_type == ops->connection_protocol) {
             conn = rc_inc(((connection_tag_p)src_tag)->conn);
         }
 

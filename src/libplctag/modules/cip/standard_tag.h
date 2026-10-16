@@ -116,8 +116,6 @@ extern int32_t cip_encode_no_offset(uint8_t *dest, int32_t capacity, int32_t byt
  * The three vtable entry points.  Each family builds its own vtable around these, because
  * the abort entry point and the attribute table are still the family's own.
  */
-extern int cip_standard_tag_read_start(plc_tag_p tag_arg);
-extern int cip_standard_tag_write_start(plc_tag_p tag_arg);
 
 /*
  * Whether a transfer of this tag too large for one packet may go as sized segments, and

@@ -38,15 +38,5 @@
 #include "tag.h"
 
 extern int initialize_modules(void);
-/*
- * A module's tag constructor.
- *
- * The return value is the error channel: PLCTAG_STATUS_OK and *tag_out set, or an error
- * code.  A constructor that allocated a tag before it failed hands that tag back anyway so
- * the caller can release it, so *tag_out may be non-NULL on an error return.
- */
-typedef int (*tag_create_function)(attr attributes,
-                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                   void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
 extern tag_create_function find_tag_create_func(attr attributes);
 extern void destroy_modules(void);
