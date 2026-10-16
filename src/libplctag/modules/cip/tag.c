@@ -225,13 +225,6 @@ int cip_tag_unimplemented_status(plc_tag_p tag) {
 }
 
 
-int cip_tag_unimplemented_tickler(plc_tag_p tag) {
-    pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
-
-    return PLCTAG_ERR_NOT_IMPLEMENTED;
-}
-
-
 int cip_tag_unimplemented_write(plc_tag_p tag) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "This should be overridden by a PLC-specific function!");
 

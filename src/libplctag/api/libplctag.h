@@ -326,7 +326,7 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
  * calls and concurrently with itself.  Closing the library is atomic: exactly one caller
  * performs the shutdown and any other returns immediately.  A library call racing it
  * either completes normally or returns PLCTAG_ERR_NOT_FOUND.  It may block for a short
- * time while in-flight operations are aborted and the tickler thread is joined.
+ * time while in-flight operations are aborted and handler threads are joined.
  *
  * @note A plc_tag_create() racing this function either completes normally, in which case
  *       its tag is destroyed here like any other, or fails with PLCTAG_ERR_NOT_ALLOWED.

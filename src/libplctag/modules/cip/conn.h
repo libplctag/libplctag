@@ -472,7 +472,6 @@ typedef cip_conn_t *cip_conn_p;
 
 /* shared connection handling, see modules/cip/conn.c */
 
-extern int session_list_add(cip_conn_list_t *list, cip_conn_p conn);
 extern int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn);
 extern int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
 

@@ -66,9 +66,6 @@ extern int cip_encode_path(const char *path, int *needs_connection, int plc_type
 /* look up the type size in bytes based on the first byte */
 extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
 
-/* look up the element size in bytes based on the first byte */
-extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);
-
 /*
  * Everything the symbolic-name encoder needs from a tag, so that the encoder
  * itself does not depend on any family's tag structure.

@@ -835,12 +835,6 @@ int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size) {
 }
 
 
-int cip_lookup_data_element_size(uint8_t type_byte, int *element_size) {
-    *element_size = cip_type_lookup[type_byte].instance_data_length;
-    return cip_type_lookup[type_byte].is_found;
-}
-
-
 int cip_encode_name(cip_name_t *ctx, const char *name) {
     int rc = PLCTAG_STATUS_OK;
     int encoded_index = 0;

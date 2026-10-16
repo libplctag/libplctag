@@ -214,7 +214,6 @@ typedef struct cip_tag_t *cip_tag_p;
 extern int cip_tag_unimplemented_abort(plc_tag_p tag);
 extern int cip_tag_unimplemented_read(plc_tag_p tag);
 extern int cip_tag_unimplemented_status(plc_tag_p tag);
-extern int cip_tag_unimplemented_tickler(plc_tag_p tag);
 extern int cip_tag_unimplemented_write(plc_tag_p tag);
 
 /*

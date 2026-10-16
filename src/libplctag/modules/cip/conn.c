@@ -284,19 +284,6 @@ int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
 }
 
 
-int session_list_add(cip_conn_list_t *list, cip_conn_p conn) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
-
-    critical_block(list->mutex) { rc = session_list_add_unsafe(list, conn); }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
-
-    return rc;
-}
-
-
 int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
 
@@ -1747,6 +1734,9 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
 
         mutex_unlock(tag->api_mutex);
     }
+
+    /* the next fragment, or tags that did not fit this packet, are due now: skip the idle tick. */
+    if(conn->slot_count > 0) { cond_signal(conn->session_wait_cond); }
 
     return bad_packet_rc;
 }

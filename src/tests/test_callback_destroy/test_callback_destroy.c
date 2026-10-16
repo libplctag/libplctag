@@ -35,7 +35,7 @@
  * test_callback_destroy
  *
  * An application is allowed to call plc_tag_destroy() on a tag from inside that tag's own
- * event callback.  The callback runs on the tickler thread while the library still holds a
+ * event callback.  The callback runs on a library thread while the library still holds a
  * reference to the tag, so the object cannot actually be freed underneath the caller:
  * plc_tag_destroy() removes it from the ID lookup table and the last reference release does
  * the freeing once the callback has returned.

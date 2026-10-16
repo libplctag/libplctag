@@ -280,7 +280,6 @@ struct modbus_tag_t {
 
     /* request timing - tracks time from entering REQUEST state to receiving response */
     int64_t request_start_time;
-    int64_t request_sent_time; /* timestamp when request was sent over wire */
 
     /* data for the tag. */
     int elem_count;

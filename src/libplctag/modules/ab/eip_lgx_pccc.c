@@ -36,9 +36,9 @@
  *
  * A ControlLogix answers the Execute PCCC service with the typed read and typed write
  * functions, 0x68 and 0x67, against a symbolic tag name rather than a PLC/5 or SLC logical
- * address.  Everything around those two commands -- the request prefix, the tickler, the
- * status call, attaching the request to the tag -- is shared with pccc.c; the two commands
- * and the typed reply they produce are all that is local.
+ * address.  Everything around those two commands -- the request prefix and the status
+ * call -- is shared with pccc.c; the two commands and the typed reply they produce are all
+ * that is local.
  *
  * A typed read carries its own data-type descriptor, which a range read does not.  That is
  * why check_read_status() here decodes the descriptor and saves it as tag->encoded_type_info,

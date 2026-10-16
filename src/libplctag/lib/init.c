@@ -153,8 +153,8 @@ void destroy_modules(void) {
      *
      * The device modules do unwind in reverse.  refcount and the tag registry do not:
      * refcount starts BEFORE the registry and must also stop BEFORE it, because draining
-     * the deferred destructors runs tag teardown that touches the tag table, lookup mutex
-     * and tickler condvar that tag_registry_teardown() then destroys.  That pair is not a
+     * the deferred destructors runs tag teardown that touches the tag table and lookup
+     * mutex that tag_registry_teardown() then destroys.  That pair is not a
      * stack, and pretending otherwise in a table would be wrong rather than tidy.
      */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
@@ -257,7 +257,7 @@ int initialize_modules(void) {
 
             /*
              * The registry was built but never published, so nothing can have found it.
-             * Discard it rather than leaving a live tickler behind.  Harmless before the
+             * Discard it rather than leaving it allocated.  Harmless before the
              * registry itself has started.
              */
             tag_registry_discard_pending();
@@ -268,7 +268,7 @@ int initialize_modules(void) {
 
     /*
      * Publish the registry tag_registry_init() built above -- making it visible to
-     * tag_registry_acquire() -- and start its tag tickler thread, now that every
+     * tag_registry_acquire() -- now that every
      * component has started successfully.  This stays outside lib_components[] on
      * purpose: only the registry has a visibility gate, and a hook for one
      * implementation would be an abstraction with a single user.  Must happen before
@@ -284,7 +284,7 @@ int initialize_modules(void) {
      * POSIX (shared or static) and the Windows STATIC library are linked into an
      * executable, so atexit() runs during the executable's normal CRT exit while
      * the process is still multithreaded — plc_tag_shutdown() can cleanly join
-     * the tag-tickler and refcount-cleanup threads. (Omitting it there leaves
+     * the handler and refcount-cleanup threads. (Omitting it there leaves
      * those threads running into CRT teardown and crashing, for programs that
      * don't call plc_tag_shutdown() themselves.)
      *

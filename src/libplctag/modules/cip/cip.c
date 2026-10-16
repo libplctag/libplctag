@@ -470,9 +470,7 @@ static int write_request_framing(cip_conn_p conn, int payload_size, bool unroute
      * every field this function and prepare_request() do not write would otherwise keep
      * whatever the previous packet left there -- interface_handle, which must be zero,
      * picks up the session registration's protocol version, and a ControlLogix rejects
-     * the packet at the encapsulation layer for it.  The framed builders never saw this
-     * because they filled a freshly allocated, zeroed request buffer and pack_requests()
-     * copied the whole thing over the stale bytes.
+     * the packet at the encapsulation layer for it.
      */
     mem_set(conn->data, 0, offset);
 

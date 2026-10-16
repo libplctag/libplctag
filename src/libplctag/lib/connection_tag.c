@@ -284,7 +284,7 @@ static int32_t connection_get_connection_status(plc_tag_p raw_tag, int32_t *resu
 
     /*
      * Straight from the connection, as data tags report it.  last_conn_state only moves when
-     * the tickler delivers events, and it skips them all for a tag without a callback.
+     * the handler delivers events, and it skips them all for a tag without a callback.
      */
     *result = (tag->watch ? atomic_get_int32(&tag->watch->status) : tag->last_conn_state);
 
