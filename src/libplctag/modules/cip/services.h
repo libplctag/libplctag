@@ -60,6 +60,9 @@
  * so those codes belong to the vendor's module, not here.
  */
 
+/* the path segment that carries a tag name. */
+#define CIP_SYMBOLIC_SEGMENT ((uint8_t)0x91)
+
 /* OR'd into the service code in a reply. */
 #define CIP_SVC_REPLY ((uint8_t)0x80)
 

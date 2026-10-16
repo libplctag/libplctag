@@ -46,6 +46,7 @@
 
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/tag.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 
@@ -85,6 +86,16 @@ typedef struct cip_standard_tag_ops_t {
     int32_t max_transfer_packets;
 
     /*
+     * The family moves a transfer too large for one packet as a run of plain requests, each
+     * naming its byte range in the path -- OMRON's Simple Data Segment, 0x80 0x03 <u32 offset>
+     * <u16 size> -- rather than with a fragmented service.  The PLC never splits a reply
+     * itself, so the client must know the whole size first and ask for exactly what fits.
+     * Only whole variables are split this way: what the offset means after an array index
+     * segment is not known.
+     */
+    bool sized_segments;
+
+    /*
      * Append the read request's byte offset, if this family's read service carries one.
      * Always present: cip_encode_no_offset() is cheaper than testing for NULL, and it
      * keeps the offset bound to the service code that requires it -- a fragmented service
@@ -107,6 +118,13 @@ extern int32_t cip_encode_no_offset(uint8_t *dest, int32_t capacity, int32_t byt
  */
 extern int cip_standard_tag_read_start(plc_tag_p tag_arg);
 extern int cip_standard_tag_write_start(plc_tag_p tag_arg);
+
+/*
+ * Whether a transfer of this tag too large for one packet may go as sized segments, and
+ * whether its known size is too large for one read, so that it will.
+ */
+extern bool cip_standard_tag_uses_segments(cip_tag_p tag);
+extern bool cip_standard_tag_reads_in_segments(cip_tag_p tag);
 
 /* the wire format, for the vtables of the families that use the standard tag */
 extern int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);

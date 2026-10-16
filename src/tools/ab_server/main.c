@@ -66,6 +66,9 @@ static bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path)
 static void parse_path(const char *path, plc_s *plc);
 static void parse_pccc_tag(const char *tag, plc_s *plc);
 static void parse_cip_tag(const char *tag, plc_s *plc);
+static bool lookup_atomic_type(const char *type_str, tag_type_t *type, size_t *size);
+static void parse_udt(const char *udt_str, plc_s *plc);
+static uint16_t udt_crc(udt_def_s *udt);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
 /* tcp_server.c gives every accepted connection its own memcpy'd copy of the
@@ -278,7 +281,14 @@ void usage(void) {
                     "                                 pccc_tns   - PCCC transaction number we never sent.\n"
                     "                                 endless_frag - never-ending fragmented read.\n"
                     "\n"
+                    "    Omron UDTs:\n"
+                    "        --udt=<name>:<member>:<type>,<member>:<type>...\n"
+                    "                               define a structure of atomic members.  A tag of\n"
+                    "                               type <name> is then one, e.g. --tag=P:Point[1].\n"
+                    "                               An Omron tag with one dimension of 1 is a scalar.\n"
+                    "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
+                    "         ab_server --plc=Omron --udt=Point:x:DINT,y:REAL --tag=P:Point[1]\n"
                     "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n"
                     "         ab_server --plc=LgxPccc --path=1,0 --tag=N7[10]\n");
 
@@ -314,6 +324,13 @@ static const args_flag_def_t arg_flags[] = {
      "TCP port to listen on.  Defaults to 44818",
      {.has_default = false}},
     {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated", {.has_default = false}},
+    {"udt",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_MULTIPLE,
+     "udt",
+     "Omron UDT definition, <name>:<member>:<type>,<member>:<type>...  May be repeated",
+     {.has_default = false}},
     {"debug", ARGS_TYPE_BOOL, ARGS_OPTIONAL, ARGS_ONCE, "debug", "Turn on debug logging", {.has_default = false}},
     {"dup-conn-id-tries",
      ARGS_TYPE_INT,
@@ -443,6 +460,23 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     if(args_get_string(&args, "port")) { plc->port_str = args_get_string(&args, "port"); }
+
+    /* UDTs before tags, so a tag can name one. */
+    for(size_t i = 0; i < args_get_count(&args, "udt"); i++) {
+        args_value_t udt_val = args_get_at(&args, "udt", i);
+
+        if(!udt_val.present || !udt_val.value.string_val) { continue; }
+
+        if(plc->plc_type != PLC_OMRON) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "--udt is only supported for Omron.\n");
+            args_free(&args);
+            usage();
+            return;
+        }
+
+        parse_udt(udt_val.value.string_val, plc);
+    }
 
     /* now that the PLC type is known, the tags can be interpreted. */
     num_tags = args_get_count(&args, "tag");
@@ -585,8 +619,13 @@ bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path) {
         plc->path[14] = (uint8_t)0x24;
         plc->path[15] = (uint8_t)0x01;
         plc->path_len = 16;
-        plc->client_to_server_max_packet = 504;
-        plc->server_to_client_max_packet = 504;
+        /*
+         * Unconnected (UCMM) messages carry up to 502 bytes of CIP, and aphyt reads in chunks that
+         * fill that.  This limit covers the whole EIP packet, so add the 24-byte EIP header and the
+         * 16 bytes of interface handle, timeout and CPF items.  A Forward Open replaces it.
+         */
+        plc->client_to_server_max_packet = 24 + 16 + 504;
+        plc->server_to_client_max_packet = 24 + 16 + 504;
         *needs_path = false;
     } else if(str_cmp_i(plc_type_str, "PLC/5") == 0) {
         log_info_always("Selecting PLC/5 simulator.");
@@ -875,8 +914,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         start++;
     }
 
-    /* get the type field */
-    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    /* get the type field, which may name a UDT. */
+    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
     if(!len) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot match tag type in \"%s\"!\n", tag_str);
@@ -920,24 +959,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* match the type. */
-    if(str_cmp_i(type_str, "SINT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_SINT;
-        tag->elem_size = 1;
-    } else if(str_cmp_i(type_str, "INT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_INT;
-        tag->elem_size = 2;
-    } else if(str_cmp_i(type_str, "DINT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_DINT;
-        tag->elem_size = 4;
-    } else if(str_cmp_i(type_str, "LINT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_LINT;
-        tag->elem_size = 8;
-    } else if(str_cmp_i(type_str, "REAL") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_REAL;
-        tag->elem_size = 4;
-    } else if(str_cmp_i(type_str, "LREAL") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_LREAL;
-        tag->elem_size = 8;
+    if(lookup_atomic_type(type_str, &tag->tag_type, &tag->elem_size)) {
+        /* nothing more to do. */
     } else if(str_cmp_i(type_str, "STRING") == 0) {
         /*
          * "STRING" means a different thing on each PLC family, so this needs the PLC type to
@@ -984,17 +1007,30 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         tag->variable_elements = true;
         tag->count_word_bytes = TAG_CIP_SHORT_STRING_COUNT_WORD_BYTES;
         tag->elements_zero_terminated = false;
-    } else if(str_cmp_i(type_str, "BOOL") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_BOOL;
-        tag->elem_size = 1;
     } else {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
-        usage();
+        for(tag->udt = plc->udts; tag->udt; tag->udt = tag->udt->next_udt) {
+            if(str_cmp_i(type_str, tag->udt->name) == 0) { break; }
+        }
+
+        if(!tag->udt) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
+            usage();
+        }
+
+        tag->tag_type = TAG_CIP_TYPE_STRUCT;
+        tag->elem_size = tag->udt->size;
     }
 
     /* build the encoded type as it will appear on the wire. */
-    if(tag->tag_type == TAG_CIP_STRUCT_HANDLE_STRING) {
+    if(tag->udt) {
+        /* an Omron structure goes out as an abbreviated struct carrying the UDT's CRC. */
+        tag->type_info[0] = TAG_CIP_TYPE_ABBREV_STRUCT;
+        tag->type_info[1] = 2;
+        tag->type_info[2] = (uint8_t)(tag->udt->crc & 0xFF);
+        tag->type_info[3] = (uint8_t)((tag->udt->crc >> 8) & 0xFF);
+        tag->type_info_size = 4;
+    } else if(tag->tag_type == TAG_CIP_STRUCT_HANDLE_STRING) {
         tag->type_info[0] = TAG_CIP_TYPE_ABBREV_STRUCT;
         tag->type_info[1] = 2; /* two bytes of struct handle follow. */
         tag->type_info[2] = (uint8_t)(TAG_CIP_STRUCT_HANDLE_STRING & 0xFF);
@@ -1110,6 +1146,138 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* add the tag to the list. */
     tag->next_tag = plc->tags;
     plc->tags = tag;
+}
+
+
+/* the fixed-size CIP types a tag or UDT member can have. */
+bool lookup_atomic_type(const char *type_str, tag_type_t *type, size_t *size) {
+    static const struct {
+        const char *name;
+        tag_type_t type;
+        size_t size;
+    } atomic_types[] = {
+        {"SINT", TAG_CIP_TYPE_SINT, 1},
+        {"INT", TAG_CIP_TYPE_INT, 2},
+        {"DINT", TAG_CIP_TYPE_DINT, 4},
+        {"LINT", TAG_CIP_TYPE_LINT, 8},
+        {"REAL", TAG_CIP_TYPE_REAL, 4},
+        {"LREAL", TAG_CIP_TYPE_LREAL, 8},
+        {"BOOL", TAG_CIP_TYPE_BOOL, 1},
+    };
+
+    for(size_t i = 0; i < sizeof(atomic_types) / sizeof(atomic_types[0]); i++) {
+        if(str_cmp_i(type_str, atomic_types[i].name) == 0) {
+            *type = atomic_types[i].type;
+            *size = atomic_types[i].size;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+/*
+ * Omron UDTs are in the format:
+ *    <name>:<member>:<type>,<member>:<type>...
+ *
+ * Members are atomic types laid out at their natural alignment, and the UDT's size is rounded
+ * up to its widest member, which is how aphyt unpacks them.  A BOOL member takes two bytes, as
+ * it does on an Omron.
+ */
+void parse_udt(const char *udt_str, plc_s *plc) {
+    udt_def_s *udt = calloc(1, sizeof(*udt));
+    char *copy = strdup(udt_str);
+    char *member_list = NULL;
+    char *member = NULL;
+    char *next_member = NULL;
+    size_t align = 1;
+
+    if(!udt || !copy) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Unable to allocate memory for UDT \"%s\"!\n", udt_str);
+        exit(1);
+    }
+
+    member_list = strchr(copy, ':');
+    if(!member_list || member_list == copy) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "UDT definition \"%s\" must be <name>:<member>:<type>,...!\n", udt_str);
+        usage();
+    }
+
+    *member_list = 0;
+    member_list++;
+    udt->name = strdup(copy);
+
+    for(member = member_list; member; member = next_member) {
+        char *type_str = NULL;
+        udt_member_s *m = &udt->members[udt->num_members];
+
+        next_member = strchr(member, ',');
+        if(next_member) { *next_member++ = 0; }
+
+        type_str = strchr(member, ':');
+
+        if(!type_str || type_str == member || udt->num_members >= UDT_MAX_MEMBERS) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Bad member \"%s\" in UDT \"%s\", or more than %d members!\n", member, udt_str, UDT_MAX_MEMBERS);
+            usage();
+        }
+
+        *type_str = 0;
+        type_str++;
+
+        if(!lookup_atomic_type(type_str, &m->type, &m->size)) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "UDT member type \"%s\" must be an atomic type!\n", type_str);
+            usage();
+        }
+
+        if(m->type == TAG_CIP_TYPE_BOOL) { m->size = 2; }
+
+        m->name = strdup(member);
+        m->offset = (udt->size + m->size - 1) / m->size * m->size;
+        udt->size = m->offset + m->size;
+        if(m->size > align) { align = m->size; }
+
+        udt->num_members++;
+    }
+
+    if(udt->num_members == 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "UDT \"%s\" has no members!\n", udt_str);
+        usage();
+    }
+
+    udt->size = (udt->size + align - 1) / align * align;
+    udt->crc = udt_crc(udt);
+    udt->vto_id = plc->max_vto_id + 1;
+    plc->max_vto_id = udt->vto_id + (uint32_t)udt->num_members;
+
+    free(copy);
+
+    log_info("Processed UDT %s: %zu members, %zu bytes, CRC %04x, type instance %u.", udt->name, udt->num_members, udt->size,
+             udt->crc, udt->vto_id);
+
+    udt->next_udt = plc->udts;
+    plc->udts = udt;
+}
+
+
+/*
+ * Omron's CRC is over the type definition and its algorithm is not public, so any stable hash
+ * of the definition stands in: a client only echoes it back.  FNV-1a folded to 16 bits.
+ */
+uint16_t udt_crc(udt_def_s *udt) {
+    uint32_t hash = 2166136261u;
+
+    for(size_t i = 0; i < udt->num_members; i++) {
+        for(const char *c = udt->members[i].name; *c; c++) { hash = (hash ^ (uint8_t)*c) * 16777619u; }
+        hash = (hash ^ (uint8_t)(udt->members[i].type & 0xFF)) * 16777619u;
+    }
+
+    return (uint16_t)((hash >> 16) ^ (hash & 0xFFFF));
 }
 
 

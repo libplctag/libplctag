@@ -149,8 +149,38 @@ typedef enum {
     FAULT_MAX
 } fault_kind_t;
 
+/*
+ * An Omron UDT from --udt: a flat structure of atomic members.  Omron describes it through the
+ * Variable Type Object (class 0x6C): one instance for the structure itself at vto_id, then one
+ * per member at vto_id + 1 + i, linked in member order.
+ */
+#define UDT_MAX_MEMBERS (32) /* ponytail: fixed table, grow it if a test needs a wider UDT. */
+#define TAG_CIP_TYPE_STRUCT ((tag_type_t)0x00A2)
+#define TAG_CIP_TYPE_ARRAY ((uint8_t)0xA3)
+
+typedef struct {
+    char *name;
+    tag_type_t type;
+    size_t size;
+    size_t offset;
+} udt_member_s;
+
+typedef struct udt_def_s {
+    struct udt_def_s *next_udt;
+    char *name;
+    uint16_t crc; /* sent as the additional info on reads and checked on writes, as an Omron does. */
+    size_t size;
+    uint32_t vto_id;
+    size_t num_members;
+    udt_member_s members[UDT_MAX_MEMBERS];
+} udt_def_s;
+
 struct tag_def_s {
     struct tag_def_s *next_tag;
+
+    /* the UDT when tag_type is TAG_CIP_TYPE_STRUCT, else NULL. */
+    udt_def_s *udt;
+
     char *name;
     tag_type_t tag_type;
 
@@ -284,4 +314,8 @@ typedef struct plc_s {
 
     /* list of tags served by this "PLC" */
     struct tag_def_s *tags;
+
+    /* Omron UDTs, and the highest Variable Type Object instance they use. */
+    udt_def_s *udts;
+    uint32_t max_vto_id;
 } plc_s;

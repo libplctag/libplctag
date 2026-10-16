@@ -139,6 +139,12 @@ struct cip_tag_t {
      */
     debug_module_t debug_module;
 
+    /*
+     * OMRON: a plain read was refused as too large, so the next read asks the PLC for the
+     * variable's size (Get Attributes All) before reading it in sized segments.
+     */
+    bool size_probe;
+
     uint32_t next_id;       /* listing tags */
     uint8_t udt_get_fields; /* UDT tags */
     uint16_t udt_id;

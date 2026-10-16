@@ -35,6 +35,7 @@
 #include <errno.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/path.h>
+#include <libplctag/modules/cip/services.h>
 #include <platform.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1004,7 +1005,7 @@ int parse_symbolic_segment(cip_name_t *ctx, const char *name, int *encoded_index
     }
 
     /* start building the encoded symbolic segment. */
-    ctx->encoded_name[encoded_i] = 0x91; /* start of symbolic segment. */
+    ctx->encoded_name[encoded_i] = CIP_SYMBOLIC_SEGMENT;
     encoded_i++;
     seg_len_index = encoded_i;
     ctx->encoded_name[seg_len_index] = 0; /* the loop below counts up from zero, do not trust what was here. */

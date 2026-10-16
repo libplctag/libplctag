@@ -50,8 +50,8 @@
 
 /*
  * Rockwell's tag listing.  This is not a CIP service: it is a Rockwell service code
- * reading a Rockwell object class.  OMRON lists tags a different way (service 0x5F),
- * which this library does not implement.
+ * reading a Rockwell object class.  OMRON lists tags a different way (service 0x5F); see
+ * modules/omron/omron_listing.c.
  */
 #define AB_CIP_SVC_LIST_TAGS ((uint8_t)0x55)
 #define AB_CIP_CLASS_SYMBOL ((uint8_t)0x6B)

@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include "cip.h"
+#include "omron.h"
 #include "eip.h"
 #include "fault.h"
 #include "pccc.h"
@@ -43,28 +44,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <utils/random_utils.h>
-
-
-/* tag commands */
-#define CIP_SRV_GET_ATTRIBUTES_ALL ((uint8_t)0x01)
-#define CIP_SRV_MULTI ((uint8_t)0x0a)
-#define CIP_SRV_PCCC_EXECUTE ((uint8_t)0x4b)
-#define CIP_SRV_READ_NAMED_TAG ((uint8_t)0x4c)
-#define CIP_SRV_WRITE_NAMED_TAG ((uint8_t)0x4d)
-#define CIP_SRV_FORWARD_CLOSE ((uint8_t)0x4e)
-/*
- * The same code is Read-Modify-Write when the path addresses a tag rather than the
- * Connection Manager object.  The two never collide here: a Forward Close arrives at the
- * unconnected dispatcher, an RMW at the connected one, wrapped in an Unconnected_Send or a
- * connected CPF item.
- */
-#define CIP_SRV_RMW ((uint8_t)0x4e)
-#define CIP_SRV_READ_NAMED_TAG_FRAG ((uint8_t)0x52)
-#define CIP_SRV_UNCONNECTED_SEND ((uint8_t)0x52)
-#define CIP_SRV_WRITE_NAMED_TAG_FRAG ((uint8_t)0x53)
-#define CIP_SRV_FORWARD_OPEN ((uint8_t)0x54)
-#define CIP_SRV_INSTANCES_ATTRIBS ((uint8_t)0x55)
-#define CIP_SRV_FORWARD_OPEN_EX ((uint8_t)0x5b)
 
 
 /* non-tag commands */
@@ -80,40 +59,10 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 // uint8_t LOGIX_CONN_PATH[] = { 0x03, 0x00, 0x00, 0x20, 0x02, 0x24, 0x01 };
 // uint8_t MICRO800_CONN_PATH[] = { 0x02, 0x20, 0x02, 0x24, 0x01 };
 
-#define CIP_DONE ((uint8_t)0x80)
-
-#define CIP_SYMBOLIC_SEGMENT_MARKER ((uint8_t)0x91)
-
-/* CIP Errors */
-
-#define CIP_OK ((uint8_t)0x00)
-/* the Identity object, class 1 instance 1, is what an @identity tag asks for. */
-#define CIP_CLASS_IDENTITY ((uint8_t)0x01)
-#define CIP_IDENTITY_INSTANCE ((uint8_t)0x01)
-
-#define CIP_ERR_EXT_ERR ((uint8_t)0x01)
-#define CIP_ERR_INVALID_PARAM ((uint8_t)0x03)
-#define CIP_ERR_PATH_SEGMENT ((uint8_t)0x04)
-#define CIP_ERR_PATH_DEST_UNKNOWN ((uint8_t)0x05)
-#define CIP_ERR_FRAG ((uint8_t)0x06)
-#define CIP_ERR_UNSUPPORTED ((uint8_t)0x08)
-#define CIP_ERR_INSUFFICIENT_DATA ((uint8_t)0x13)
-#define CIP_ERR_TOO_MUCH_DATA ((uint8_t)0x15)
-#define CIP_ERR_EXTENDED ((uint8_t)0xff)
-
-#define CIP_ERR_EX_DUPLICATE_CONN ((uint16_t)0x0100)
-#define CIP_ERR_EX_LINK_OFFLINE ((uint16_t)0x0800)
-#define CIP_ERR_EX_CONN_SIZE ((uint16_t)0x0109)
-#define CIP_ERR_EX_INVALID_CONN_SIZE ((uint16_t)0x0109)
-#define CIP_ERR_EX_TOO_LONG ((uint16_t)0x2105)
-#define CIP_ERR_EX_UC_SEND_PARAM ((uint16_t)0x0205)
-
 /* tag and object constants */
 #define CIP_TAG_PATH_MIN ((size_t)(4)) /* 1 byte segment type, 1 byte length count, 1 byte tag name, 1 byte padding */
 #define CIP_OBJ_PATH_MIN ((size_t)(4)) /* 1 byte class type, 1 byte class ID, 1 byte instance type, 1 byte instance ID */
 
-#define CIP_RESPONSE_HEADER_SIZE ((size_t)4)
-#define CIP_RESPONSE_HEADER_EXT_ERR_SIZE ((size_t)6)
 /*
  * Encoded type size is per-tag now (tag_def_s.type_info_size): two bytes for an atomic type,
  * four for a structure such as the Logix STRING UDT.
@@ -138,7 +87,6 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 #define CIP_MINIMAL_RESPONSE_SIZE ((size_t)6) /* four bytes for header plus 2 for optional extended status. */
 
 
-static slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
 static slice_s make_cip_log_error_size(slice_s output, uint8_t cip_cmd, uint16_t supported_size);
 
 static slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
@@ -182,6 +130,14 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
     log_info_slice(cip_service_path);
     log_info("CIP Payload:");
     log_info_slice(cip_service_payload);
+
+    if(plc->plc_type == PLC_OMRON) {
+        slice_s omron_response = {0};
+
+        if(omron_dispatch_request(cip_service, cip_service_path, cip_service_payload, output, plc, &omron_response)) {
+            return omron_response;
+        }
+    }
 
     switch(cip_service) {
         case CIP_SRV_FORWARD_OPEN:
@@ -232,7 +188,12 @@ slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *p
             return cip_dispatch_request(slice_from_slice(cip_service_payload, 4, embedded_cip_service_length), output, plc);
             break;
 
-        default: return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
+        default:
+            /* an Omron takes tag reads and writes as plain unconnected requests, with no Unconnected Send. */
+            if(plc->plc_type == PLC_OMRON) { return cip_dispatch_request(input, output, plc); }
+
+            return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+            break;
     }
 }
 
@@ -255,6 +216,14 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     log_info_slice(cip_service_path);
     log_info("CIP Payload:");
     log_info_slice(cip_service_payload);
+
+    if(plc->plc_type == PLC_OMRON) {
+        slice_s omron_response = {0};
+
+        if(omron_dispatch_request(cip_service, cip_service_path, cip_service_payload, output, plc, &omron_response)) {
+            return omron_response;
+        }
+    }
 
     switch(cip_service) {
         case CIP_SRV_MULTI: return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc); break;
@@ -351,16 +320,15 @@ static const cip_identity_s cip_identities[] = {
  */
 slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, slice_s output, plc_s *plc) {
     const cip_identity_s *identity = NULL;
+    uint32_t instance = 0;
     size_t name_len = 0;
     size_t offset = 0;
 
     /*
-     * The path is a logical class segment then a logical instance segment:
-     * 0x20 <class> 0x24 <instance>.  Only the Identity object is served here.
+     * The path is a logical class segment then a logical instance segment.  Only the Identity
+     * object is served here.
      */
-    if(slice_len(cip_service_path) != 4 || slice_get_uint8(cip_service_path, 0) != 0x20
-       || slice_get_uint8(cip_service_path, 1) != CIP_CLASS_IDENTITY || slice_get_uint8(cip_service_path, 2) != 0x24
-       || slice_get_uint8(cip_service_path, 3) != CIP_IDENTITY_INSTANCE) {
+    if(!cip_path_is_class(cip_service_path, CIP_CLASS_IDENTITY, &instance) || instance != CIP_IDENTITY_INSTANCE) {
         log_info("Get_Attributes_All is only supported on the Identity object, class 1 instance 1!");
         return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
     }
@@ -584,6 +552,7 @@ typedef struct {
 
 /* the minimal Forward Open with no path */
 #define CIP_FORWARD_OPEN_MIN_SIZE (42)
+#define CIP_CONNECTED_FRAMING_SIZE ((uint32_t)(24 + 20)) /* EIP header, then CPF framing of a connected send */
 #define CIP_FORWARD_OPEN_EX_MIN_SIZE (46)
 
 
@@ -593,6 +562,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     slice_s conn_path_slice = {0};
     size_t offset = 0;
     forward_open_s fo_req = {0};
+    uint32_t conn_size_mask = 0;
 
     if(cip_service == CIP_SRV_FORWARD_OPEN) {
         log_info("Processing Forward Open request.");
@@ -746,11 +716,14 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     plc->server_connection_id = (uint32_t)(random_u64(UINT32_MAX) + 1);
     plc->server_connection_seq = (uint16_t)(random_u64(UINT16_MAX) + 1);
 
-    /* store the allowed packet sizes. */
-    plc->client_to_server_max_packet =
-        fo_req.client_to_server_conn_params & ((cip_service == CIP_SRV_FORWARD_OPEN) ? 0x1FF : 0x0FFF);
-    plc->server_to_client_max_packet =
-        fo_req.server_to_client_conn_params & ((cip_service == CIP_SRV_FORWARD_OPEN) ? 0x1FF : 0x0FFF);
+    /*
+     * Store the allowed packet sizes.  The connection size is the connected data -- the 2-byte
+     * sequence count and the CIP message -- but the limit here covers the whole EIP packet, so
+     * add the 24-byte EIP header and the 20 bytes of interface handle, timeout and CPF items.
+     */
+    conn_size_mask = (cip_service == CIP_SRV_FORWARD_OPEN) ? 0x1FF : 0x0FFF;
+    plc->client_to_server_max_packet = CIP_CONNECTED_FRAMING_SIZE + (fo_req.client_to_server_conn_params & conn_size_mask);
+    plc->server_to_client_max_packet = CIP_CONNECTED_FRAMING_SIZE + (fo_req.server_to_client_conn_params & conn_size_mask);
 
     /* FIXME - check that the packet sizes are valid 508 or 4002 */
 
@@ -1090,6 +1063,16 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
     if(request_start_byte_offset + copy_size < request_end_byte_offset) {
         log_info("Need to fragment read request.");
         needs_fragmentation = true;
+    }
+
+    /*
+     * An Omron never sends part of a reply.  It refuses the read, and the client asks for the
+     * variable's size and reads it with Simple Data Segments instead.  The fault injections
+     * above still force a partial status, because that is what they are for.
+     */
+    if(needs_fragmentation && plc->plc_type == PLC_OMRON && !endless_fragmentation) {
+        log_info("Omron read does not fit in one reply.");
+        return make_cip_log_error(output, cip_service, CIP_ERR_REPLY_TOO_LARGE, false, 0);
     }
 
     /* fill in the CIP response header. */
@@ -1488,56 +1471,10 @@ slice_s make_cip_log_error_size(slice_s output, uint8_t cip_cmd, uint16_t suppor
 
 bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num_indexes, uint32_t *indexes) {
     size_t offset = 0;
-    uint8_t name_len = 0;
-    uint8_t segment_marker = 0;
-    slice_s tag_name_slice = {0};
     uint32_t max_indexes = *num_indexes; /* contains the max possible */
 
-    /* Check if the tag path is long enough to contain the segment marker and name length */
-    if(slice_len(tag_path) < CIP_MIN_TAG_PATH_SIZE) {
-        log_info("Tag path is too short to contain segment marker and name length!");
-        return false;
-    }
-
-    /* Get the segment marker */
-    segment_marker = slice_get_uint8(tag_path, offset);
-    offset++;
-    if(segment_marker != CIP_SYMBOLIC_SEGMENT_MARKER) {
-        log_info("Expected symbolic segment marker but found %x!", segment_marker);
-        return false;
-    }
-
-    /* Get the name length */
-    name_len = slice_get_uint8(tag_path, offset);
-    offset++;
-    if(name_len + offset > slice_len(tag_path)) {
-        log_info("Name length %d exceeds remaining tag path length %d!", name_len, slice_len(tag_path) - offset);
-        return false;
-    }
-
-    /* Extract the tag name slice */
-    tag_name_slice = slice_from_slice(tag_path, offset, name_len);
-    offset += name_len;
-
-    /* Align to 16-bit boundary if necessary */
-    if(offset % 2 != 0) { offset++; }
-
-    /* find the tag */
-    *tag = plc->tags;
-
-    while(*tag) {
-        if(slice_match_string_exact(tag_name_slice, (*tag)->name)) {
-            log_info("Found tag %s", (*tag)->name);
-            break;
-        }
-
-        (*tag) = (*tag)->next_tag;
-    }
-
-    if(!*tag) {
-        log_info("Tag %.*s not found!", slice_len(tag_name_slice), (const char *)(tag_name_slice.data));
-        return false;
-    }
+    *tag = cip_find_symbol_tag(tag_path, plc, &offset);
+    if(!*tag) { return false; }
 
     /* Initialize the number of indexes to zero */
     *num_indexes = 0;
@@ -1594,6 +1531,56 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     }
 
     return true;
+}
+
+
+tag_def_s *cip_find_symbol_tag(slice_s path, plc_s *plc, size_t *end_offset) {
+    size_t name_len = 0;
+    slice_s name = {0};
+
+    if(slice_len(path) < CIP_MIN_TAG_PATH_SIZE || slice_get_uint8(path, 0) != CIP_SYMBOLIC_SEGMENT_MARKER) {
+        log_info("Path does not start with a symbolic segment!");
+        return NULL;
+    }
+
+    name_len = slice_get_uint8(path, 1);
+    if(2 + name_len > slice_len(path)) {
+        log_info("Name length %zu exceeds remaining tag path length %zu!", name_len, slice_len(path) - 2);
+        return NULL;
+    }
+
+    name = slice_from_slice(path, 2, name_len);
+    *end_offset = 2 + name_len + (name_len & 1);
+
+    for(tag_def_s *tag = plc->tags; tag; tag = tag->next_tag) {
+        if(slice_match_string_exact(name, tag->name)) {
+            log_info("Found tag %s", tag->name);
+            return tag;
+        }
+    }
+
+    log_info("Tag %.*s not found!", (int)name_len, (const char *)(name.data));
+    return NULL;
+}
+
+
+bool cip_path_is_class(slice_s path, uint8_t class_id, uint32_t *instance) {
+    if(slice_len(path) < CIP_OBJ_PATH_MIN || slice_get_uint8(path, 0) != CIP_SEG_CLASS_8
+       || slice_get_uint8(path, 1) != class_id) {
+        return false;
+    }
+
+    if(slice_len(path) == 4 && slice_get_uint8(path, 2) == CIP_SEG_INSTANCE_8) {
+        *instance = slice_get_uint8(path, 3);
+        return true;
+    }
+
+    if(slice_len(path) == 6 && slice_get_uint8(path, 2) == CIP_SEG_INSTANCE_16) {
+        *instance = slice_get_uint16_le(path, 4);
+        return true;
+    }
+
+    return false;
 }
 
 

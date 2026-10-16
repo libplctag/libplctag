@@ -523,6 +523,8 @@ const cip_standard_tag_ops_t cip_standard_tag_ops_ab = {.read_service = CIP_SVC_
 
                                                         .max_transfer_packets = CIP_TRANSFER_PACKETS_UNLIMITED,
 
+                                                        .sized_segments = false,
+
                                                         .encode_read_offset = cip_encode_offset_u32};
 
 

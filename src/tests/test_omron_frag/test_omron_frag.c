@@ -31,7 +31,8 @@
  ***************************************************************************/
 
 /*
- * What an Omron client does with a CIP partial-transfer status.
+ * What an Omron client does with a CIP partial-transfer status, and with a tag too large for
+ * one packet.
  *
  * Omron does not use CIP's 0x06 to report a transfer it could not finish -- it answers with an
  * error -- and it implements no fragmented read service, so there is no request that could ask
@@ -50,10 +51,10 @@
  *   - a partial status carrying no data, injected without end.  AB treats a few of these as
  *     packing starvation and retries, then gives up once they stop making progress.  Omron used
  *     to do the same, so this is the case that says the retry path is gone rather than narrowed.
- *   - a read genuinely too large for one packet, with nothing injected at all.  This is the
- *     ordinary way AB gets a partial status, and the one shape here a correct server produces
- *     on its own.  An Omron client has no way to ask for the rest, so it must refuse rather
- *     than return a short buffer as if it were the whole tag.
+ *   - a tag genuinely too large for one packet, with nothing injected at all.  This is the
+ *     ordinary way AB gets a partial status.  An Omron refuses the read outright instead, and
+ *     the client recovers: it asks for the variable's size and moves it in Simple Data
+ *     Segments, which this checks with a write and a read-back.
  *
  * The server is started and stopped per case on the one port the runner allocates, because
  * --empty_frag and --corrupt count down across the whole process.
@@ -94,7 +95,7 @@
 /* Arms nothing.  An empty string would reach Windows as an empty argument; this does not. */
 #define NO_FAULT "--empty_frag=0"
 
-/* CIP 0x06 decodes to this.  Every case below is the same status, so all of them report it. */
+/* CIP 0x06 decodes to this.  Both fault cases below are that status, so both report it. */
 #define EXPECTED_ERROR (PLCTAG_ERR_TOO_LARGE)
 
 /* only for running this by hand; the parallel runner allocates the port. */
@@ -109,11 +110,16 @@
 #define SMALL_TAG_ELEMENTS (10)
 
 /*
- * 1000 DINTs is 4000 bytes, well past what one packet carries, so the server has to report a
- * partial transfer without being told to.  Same tag and count the AB tests use.
+ * 1000 DINTs is 4000 bytes, well past what one packet carries, so the server refuses the plain
+ * read without being told to.  Same tag and count the AB tests use.
  */
 #define BIG_TAG "TestBigArray"
 #define BIG_TAG_ELEMENTS (1000)
+
+/* 200 twelve-byte UDTs, also past one packet, whose writes carry the UDT's CRC. */
+#define BIG_UDT_TAG "Pts"
+#define BIG_UDT_ELEMENTS (200)
+#define BIG_UDT_SIZE (12)
 
 /*
  * The pidfile is keyed on this test process's own PID so that stopping the server kills exactly
@@ -123,13 +129,14 @@
 #ifdef WINDOWS_PLATFORM
 #    define SERVER_START \
         "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
-        "'--plc=Omron','--port=%d','--tag=TestDINTArray:DINT[10]','--tag=TestBigArray:DINT[2000]','%s').Id\"" \
+        "'--plc=Omron','--port=%d','--tag=TestDINTArray:DINT[10]','--tag=TestBigArray:DINT[2000]','--udt=Point:x:DINT,y:REAL,z:INT','--tag=Pts:Point[200]','%s').Id\"" \
         " > ab_server_frag_%d.pid"
 #    define SERVER_STOP \
         "for /f %%p in (ab_server_frag_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_frag_%d.pid >nul 2>&1"
 #else
 #    define SERVER_START \
-        "%s --plc=Omron --port=%d --tag=TestDINTArray:DINT[10] --tag=TestBigArray:DINT[2000] %s > " \
+        "%s --plc=Omron --port=%d --tag=TestDINTArray:DINT[10] --tag=TestBigArray:DINT[2000] " \
+        "--udt=Point:x:DINT,y:REAL,z:INT --tag=Pts:Point[200] %s > " \
         "/tmp/omron_frag_test_server_%d.log 2>&1 & echo $! > " \
         "/tmp/ab_server_frag_%d.pid"
 #    define SERVER_STOP "kill -TERM $(cat /tmp/ab_server_frag_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_frag_%d.pid"
@@ -213,6 +220,63 @@ static int32_t read_against_fault(const char *ab_server_path, int32_t test_pid, 
 }
 
 
+/*
+ * Write a pattern to a tag too large for one packet and read it back through a second tag.
+ * An NJ/NX refuses the plain read, so this goes Get Attributes All for the size, then Simple
+ * Data Segment reads and writes.  Returns OK or the first failure.
+ */
+static int32_t round_trip_one(int32_t server_port, const char *tag_name, int32_t elem_count, int32_t expected_size) {
+    char tag_attribs[256] = {0};
+    int32_t tag = 0;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    snprintf(tag_attribs, sizeof(tag_attribs), TAG_ATTRIBS_FMT, (int)server_port, (int)elem_count, tag_name);
+
+    tag = plc_tag_create(tag_attribs, TAG_TIMEOUT_MS);
+    if(tag < 0) { return tag; }
+
+    if(plc_tag_get_size(tag) != expected_size) {
+        log("%s is %d bytes, expected %d.\n", tag_name, (int)plc_tag_get_size(tag), (int)expected_size);
+        plc_tag_destroy(tag);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    for(int32_t i = 0; i < expected_size; i++) { plc_tag_set_uint8(tag, i, (uint8_t)((i * 7) + 1)); }
+
+    rc = plc_tag_write(tag, TAG_TIMEOUT_MS);
+    plc_tag_destroy(tag);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
+    tag = plc_tag_create(tag_attribs, TAG_TIMEOUT_MS);
+    if(tag < 0) { return tag; }
+
+    for(int32_t i = 0; i < expected_size && rc == PLCTAG_STATUS_OK; i++) {
+        if(plc_tag_get_uint8(tag, i) != (uint8_t)((i * 7) + 1)) {
+            log("%s byte %d reads back as %u.\n", tag_name, (int)i, (unsigned)plc_tag_get_uint8(tag, i));
+            rc = PLCTAG_ERR_BAD_DATA;
+        }
+    }
+
+    plc_tag_destroy(tag);
+
+    return rc;
+}
+
+
+static int32_t round_trip(const char *ab_server_path, int32_t test_pid, int32_t server_port) {
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    if(!start_server(ab_server_path, test_pid, server_port, NO_FAULT)) { return PLCTAG_ERR_NO_RESOURCES; }
+
+    rc = round_trip_one(server_port, BIG_TAG, BIG_TAG_ELEMENTS, BIG_TAG_ELEMENTS * 4);
+    if(rc == PLCTAG_STATUS_OK) { rc = round_trip_one(server_port, BIG_UDT_TAG, BIG_UDT_ELEMENTS, BIG_UDT_ELEMENTS * BIG_UDT_SIZE); }
+
+    stop_server(test_pid);
+
+    return rc;
+}
+
+
 /* returns the number of failures, so main() can run every case and report all of them. */
 static int32_t check(const char *what, int32_t rc, int32_t expected) {
     if(rc == expected) {
@@ -271,18 +335,13 @@ int main(int argc, char **argv) {
                       EXPECTED_ERROR);
 
     /*
-     * No fault at all: the read simply does not fit in one packet.  A short buffer returned as
-     * if it were the whole tag would be the worst outcome here, so the refusal matters even
-     * though nothing is being attacked.
+     * No fault at all: the tag simply does not fit in one packet.  The PLC refuses the plain
+     * read, and the client reads and writes it in Simple Data Segments instead.
      */
-    failures += check("a read too large for one packet is refused",
-                      read_against_fault(ab_server_path, test_pid, server_port, NO_FAULT, BIG_TAG, BIG_TAG_ELEMENTS),
-                      EXPECTED_ERROR);
+    failures += check("a tag too large for one packet round-trips in segments",
+                      round_trip(ab_server_path, test_pid, server_port), PLCTAG_STATUS_OK);
 
-    /*
-     * The control for the case above.  The same tag, read in a size that fits, has to come back
-     * clean -- otherwise that refusal would pass just as well for a tag the server never had.
-     */
+    /* the same tag, read in a size that fits, takes the plain read. */
     failures += check("the same tag reads cleanly when it fits",
                       read_against_fault(ab_server_path, test_pid, server_port, NO_FAULT, BIG_TAG, SMALL_TAG_ELEMENTS),
                       PLCTAG_STATUS_OK);

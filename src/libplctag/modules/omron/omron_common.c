@@ -37,6 +37,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/error_codes.h>
 #include <libplctag/modules/cip/identity_tag.h>
 #include <libplctag/modules/cip/raw_tag.h>
 #include <libplctag/modules/cip/services.h>
@@ -44,6 +45,7 @@
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
 #include <libplctag/modules/omron/omron_common.h>
+#include <libplctag/modules/omron/omron_listing.h>
 #include <limits.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
@@ -53,6 +55,12 @@
 #include <utils/rc.h>
 #include <utils/vector.h>
 
+
+/* the CIP status an NJ/NX refuses an over-large read with. */
+#define OMRON_STATUS_REPLY_TOO_LARGE ((uint8_t)0x11)
+
+static int omron_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+static int omron_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
 /*
  * Externally visible global variables
@@ -295,7 +303,7 @@ const attr_def_t omron_attribs[] = {
 };
 
 
-/* an NJ/NX has the CIP special tags, but not the Logix listing services. */
+/* an NJ/NX has the CIP special tags, and its own tag and UDT listing (omron_listing.c). */
 int omron_setup_njnx_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attribs) {
     const char *name = attr_get_str(attribs, "name", NULL);
     int rc = PLCTAG_STATUS_OK;
@@ -307,6 +315,10 @@ int omron_setup_njnx_name(const cip_plc_entry_t *entry, cip_tag_p tag, attr attr
     }
 
     if(str_cmp_i(name, "@raw") == 0) { return cip_raw_tag_setup(tag, &omron_raw_tag_vtable, DEBUG_MODULE_OMRON_RAW_TAG); }
+
+    if(str_cmp_i(name, "@tags") == 0) { return omron_setup_listing_tag(tag); }
+
+    if(str_cmp_i_n(name, "@udt/", str_length("@udt/")) == 0) { return omron_setup_udt_tag(tag, name); }
 
     rc = cip_tag_parse_elem_type(tag, attribs, DEBUG_MODULE_OMRON_COMMON);
     if(rc != PLCTAG_STATUS_OK) { return rc; }
@@ -370,6 +382,8 @@ const cip_standard_tag_ops_t cip_standard_tag_ops_omron = {.read_service = CIP_S
 
                                                            .max_transfer_packets = CIP_TRANSFER_SINGLE_PACKET,
 
+                                                           .sized_segments = true,
+
                                                            .encode_read_offset = cip_encode_no_offset};
 
 
@@ -383,12 +397,108 @@ struct tag_vtable_t cip_standard_tag_vtable_omron = {
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,
-    .encode_read = (tag_encode_func)cip_standard_tag_encode_read,
-    .decode_read = (tag_decode_func)cip_standard_tag_decode_read,
+    .encode_read = (tag_encode_func)omron_standard_tag_encode_read,
+    .decode_read = (tag_decode_func)omron_standard_tag_decode_read,
     .encode_write = (tag_encode_func)cip_standard_tag_encode_write,
     .decode_write = (tag_decode_func)cip_standard_tag_decode_write,
 
     /* attribute accessors */
     .attribs = omron_attribs,
 };
+
+
+/*
+ * Reads of a whole variable too large for one reply.  An NJ/NX refuses the plain read with
+ * status 0x11 rather than sending part of it, and the reply does not say how big the variable
+ * is.  Get Attributes All on the variable does: its size (4), type (1) and array element type
+ * (1).  The tag's elem_count elements from the start are then read in sized segments by the
+ * shared engine.
+ *
+ * ponytail: 0x11 is the CIP code for this refusal; that an NJ/NX sends it, rather than another
+ * error, is not confirmed on hardware.
+ */
+static int omron_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    if(!tag->size_probe) { return cip_standard_tag_encode_read(tag, dest, capacity, plan); }
+
+    if(1 + tag->encoded_name_size > capacity) { return PLCTAG_ERR_TOO_SMALL; }
+
+    dest[0] = CIP_GET_ATTRIBUTES_ALL;
+    mem_copy(dest + 1, tag->encoded_name, tag->encoded_name_size);
+
+    plan->req_size = 1 + tag->encoded_name_size;
+    plan->reply_size = 0;
+    plan->packable = false;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int omron_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+    cip_header *resp = (cip_header *)reply;
+    uint8_t *data = reply + sizeof(cip_header);
+    int32_t data_size = reply_size - (int32_t)sizeof(cip_header);
+    int64_t total = 0;
+    uint8_t *new_data = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    if(!tag->size_probe) {
+        /* only a refused plain read asks for the size; a refused segment would ask forever. */
+        bool was_plain = !cip_standard_tag_reads_in_segments(tag);
+
+        rc = cip_standard_tag_decode_read(tag, reply, reply_size);
+
+        if(rc == PLCTAG_ERR_TOO_LARGE && was_plain && reply_size >= (int32_t)sizeof(cip_header)
+           && resp->status == OMRON_STATUS_REPLY_TOO_LARGE && cip_standard_tag_uses_segments(tag)) {
+            pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Too large for one reply, asking for its size.");
+            tag->size_probe = true;
+            rc = PLCTAG_STATUS_PENDING;
+        }
+
+        return rc;
+    }
+
+    tag->size_probe = false;
+
+    if(reply_size < (int32_t)sizeof(cip_header) || resp->reply_service != (CIP_GET_ATTRIBUTES_ALL | CIP_SVC_REPLY)) {
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    if(resp->status != CIP_STATUS_OK) {
+        size_t status_size = cip_error_data_size(&resp->status, reply + reply_size);
+
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Size request failed with status 0x%x %s.", resp->status,
+               decode_cip_error_short(&resp->status, status_size));
+        return decode_cip_error_code(&resp->status, status_size);
+    }
+
+    if(data_size < 8) { return PLCTAG_ERR_TOO_SMALL; }
+
+    /* the size is one element's for an array and the whole variable's otherwise. */
+    total = (int64_t)((uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24))
+            * tag->elem_count;
+
+    if(data[4] == CIP_DATA_STRING || data[5] == CIP_DATA_STRING || total <= 0 || total > CIP_MAX_TAG_DATA_SIZE) {
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id,
+               "Variable of %" PRId64 " bytes, type 0x%02x, cannot be read in segments!", total, data[4]);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    new_data = (uint8_t *)mem_realloc(tag->data, (int)total);
+    if(!new_data) { return PLCTAG_ERR_NO_MEM; }
+
+    tag->data = new_data;
+    tag->size = (int32_t)total;
+    tag->elem_size = tag->size / tag->elem_count;
+    tag->offset = 0;
+
+    /* small enough for one read means the refusal was not about size; asking again would loop. */
+    if(!cip_standard_tag_reads_in_segments(tag)) {
+        pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_WARN, tag->tag_id, "Read of %d bytes was refused as too large!", tag->size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    pdebug(DEBUG_MODULE_OMRON_STANDARD_TAG, DEBUG_DETAIL, tag->tag_id, "Variable is %d bytes.", tag->size);
+
+    return PLCTAG_STATUS_PENDING;
+}
 

@@ -245,12 +245,7 @@ slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
-    /* session sender plc must be zero. */
-    if(header->sender_context != (uint64_t)0) {
-        log_info("Request failed sanity check: request sender context should be zero.");
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
-    }
+    /* the sender context is the client's to choose and is echoed back, so any value is fine. */
 
     /* session options must be zero. */
     if(header->options != (uint32_t)0) {

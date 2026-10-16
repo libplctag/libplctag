@@ -69,6 +69,9 @@ static int calculate_write_data_per_packet(cip_tag_p tag);
 
 static bool tag_can_split_transfer(cip_tag_p tag);
 static bool tag_elements_are_variable(cip_tag_p tag);
+static bool name_has_index(cip_tag_p tag);
+static int32_t segment_read_budget(cip_tag_p tag);
+static int32_t encode_segment_path(cip_tag_p tag, uint8_t *dest, int32_t byte_offset, int32_t size);
 static debug_module_t tag_debug_module(cip_tag_p tag);
 
 
@@ -141,6 +144,79 @@ static bool tag_elements_are_variable(cip_tag_p tag) {
     }
 
     return false;
+}
+
+
+/* the Simple Data Segment that names a byte range: 0x80, 3 words, u32 offset, u16 size. */
+#define CIP_DATA_SEGMENT ((uint8_t)0x80)
+#define CIP_DATA_SEGMENT_WORDS ((uint8_t)0x03)
+#define CIP_DATA_SEGMENT_SIZE ((int32_t)8)
+
+/* the widest type info a segmented reply carries: an abbreviated struct, A0 02 and a CRC. */
+#define CIP_SEGMENT_TYPE_INFO_SIZE ((int32_t)4)
+
+
+/* true when the encoded name addresses an array element rather than a whole variable. */
+static bool name_has_index(cip_tag_p tag) {
+    int32_t i = 1; /* past the word count */
+
+    while(i < tag->encoded_name_size) {
+        int32_t name_len = 0;
+
+        /* anything but a symbolic segment is an element (or other) segment. */
+        if(tag->encoded_name[i] != CIP_SYMBOLIC_SEGMENT || i + 1 >= tag->encoded_name_size) { return true; }
+
+        name_len = tag->encoded_name[i + 1];
+        i += 2 + name_len + (name_len & 1);
+    }
+
+    return false;
+}
+
+
+bool cip_standard_tag_uses_segments(cip_tag_p tag) {
+    return tag->std_ops->sized_segments && !tag->is_bit && !tag_elements_are_variable(tag)
+           && !name_has_index(tag);
+}
+
+
+/*
+ * The most data one segmented read can ask for: the reply has to hold it with its CIP header
+ * and type info, and it is cut on the same boundaries a split write is, so no atomic member
+ * is split.
+ */
+static int32_t segment_read_budget(cip_tag_p tag) {
+    int32_t split = (tag->elem_size > 0 && tag->elem_size < CIP_MAX_ATOMIC_SIZE) ? tag->elem_size : CIP_MAX_ATOMIC_SIZE;
+    int32_t budget = session_get_available_cip_payload_space(tag->session) - (int32_t)sizeof(cip_header)
+                     - CIP_SEGMENT_TYPE_INFO_SIZE - 8; /* MAGIC fudge factor, as for writes */
+
+    if(!tag->use_connected_msg) { budget -= CIP_EIP_UC_SEND_OVERHEAD; }
+
+    return (budget / split) * split;
+}
+
+
+bool cip_standard_tag_reads_in_segments(cip_tag_p tag) {
+    return cip_standard_tag_uses_segments(tag) && tag->size > segment_read_budget(tag);
+}
+
+
+/* the tag's encoded name with a Simple Data Segment for size bytes at byte_offset appended. */
+static int32_t encode_segment_path(cip_tag_p tag, uint8_t *dest, int32_t byte_offset, int32_t size) {
+    uint8_t *data = dest;
+
+    *data++ = (uint8_t)(tag->encoded_name[0] + CIP_DATA_SEGMENT_SIZE / 2);
+    mem_copy(data, tag->encoded_name + 1, tag->encoded_name_size - 1);
+    data += tag->encoded_name_size - 1;
+
+    *data++ = CIP_DATA_SEGMENT;
+    *data++ = CIP_DATA_SEGMENT_WORDS;
+    *((uint32_le *)data) = h2le32((uint32_t)byte_offset);
+    data += sizeof(uint32_le);
+    *((uint16_le *)data) = h2le16((uint16_t)size);
+    data += sizeof(uint16_le);
+
+    return (int32_t)(data - dest);
 }
 
 
@@ -266,6 +342,34 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
      * replies.  A family without the fragmented service gets the plain one and never
      * splits a transfer.
      */
+    if(cip_standard_tag_reads_in_segments(tag)) {
+        int32_t chunk = segment_read_budget(tag);
+
+        if(chunk > tag->size - tag->offset) { chunk = tag->size - tag->offset; }
+
+        if(fixed_size + CIP_DATA_SEGMENT_SIZE > capacity) {
+            pdebug(dbg, DEBUG_WARN, tag->tag_id, "Segmented read request does not fit in %d bytes!", capacity);
+            return PLCTAG_ERR_TOO_SMALL;
+        }
+
+        /* the plain Read Tag service, the byte range in the path, and one element. */
+        *data = tag->std_ops->read_service;
+        data++;
+
+        data += encode_segment_path(tag, data, tag->offset, chunk);
+
+        *((uint16_le *)data) = h2le16((uint16_t)1);
+        data += sizeof(uint16_le);
+
+        plan->req_size = (int32_t)(data - dest);
+        plan->reply_size = chunk + CIP_SEGMENT_TYPE_INFO_SIZE;
+        plan->packable = (tag->allow_packing != 0);
+
+        pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done, segment of %d bytes at %d.", chunk, tag->offset);
+
+        return PLCTAG_STATUS_OK;
+    }
+
     *data = tag->std_ops->read_service;
     data++;
 
@@ -308,6 +412,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
     uint8_t *data = dest;
     int rc = PLCTAG_STATUS_OK;
     bool multiple_requests = false;
+    bool segmented = false;
     int32_t write_size = 0;
     int32_t pad_size = 0;
     int32_t needed = 0;
@@ -327,8 +432,10 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
 
     if(tag->write_data_per_packet < tag->size) { multiple_requests = true; }
 
+    segmented = multiple_requests && cip_standard_tag_uses_segments(tag);
+
     /* a family limited to one packet cannot split the transfer, so it has to refuse it. */
-    if(multiple_requests && !tag_can_split_transfer(tag)) {
+    if(multiple_requests && !tag_can_split_transfer(tag) && !segmented) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Tag too large for an unfragmented write on this PLC!");
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -350,13 +457,14 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
      * so str_pad_to_multiple_bytes can turn this off.
      */
     str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
-    if((str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0
+    if(!segmented && (str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0
        && write_size % str_pad_to_multiple_bytes != 0) {
         pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
     }
 
     needed = 1 + (int32_t)tag->encoded_name_size + (int32_t)tag->encoded_type_info_size + (int32_t)sizeof(uint16_le)
-             + (multiple_requests ? (int32_t)sizeof(uint32_le) : 0) + write_size + pad_size;
+             + (segmented ? CIP_DATA_SEGMENT_SIZE : (multiple_requests ? (int32_t)sizeof(uint32_le) : 0)) + write_size
+             + pad_size;
 
     if(needed > capacity) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Write request of %d bytes does not fit in %d bytes!", needed, capacity);
@@ -376,20 +484,27 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
      * The plain service is used when the whole tag fits in one request.  Fragmented writes of
      * a single boolean have been seen not to work, and a single boolean always fits, so this
      * is not merely an optimisation.
+     *
+     * A sized-segment write is the plain service with the byte range in the path and one
+     * element, and no offset field.
      */
-    *data = (multiple_requests) ? tag->std_ops->write_service_split : tag->std_ops->write_service;
+    *data = (multiple_requests && !segmented) ? tag->std_ops->write_service_split : tag->std_ops->write_service;
     data++;
 
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
+    if(segmented) {
+        data += encode_segment_path(tag, data, tag->offset, write_size);
+    } else {
+        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+        data += tag->encoded_name_size;
+    }
 
     mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
     data += tag->encoded_type_info_size;
 
-    *((uint16_le *)data) = h2le16((uint16_t)(tag->elem_count));
+    *((uint16_le *)data) = h2le16((uint16_t)(segmented ? 1 : tag->elem_count));
     data += sizeof(uint16_le);
 
-    if(multiple_requests) {
+    if(multiple_requests && !segmented) {
         *((uint32_le *)data) = h2le32((uint32_t)tag->offset);
         data += sizeof(uint32_le);
     }
@@ -510,6 +625,7 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
+    bool segmented = cip_standard_tag_reads_in_segments(tag);
     debug_module_t dbg = tag_debug_module(tag);
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -660,11 +776,16 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
 
             /* bump the byte offset */
             tag->offset += (int)(payload_size);
+
+            /* a segmented transfer is partial until every byte has come back. */
+            if(segmented && tag->offset < tag->size) { partial_data = 1; }
         } else {
             pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
 
             /* no payload means no forward progress on a fragmented transfer. */
             tag->fragment_retry_count++;
+
+            if(segmented) { partial_data = 1; }
         }
 
         /* set the return code */
@@ -786,6 +907,9 @@ int calculate_write_data_per_packet(cip_tag_p tag) {
                + 2                           /* element count, 16-bit int */
                + 4                           /* byte offset, 32-bit int */
                + 8;                          /* MAGIC fudge factor */
+
+    /* a sized segment in the path takes eight bytes where the offset field took four. */
+    if(tag->std_ops->sized_segments) { overhead += CIP_DATA_SEGMENT_SIZE - 4; }
 
     /*
      * An unconnected request is wrapped in an Unconnected Send by the connection, and that

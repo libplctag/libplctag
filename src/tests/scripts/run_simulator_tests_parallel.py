@@ -1074,7 +1074,8 @@ def build_manifest() -> Manifest:
     omron_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Omron", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
-                        "--tag=TestString:STRING[4]", "--tag=VarStrings:VSTRING[4]"],
+                        "--tag=TestString:STRING[4]", "--tag=VarStrings:VSTRING[4]",
+                        "--udt=Point:x:DINT,y:REAL,z:INT", "--tag=P1:Point[1]", "--tag=_SysFlag:DINT[1]"],
         startup_wait_s=1,
     )
     ogw = "127.0.0.1:{PORT}"
@@ -1104,6 +1105,18 @@ def build_manifest() -> Manifest:
               check=CheckSpec(log_file=var_str_test.log_file,
                               pattern=r'^data\[0\]="a"$|^data\[1\]="bb"$|^data\[2\]="ccc"$|^data\[3\]="dddd"$',
                               expected=4))
+
+    # Omron @tags (Get Instance List 0x5F, then Get Attributes All per variable) and @udt/N
+    # (the Variable Type Object, class 0x6C) fill the Logix layouts, so list_tags_logix reads
+    # them.  _SysFlag is a system variable, which is a second instance list walk.
+    list_omron_test = sec.test("Omron tag and UDT listing",
+              [exe("list_tags_logix"), ogw, "18,127.0.0.1", "omron-njnx"], F)
+    sec.test("check: Omron tag and UDT listing", None, F, depends_on=list_omron_test.id, ports_needed=0,
+              check=CheckSpec(log_file=list_omron_test.log_file,
+                              pattern=r'^Tag "P1" .*UDT \(0x8001\) Point\.|^Tag "_SysFlag" .*DINT|^Tag "TestDINTArray\[10\]" '
+                                      r'|^    Field 0: x, offset 0, .*DINT|^    Field 1: y, offset 4, .*REAL'
+                                      r'|^    Field 2: z, offset 8, .*INT',
+                              expected=6))
 
     # The Omron module has its own copies of the attribute checks -- same wording, different
     # module tag in the log -- so they need their own tests rather than riding on the AB ones.
