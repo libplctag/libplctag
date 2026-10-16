@@ -56,6 +56,7 @@
 #include "plc.h"
 #include "slice.h"
 #include "tcp_server.h"
+#include "udp_server.h"
 #include "utils.h"
 #include "mutex.h"
 #include "log.h"
@@ -162,6 +163,7 @@ void setup_break_handler(void) {
 
 int main(int argc, const char **argv) {
     tcp_server_p server = NULL;
+    udp_server_p udp_server = NULL;
     plc_s plc;
 
     /* set up handler for ^C etc. */
@@ -192,7 +194,13 @@ int main(int argc, const char **argv) {
         return 1;
     }
 
+    /* discovery: ListIdentity over UDP on the same port. */
+    udp_server = udp_server_start((plc.port_str ? plc.port_str : "44818"), &plc, &done);
+    if(!udp_server) { log_error("Unable to answer ListIdentity over UDP; continuing without it."); }
+
     tcp_server_start(server, &done);
+
+    udp_server_destroy(udp_server);
 
     /* Dump fairness statistics before shutdown */
     dump_fairness_stats(&plc);

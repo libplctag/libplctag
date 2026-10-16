@@ -58,6 +58,24 @@ extern SOCKET socket_open_tcp_client(const char *remote_host, const char *remote
  *          Negative error code (from err_t) on failure */
 extern SOCKET socket_open_tcp_server(const char *listening_port);
 
+/* Open a UDP socket bound to the port on every interface, or INVALID_SOCKET. */
+extern SOCKET socket_open_udp_server(const char *listening_port);
+
+/* Where a datagram came from, so the reply can go back.  Big enough for any sockaddr. */
+typedef struct {
+    uint64_t addr[16]; /* 128 bytes, aligned for a sockaddr */
+    uint32_t len;
+} socket_peer_s;
+
+/* Receive one datagram, waiting up to timeout_ms.  On error: slice_has_err() is true. */
+extern slice_s socket_read_from(SOCKET sock, slice_s in_buf, uint32_t timeout_ms, socket_peer_s *peer);
+
+/* Send one datagram to peer.  On error: slice_has_err() is true. */
+extern slice_s socket_write_to(SOCKET sock, slice_s out_buf, socket_peer_s *peer);
+
+/* The local IPv4 address, host order, that traffic to peer leaves from, or 0. */
+extern uint32_t socket_local_ipv4_toward(socket_peer_s *peer);
+
 /* Close a socket */
 extern void socket_close(SOCKET sock);
 

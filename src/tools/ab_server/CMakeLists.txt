@@ -46,6 +46,8 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/tcp_server.h
     ${CMAKE_CURRENT_SOURCE_DIR}/thread.c
     ${CMAKE_CURRENT_SOURCE_DIR}/thread.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/udp_server.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/udp_server.h
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.c
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/log.c

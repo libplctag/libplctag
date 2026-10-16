@@ -300,7 +300,7 @@ def kill_stray_servers() -> None:
 
 
 REQUIRED_EXECUTABLES = [
-    "ab_server", "modbus_server", "list_tags_logix", "get_identity", "test_create_shutdown_race",
+    "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy", "test_cip_ops",
@@ -381,7 +381,18 @@ def build_manifest() -> Manifest:
     )
     gw = "127.0.0.1:{PORT}"
 
+    def list_identity(section, plc, vendor, device_type, product_code, product_name):
+        """scan_eip_network's ListIdentity over UDP, and the one device line it must print."""
+        scan = section.test(f"ListIdentity discovery over UDP ({plc})",
+                  [exe("scan_eip_network"), "--network=127.0.0.1/32", "--delay-max-ms=500", "--port={PORT}"], F)
+        section.test(f"check: ListIdentity discovery over UDP ({plc})", None, F, depends_on=scan.id, ports_needed=0,
+                  check=CheckSpec(log_file=scan.log_file,
+                                  pattern=rf'^127\.0\.0\.1\t\d+\t{vendor}\t{device_type}\t{product_code}\t.*\t'
+                                          rf'{re.escape(product_name)}\t3$',
+                                  expected=1))
+
     sec = m.section("controllogix_fast", server=fast_server)
+    list_identity(sec, "ControlLogix", 1, 14, 164, "1756-L81E/B")
 
     # @identity: Get_Attributes_All on the Identity object, class 1 instance 1.  With a path
     # the request is routed inside an Unconnected Send, without one it goes out unrouted --
@@ -1026,6 +1037,7 @@ def build_manifest() -> Manifest:
     )
 
     sec = m.section("micro800", server=micro800_server)
+    list_identity(sec, "Micro800", 1, 14, 200, "2080-LC50-24QWB")
     sec.test("identity, unrouted",
               [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=generic&name=@identity&debug=3"], F)
     sec.test("identity, Micro800, connected",
@@ -1105,6 +1117,9 @@ def build_manifest() -> Manifest:
               check=CheckSpec(log_file=var_str_test.log_file,
                               pattern=r'^data\[0\]="a"$|^data\[1\]="bb"$|^data\[2\]="ccc"$|^data\[3\]="dddd"$',
                               expected=4))
+
+    # discovery: ab_server answers ListIdentity with the interface that faces the scanner.
+    list_identity(sec, "Omron", 47, 14, 142, "NX102-9000")
 
     # Omron @tags (Get Instance List 0x5F, then Get Attributes All per variable) and @udt/N
     # (the Variable Type Object, class 0x6C) fill the Logix layouts, so list_tags_logix reads
@@ -1236,6 +1251,7 @@ def build_manifest() -> Manifest:
     mgw = "127.0.0.1:{PORT}"
 
     sec = m.section("micrologix", server=micrologix_server)
+    list_identity(sec, "MicroLogix", 1, 12, 185, "1763-L16BWA B/12.00")
     missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N250:0"], F)
@@ -1381,6 +1397,7 @@ def build_manifest() -> Manifest:
     lgx_pccc_tag = f"protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=1"
 
     sec = m.section("lgx_pccc", server=lgx_pccc_server)
+    list_identity(sec, "PCCC-mapped Logix", 1, 14, 164, "1756-L81E/B")
     missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag", f"--tag={lgx_pccc_tag}&name=N250:0"], F)
     sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
@@ -1454,6 +1471,7 @@ def build_manifest() -> Manifest:
     pgw = "127.0.0.1:{PORT}"
 
     sec = m.section("plc5", server=plc5_server)
+    list_identity(sec, "PLC/5", 1, 14, 18, "PLC-5/30 C/K - 1785-ENET 2.17 ")
     missing = sec.test("async create of a missing data file fails for good",
               [exe("test_write_before_read"), "--missing-tag",
                f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N250:0"], F)

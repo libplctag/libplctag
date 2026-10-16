@@ -319,10 +319,8 @@ static const cip_identity_s cip_identities[] = {
  * is the same either way -- the framing is the connection's business, not this object's.
  */
 slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, slice_s output, plc_s *plc) {
-    const cip_identity_s *identity = NULL;
     uint32_t instance = 0;
-    size_t name_len = 0;
-    size_t offset = 0;
+    size_t size = 0;
 
     /*
      * The path is a logical class segment then a logical instance segment.  Only the Identity
@@ -333,25 +331,33 @@ slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, s
         return make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
     }
 
+    size = cip_encode_identity(slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE, slice_len(output) - CIP_RESPONSE_HEADER_SIZE),
+                               plc);
+    if(size == 0) { return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0); }
+
+    make_cip_log_error(output, cip_service, CIP_OK, false, 0);
+
+    return slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE + size);
+}
+
+
+size_t cip_encode_identity(slice_s output, plc_s *plc) {
+    const cip_identity_s *identity = NULL;
+    size_t name_len = 0;
+    size_t offset = 0;
+
     if((size_t)plc->plc_type >= (sizeof(cip_identities) / sizeof(cip_identities[0]))) {
         log_info("No identity is defined for PLC type %d!", (int)plc->plc_type);
-        return make_cip_log_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
+        return 0;
     }
 
     identity = &cip_identities[plc->plc_type];
     name_len = strlen(identity->product_name);
 
-    if(slice_len(output) < CIP_RESPONSE_HEADER_SIZE + CIP_IDENTITY_FIXED_SIZE + 1 + name_len) {
-        log_info("Insufficient space in the output buffer for the identity response!");
-        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    if(slice_len(output) < CIP_IDENTITY_FIXED_SIZE + 1 + name_len) {
+        log_info("Insufficient space in the output buffer for the identity!");
+        return 0;
     }
-
-    slice_set_uint8(output, 0, (uint8_t)(cip_service | CIP_DONE));
-    slice_set_uint8(output, 1, 0);      /* reserved */
-    slice_set_uint8(output, 2, CIP_OK); /* status */
-    slice_set_uint8(output, 3, 0);      /* no extended error */
-
-    offset = CIP_RESPONSE_HEADER_SIZE;
 
     slice_set_uint16_le(output, offset, identity->vendor_id);
     offset += 2;
@@ -379,7 +385,7 @@ slice_s handle_identity_request(uint8_t cip_service, slice_s cip_service_path, s
              (unsigned int)identity->vendor_id, (unsigned int)identity->product_code, (unsigned int)identity->revision_major,
              (unsigned int)identity->revision_minor, (unsigned int)identity->serial_number, identity->product_name);
 
-    return slice_from_slice(output, 0, offset);
+    return offset;
 }
 
 

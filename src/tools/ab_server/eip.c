@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include "eip.h"
+#include "cip.h"
 #include "cpf.h"
 #include "err.h"
 #include "fault.h"
@@ -45,6 +46,13 @@
 #define EIP_REGISTER_SESSION_SIZE (4) /* 4 bytes, 2 16-bit words */
 
 #define EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
+
+/* ListIdentity: no session, and over UDP as well as TCP. */
+#define EIP_LIST_IDENTITY ((uint16_t)0x0063)
+#define EIP_CPF_ITEM_IDENTITY ((uint16_t)0x000C)
+#define EIP_LIST_IDENTITY_HEADER_SIZE ((size_t)24) /* item count, type, length, version, 16-byte sockaddr */
+#define EIP_IDENTITY_STATE_OPERATIONAL ((uint8_t)0x03)
+#define EIP_DEFAULT_PORT (44818)
 
 /* supported EIP version */
 #define EIP_VERSION ((uint16_t)1)
@@ -62,6 +70,7 @@ typedef struct {
 
 static slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
 static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
+static slice_s list_identity(slice_s output, plc_s *plc);
 static bool check_session_request(plc_s *plc, eip_header_s *header);
 
 
@@ -105,6 +114,8 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
             response =
                 unregister_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
             break;
+
+        case EIP_LIST_IDENTITY: response = list_identity(response, plc); break;
 
         case EIP_UNCONNECTED_SEND:
             if(!check_session_request(plc, &header)) {
@@ -291,4 +302,45 @@ slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header
     } else {
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
+}
+
+
+/*
+ * ListIdentity reply: one CPF item of type 0x0C holding the encapsulation version, a sockaddr
+ * in network byte order, the Identity attributes and a state byte.
+ *
+ * The sockaddr address is the interface facing the sender, which scan_eip_network prints.
+ * ponytail: over TCP it is 0.0.0.0, because the TCP server does not record its local address;
+ * a TCP client already knows it.
+ */
+static slice_s list_identity(slice_s output, plc_s *plc) {
+    uint16_t port = (uint16_t)(plc->port_str ? atoi(plc->port_str) : EIP_DEFAULT_PORT);
+    slice_s identity = slice_from_slice(output, EIP_LIST_IDENTITY_HEADER_SIZE, slice_len(output) - EIP_LIST_IDENTITY_HEADER_SIZE);
+    size_t identity_size = cip_encode_identity(identity, plc);
+    size_t item_size = 0;
+
+    if(identity_size == 0 || identity_size + 1 > slice_len(identity)) { return slice_make_err(EIP_ERR_BAD_REQUEST); }
+
+    slice_set_uint8(identity, identity_size, EIP_IDENTITY_STATE_OPERATIONAL);
+    item_size = (EIP_LIST_IDENTITY_HEADER_SIZE - 6) + identity_size + 1;
+
+    slice_set_uint16_le(output, 0, 1); /* one item */
+    slice_set_uint16_le(output, 2, EIP_CPF_ITEM_IDENTITY);
+    slice_set_uint16_le(output, 4, (uint16_t)item_size);
+    slice_set_uint16_le(output, 6, EIP_VERSION);
+
+    /* sockaddr_in, big endian: family, port, address, then 8 zero bytes. */
+    slice_set_uint8(output, 8, 0);
+    slice_set_uint8(output, 9, 2); /* AF_INET */
+    slice_set_uint8(output, 10, (uint8_t)(port >> 8));
+    slice_set_uint8(output, 11, (uint8_t)(port & 0xFF));
+    slice_set_uint8(output, 12, (uint8_t)(plc->local_ip >> 24));
+    slice_set_uint8(output, 13, (uint8_t)((plc->local_ip >> 16) & 0xFF));
+    slice_set_uint8(output, 14, (uint8_t)((plc->local_ip >> 8) & 0xFF));
+    slice_set_uint8(output, 15, (uint8_t)(plc->local_ip & 0xFF));
+    for(size_t i = 16; i < EIP_LIST_IDENTITY_HEADER_SIZE; i++) { slice_set_uint8(output, i, 0); }
+
+    log_info("Answering ListIdentity.");
+
+    return slice_from_slice(output, 0, 6 + item_size);
 }

@@ -42,6 +42,13 @@
 extern slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *context);
 extern slice_s cip_dispatch_unconnected_request(slice_s input, slice_s output, plc_s *context);
 
+/*
+ * The Identity object's attributes as Get Attributes All returns them -- vendor, device type,
+ * product code, revision, status, serial number and product name -- at the start of output.
+ * ListIdentity carries the same bytes.  Returns the size written, 0 if it does not fit.
+ */
+extern size_t cip_encode_identity(slice_s output, plc_s *plc);
+
 /* a CIP response header for cip_cmd with status cip_err, plus two bytes of extended status when extend is set. */
 extern slice_s make_cip_log_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
 

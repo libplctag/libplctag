@@ -312,6 +312,12 @@ typedef struct plc_s {
     /* response delay */
     int response_delay;
 
+    /*
+     * The local IPv4 address, host order, that the ListIdentity reply advertises.  The UDP
+     * listener sets it per request to the interface facing the sender; 0 otherwise.
+     */
+    uint32_t local_ip;
+
     /* list of tags served by this "PLC" */
     struct tag_def_s *tags;
 

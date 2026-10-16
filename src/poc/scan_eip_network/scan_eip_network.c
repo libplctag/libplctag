@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -635,10 +636,18 @@ int main(int argc, char *argv[]) {
          "scan.network",
          "Network in CIDR notation (e.g., 192.168.1.0/24)",
          {.has_default = false}},
+        {"port",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "scan.port",
+         "UDP port to send ListIdentity to (default 44818)",
+         {.has_default = true, .value.int_val = EIP_BROADCAST_PORT}},
     };
     const char *network_str = NULL;
     int64_t delay_ms_val = 0;
     uint32_t delay_ms = 0;
+    int64_t port = EIP_BROADCAST_PORT;
     cidr_net_t network = {0};
     struct in_addr local_addr = {0};
     socket_t broadcast_sock = INVALID_SOCKET;
@@ -661,17 +670,23 @@ int main(int argc, char *argv[]) {
     err = args_parse(argc, (const char **)argv, flags, sizeof(flags) / sizeof(flags[0]), &args_result);
     if(err != UTIL_OK) {
         fprintf(stderr, "ERROR: Argument parsing failed: %s\n", args_get_error_detail(&args_result));
-        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> --network=<w.x.y.z/p>\n", argv[0]);
+        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> --network=<w.x.y.z/p> [--port=<port>]\n", argv[0]);
         goto cleanup;
     }
 
     /* Extract parsed values */
     delay_ms_val = args_get_int(&args_result, "delay-max-ms");
     network_str = args_get_string(&args_result, "network");
+    port = args_get_int(&args_result, "port");
 
     if(!network_str) {
         fprintf(stderr, "ERROR: Missing required --network argument\n");
-        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> --network=<w.x.y.z/p>\n", argv[0]);
+        fprintf(stderr, "USAGE: %s --delay-max-ms=<100-2000> --network=<w.x.y.z/p> [--port=<port>]\n", argv[0]);
+        goto cleanup;
+    }
+
+    if(port < 1 || port > 65535) {
+        fprintf(stderr, "ERROR: port must be 1-65535, got %" PRId64 "\n", port);
         goto cleanup;
     }
 
@@ -709,7 +724,7 @@ int main(int argc, char *argv[]) {
     broadcast_in_addr.s_addr = htonl(network.broadcast);
     char broadcast_str[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &broadcast_in_addr, broadcast_str, sizeof(broadcast_str));
-    socket_address_init(&broadcast_addr, broadcast_str, EIP_BROADCAST_PORT);
+    socket_address_init(&broadcast_addr, broadcast_str, (uint16_t)port);
 
     /* Send request */
     err = socket_sendto_buf(broadcast_sock, &broadcast_addr, &request_buf);

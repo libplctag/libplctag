@@ -171,6 +171,9 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
  * separate namespaces -- strerror() on a Winsock code is meaningless -- so pick
  * the right source per platform and let err_to_string() render it.
  */
+static SOCKET open_bound_socket(const char *listening_port, int type);
+
+
 static int socket_last_error(void) {
 #ifdef IS_WINDOWS
     return err_from_winsock(WSAGetLastError());
@@ -191,13 +194,36 @@ static int socket_last_error(void) {
  * accepting anything. The specific reason is logged here instead.
  */
 SOCKET socket_open_tcp_server(const char *listening_port) {
+    SOCKET sock = open_bound_socket(listening_port, SOCK_STREAM);
+    int rc = 0;
+
+    if(sock == INVALID_SOCKET) { return INVALID_SOCKET; }
+
+    rc = listen(sock, LISTEN_QUEUE);
+    if(rc < 0) {
+        int listen_err = socket_last_error();
+
+        log_error("ERROR: Unable to listen() on port %s: %s", listening_port, err_to_string(listen_err));
+        socket_close(sock);
+        return INVALID_SOCKET;
+    }
+
+    return sock;
+}
+
+
+SOCKET socket_open_udp_server(const char *listening_port) { return open_bound_socket(listening_port, SOCK_DGRAM); }
+
+
+/* a socket of the given type bound to the port on every interface, or INVALID_SOCKET. */
+static SOCKET open_bound_socket(const char *listening_port, int type) {
     struct sockaddr_in address = {0};
     SOCKET sock = INVALID_SOCKET;
     SOCKET sock_opt = 0;
     int rc = 0;
 
 #ifdef IS_WINDOWS
-    /* Windows needs special initialization. */
+    /* Windows needs special initialization.  It counts calls, so a second one is harmless. */
     static WSADATA winsock_data;
     rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
 
@@ -208,7 +234,7 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
 #endif
 
     /* create the socket */
-    sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
+    sock = socket(AF_INET, type, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
         log_error("ERROR: socket() failed for port %s: %s", listening_port, err_to_string(socket_last_error()));
         return INVALID_SOCKET;
@@ -235,15 +261,6 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
         int bind_err = socket_last_error();
 
         log_error("ERROR: Unable to bind() to port %s: %s", listening_port, err_to_string(bind_err));
-        socket_close(sock);
-        return INVALID_SOCKET;
-    }
-
-    rc = listen(sock, LISTEN_QUEUE);
-    if(rc < 0) {
-        int listen_err = socket_last_error();
-
-        log_error("ERROR: Unable to listen() on port %s: %s", listening_port, err_to_string(listen_err));
         socket_close(sock);
         return INVALID_SOCKET;
     }
@@ -419,4 +436,74 @@ slice_s socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms) {
         log_info("Socket select error trying to write!\n");
         return slice_make_err(ERR_SOCKET_SELECT);
     }
+}
+
+
+slice_s socket_read_from(SOCKET sock, slice_s in_buf, uint32_t timeout_ms, socket_peer_s *peer) {
+    fd_set read_fd_set;
+    TIMEVAL timeout;
+    socklen_t peer_len = (socklen_t)sizeof(peer->addr);
+    int rc = 0;
+
+    timeout.tv_sec = (time_t)(timeout_ms / 1000);
+    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+
+    FD_ZERO(&read_fd_set);
+    FD_SET(sock, &read_fd_set);
+
+    rc = select((int)(unsigned int)sock + 1, &read_fd_set, NULL, NULL, &timeout);
+    if(rc == 0) { return slice_make_err(ERR_SOCKET_TIMEOUT); }
+    if(rc < 0) { return slice_make_err(ERR_SOCKET_SELECT); }
+
+#ifdef IS_WINDOWS
+    rc = (int)recvfrom(sock, (char *)slice_get_bytes(in_buf, 0), (int)slice_len(in_buf), 0, (struct sockaddr *)peer->addr,
+                       &peer_len);
+#else
+    rc = (int)recvfrom(sock, (char *)slice_get_bytes(in_buf, 0), (size_t)slice_len(in_buf), 0, (struct sockaddr *)peer->addr,
+                       &peer_len);
+#endif
+    if(rc < 0) { return slice_make_err(ERR_SOCKET_READ); }
+
+    peer->len = (uint32_t)peer_len;
+
+    return slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc);
+}
+
+
+slice_s socket_write_to(SOCKET sock, slice_s out_buf, socket_peer_s *peer) {
+    int rc = 0;
+
+#ifdef IS_WINDOWS
+    rc = (int)sendto(sock, (char *)slice_get_bytes(out_buf, 0), (int)slice_len(out_buf), 0, (struct sockaddr *)peer->addr,
+                     (int)peer->len);
+#else
+    rc = (int)sendto(sock, (char *)slice_get_bytes(out_buf, 0), (size_t)slice_len(out_buf), 0, (struct sockaddr *)peer->addr,
+                     (socklen_t)peer->len);
+#endif
+    if(rc < 0) { return slice_make_err(ERR_SOCKET_WRITE); }
+
+    return slice_from_slice(out_buf, 0, (size_t)(unsigned int)rc);
+}
+
+
+/*
+ * The local IPv4 address, host order, that traffic to peer leaves from, or 0.  Connecting a
+ * UDP socket sends nothing; it only makes the kernel pick the route.
+ */
+uint32_t socket_local_ipv4_toward(socket_peer_s *peer) {
+    struct sockaddr_in local = {0};
+    socklen_t local_len = (socklen_t)sizeof(local);
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
+    uint32_t result = 0;
+
+    if(sock == INVALID_SOCKET) { return 0; }
+
+    if(connect(sock, (struct sockaddr *)peer->addr, (socklen_t)peer->len) == 0
+       && getsockname(sock, (struct sockaddr *)&local, &local_len) == 0) {
+        result = ntohl(local.sin_addr.s_addr);
+    }
+
+    socket_close(sock);
+
+    return result;
 }
