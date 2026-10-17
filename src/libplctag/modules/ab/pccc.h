@@ -64,7 +64,6 @@ extern const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size);
 /* the library error for the same PCCC STS/EXT STS bytes pccc_decode_error() describes. */
 extern int pccc_status_to_rc(uint8_t *error_ptr, size_t error_size);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length);
-extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
 
 /*
  * The front of a PCCC request carried by the Execute PCCC service, and the PCCC command
@@ -106,7 +105,6 @@ START_PACK typedef struct {
 
 /* generic direct ethernet tag functions */
 extern int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size, bool is_dhp);
-extern int pccc_tag_write_start(plc_tag_p tag_arg);
 
 /*
  * Write the request prefix and return the first byte after it.  is_dhp picks the DH+ routing

@@ -128,6 +128,7 @@ static int pccc_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
 static int pccc_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int plc5_encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 static int slc_encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+static int pccc_tag_write_start(plc_tag_p tag_arg);
 
 
 
@@ -549,8 +550,7 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
      * type value.  We stop after 4 bytes.  Hopefully
      * that works.
      *
-     * The extension bytes are little-endian, the same order
-     * pccc_encode_dt_byte() writes them and the same order encode_data()
+     * The extension bytes are little-endian, the same order encode_data()
      * uses for the equivalent escape in a logical address.
      */
 
@@ -594,64 +594,6 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, i
     data++;
 
     return data;
-}
-
-
-int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size) {
-    uint8_t *dt_byte = data;
-    uint8_t d_byte;
-    uint8_t t_byte;
-    int size_bytes;
-
-    /* increment past the dt_byte */
-    data++;
-    buf_size--;
-
-    /* if data type fits in 3 bits then
-     * just use the dt_byte.
-     */
-
-    if(data_type <= 0x07) {
-        t_byte = (uint8_t)data_type;
-        data_type = 0;
-    } else {
-        size_bytes = 0;
-
-        while((data_type & 0xFF) && data_size) {
-            *data = data_type & 0xFF;
-            data_type >>= 8;
-            size_bytes++;
-            buf_size--;
-            data++;
-        }
-
-        t_byte = (uint8_t)(0x08 | size_bytes);
-    }
-
-    if(data_size <= 0x07) {
-        d_byte = (uint8_t)data_size;
-        data_size = 0;
-    } else {
-        size_bytes = 0;
-
-        while((data_size & 0xFF) && data_size) {
-            *data = data_size & 0xFF;
-            data_size >>= 8;
-            size_bytes++;
-            buf_size--;
-            data++;
-        }
-
-        d_byte = (uint8_t)(0x08 | size_bytes);
-    }
-
-    *dt_byte = (uint8_t)((t_byte << 4) | d_byte);
-
-    /* did we succeed? */
-    if(buf_size == 0 || data_type != 0 || data_size != 0) { return 0; }
-
-
-    return (int)(data - dt_byte);
 }
 
 
@@ -1627,7 +1569,7 @@ static int pccc_check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_s
 }
 
 
-int pccc_tag_write_start(plc_tag_p tag_arg) {
+static int pccc_tag_write_start(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
 
     /* the SLC masked write's mask is only 16 bits. */

@@ -52,7 +52,17 @@
 #include <utils/debug.h>
 
 
-void cip_encode_route_timeout(int timeout_ms, uint8_t *secs_per_tick, uint8_t *timeout_ticks) {
+static void cip_encode_route_timeout(int timeout_ms, uint8_t *secs_per_tick, uint8_t *timeout_ticks);
+
+
+/*
+ * Encode a CIP route timeout as the priority/tick and tick-count pair the Connection
+ * Manager expects.  The low nibble of the tick byte gives the tick size as 2^n
+ * milliseconds and the count byte says how many ticks.  The smallest tick whose 255-count
+ * maximum reaches the timeout is chosen and the count rounded up, so the encoded value is
+ * never shorter than asked for.
+ */
+static void cip_encode_route_timeout(int timeout_ms, uint8_t *secs_per_tick, uint8_t *timeout_ticks) {
     uint8_t tick_exponent = 0;
 
     if(timeout_ms < 1) { timeout_ms = 1; }

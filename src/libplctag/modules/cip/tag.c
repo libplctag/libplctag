@@ -57,6 +57,11 @@
 #include <utils/rc.h>
 #include <utils/vector.h>
 
+
+static void cip_tag_destroy(cip_tag_p tag);
+static int cip_tag_send(cip_tag_p tag);
+
+
 /* Default byte order for short strings */
 tag_byte_order_t cip_short_string_byte_order = {.is_allocated = 0,
 
@@ -88,7 +93,7 @@ tag_byte_order_t cip_short_string_byte_order = {.is_allocated = 0,
  * that test: the Omron copy this replaced dereferenced the pointer in its first pdebug and
  * again inside the null branch itself.
  */
-void cip_tag_destroy(cip_tag_p tag) {
+static void cip_tag_destroy(cip_tag_p tag) {
     cip_conn_p conn = NULL;
 
     if(!tag) {
@@ -318,7 +323,12 @@ int cip_tag_abort(cip_tag_p tag) {
 }
 
 
-int cip_tag_send(cip_tag_p tag) {
+/*
+ * Hand the tag to its connection, whose handler encodes the request the tag's read or write
+ * op state calls for, sends it, and decodes the reply with the vtable's encode_* and decode_*.
+ * The caller has started the op (tag_op_start()) first.
+ */
+static int cip_tag_send(cip_tag_p tag) {
     /* a tag the library is still building waits for activate to queue it. */
     if(!tag->activated) { return PLCTAG_STATUS_OK; }
 

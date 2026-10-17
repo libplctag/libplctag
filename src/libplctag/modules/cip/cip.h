@@ -46,15 +46,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * Encode a CIP route timeout as the priority/tick and tick-count pair the Connection
- * Manager expects.  The low nibble of the tick byte gives the tick size as 2^n
- * milliseconds and the count byte says how many ticks.  The smallest tick whose 255-count
- * maximum reaches the timeout is chosen and the count rounded up, so the encoded value is
- * never shorter than asked for.
- */
-extern void cip_encode_route_timeout(int timeout_ms, uint8_t *secs_per_tick, uint8_t *timeout_ticks);
-
 /* Build an Extended Forward Open (service 0x5B) request into conn->data. */
 extern int cip_encode_forward_open_ex(cip_conn_p conn);
 

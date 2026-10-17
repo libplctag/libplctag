@@ -84,6 +84,8 @@ static int32_t core_get_float64_byte_order(plc_tag_p tag, uint8_t *buffer, int32
 static int32_t core_get_float64_byte_order_size(plc_tag_p tag);
 
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name);
+static int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length);
+static int32_t attr_byte_order_size(const int *order, size_t order_len);
 
 
 /* Attributes the core handles for every tag.  A protocol overrides one by listing the same
@@ -476,14 +478,15 @@ static int32_t attr_format_byte_order(const int *order, size_t order_len, char *
 }
 
 
-int32_t attr_byte_order_size(const int *order, size_t order_len) {
+/* Render a byte order array, e.g. {0,1,2,3}, as the "0,1,2,3" text the tag string uses. */
+static int32_t attr_byte_order_size(const int *order, size_t order_len) {
     char scratch[32] = {0};
 
     return attr_format_byte_order(order, order_len, &scratch[0], sizeof(scratch));
 }
 
 
-int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length) {
+static int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length) {
     char scratch[32] = {0};
     int32_t size = attr_format_byte_order(order, order_len, &scratch[0], sizeof(scratch));
 

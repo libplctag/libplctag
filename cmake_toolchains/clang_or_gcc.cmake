@@ -106,8 +106,8 @@ set(ASAN_PTR_FLAGS "")
 plctag_try_sanitize_flag(ASAN_PTR_FLAGS "-fsanitize=pointer-compare")
 plctag_try_sanitize_flag(ASAN_PTR_FLAGS "-fsanitize=pointer-subtract")
 
-# Client (library/tests/examples/client-side tools) and server (ab_server, ab_server_fiber,
-# modbus_server*) binaries never link together, so each gets its own independent sanitizer
+# Client (library/tests/examples/client-side tools) and server (ab_server,
+# modbus_server) binaries never link together, so each gets its own independent sanitizer
 # choice. CLIENT_SANITIZE_FLAGS folds into the shared CMAKE_C_FLAGS_DEBUG below (so every
 # target gets it by default); server CMakeLists.txt files override CMAKE_C_FLAGS locally with
 # CMAKE_C_FLAGS_DEBUG_BASE + SERVER_SANITIZE_FLAGS instead. See src/tools/ab_server/CMakeLists.txt.
@@ -156,7 +156,7 @@ set(CMAKE_C_FLAGS_MINSIZEREL " -Os -DNDEBUG -DPLCTAG_COMPILE_DEBUG_LEVEL=3 -Wall
 set(CMAKE_C_FLAGS_DEBUG " -O0 -g -Wall -DPLCTAG_COMPILE_DEBUG_LEVEL=${MAX_DEBUG_LEVEL} -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer -std=c11 ${EXTRA_COMPILE_FLAGS_DEBUG}")
 
 # Same as CMAKE_C_FLAGS_DEBUG but without the client's sanitizer flags -- servers
-# (ab_server, ab_server_fiber, modbus_server*) build from this plus SERVER_SANITIZE_FLAGS.
+# (ab_server, modbus_server) build from this plus SERVER_SANITIZE_FLAGS.
 set(CMAKE_C_FLAGS_DEBUG_BASE " -O0 -g -Wall -DPLCTAG_COMPILE_DEBUG_LEVEL=${MAX_DEBUG_LEVEL} -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer -std=c11 ${EXTRA_COMPILE_FLAGS_DEBUG_BASE}")
 
 set(CMAKE_CXX_FLAGS_MINSIZEREL " -Os -DNDEBUG -DPLCTAG_COMPILE_DEBUG_LEVEL=3 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${EXTRA_COMPILE_FLAGS_MINSIZEREL}")

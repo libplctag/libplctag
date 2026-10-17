@@ -462,18 +462,8 @@ typedef cip_conn_t *cip_conn_p;
 
 /* shared connection handling, see modules/cip/conn.c */
 
-extern int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn);
-extern int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
-
-extern int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn);
-extern cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                                   int connection_group_id, cip_plc_type_t plc_type);
-
 extern uint16_t next_conn_serial_number(uint16_t current);
-extern uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn);
 extern uint64_t session_get_new_seq_id(cip_conn_p conn);
-extern int session_match_valid(const char *host, const char *path, cip_conn_p conn);
-extern int session_close_socket(cip_conn_p conn);
 extern int session_get_available_cip_payload_space(cip_conn_p conn);
 
 /*
@@ -487,15 +477,8 @@ extern int session_get_available_cip_payload_space(cip_conn_p conn);
  */
 extern int cip_conn_max_cip_payload(cip_conn_p conn);
 
-extern int send_eip_request(cip_conn_p conn, int timeout);
 extern int recv_eip_response(cip_conn_p conn, int timeout);
-extern int send_forward_open_request(cip_conn_p conn);
-extern int send_forward_close_req(cip_conn_p conn);
-extern int recv_forward_close_resp(cip_conn_p conn);
-extern int perform_forward_close(cip_conn_p conn);
-extern int session_open_socket(cip_conn_p conn);
 extern int prepare_request(cip_conn_p conn);
-extern int session_unregister(cip_conn_p conn);
 
 /* frame the exchange in conn->slots, and find one reply in what came back. */
 extern int pack_exchange(cip_conn_p conn);
@@ -509,10 +492,6 @@ extern int find_reply(cip_conn_p conn, int32_t index, uint8_t **reply, int32_t *
 extern int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag);
 extern void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag);
 
-extern int session_register(cip_conn_p conn);
-extern void session_destroy(void *conn_arg);
-extern int receive_forward_open_response(cip_conn_p conn);
-
 /*
  * How much of the single reply packet a request expecting reply_size bytes will consume: its
  * own reply plus the offset entry and the worst-case inter-packet padding.  A reply size of
@@ -524,9 +503,6 @@ static inline int32_t reply_budget_cost(int32_t reply_size) {
 
     return reply_size + CIP_MSP_MAX_PACKET_PADDING + CIP_MSP_OFFSET_ENTRY_SIZE;
 }
-extern int process_requests(cip_conn_p conn);
-extern THREAD_FUNC(session_handler);
-extern void session_set_connection_status(cip_conn_p conn, int32_t new_status);
 
 
 /* the one connection list, for every CIP family.  Started and torn down with the library. */

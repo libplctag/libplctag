@@ -77,6 +77,27 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *fam
                                   int *is_new_conn);
 static int session_create(cip_conn_list_t *list, const cip_family_t *family, const char *host, const char *path,
                           int use_connected_msg, int connection_group_id, cip_conn_p *conn_out);
+static int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn);
+static int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
+static int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn);
+static cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
+                                                   int connection_group_id, cip_plc_type_t plc_type);
+static uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn);
+static int session_match_valid(const char *host, const char *path, cip_conn_p conn);
+static int session_close_socket(cip_conn_p conn);
+static int send_eip_request(cip_conn_p conn, int timeout);
+static int send_forward_open_request(cip_conn_p conn);
+static int send_forward_close_req(cip_conn_p conn);
+static int recv_forward_close_resp(cip_conn_p conn);
+static int perform_forward_close(cip_conn_p conn);
+static int session_open_socket(cip_conn_p conn);
+static int session_unregister(cip_conn_p conn);
+static int session_register(cip_conn_p conn);
+static void session_destroy(void *conn_arg);
+static int receive_forward_open_response(cip_conn_p conn);
+static int process_requests(cip_conn_p conn);
+static THREAD_FUNC(session_handler);
+static void session_set_connection_status(cip_conn_p conn, int32_t new_status);
 
 
 /*
@@ -129,7 +150,7 @@ uint16_t next_conn_serial_number(uint16_t current) {
     return next;
 }
 
-uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn) {
+static uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn) {
     /* check for rollover; zero is not a valid sequence id. */
     if((++conn->session_seq_id) == 0) { conn->session_seq_id = 1; }
 
@@ -144,7 +165,7 @@ uint64_t session_get_new_seq_id(cip_conn_p conn) {
     return res;
 }
 
-int session_match_valid(const char *host, const char *path, cip_conn_p conn) {
+static int session_match_valid(const char *host, const char *path, cip_conn_p conn) {
     if(!conn) { return 0; }
 
     if(!str_length(host)) {
@@ -164,7 +185,7 @@ int session_match_valid(const char *host, const char *path, cip_conn_p conn) {
     return 1;
 }
 
-int session_close_socket(cip_conn_p conn) {
+static int session_close_socket(cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
 
     if(conn->sock) {
@@ -257,7 +278,7 @@ static int session_list_init(cip_conn_list_t *list) {
 
 
 
-int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
+static int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
 
     if(!conn) { return PLCTAG_ERR_NULL_PTR; }
@@ -272,7 +293,7 @@ int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
 }
 
 
-int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
+static int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
 
     if(!conn || !list->conns) { return 0; }
@@ -305,7 +326,7 @@ static int32_t session_list_count(cip_conn_list_t *list) {
 }
 
 
-int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
+static int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
@@ -322,8 +343,8 @@ int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
 }
 
 
-cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                            int connection_group_id, cip_plc_type_t plc_type) {
+static cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
+                                                   int connection_group_id, cip_plc_type_t plc_type) {
     for(int i = 0; i < vector_length(list->conns); i++) {
         cip_conn_p conn = vector_get(list->conns, i);
 
@@ -349,7 +370,7 @@ cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *h
 
     return NULL;
 }
-int send_eip_request(cip_conn_p conn, int timeout) {
+static int send_eip_request(cip_conn_p conn, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     int32_t final_rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
@@ -700,7 +721,7 @@ static void forward_open_reset_negotiation(cip_conn_p conn) {
 }
 
 
-int send_forward_open_request(cip_conn_p conn) {
+static int send_forward_open_request(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t max_payload;
 
@@ -748,7 +769,7 @@ int send_forward_open_request(cip_conn_p conn) {
  * not raise these to SESSION_DEFAULT_TIMEOUT to match Forward Open -- they are not the
  * same case.
  */
-int send_forward_close_req(cip_conn_p conn) {
+static int send_forward_close_req(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
@@ -767,7 +788,7 @@ int send_forward_close_req(cip_conn_p conn) {
 }
 
 
-int recv_forward_close_resp(cip_conn_p conn) {
+static int recv_forward_close_resp(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
@@ -786,7 +807,7 @@ int recv_forward_close_resp(cip_conn_p conn) {
 }
 
 
-int perform_forward_close(cip_conn_p conn) {
+static int perform_forward_close(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
@@ -811,7 +832,7 @@ int perform_forward_close(cip_conn_p conn) {
 }
 
 
-int session_open_socket(cip_conn_p conn) {
+static int session_open_socket(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
     char **server_port = NULL;
     int port = 0;
@@ -945,7 +966,7 @@ int prepare_request(cip_conn_p conn) {
 }
 
 
-int session_unregister(cip_conn_p conn) {
+static int session_unregister(cip_conn_p conn) {
     (void)conn;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
@@ -972,7 +993,7 @@ int session_unregister(cip_conn_p conn) {
 
 
 
-int session_register(cip_conn_p conn) {
+static int session_register(cip_conn_p conn) {
     eip_session_reg_req *req;
     eip_encap *resp;
     int rc = PLCTAG_STATUS_OK;
@@ -1050,7 +1071,7 @@ int session_register(cip_conn_p conn) {
 
     return PLCTAG_STATUS_OK;
 }
-void session_destroy(void *conn_arg) {
+static void session_destroy(void *conn_arg) {
     cip_conn_p conn = conn_arg;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
@@ -1206,7 +1227,7 @@ static int session_identify(cip_conn_p conn) {
 }
 
 
-int receive_forward_open_response(cip_conn_p conn) {
+static int receive_forward_open_response(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting");
@@ -1234,7 +1255,7 @@ int receive_forward_open_response(cip_conn_p conn) {
 }
 
 
-int process_requests(cip_conn_p conn) {
+static int process_requests(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
     int32_t slot_count = 0;
 
@@ -1743,12 +1764,12 @@ void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag) {
         }
     }
 }
-void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
+static void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
     conn_watch_set_status(&conn->watch, conn->session_mutex, new_status);
 }
 
 
-THREAD_FUNC(session_handler) {
+static THREAD_FUNC(session_handler) {
     cip_conn_p conn = arg;
     int rc = PLCTAG_STATUS_OK;
     conn->state = SESSION_OPEN_SOCKET_START;

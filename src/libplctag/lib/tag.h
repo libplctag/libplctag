@@ -141,10 +141,6 @@ extern const attr_def_t *attr_find_lib(const char *name);
 extern int32_t attr_copy_string(const char *str, uint8_t *buffer, int32_t buffer_length);
 extern int32_t attr_string_size(const char *str);
 
-/* Render a byte order array, e.g. {0,1,2,3}, as the "0,1,2,3" text the tag string uses. */
-extern int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length);
-extern int32_t attr_byte_order_size(const int *order, size_t order_len);
-
 
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {

@@ -43,7 +43,8 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     # message("${example}:${CMAKE_BUILD_TYPE} is being compiled with flags=${CMAKE_C_FLAGS}")
 
-    add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/compat_utils.c")
+    add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/utils/compat_utils.c")
+    target_include_directories(${example} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../tools/utils")
 
     # STATIC_C_LINKER_OPTIONS/STATIC_CXX_LINKER_OPTIONS (cmake_toolchains/clang_or_gcc.cmake)
     # already go static-free when sanitizers are enabled, same as every other target

@@ -248,13 +248,6 @@ extern int cip_tag_status(cip_tag_p tag);
 extern int cip_tag_abort(cip_tag_p tag);
 
 /*
- * The refcount cleanup for a CIP tag, passed to rc_alloc() by every dialect's tag
- * constructor.  Aborts anything in flight, releases the connection, and frees everything the
- * generic tag owns.  Nothing here is dialect-specific, which is why there is one copy.
- */
-extern void cip_tag_destroy(cip_tag_p tag);
-
-/*
  * The tag attributes every CIP family answers identically.  A family's attr_def_t table
  * points straight at these; only the attributes whose meaning really differs by family
  * stay in that family's own file.
@@ -310,13 +303,6 @@ typedef int (*cip_tag_encode_func)(cip_tag_p tag, uint8_t *dest, int32_t capacit
 /* Parse a reply: the CIP message the connection delivered for this tag, framing stripped. */
 typedef int (*cip_tag_decode_func)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
-
-/*
- * Hand the tag to its connection, whose handler encodes the request the tag's read or write
- * op state calls for, sends it, and decodes the reply with the vtable's encode_* and decode_*.
- * The caller has started the op (tag_op_start()) first.
- */
-extern int cip_tag_send(cip_tag_p tag);
 
 /* the vtable's activate: the library has finished the tag, so the handler may now see it. */
 extern int cip_tag_activate(plc_tag_p tag_arg);
