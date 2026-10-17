@@ -307,7 +307,7 @@ REQUIRED_EXECUTABLES = [
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
-    "test_reconnect_after_outage_sync", "test_shutdown",
+    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
@@ -1005,6 +1005,10 @@ def build_manifest() -> Manifest:
               [exe("test_reconnect_after_outage_async"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
     sec.test("Test sync reconnect after PLC outage",
               [exe("test_reconnect_after_outage_sync"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
+    # Nothing is due and nothing is in flight, so only the handler watching the socket while it
+    # waits can see the server go away.
+    sec.test("a PLC closing an idle connection is noticed at once",
+              [exe("test_idle_peer_close"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
 
     # --- ControlLogix functional/slow (delay=100) section -------------------
     slow_server = ServerSpec(

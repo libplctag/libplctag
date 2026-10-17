@@ -125,6 +125,7 @@ typedef struct {
     int errors_before_disconnect; /* error count before disconnect */
     int errors_after_reconnect;   /* error count after reconnect */
     int errors_during_disconnect; /* calculated: errors that occurred during disconnect */
+    int reads_during_disconnect;  /* successful reads while the server was down */
 } test_state_t;
 
 
@@ -350,14 +351,19 @@ int calc_test_stats(test_state_t *test_state) {
     /*
      * determine if test passed - needs both:
      * 1. Successful reads after reconnect (showing auto_sync_read resumed)
-     * 2. Evidence of disconnection (either errors or pending reads)
+     * 2. Evidence of disconnection: errors, pending reads, or reads stalling while the server
+     *    was down.  The library notices a dropped connection while idle, so no read need be in
+     *    flight to fail; auto-sync reads then simply stop until the reconnect.
      */
     int pending_operations = test_state->read_start_count - test_state->read_success_count;
-    int disconnect_evidence = test_state->errors_during_disconnect > 0;
+    int expected_disconnect_reads = DISCONNECT_TIME_MS / test_state->read_timeout_ms;
+    int reads_stalled = test_state->reads_during_disconnect < expected_disconnect_reads / 10;
+    int disconnect_evidence = test_state->errors_during_disconnect > 0 || reads_stalled;
     int reconnect_success = test_state->read_success_after_reconnect > 0;
 
-    log("Disconnect evidence: %d errors, %d pending operations\n",
-        test_state->errors_after_reconnect - test_state->errors_before_disconnect, pending_operations);
+    log("Disconnect evidence: %d errors, %d pending operations, %d of %d reads while down\n",
+        test_state->errors_after_reconnect - test_state->errors_before_disconnect, pending_operations,
+        test_state->reads_during_disconnect, expected_disconnect_reads);
 
     test_state->test_passed = (reconnect_success && disconnect_evidence);
 
@@ -482,6 +488,7 @@ int run_auto_test(const char *ab_server_cmd) {
     auto_test_state.errors_before_disconnect = read_error_before_disconnect;
     auto_test_state.errors_after_reconnect = read_error_after_reconnect;
     auto_test_state.read_success_after_reconnect = after_reconnect_read_success_count;
+    auto_test_state.reads_during_disconnect = after_disconnect_read_success_count;
 
     log("[DEBUG] About to destroy tag (ID %d)\n", auto_test_state.tag);
     log("[STATUS] Test completed.\n");

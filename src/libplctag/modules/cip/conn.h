@@ -55,9 +55,6 @@
  */
 #define CIP_MAX_FRAMING_SIZE ((int)sizeof(eip_cip_uc_req) + 2 + 255)
 
-/* how long to block in one socket read or write before checking for shutdown */
-#define SOCKET_WAIT_TIMEOUT_MS (20)
-
 
 /* EtherNet/IP encapsulation and Forward Open constants, common to every CIP dialect. */
 #define CIP_EIP_DEFAULT_PORT (44818)
@@ -433,7 +430,6 @@ typedef struct cip_conn_t {
     thread_p handler_thread;
     atomic_int32_t terminating;
     mutex_p session_mutex;
-    cond_p session_wait_cond;
 
     /* connection status and event ring - what connection tags observe */
     conn_event_ring_t watch;
