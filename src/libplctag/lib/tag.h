@@ -250,10 +250,8 @@ typedef struct tag_byte_order_s tag_byte_order_t;
 
 typedef enum {
     TAG_OP_IDLE = 0,
-    TAG_OP_READ_REQUEST,  /* waiting to be sent */
-    TAG_OP_READ_RESPONSE, /* sent, waiting for the reply */
-    TAG_OP_WRITE_REQUEST,
-    TAG_OP_WRITE_RESPONSE
+    TAG_OP_READ_REQUEST, /* a read is in progress, queued or on the wire */
+    TAG_OP_WRITE_REQUEST
 } tag_op_state_t;
 
 
@@ -387,7 +385,7 @@ extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
 #define tag_op_state(tag) ((tag_op_state_t)atomic_get_int32(&(tag)->op_state))
 #define tag_op_set(tag, state) atomic_set_int32(&(tag)->op_state, (int32_t)(state))
 #define tag_op_busy(tag) (tag_op_state(tag) != TAG_OP_IDLE)
-#define tag_op_is_read(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST || tag_op_state(tag) == TAG_OP_READ_RESPONSE)
+#define tag_op_is_read(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST)
 
 /* queue one event; dropped when the tag has no callback. */
 extern void tag_event_push(plc_tag_p tag, int event, int status);

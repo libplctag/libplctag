@@ -97,5 +97,5 @@ extern void tag_driver_tickle_creating_unsafe(tag_driver_t *driver);
  */
 extern void tag_driver_done_unsafe(tag_driver_t *driver, plc_tag_p tag, int64_t now);
 
-/* run the callbacks for every tag that has events, with the connection mutex released. */
+/* run the callbacks for every tag that has events: connection mutex released, each tag's API mutex held. */
 extern void tag_driver_notify(tag_driver_t *driver);

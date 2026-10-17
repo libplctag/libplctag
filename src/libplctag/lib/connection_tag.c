@@ -47,6 +47,7 @@
 
 static int connection_tag_abort(plc_tag_p tag);
 static int connection_tag_status(plc_tag_p tag);
+static int connection_tag_activate(plc_tag_p tag);
 static void connection_tag_deliver(connection_tag_p tag);
 static int32_t connection_get_connection_status(plc_tag_p tag, int32_t *result);
 static void connection_tag_destructor(void *ptr);
@@ -72,6 +73,7 @@ static struct tag_vtable_t connection_tag_vtable = {
     .write = NULL,                     /* not used */
     .wake_plc = NULL,                  /* not used */
     .tag_data_written = NULL,          /* not used */
+    .activate = connection_tag_activate,
     .attribs = connection_tag_attribs,
 };
 
@@ -132,33 +134,41 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
         }
     }
 
-    /*
-     * Watch from here.  The API mutex is held across the add and CREATED so that the handler,
-     * which delivers under it, can only queue connection events behind CREATED.  A connection
-     * already up when the tag joins it reports that state straight after CREATED.
-     */
-    critical_block(tag->api_mutex) {
-        rc = conn_watch_add_watcher(tag->watch, tag->conn_mutex, (plc_tag_p)tag);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(args->debug_module, DEBUG_WARN, 0, "Unable to watch the connection, error %s!", plc_tag_decode_error(rc));
-            tag->status = (int8_t)rc;
-            tag_created((plc_tag_p)tag, rc);
-            break;
-        }
-
-        tag_created((plc_tag_p)tag, PLCTAG_STATUS_OK);
-
-        if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN) {
-            tag_event_push((plc_tag_p)tag, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) { return (plc_tag_p)tag; }
-
     pdebug(args->debug_module, DEBUG_DETAIL, 0, "Done with initial connection status=%s.",
            conn_status_name(tag->last_conn_state));
 
     return (plc_tag_p)tag;
+}
+
+
+/*
+ * Watch from here, once the tag has its id: the handler delivers events from the moment the
+ * tag is on the list.  The library holds the API mutex across this call, so the handler, which
+ * delivers under it, can only queue connection events behind CREATED.  A connection already up
+ * when the tag joins it reports that state straight after CREATED.
+ */
+static int connection_tag_activate(plc_tag_p raw_tag) {
+    connection_tag_p tag = (connection_tag_p)raw_tag;
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    /* no connection: the create already failed. */
+    if(!tag->conn) { return tag->status; }
+
+    rc = conn_watch_add_watcher(tag->watch, tag->conn_mutex, raw_tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to watch the connection, error %s!", plc_tag_decode_error(rc));
+        tag->status = (int8_t)rc;
+        tag_created(raw_tag, rc);
+        return rc;
+    }
+
+    tag_created(raw_tag, PLCTAG_STATUS_OK);
+
+    if(tag->last_conn_state != PLCTAG_CONN_STATUS_DOWN) {
+        tag_event_push(raw_tag, tag->last_conn_state + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK);
+    }
+
+    return PLCTAG_STATUS_OK;
 }
 
 

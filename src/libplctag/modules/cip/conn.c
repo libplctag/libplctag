@@ -1064,8 +1064,6 @@ void session_destroy(void *conn_arg) {
     /* so remove the conn from the list so no one else can reference it. */
     session_list_remove(conn->owner_list, conn);
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", conn->packet_count);
-
     /* terminate the conn thread first. */
     atomic_set_int32(&conn->terminating, 1);
 
@@ -1084,6 +1082,9 @@ void session_destroy(void *conn_arg) {
             conn->handler_thread = NULL;
         }
     }
+
+    /* the handler counts packets until it exits. */
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", conn->packet_count);
 
 
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
