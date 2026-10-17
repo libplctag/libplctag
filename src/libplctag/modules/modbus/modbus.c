@@ -953,11 +953,7 @@ static int reset_plc(modbus_plc_p plc) {
                        "Resetting tag %" PRId32 " from %s to request state due to socket disconnect.", cur->tag_id,
                        op_to_str(tag_op_state(cur)));
 
-                /* If this tag had a pending request, clear it and decrement counter */
-                if(cur->pending_transaction_id != 0) {
-                    cur->pending_transaction_id = 0;
-                    decrement_request_count(plc);
-                }
+                cur->pending_transaction_id = 0;
 
                 /* Reset to the corresponding REQUEST state to allow retry on reconnect */
                 if(tag_op_state(cur) == TAG_OP_READ_RESPONSE) {
@@ -968,8 +964,8 @@ static int reset_plc(modbus_plc_p plc) {
             }
         }
 
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "After reset, in-flight count is: %" PRId32,
-               atomic_get_int32(&plc->pending_request_count));
+        /* nothing is in flight on a closed socket, orphaned requests included. */
+        atomic_set_int32(&plc->pending_request_count, 0);
 
         if(plc->sock) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Closing socket due to error or disconnect.");
@@ -3039,9 +3035,9 @@ static void decrement_request_count(modbus_plc_p plc) {
 /*
  * find_response_tag
  *
- * Scan RESPONSE-state tags at the front of active_tags for one whose
- * pending_transaction_id matches transaction_id.
- * Stops scanning at the first REQUEST-state tag (invariant: RESPONSE tags are always at the front).
+ * Find the RESPONSE-state tag on active_tags whose pending_transaction_id matches
+ * transaction_id.  RESPONSE tags usually sort to the front, but not always: an aborted tag is
+ * IDLE for a moment before mb_abort() takes it off the list, so the whole list is scanned.
  * Returns the matched tag or NULL.
  * Must be called while holding plc->mutex.
  */
@@ -3052,10 +3048,7 @@ static modbus_tag_p find_response_tag(modbus_plc_p plc, uint16_t transaction_id)
         modbus_tag_p tag = vector_get(plc->active_tags, i);
         if(!tag) { continue; }
 
-        if(tag_op_state(tag) != TAG_OP_READ_RESPONSE && tag_op_state(tag) != TAG_OP_WRITE_RESPONSE) {
-            /* Past the RESPONSE-state prefix; no match possible. */
-            break;
-        }
+        if(tag_op_state(tag) != TAG_OP_READ_RESPONSE && tag_op_state(tag) != TAG_OP_WRITE_RESPONSE) { continue; }
 
         if(tag->pending_transaction_id == transaction_id) { return tag; }
     }
@@ -3147,11 +3140,11 @@ int mb_abort(plc_tag_p p_tag) {
     critical_block(tag->plc->mutex) {
         tag_schedule_remove(tag->plc->active_tags, (plc_tag_p)tag);
 
-        /* Clear any in-flight request counter slot this tag occupied. */
-        if(tag->pending_transaction_id != 0) {
-            tag->pending_transaction_id = 0;
-            decrement_request_count(tag->plc);
-        }
+        /*
+         * Orphan any request on the wire.  Its slot stays counted until the reply arrives and is
+         * discarded as unmatched; reset_plc() frees it if the connection drops first.
+         */
+        tag->pending_transaction_id = 0;
     }
 
     /* Now safe to reset tag state fields with no other thread observing the tag. */
@@ -3353,11 +3346,7 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
     critical_block(tag->plc->mutex) {
         switch(tag_op_state(tag)) {
             case TAG_OP_READ_RESPONSE:
-                /*
-                 * Orphan the reply by clearing the transaction ID: when it arrives the re-verify
-                 * in tickle_all_tags() fails and it is discarded.
-                 */
-                decrement_request_count(tag->plc);
+                /* orphan the reply; when it arrives it is discarded as unmatched, freeing its slot. */
                 tag->pending_transaction_id = 0;
                 /* fall through */
 

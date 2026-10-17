@@ -46,7 +46,7 @@
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/connection_tag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/lib/tag_schedule.h>
+#include <libplctag/lib/tag_driver.h>
 #include <libplctag/modules/cip/cip.h>
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/conn.h>
@@ -68,19 +68,11 @@
 static int session_list_init(cip_conn_list_t *list);
 static int32_t session_list_count(cip_conn_list_t *list);
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
-static void tickle_due_tags_unsafe(cip_conn_p conn, int64_t now);
-static void tickle_waiting_creates_unsafe(cip_conn_p conn);
-static void tickle_tags_unsafe(cip_conn_p conn, cip_tag_p *tags, int32_t count, int64_t now);
 static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now);
 static int dispatch_replies_unsafe(cip_conn_p conn);
 static void requeue_slots_unsafe(cip_conn_p conn);
 static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc);
-static void arm_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int64_t now);
-static void notify_later_unsafe(cip_conn_p conn, cip_tag_p tag);
-static void notify_tags(cip_conn_p conn);
 static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc);
-static bool has_due_tags_unsafe(cip_conn_p conn, int64_t now);
-static int64_t next_tag_time_unsafe(cip_conn_p conn);
 static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *family, attr attribs, cip_conn_p *tag_conn,
                                   int *is_new_conn);
 static int session_create(cip_conn_list_t *list, const cip_family_t *family, const char *host, const char *path,
@@ -1114,15 +1106,7 @@ void session_destroy(void *conn_arg) {
         if(conn->sock) { session_close_socket(conn); }
 
         /* every tag holds a reference to its connection, so no tag is left on the list. */
-        if(conn->active) {
-            vector_destroy(conn->active);
-            conn->active = NULL;
-        }
-
-        if(conn->notify) {
-            vector_destroy(conn->notify);
-            conn->notify = NULL;
-        }
+        tag_driver_destroy(&conn->driver);
 
         if(conn->staging) {
             mem_free(conn->staging);
@@ -1266,7 +1250,7 @@ int process_requests(cip_conn_p conn) {
     critical_block(conn->session_mutex) {
         int64_t now = time_ms();
 
-        tickle_due_tags_unsafe(conn, now);
+        tag_driver_tickle_due_unsafe(&conn->driver, now);
         slot_count = build_exchange_unsafe(conn, now);
     }
 
@@ -1497,81 +1481,11 @@ int process_requests(cip_conn_p conn) {
         }
     }
 
-    notify_tags(conn);
+    tag_driver_notify(&conn->driver);
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Done.");
 
     return rc;
-}
-
-
-/*
- * Run the library's per-tag housekeeping for the tags whose time has come but which have no
- * operation in flight: start an auto-sync read or write when one is due, act on an abort
- * request.  What it starts lands back on the list as an operation; anything else is re-armed
- * for its next deadline, or dropped if it has none.
- *
- * Holds session_mutex and only tries each tag's API mutex.  A busy tag stays due.
- */
-static void tickle_due_tags_unsafe(cip_conn_p conn, int64_t now) {
-    cip_tag_p due[CIP_TICKLE_BATCH];
-    int32_t count = 0;
-
-    for(int32_t i = 0; i < vector_length(conn->active) && count < CIP_TICKLE_BATCH; i++) {
-        cip_tag_p tag = vector_get(conn->active, i);
-
-        if(tag->op_time > now) { break; }
-
-        if(!tag_op_busy(tag)) { due[count++] = tag; }
-    }
-
-    tickle_tags_unsafe(conn, due, count, now);
-}
-
-
-/*
- * The tags waiting for their create to finish when the connection cannot get to IDLE, where
- * tickle_due_tags_unsafe() would reach them: a probed connection the device refused, whose
- * deferred tags fail with the refusal.
- */
-static void tickle_waiting_creates_unsafe(cip_conn_p conn) {
-    cip_tag_p waiting[CIP_TICKLE_BATCH];
-    int32_t count = 0;
-
-    for(int32_t i = 0; i < vector_length(conn->active) && count < CIP_TICKLE_BATCH; i++) {
-        cip_tag_p tag = vector_get(conn->active, i);
-
-        if(tag->create_read_status == PLCTAG_STATUS_PENDING && !tag_op_busy(tag)) {
-            waiting[count++] = tag;
-        }
-    }
-
-    tickle_tags_unsafe(conn, waiting, count, time_ms());
-}
-
-
-/*
- * Run the library's housekeeping and the kind's own tickler, if it has one, for each tag:
- * @raw finishes its create once the connection is up, and a deferred tag sets itself up once
- * the device is identified.  Holds session_mutex and only tries each tag's API mutex; a busy
- * tag stays on the list for next time.
- */
-static void tickle_tags_unsafe(cip_conn_p conn, cip_tag_p *tags, int32_t count, int64_t now) {
-    for(int32_t i = 0; i < count; i++) {
-        cip_tag_p tag = tags[i];
-
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
-
-        plc_tag_generic_tickler((plc_tag_p)tag);
-
-        if(tag->vtable->tickler) { tag->vtable->tickler((plc_tag_p)tag); }
-
-        if(!tag_op_busy(tag)) { arm_tag_unsafe(conn, tag, now); }
-
-        notify_later_unsafe(conn, tag);
-
-        mutex_unlock(tag->api_mutex);
-    }
 }
 
 
@@ -1593,8 +1507,8 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
 
     conn->slot_count = 0;
 
-    while(index < vector_length(conn->active) && conn->slot_count < MAX_REQUESTS) {
-        cip_tag_p tag = vector_get(conn->active, index);
+    while(index < vector_length(conn->driver.active) && conn->slot_count < MAX_REQUESTS) {
+        cip_tag_p tag = vector_get(conn->driver.active, index);
         tag_op_plan_t plan = {0};
         bool is_read = tag_op_is_read(tag);
         tag_encode_func encode = is_read ? tag->vtable->encode_read : tag->vtable->encode_write;
@@ -1668,7 +1582,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
         reply_space -= reply_budget_cost(plan.reply_size);
 
         /* off the list while it is on the wire; it keeps its op_time in case it has to go again. */
-        tag_schedule_remove(conn->active, (plc_tag_p)tag);
+        tag_driver_forget_unsafe(&conn->driver, (plc_tag_p)tag);
         mutex_unlock(tag->api_mutex);
 
         if(!bundle) { break; }
@@ -1723,7 +1637,7 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
 
         if(rc == PLCTAG_STATUS_PENDING) {
             tag->status = (int8_t)PLCTAG_STATUS_PENDING;
-            tag_schedule_insert(conn->active, (plc_tag_p)tag, time_ms());
+            tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
         } else {
             finish_tag_unsafe(conn, tag, rc);
         }
@@ -1744,7 +1658,7 @@ static void requeue_slots_unsafe(cip_conn_p conn) {
         cip_tag_p tag = conn->slots[i].tag;
 
         if(tag) {
-            tag_schedule_insert(conn->active, (plc_tag_p)tag, tag->op_time);
+            tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, tag->op_time);
             conn->slots[i].tag = NULL;
         }
     }
@@ -1758,73 +1672,7 @@ static void requeue_slots_unsafe(cip_conn_p conn) {
  */
 static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc) {
     cip_tag_op_done(tag, rc);
-
-    arm_tag_unsafe(conn, tag, time_ms());
-    notify_later_unsafe(conn, tag);
-}
-
-
-/*
- * Put a tag with no operation in flight on the list at its next auto-sync deadline, or take it
- * off when it has none.  The library starts the operation when the deadline comes
- * (tickle_due_tags_unsafe()), which is why a deadline already past is set just after now
- * rather than at it: the library only starts a read whose time is strictly past.
- */
-static void arm_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int64_t now) {
-    int64_t when = 0;
-
-    /* a dirty tag reads after its write; a write in flight holds the read back too. */
-    if(tag->auto_sync_read_ms > 0 && !tag->tag_is_dirty && !tag_op_busy(tag)) {
-        when = (tag->auto_sync_next_read > now) ? tag->auto_sync_next_read : now + 1;
-    }
-
-    if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
-        int64_t write_time = (tag->auto_sync_next_write > now) ? tag->auto_sync_next_write : now + 1;
-
-        if(!when || write_time < when) { when = write_time; }
-    }
-
-    /* a create its kind's tickler finishes -- @raw, a deferred tag -- is looked at again shortly. */
-    if(tag->create_read_status == PLCTAG_STATUS_PENDING && tag->vtable->tickler) {
-        int64_t create_time = now + SESSION_IDLE_WAIT_TIME;
-
-        if(!when || create_time < when) { when = create_time; }
-    }
-
-    if(when) {
-        tag_schedule_insert(conn->active, (plc_tag_p)tag, when);
-    } else {
-        tag_schedule_remove(conn->active, (plc_tag_p)tag);
-    }
-}
-
-
-/*
- * Callbacks run inside the tag's API mutex, which the handler may not wait for while it holds
- * session_mutex.  So a tag that has events to report is remembered here, with a reference that
- * keeps it alive, and notify_tags() runs its callbacks after session_mutex is released.  The
- * tag is linked to the connection, so its reference count cannot have reached zero unless its
- * destructor is already waiting on session_mutex, and then rc_inc() refuses.
- */
-static void notify_later_unsafe(cip_conn_p conn, cip_tag_p tag) {
-    cip_tag_p held = rc_inc(tag);
-
-    if(held) { vector_set(conn->notify, vector_length(conn->notify), held); }
-}
-
-
-/*
- * Run the callbacks remembered by notify_later_unsafe().  Only the handler thread adds to or
- * drains the list, and it calls this with session_mutex released.  Dropping the reference can
- * be the tag's last; its destructor then runs on the rc cleanup thread.
- */
-static void notify_tags(cip_conn_p conn) {
-    while(vector_length(conn->notify) > 0) {
-        plc_tag_p tag = vector_remove(conn->notify, 0);
-
-        plc_tag_generic_handle_event_callbacks(tag);
-        rc_dec(tag);
-    }
+    tag_driver_done_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
 }
 
 
@@ -1841,8 +1689,8 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
     int32_t failed = 0;
     int32_t index = 0;
 
-    while(index < vector_length(conn->active)) {
-        cip_tag_p tag = vector_get(conn->active, index);
+    while(index < vector_length(conn->driver.active)) {
+        cip_tag_p tag = vector_get(conn->driver.active, index);
 
         if(!tag_op_busy(tag)) {
             index++;
@@ -1872,26 +1720,10 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
 }
 
 
-/* is there a tag whose time has come?  Called with session_mutex held. */
-static bool has_due_tags_unsafe(cip_conn_p conn, int64_t now) {
-    plc_tag_p first = (vector_length(conn->active) > 0) ? vector_get(conn->active, 0) : NULL;
-
-    return (first && first->op_time <= now);
-}
-
-
-/* when the handler next has to look at a tag, 0 for nothing scheduled.  Called with session_mutex held. */
-static int64_t next_tag_time_unsafe(cip_conn_p conn) {
-    plc_tag_p first = (vector_length(conn->active) > 0) ? vector_get(conn->active, 0) : NULL;
-
-    return first ? first->op_time : 0;
-}
-
-
 int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag) {
     if(!conn || !tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    critical_block(conn->session_mutex) { tag_schedule_insert(conn->active, (plc_tag_p)tag, time_ms()); }
+    critical_block(conn->session_mutex) { tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms()); }
 
     cond_signal(conn->session_wait_cond);
 
@@ -1903,7 +1735,7 @@ void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag) {
     if(!conn || !tag) { return; }
 
     critical_block(conn->session_mutex) {
-        tag_schedule_remove(conn->active, (plc_tag_p)tag);
+        tag_driver_forget_unsafe(&conn->driver, (plc_tag_p)tag);
 
         for(int32_t i = 0; i < conn->slot_count; i++) {
             if(conn->slots[i].tag == tag) { conn->slots[i].tag = NULL; }
@@ -2040,8 +1872,8 @@ THREAD_FUNC(session_handler) {
 
                 if((rc = session_identify(conn)) != PLCTAG_STATUS_OK) {
                     /* a refusal is the answer for the tags waiting to be set up. */
-                    critical_block(conn->session_mutex) { tickle_waiting_creates_unsafe(conn); }
-                    notify_tags(conn);
+                    critical_block(conn->session_mutex) { tag_driver_tickle_creating_unsafe(&conn->driver); }
+                    tag_driver_notify(&conn->driver);
 
                     conn->state = SESSION_UNREGISTER;
                 } else if(conn->use_connected_msg) {
@@ -2160,7 +1992,7 @@ THREAD_FUNC(session_handler) {
                     if(conn->fo_plc_answered && forward_open_error_is_configuration(conn, rc)) {
                         critical_block(conn->session_mutex) { fail_waiting_tags_unsafe(conn, rc); }
 
-                        notify_tags(conn);
+                        tag_driver_notify(&conn->driver);
                     }
                 }
 
@@ -2191,7 +2023,7 @@ THREAD_FUNC(session_handler) {
 
                 /* if there is work to do, make sure we do not disconnect. */
                 critical_block(conn->session_mutex) {
-                    if(has_due_tags_unsafe(conn, now)) {
+                    if(tag_driver_has_due_unsafe(&conn->driver, now)) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "There are tags due before sending.");
                         inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
                         auto_disconnect_time = now + inactivity_timeout_ms;
@@ -2313,7 +2145,7 @@ THREAD_FUNC(session_handler) {
                 /* if there is work to do, reconnect.. */
                 pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
                 critical_block(conn->session_mutex) {
-                    if(has_due_tags_unsafe(conn, now)) {
+                    if(tag_driver_has_due_unsafe(&conn->driver, now)) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "There are tags due, reopening connection to PLC.");
 
                         conn->state = SESSION_OPEN_SOCKET_START;
@@ -2354,7 +2186,7 @@ THREAD_FUNC(session_handler) {
          */
         if(conn->state == SESSION_IDLE || conn->state == SESSION_WAIT_IDLE_RECONNECT) {
             critical_block(conn->session_mutex) {
-                int64_t next_tag_time = next_tag_time_unsafe(conn);
+                int64_t next_tag_time = tag_driver_next_time_unsafe(&conn->driver);
 
                 if(next_tag_time > 0 && wait_until_time > 0 && next_tag_time < wait_until_time) {
                     wait_until_time = (next_tag_time > now) ? next_tag_time : now + 1;
@@ -2552,9 +2384,7 @@ static int session_create(cip_conn_list_t *list, const cip_family_t *family, con
             remove mem_free from destructor for host, path, and conn_path.
     */
 
-    conn->active = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
-    conn->notify = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
-    if(!conn->active || !conn->notify) {
+    if(tag_driver_init(&conn->driver) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to allocate the tag lists!");
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
         rc_dec(conn);

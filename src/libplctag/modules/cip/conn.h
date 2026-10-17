@@ -34,6 +34,7 @@
  ***************************************************************************/
 
 
+#include <libplctag/lib/tag_driver.h>
 #include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/modules/cip/plc_type.h>
@@ -168,9 +169,6 @@
 #define SESSION_TEARDOWN_TIMEOUT_MS (5000)
 
 
-/* initial size and growth step of a connection's outstanding-request vector */
-#define SESSION_MIN_REQUESTS (10)
-#define SESSION_INC_REQUESTS (10)
 
 
 /* limits on the strings copied into a connection's allocation */
@@ -206,8 +204,6 @@ typedef enum {
 /* the most requests that may be bundled into one Multiple Service Packet */
 #define MAX_REQUESTS (400)
 
-/* the most tags the handler starts auto-sync work for in one pass */
-#define CIP_TICKLE_BATCH (64)
 
 #define CIP_ERR_UNSUPPORTED_SERVICE ((uint8_t)0x08)
 #define CIP_ERR_PARTIAL_ERROR ((uint8_t)0x1e)
@@ -393,17 +389,11 @@ typedef struct cip_conn_t {
 
     /*
      * The tags the handler has to act on, in order of when: a tag with an operation to send is
-     * due when it was started, and a tag armed for auto-sync is due at its next deadline.  Kept
-     * sorted with lib/tag_schedule.h.  Raw pointers under session_mutex: a tag unlinks itself
-     * before it is freed (cip_conn_forget_tag()), so the list never holds a reference.
+     * due when it was started, and a tag armed for auto-sync is due at its next deadline.  Its
+     * list is guarded by session_mutex; a tag takes itself off before it is freed
+     * (cip_conn_forget_tag()).
      */
-    vector_p active;
-
-    /*
-     * Tags with events to report, each holding a reference, whose callbacks run once the handler
-     * has released session_mutex.  Only the handler thread touches it.
-     */
-    vector_p notify;
+    tag_driver_t driver;
 
     /*
      * The exchange being built or in flight.  The encoders write the requests back to back

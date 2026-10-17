@@ -303,7 +303,7 @@ REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
-    "test_callback_destroy", "test_cip_ops",
+    "test_callback_destroy", "test_cip_ops", "test_modbus_ops",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
@@ -1581,6 +1581,78 @@ def build_manifest() -> Manifest:
     sec.test("Modbus tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=1&name=hr10&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
+    # Modbus operations under pipelining, reordered replies, aborts, dropped connections and
+    # auto-sync.  Each fault server is the test's own, so the fault cannot reach other tests.
+    def mb_fault_server(*fault_args: str) -> ServerSpec:
+        return ServerSpec(exe_path=exe("modbus_server"),
+                          args_template=["--listen=127.0.0.1:{PORT}", "--debug=INFO", *fault_args],
+                          startup_wait_s=1)
+    mb_ops_base = f"--base=protocol=modbus-tcp&gateway={mbgw}&path=0"
+    mb_inflight8 = f"{mb_ops_base}&max_requests_in_flight=8"
+    mb_redial = "&connection_retry_max_delay_ms=200"
+    sec.test("pipelined writes and reads, one request in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_ops_base], F, server=mb_fault_server())
+    sec.test("pipelined writes and reads, eight requests in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_inflight8], F, server=mb_fault_server())
+    reordered = sec.test("pipelined writes and reads with replies out of order (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_inflight8], F,
+              server=mb_fault_server("--reorder=true"))
+    sec.test("check: the reorder test's replies were reordered", None, F, depends_on=reordered.id, ports_needed=0,
+              check=CheckSpec(log_file=reordered.server_log_file, pattern=r"Fault: holding the reply",
+                              expected=1, at_least=True))
+    sec.test("abort storm, one request in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_ops_base], F, server=mb_fault_server())
+    sec.test("abort storm, eight requests in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_inflight8], F, server=mb_fault_server())
+    sec.test("abort storm with replies out of order (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_inflight8], F,
+              server=mb_fault_server("--reorder=true"))
+    dropped = sec.test("write and read back while the server drops every 7th request's connection (Modbus)",
+              [exe("test_modbus_ops"), "--mode=write-read", mb_ops_base + mb_redial], F,
+              server=mb_fault_server("--close-every=7"))
+    sec.test("check: the dropped-connection test's server dropped connections", None, F, depends_on=dropped.id,
+              ports_needed=0, check=CheckSpec(log_file=dropped.server_log_file, pattern=r"Fault: closing the connection",
+                                              expected=1, at_least=True))
+    dropped_pipelined = sec.test("pipelined operations resent after dropped connections (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_inflight8 + mb_redial], F,
+              server=mb_fault_server("--close-every=7"))
+    sec.test("check: the pipelined dropped-connection test's server dropped connections", None, F,
+              depends_on=dropped_pipelined.id, ports_needed=0,
+              check=CheckSpec(log_file=dropped_pipelined.server_log_file, pattern=r"Fault: closing the connection",
+                              expected=1, at_least=True))
+    sec.test("transaction ID wraps past 65535 (Modbus)",
+              [exe("test_modbus_ops"), "--mode=tid-wrap", "--count=16", f"{mb_ops_base}&max_requests_in_flight=16"], S,
+              server=mb_fault_server("--reorder=true"))
+    sec.test("data written during auto-sync reads reaches the server (Modbus)",
+              [exe("test_modbus_ops"), "--mode=auto-dirty", mb_ops_base], F, server=mb_fault_server())
+    sec.test("auto-sync read and write on one tag (Modbus)",
+              [exe("test_auto_sync"),
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=hr40&auto_sync_read_ms=600&auto_sync_write_ms=20",
+               "--run-ms=10000"], T)
+    sec.test("restart the library after shutdown (Modbus)",
+              [exe("test_shutdown_restart"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=hr2"], F)
+    sec.test("holding register int16 array write and read back (Modbus)",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=4&name=hr100",
+               "--write=1,-2,300,-4000", "--check"], F)
+    sec.test("holding register uint16 extremes write and read back (Modbus)",
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr110",
+               "--write=65535,7", "--check"], F)
+    sec.test("coil set and read back (Modbus)",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=co10",
+               "--write=1", "--check"], F)
+    sec.test("coil clear and read back (Modbus)",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=co11",
+               "--write=0", "--check"], F)
+    sec.test("input register read (Modbus)",
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=4&name=ir5"], F)
+    sec.test("discrete input read (Modbus)",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=di5"], F)
+    ir_write = sec.test("input register write is refused (Modbus)",
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=ir5",
+               "--write=1"], F, expect_failure=True)
+    sec.test("check: the input register write was refused as unsupported", None, F, depends_on=ir_write.id,
+              ports_needed=0, check=CheckSpec(log_file=ir_write.log_file, pattern=r"PLCTAG_ERR_UNSUPPORTED",
+                                              expected=1, at_least=True))
     reconnect_test = sec.test("for Modbus reconnect bug",
               [exe("test_modbus_multiple"), f"--gateway1={mbgw}", f"--gateway2={mbgw2}"], T)
     # Depends on the reconnect test's own log; a CheckSpec test always runs

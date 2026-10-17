@@ -367,7 +367,6 @@ static inline bool tag_range_is_valid(plc_tag_p tag, int offset, int count) {
 /* Remove a tag from play: abort, raise DESTROYED, drop the library reference. */
 extern void destroy_tag_common(plc_tag_p tag);
 
-extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
