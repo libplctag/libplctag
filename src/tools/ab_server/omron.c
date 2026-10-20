@@ -41,101 +41,28 @@
 #include "log.h"
 #include "mutex.h"
 #include "plc.h"
-#include "slice.h"
+#include <libplctag/api/libplctag.h>
+#include <utils/byte_slice.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#define OMRON_SRV_GET_INSTANCE_LIST ((uint8_t)0x5f)
-
-#define OMRON_CLASS_TAG_NAME_SERVER ((uint8_t)0x6a)
-#define OMRON_CLASS_VARIABLE ((uint16_t)0x006b)
-#define OMRON_CLASS_VARIABLE_TYPE ((uint8_t)0x6c)
-
-#define OMRON_SIMPLE_DATA_SEGMENT ((uint8_t)0x80)
 #define OMRON_SIMPLE_DATA_SEGMENT_WORDS ((uint8_t)0x03)
-#define OMRON_SIMPLE_DATA_SEGMENT_SIZE ((size_t)8)
 
 /* kind of variable in an instance list request. */
 #define OMRON_KIND_SYSTEM ((uint16_t)1)
-#define OMRON_KIND_USER ((uint16_t)2)
-
-#define OMRON_INSTANCE_LIST_REQUEST_SIZE ((size_t)10)
-#define OMRON_INSTANCE_LIST_HEADER_SIZE ((size_t)4)
-#define OMRON_INSTANCE_ENTRY_FIXED_SIZE ((size_t)13) /* 4 unknown, 2 length, 2 class, 4 instance, 1 name length */
 
 static bool is_scalar(tag_def_s *tag);
 static bool is_fixed_string(tag_def_s *tag);
 static uint8_t element_type_code(tag_def_s *tag);
-static slice_s handle_instance_list(uint8_t cip_service, slice_s payload, slice_s output, plc_s *plc);
-static slice_s handle_variable_attributes(uint8_t cip_service, tag_def_s *tag, slice_s output);
-static slice_s handle_variable_type_attributes(uint8_t cip_service, uint32_t instance, slice_s output, plc_s *plc);
-static slice_s write_variable_type(slice_s output, uint8_t cip_service, uint32_t size, uint8_t type_code,
-                                   uint16_t num_members, uint16_t crc, const char *name, uint32_t next_id, uint32_t nesting_id);
-static slice_s handle_segment_read(uint8_t cip_service, tag_def_s *tag, uint32_t offset, uint16_t size, slice_s output);
-static slice_s handle_segment_write(uint8_t cip_service, tag_def_s *tag, uint32_t offset, uint16_t size, slice_s payload,
-                                    slice_s output);
-
-
-bool omron_dispatch_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
-                            plc_s *plc, slice_s *response) {
-    tag_def_s *tag = NULL;
-    size_t end_offset = 0;
-    uint32_t instance = 0;
-
-    switch(cip_service) {
-        case OMRON_SRV_GET_INSTANCE_LIST:
-            if(!cip_path_is_class(cip_service_path, OMRON_CLASS_TAG_NAME_SERVER, &instance)) { return false; }
-            *response = handle_instance_list(cip_service, cip_service_payload, output, plc);
-            return true;
-
-        case CIP_SRV_GET_ATTRIBUTES_ALL:
-            if(cip_path_is_class(cip_service_path, OMRON_CLASS_VARIABLE_TYPE, &instance)) {
-                *response = handle_variable_type_attributes(cip_service, instance, output, plc);
-                return true;
-            }
-
-            if(slice_get_uint8(cip_service_path, 0) != CIP_SYMBOLIC_SEGMENT_MARKER) { return false; }
-
-            tag = cip_find_symbol_tag(cip_service_path, plc, &end_offset);
-            if(!tag || end_offset != slice_len(cip_service_path)) {
-                log_info("Omron Get Attributes All: no such variable.");
-                *response = make_cip_log_error(output, cip_service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
-                return true;
-            }
-
-            *response = handle_variable_attributes(cip_service, tag, output);
-            return true;
-
-        case CIP_SRV_READ_NAMED_TAG:
-        case CIP_SRV_WRITE_NAMED_TAG:
-            tag = cip_find_symbol_tag(cip_service_path, plc, &end_offset);
-            if(!tag || end_offset >= slice_len(cip_service_path)
-               || slice_get_uint8(cip_service_path, end_offset) != OMRON_SIMPLE_DATA_SEGMENT) {
-                return false;
-            }
-
-            if(slice_len(cip_service_path) != end_offset + OMRON_SIMPLE_DATA_SEGMENT_SIZE
-               || slice_get_uint8(cip_service_path, end_offset + 1) != OMRON_SIMPLE_DATA_SEGMENT_WORDS) {
-                log_info("Malformed Omron simple data segment!");
-                *response = make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
-                return true;
-            }
-
-            if(cip_service == CIP_SRV_READ_NAMED_TAG) {
-                *response = handle_segment_read(cip_service, tag, slice_get_uint32_le(cip_service_path, end_offset + 2),
-                                                slice_get_uint16_le(cip_service_path, end_offset + 6), output);
-            } else {
-                *response = handle_segment_write(cip_service, tag, slice_get_uint32_le(cip_service_path, end_offset + 2),
-                                                 slice_get_uint16_le(cip_service_path, end_offset + 6), cip_service_payload,
-                                                 output);
-            }
-            return true;
-
-        default: return false;
-    }
-}
+static bool reply_data(byte_slice_t out, uint8_t service, int32_t data_size, byte_slice_t *data, byte_slice_t *rest);
+static byte_slice_t write_variable_type(byte_slice_t out, uint8_t service, uint32_t size, uint8_t type_code,
+                                        uint16_t num_members, uint16_t crc, const char *name, uint32_t next_id,
+                                        uint32_t nesting_id);
+static byte_slice_t segment_read(uint8_t service, tag_def_s *tag, uint32_t offset, uint16_t size, byte_slice_t out);
+static byte_slice_t segment_write(uint8_t service, tag_def_s *tag, uint32_t offset, uint16_t size, byte_slice_t payload,
+                                  byte_slice_t out);
 
 
 /* ponytail: the tag syntax always has a dimension, so NAME:TYPE[1] stands for a scalar. */
@@ -150,13 +77,28 @@ static uint8_t element_type_code(tag_def_s *tag) { return (uint8_t)(tag->tag_typ
 
 
 /*
+ * An OK reply header and data_size zeroed bytes after it, which the caller fills in place.
+ * False if out cannot hold them.
+ */
+static bool reply_data(byte_slice_t out, uint8_t service, int32_t data_size, byte_slice_t *data, byte_slice_t *rest) {
+    *rest = byte_slice_take(cip_write_reply_header(out, service, CIP_OK, false, 0), data_size, data);
+
+    if(byte_slice_has_error(*rest)) { return false; }
+
+    memset(byte_slice_get_data(*data), 0, (size_t)data_size);
+
+    return true;
+}
+
+
+/*
  * Get Instance List (0x5F) on the Tag Name Server.  Request: start index (4), count (4), kind
  * (2).  Variables whose names start with '_' are system variables, the rest are user ones, and
  * each kind is numbered from 1 in tag order.  Reply: count (2), more-follow flag (1), pad (1),
  * then per variable: 4 bytes aphyt skips, the length of the rest (2), class 0x6B (2), the
  * variable's instance (4), and its name as a short string.
  */
-static slice_s handle_instance_list(uint8_t cip_service, slice_s payload, slice_s output, plc_s *plc) {
+byte_slice_t omron_get_instance_list(cip_request_t *req, byte_slice_t out, plc_s *plc) {
     uint32_t start = 0;
     uint32_t max_count = 0;
     uint16_t kind = 0;
@@ -164,22 +106,29 @@ static slice_s handle_instance_list(uint8_t cip_service, slice_s payload, slice_
     uint32_t instance = 0;
     uint16_t count = 0;
     bool more = false;
-    size_t offset = CIP_RESPONSE_HEADER_SIZE + OMRON_INSTANCE_LIST_HEADER_SIZE;
+    byte_slice_t in = req->payload;
+    byte_slice_t header = {0};
+    byte_slice_t entries = {0};
 
-    if(slice_len(payload) != OMRON_INSTANCE_LIST_REQUEST_SIZE) {
-        log_info("Omron instance list request must be %zu bytes!", OMRON_INSTANCE_LIST_REQUEST_SIZE);
-        return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    in = byte_slice_read_u32_le(in, &start);
+    in = byte_slice_read_u32_le(in, &max_count);
+    in = byte_slice_read_u16_le(in, &kind);
+
+    in = byte_slice_end(in);
+
+
+    if(byte_slice_has_error(in)) {
+        log_info("Omron instance list request must be 10 bytes!");
+        return cip_write_reply_header(out, req->service, cip_input_status(in), false, 0);
     }
 
-    start = slice_get_uint32_le(payload, 0);
-    max_count = slice_get_uint32_le(payload, 4);
-    kind = slice_get_uint16_le(payload, 8);
-
-    if(slice_len(output) < offset) { return make_cip_log_error(output, cip_service, CIP_ERR_REPLY_TOO_LARGE, false, 0); }
+    entries = byte_slice_take(out, (int32_t)CIP_RESPONSE_HEADER_SIZE + 4, &header);
+    if(byte_slice_has_error(entries)) { return cip_write_reply_header(out, req->service, CIP_ERR_REPLY_TOO_LARGE, false, 0); }
 
     for(tag_def_s *tag = plc->tags; tag; tag = tag->next_tag) {
         bool is_system = (tag->name[0] == '_');
-        size_t name_len = strlen(tag->name);
+        uint8_t name_len = (uint8_t)strlen(tag->name);
+        byte_slice_t trial = entries;
 
         instance++;
 
@@ -189,30 +138,35 @@ static slice_s handle_instance_list(uint8_t cip_service, slice_s payload, slice_
 
         if(index < start) { continue; }
 
-        if(count >= max_count || offset + OMRON_INSTANCE_ENTRY_FIXED_SIZE + name_len > slice_len(output)) {
+        if(count >= max_count) {
             more = true;
             break;
         }
 
-        slice_set_uint32_le(output, offset, instance);
-        slice_set_uint16_le(output, offset + 4, (uint16_t)(2 + 4 + 1 + name_len));
-        slice_set_uint16_le(output, offset + 6, OMRON_CLASS_VARIABLE);
-        slice_set_uint32_le(output, offset + 8, instance);
-        slice_set_uint8(output, offset + 12, (uint8_t)name_len);
-        slice_copy_data_in(slice_from_slice(output, offset + 13, name_len), (uint8_t *)tag->name, name_len);
+        trial = byte_slice_write_u32_le(trial, instance);
+        trial = byte_slice_write_u16_le(trial, (uint16_t)(2 + 4 + 1 + name_len));
+        trial = byte_slice_write_u16_le(trial, CIP_CLASS_SYMBOL);
+        trial = byte_slice_write_u32_le(trial, instance);
+        trial = byte_slice_write_u8(trial, name_len);
+        trial = byte_slice_write_bytes(trial, (const uint8_t *)tag->name, name_len);
 
-        offset += OMRON_INSTANCE_ENTRY_FIXED_SIZE + name_len;
+        if(byte_slice_has_error(trial)) {
+            more = true;
+            break;
+        }
+
+        entries = trial;
         count++;
     }
 
     log_info("Omron instance list: kind %u from %u, returning %u, more %d.", kind, start, count, (int)more);
 
-    make_cip_log_error(output, cip_service, CIP_OK, false, 0);
-    slice_set_uint16_le(output, CIP_RESPONSE_HEADER_SIZE, count);
-    slice_set_uint8(output, CIP_RESPONSE_HEADER_SIZE + 2, more ? 1 : 0);
-    slice_set_uint8(output, CIP_RESPONSE_HEADER_SIZE + 3, 0);
+    header = cip_write_reply_header(header, req->service, CIP_OK, false, 0);
+    header = byte_slice_write_u16_le(header, count);
+    header = byte_slice_write_u8(header, more ? 1 : 0);
+    byte_slice_write_u8(header, 0);
 
-    return slice_from_slice(output, 0, offset);
+    return entries;
 }
 
 
@@ -226,35 +180,44 @@ static slice_s handle_instance_list(uint8_t cip_service, slice_s payload, slice_
  * aphyt reads a scalar structure's or string's type instance from bytes 8-11 instead, which
  * are reserved for a scalar, so it goes in both places.
  */
-static slice_s handle_variable_attributes(uint8_t cip_service, tag_def_s *tag, slice_s output) {
-    size_t dims = is_scalar(tag) ? 0 : tag->num_dimensions;
-    size_t data_size = 24 + (8 * dims);
-    slice_s data = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE, data_size);
+byte_slice_t omron_variable_get_attributes_all(cip_request_t *req, byte_slice_t out, plc_s *plc) {
+    tag_def_s *tag = NULL;
+    byte_slice_t data = {0};
+    byte_slice_t rest = cip_find_symbol_tag(req->path, plc, &tag);
+
+    if(!tag || byte_slice_has_error(byte_slice_end(rest))) {
+        log_info("Omron Get Attributes All: no such variable.");
+        return cip_write_reply_header(out, req->service, CIP_ERR_PATH_DEST_UNKNOWN, false, 0);
+    }
+
+    int32_t dims = is_scalar(tag) ? 0 : (int32_t)tag->num_dimensions;
     uint32_t vto_id = tag->udt ? tag->udt->vto_id : 0;
     uint32_t size = (uint32_t)tag->elem_size; /* zero for packed strings, which have no stride. */
 
-    if(slice_len(data) != data_size) { return make_cip_log_error(output, cip_service, CIP_ERR_REPLY_TOO_LARGE, false, 0); }
-
     if(is_fixed_string(tag)) { size = (uint32_t)(tag->elem_size - TAG_CIP_STRING_COUNT_WORD_BYTES); }
 
-    memset(data.data, 0, slice_len(data));
-    make_cip_log_error(output, cip_service, CIP_OK, false, 0);
-
-    slice_set_uint32_le(data, 0, size);
-
-    if(dims == 0) {
-        slice_set_uint8(data, 4, element_type_code(tag));
-        slice_set_uint32_le(data, 8, vto_id);
-    } else {
-        slice_set_uint8(data, 4, TAG_CIP_TYPE_ARRAY);
-        slice_set_uint8(data, 5, element_type_code(tag));
-        slice_set_uint8(data, 6, (uint8_t)dims);
-        for(size_t i = 0; i < dims; i++) { slice_set_uint32_le(data, 8 + (4 * i), (uint32_t)tag->dimensions[i]); }
+    if(!reply_data(out, req->service, 24 + (8 * dims), &data, &rest)) {
+        return cip_write_reply_header(out, req->service, CIP_ERR_REPLY_TOO_LARGE, false, 0);
     }
 
-    slice_set_uint32_le(data, 20 + (4 * dims), vto_id);
+    byte_slice_write_u32_le(data, size);
 
-    return slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE + data_size);
+    if(dims == 0) {
+        byte_slice_write_u8(byte_slice_skip(data, 4), element_type_code(tag));
+        byte_slice_write_u32_le(byte_slice_skip(data, 8), vto_id);
+    } else {
+        byte_slice_t d = byte_slice_skip(data, 4);
+
+        d = byte_slice_write_u8(d, TAG_CIP_TYPE_ARRAY);
+        d = byte_slice_write_u8(d, element_type_code(tag));
+        d = byte_slice_write_u8(d, (uint8_t)dims);
+        d = byte_slice_skip(d, 1);
+        for(int32_t i = 0; i < dims; i++) { d = byte_slice_write_u32_le(d, (uint32_t)tag->dimensions[i]); }
+    }
+
+    byte_slice_write_u32_le(byte_slice_skip(data, 20 + (4 * dims)), vto_id);
+
+    return rest;
 }
 
 
@@ -263,22 +226,18 @@ static slice_s handle_variable_attributes(uint8_t cip_service, tag_def_s *tag, s
  * the highest instance (2).  A UDT's own instance names it and points at its first member; each
  * member's instance names the member and points at the next.
  */
-static slice_s handle_variable_type_attributes(uint8_t cip_service, uint32_t instance, slice_s output, plc_s *plc) {
+byte_slice_t omron_variable_type_get_attributes_all(cip_request_t *req, byte_slice_t out, plc_s *plc) {
+    uint32_t instance = req->instance;
+
     if(instance == 0) {
-        if(slice_len(output) < CIP_RESPONSE_HEADER_SIZE + 4) {
-            return make_cip_log_error(output, cip_service, CIP_ERR_REPLY_TOO_LARGE, false, 0);
-        }
-
-        make_cip_log_error(output, cip_service, CIP_OK, false, 0);
-        slice_set_uint16_le(output, CIP_RESPONSE_HEADER_SIZE, 1);
-        slice_set_uint16_le(output, CIP_RESPONSE_HEADER_SIZE + 2, (uint16_t)plc->max_vto_id);
-
-        return slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE + 4);
+        out = cip_write_reply_header(out, req->service, CIP_OK, false, 0);
+        out = byte_slice_write_u16_le(out, 1);
+        return byte_slice_write_u16_le(out, (uint16_t)plc->max_vto_id);
     }
 
     for(udt_def_s *udt = plc->udts; udt; udt = udt->next_udt) {
         if(instance == udt->vto_id) {
-            return write_variable_type(output, cip_service, (uint32_t)udt->size, (uint8_t)(TAG_CIP_TYPE_STRUCT & 0xFF),
+            return write_variable_type(out, req->service, (uint32_t)udt->size, (uint8_t)(TAG_CIP_TYPE_STRUCT & 0xFF),
                                        (uint16_t)udt->num_members, udt->crc, udt->name, 0, udt->vto_id + 1);
         }
 
@@ -286,13 +245,13 @@ static slice_s handle_variable_type_attributes(uint8_t cip_service, uint32_t ins
             size_t i = instance - udt->vto_id - 1;
             uint32_t next_id = (i + 1 < udt->num_members) ? instance + 1 : 0;
 
-            return write_variable_type(output, cip_service, (uint32_t)udt->members[i].size,
+            return write_variable_type(out, req->service, (uint32_t)udt->members[i].size,
                                        (uint8_t)(udt->members[i].type & 0xFF), 0, 0, udt->members[i].name, next_id, 0);
         }
     }
 
     log_info("No Variable Type Object instance %u!", instance);
-    return make_cip_log_error(output, cip_service, CIP_ERR_OBJECT_DOES_NOT_EXIST, false, 0);
+    return cip_write_reply_header(out, req->service, CIP_ERR_OBJECT_DOES_NOT_EXIST, false, 0);
 }
 
 
@@ -302,28 +261,54 @@ static slice_s handle_variable_type_attributes(uint8_t cip_service, uint32_t ins
  *   10 reserved (4), 14 CRC (2), 16 name as a short string padded to even, then the next
  *   instance (4) and the nested (first member) instance (4).
  */
-static slice_s write_variable_type(slice_s output, uint8_t cip_service, uint32_t size, uint8_t type_code,
-                                   uint16_t num_members, uint16_t crc, const char *name, uint32_t next_id, uint32_t nesting_id) {
-    size_t name_len = strlen(name);
-    size_t name_end = 17 + name_len + ((name_len & 1) ? 0 : 1);
-    size_t data_size = name_end + 8;
-    slice_s data = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE, data_size);
+static byte_slice_t write_variable_type(byte_slice_t out, uint8_t service, uint32_t size, uint8_t type_code,
+                                        uint16_t num_members, uint16_t crc, const char *name, uint32_t next_id,
+                                        uint32_t nesting_id) {
+    uint8_t name_len = (uint8_t)strlen(name);
+    int32_t name_end = 17 + name_len + ((name_len & 1) ? 0 : 1);
+    byte_slice_t data = {0};
+    byte_slice_t rest = {0};
 
-    if(slice_len(data) != data_size) { return make_cip_log_error(output, cip_service, CIP_ERR_REPLY_TOO_LARGE, false, 0); }
+    if(!reply_data(out, service, name_end + 8, &data, &rest)) {
+        return cip_write_reply_header(out, service, CIP_ERR_REPLY_TOO_LARGE, false, 0);
+    }
 
-    memset(data.data, 0, slice_len(data));
-    make_cip_log_error(output, cip_service, CIP_OK, false, 0);
+    byte_slice_write_u32_le(data, size);
+    byte_slice_write_u8(byte_slice_skip(data, 5), type_code);
+    byte_slice_write_u16_le(byte_slice_skip(data, 8), num_members);
+    byte_slice_write_u16_le(byte_slice_skip(data, 14), crc);
+    byte_slice_write_bytes(byte_slice_write_u8(byte_slice_skip(data, 16), name_len), (const uint8_t *)name, name_len);
+    byte_slice_write_u32_le(byte_slice_write_u32_le(byte_slice_skip(data, name_end), next_id), nesting_id);
 
-    slice_set_uint32_le(data, 0, size);
-    slice_set_uint8(data, 5, type_code);
-    slice_set_uint16_le(data, 8, num_members);
-    slice_set_uint16_le(data, 14, crc);
-    slice_set_uint8(data, 16, (uint8_t)name_len);
-    slice_copy_data_in(slice_from_slice(data, 17, name_len), (uint8_t *)name, name_len);
-    slice_set_uint32_le(data, name_end, next_id);
-    slice_set_uint32_le(data, name_end + 4, nesting_id);
+    return rest;
+}
 
-    return slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE + data_size);
+
+/* the segment is 0x80, its size in words (3), the byte offset (4) and the byte count (2). */
+byte_slice_t omron_segment_access(cip_request_t *req, tag_def_s *tag, byte_slice_t segment, byte_slice_t out) {
+    uint8_t marker = 0;
+    uint8_t words = 0;
+    uint32_t offset = 0;
+    uint16_t size = 0;
+
+    segment = byte_slice_read_u8(segment, &marker);
+    segment = byte_slice_read_u8(segment, &words);
+    segment = byte_slice_read_u32_le(segment, &offset);
+    segment = byte_slice_read_u16_le(segment, &size);
+
+    if(byte_slice_has_error(byte_slice_end(segment)) || words != OMRON_SIMPLE_DATA_SEGMENT_WORDS) {
+        log_info("Malformed Omron simple data segment!");
+        return cip_write_reply_header(out, req->service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    if(tag->variable_elements) {
+        log_info("Segmented access to packed string arrays is not supported!");
+        return cip_write_reply_header(out, req->service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+
+    if(req->service == CIP_SRV_READ_NAMED_TAG) { return segment_read(req->service, tag, offset, size, out); }
+
+    return segment_write(req->service, tag, offset, size, req->payload, out);
 }
 
 
@@ -332,50 +317,39 @@ static slice_s write_variable_type(slice_s output, uint8_t cip_service, uint32_t
  * is the type, any additional info (a structure's CRC), then the bytes.  For a string, offset
  * and size count characters, and the bytes are led by a count word holding <size>.
  */
-static slice_s handle_segment_read(uint8_t cip_service, tag_def_s *tag, uint32_t offset, uint16_t size, slice_s output) {
+static byte_slice_t segment_read(uint8_t service, tag_def_s *tag, uint32_t offset, uint16_t size, byte_slice_t out) {
     bool is_string = is_fixed_string(tag);
     size_t base = is_string ? TAG_CIP_STRING_COUNT_WORD_BYTES : 0;
     size_t extent = tag->data_size - base;
-    size_t header_size = 0;
-    uint8_t header[TAG_TYPE_INFO_MAX + TAG_CIP_STRING_COUNT_WORD_BYTES] = {0};
-    slice_s payload = {0};
-
-    if(tag->variable_elements) {
-        log_info("Segmented access to packed string arrays is not supported!");
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
-    }
+    byte_slice_t rest = {0};
+    byte_slice_t dest = {0};
 
     if((size_t)offset + size > extent) {
         log_info("Segment read of %u bytes at %u runs past the %zu bytes of %s!", size, offset, extent, tag->name);
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return cip_write_reply_header(out, service, CIP_ERR_INVALID_PARAM, false, 0);
     }
+
+    rest = cip_write_reply_header(out, service, CIP_OK, false, 0);
 
     if(tag->udt) {
-        memcpy(header, tag->type_info, tag->type_info_size);
-        header_size = tag->type_info_size;
+        rest = byte_slice_write_bytes(rest, tag->type_info, (int32_t)tag->type_info_size);
     } else {
-        header[0] = element_type_code(tag);
-        header_size = 2;
+        rest = byte_slice_write_u8(rest, element_type_code(tag));
+        rest = byte_slice_write_u8(rest, 0);
     }
 
-    if(is_string) {
-        header[2] = (uint8_t)(size & 0xFF);
-        header[3] = (uint8_t)(size >> 8);
-        header_size += TAG_CIP_STRING_COUNT_WORD_BYTES;
-    }
+    if(is_string) { rest = byte_slice_write_u16_le(rest, size); }
 
-    payload = slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE + header_size, size);
-    if(slice_len(payload) != size) {
+    rest = byte_slice_take(rest, size, &dest);
+
+    if(byte_slice_has_error(rest)) {
         log_info("Segment read of %u bytes does not fit the response!", size);
-        return make_cip_log_error(output, cip_service, CIP_ERR_REPLY_TOO_LARGE, false, 0);
+        return cip_write_reply_header(out, service, CIP_ERR_REPLY_TOO_LARGE, false, 0);
     }
 
-    make_cip_log_error(output, cip_service, CIP_OK, false, 0);
-    slice_copy_data_in(slice_from_slice(output, CIP_RESPONSE_HEADER_SIZE, header_size), header, header_size);
+    critical_block(tag->data_mutex) { byte_slice_write_bytes(dest, tag->data + base + offset, size); }
 
-    critical_block(tag->data_mutex) { slice_copy_data_in(payload, tag->data + base + offset, size); }
-
-    return slice_from_slice(output, 0, CIP_RESPONSE_HEADER_SIZE + header_size + size);
+    return rest;
 }
 
 
@@ -384,42 +358,51 @@ static slice_s handle_segment_read(uint8_t cip_service, tag_def_s *tag, uint32_t
  * element count (2), then <size> bytes, led by a count word for a string.  A structure must be
  * written as an abbreviated structure carrying the UDT's CRC, an array as its element type.
  */
-static slice_s handle_segment_write(uint8_t cip_service, tag_def_s *tag, uint32_t offset, uint16_t size, slice_s payload,
-                                    slice_s output) {
+static byte_slice_t segment_write(uint8_t service, tag_def_s *tag, uint32_t offset, uint16_t size, byte_slice_t payload,
+                                  byte_slice_t out) {
     bool is_string = is_fixed_string(tag);
     size_t base = is_string ? TAG_CIP_STRING_COUNT_WORD_BYTES : 0;
     size_t extent = tag->data_size - base;
-    size_t info_len = slice_get_uint8(payload, 1);
-    size_t data_start = 2 + info_len + 2 + base;
     uint8_t want_type = tag->udt ? TAG_CIP_TYPE_ABBREV_STRUCT : element_type_code(tag);
-    size_t want_info_len = tag->udt ? 2 : 0;
+    uint8_t want_info_len = tag->udt ? 2 : 0;
+    uint8_t type = 0;
+    uint8_t info_len = 0;
+    uint16_t crc = 0;
+    byte_slice_t data = {0};
+    byte_slice_t in = payload;
 
-    if(tag->variable_elements) {
-        log_info("Segmented access to packed string arrays is not supported!");
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    in = byte_slice_read_u8(in, &type);
+    in = byte_slice_read_u8(in, &info_len);
+
+    if(byte_slice_has_error(in) || type != want_type || info_len != want_info_len) {
+        log_info("Segment write type does not match %s!", tag->name);
+        return cip_write_reply_header(out, service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
-    if(slice_len(payload) < 2 || slice_get_uint8(payload, 0) != want_type || info_len != want_info_len
-       || (tag->udt && slice_get_uint16_le(payload, 2) != tag->udt->crc)) {
-        log_info("Segment write type, or structure CRC, does not match %s!", tag->name);
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    if(tag->udt) { in = byte_slice_read_u16_le(in, &crc); }
+    in = byte_slice_skip(in, 2 + (int32_t)base); /* element count, and a string's count word */
+    in = byte_slice_take(in, size, &data);
+
+    in = byte_slice_end(in);
+
+
+    if(byte_slice_has_error(in)) {
+        log_info("Segment write does not carry the %u bytes its segment says!", size);
+        return cip_write_reply_header(out, service, cip_input_status(in), false, 0);
     }
 
-    if(slice_len(payload) != data_start + size) {
-        log_info("Segment write carries %zu bytes, not the %u its segment says!",
-                 slice_len(payload) > data_start ? slice_len(payload) - data_start : 0, size);
-        return make_cip_log_error(output, cip_service,
-                                  slice_len(payload) < data_start + size ? CIP_ERR_INSUFFICIENT_DATA : CIP_ERR_TOO_MUCH_DATA,
-                                  false, 0);
+    if(tag->udt && crc != tag->udt->crc) {
+        log_info("Segment write structure CRC does not match %s!", tag->name);
+        return cip_write_reply_header(out, service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     if((size_t)offset + size > extent) {
         log_info("Segment write of %u bytes at %u runs past the %zu bytes of %s!", size, offset, extent, tag->name);
-        return make_cip_log_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        return cip_write_reply_header(out, service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
     critical_block(tag->data_mutex) {
-        slice_copy_data_out(tag->data + base + offset, size, slice_from_slice(payload, data_start, size));
+        memcpy(tag->data + base + offset, byte_slice_get_data(data), size);
 
         if(is_string) {
             size_t len = strnlen((const char *)(tag->data + base), extent);
@@ -429,5 +412,5 @@ static slice_s handle_segment_write(uint8_t cip_service, tag_def_s *tag, uint32_
         }
     }
 
-    return make_cip_log_error(output, cip_service, CIP_OK, false, 0);
+    return cip_write_reply_header(out, service, CIP_OK, false, 0);
 }

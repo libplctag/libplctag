@@ -45,6 +45,10 @@
  * gets no such event.  So a create that returned a valid ID without a matching DESTROYED
  * event is a tag that escaped.
  *
+ * The reverse is checked too.  A create whose tag the sweep took after it was published
+ * must still return that tag's ID, or the application gets a DESTROYED event for an ID it
+ * never held.
+ *
  * Nothing here needs a PLC.  The creates are expected to fail to connect; a tag is
  * registered and its callback fires regardless of whether the connection succeeds, which
  * is all this test looks at.
@@ -114,12 +118,11 @@ static void *creator_function(void *arg) {
 }
 
 
-static int run_one_round(int round) {
+static bool run_one_round(int round, int32_t *mismatch) {
     compat_thread_t creators[NUM_CREATORS];
     int32_t created = 0;
     int32_t destroyed = 0;
     int32_t failed = 0;
-    int32_t escaped = 0;
 
     compat_atomic_store_int32(&stop_flag, 0);
     compat_atomic_store_int32(&created_ok, 0);
@@ -129,7 +132,7 @@ static int run_one_round(int round) {
     for(int i = 0; i < NUM_CREATORS; i++) {
         if(compat_thread_create(&creators[i], creator_function, NULL) != 0) {
             fprintf(stderr, "round %d: unable to start creator thread %d!\n", round, i);
-            return -1;
+            return false;
         }
     }
 
@@ -162,24 +165,30 @@ static int run_one_round(int round) {
     /*
      * Creates that ran after the gate closed return an error and never register a tag, so
      * they are not part of the comparison.  Only tags that were actually created count.
+     *
+     * The two counts must be equal.  More created than destroyed is a tag that escaped the
+     * sweep.  More destroyed than created is a DESTROYED event for an id no create returned:
+     * a create whose tag the sweep took must still return that id.
      */
-    escaped = created - destroyed;
+    *mismatch = created - destroyed;
 
     printf("round %2d: created %4d, destroyed %4d, create failed %4d", round, created, destroyed, failed);
 
-    if(escaped > 0) {
-        printf("  <-- %d tag%s escaped the shutdown sweep\n", escaped, (escaped == 1 ? "" : "s"));
+    if(*mismatch > 0) {
+        printf("  <-- %d tag%s escaped the shutdown sweep\n", *mismatch, (*mismatch == 1 ? "" : "s"));
+    } else if(*mismatch < 0) {
+        printf("  <-- %d DESTROYED event%s for ids no create returned\n", -*mismatch, (*mismatch == -1 ? "" : "s"));
     } else {
         printf("\n");
     }
 
-    return (int)escaped;
+    return true;
 }
 
 
 int main(void) {
-    int total_escaped = 0;
-    int rounds_with_escapes = 0;
+    int32_t total_mismatch = 0;
+    int32_t rounds_with_mismatch = 0;
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required library version %d.%d.%d not available!\n", REQUIRED_VERSION);
@@ -189,23 +198,25 @@ int main(void) {
     printf("Racing plc_tag_create() against plc_tag_shutdown(), %d rounds, %d creator threads.\n", NUM_ROUNDS, NUM_CREATORS);
 
     for(int round = 1; round <= NUM_ROUNDS; round++) {
-        int escaped = run_one_round(round);
+        int32_t mismatch = 0;
 
-        if(escaped < 0) { return 1; }
+        if(!run_one_round(round, &mismatch)) { return 1; }
 
-        if(escaped > 0) {
-            total_escaped += escaped;
-            rounds_with_escapes++;
+        if(mismatch != 0) {
+            total_mismatch += (mismatch > 0 ? mismatch : -mismatch);
+            rounds_with_mismatch++;
         }
     }
 
-    printf("\n%d of %d rounds leaked a tag past shutdown, %d tags in total.\n", rounds_with_escapes, NUM_ROUNDS,
-           total_escaped);
+    printf("\n%d of %d rounds had created and destroyed counts differ, by %d in total.\n", rounds_with_mismatch, NUM_ROUNDS,
+           total_mismatch);
 
     /*
      * A tag that escapes the sweep is a tag nothing will ever destroy, holding protocol
      * state that module teardown has already freed.  add_tag_lookup() refuses to publish
-     * once the sweep has begun, so this must be zero.
+     * once the sweep has begun, so this must be zero.  A DESTROYED event with no ID behind
+     * it is the reverse failure: plc_tag_create_impl() returns the ID whenever the sweep has
+     * already taken the tag out of the registry.
      *
      * Note that the plain run is a weak check: the window between a create taking its
      * registry reference and publishing its tag is only a few instructions wide, and
@@ -214,12 +225,12 @@ int main(void) {
      * ahead of the add_tag_lookup() call in plc_tag_create_impl() and every create landing
      * in the window escapes without the guard, and is refused with it.
      */
-    if(total_escaped > 0) {
-        printf("\nFAIL: %d tag%s outlived plc_tag_shutdown().\n", total_escaped, (total_escaped == 1 ? "" : "s"));
+    if(total_mismatch > 0) {
+        printf("\nFAIL: created and destroyed counts differ by %d.\n", total_mismatch);
         return 1;
     }
 
-    printf("PASS: shutdown raced %d times, no tag outlived it, no crash or sanitizer report.\n", NUM_ROUNDS);
+    printf("PASS: shutdown raced %d times, every created tag got exactly one DESTROYED, no crash or sanitizer report.\n", NUM_ROUNDS);
 
     return 0;
 }

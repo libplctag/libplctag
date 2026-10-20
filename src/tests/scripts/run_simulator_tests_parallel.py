@@ -307,7 +307,7 @@ REQUIRED_EXECUTABLES = [
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
-    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown",
+    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_ab_server_framing",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
@@ -503,6 +503,8 @@ def build_manifest() -> Manifest:
     # Raw CIP tags are the one tag type whose request is the CIP message alone, so
     # they are what exercises the library's own EIP/CPF framing. Run both messaging
     # modes: the framing is the only thing that differs between them.
+    # Split, pipelined and unknown-command requests over a raw socket: ab_server's own TCP framing.
+    sec.test("ab_server EIP framing", [exe("test_ab_server_framing"), "{PORT}"], F)
     sec.test("raw CIP tag, connected messaging",
               [exe("test_raw_cip"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
@@ -1530,6 +1532,28 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=real32",
                f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=F8:1",
                "--write=1.5", "--debug=4"], F)
+
+    # --- PCCC high element section -------------------------------------------
+    # An address field over 254 goes on the wire as 0xFF and a u16 LE.  N7:300 reads as
+    # element 255 if the server takes the field as one byte, and every field after it shifts.
+    # Each flavour carries the address its own way, so each gets a word and a bit write.
+    def pccc_high_server(plc, extra=()):
+        return ServerSpec(exe_path=exe("ab_server"),
+                          args_template=["--debug", f"--plc={plc}", "--port={PORT}", *extra, "--tag=N7[400]"],
+                          startup_wait_s=1)
+
+    hgw = "127.0.0.1:{PORT}"
+    sec = m.section("pccc_high_element", server=None)
+    for label, plc, extra, tag in [
+            ("Micrologix", "Micrologix", (), f"protocol=ab-eip&gateway={hgw}&plc=micrologix&elem_count=1"),
+            ("PLC/5", "PLC/5", (), f"protocol=ab-eip&gateway={hgw}&plc=plc5&elem_count=1"),
+            ("PCCC-mapped Logix", "LgxPccc", ("--path=1,0",), f"protocol=ab-eip&gateway={hgw}&plc=lgxpccc&path=1,0&elem_count=1")]:
+        sec.test(f"{label} N7:300 read/write",
+                  [exe("tag_rw2"), "--type=sint16", f"--tag={tag}&name=N7:300", "--write=300", "--check", "--debug=4"], F,
+                  server=pccc_high_server(plc, extra))
+        sec.test(f"{label} N7:300/3 bit write",
+                  [exe("tag_rw2"), "--type=bit", f"--tag={tag}&name=N7:300/3", "--write=1", "--check=1", "--debug=4"], F,
+                  server=pccc_high_server(plc, extra))
 
     # --- Modbus section ------------------------------------------------------
     modbus_server = ServerSpec(

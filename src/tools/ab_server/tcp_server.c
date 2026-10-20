@@ -34,7 +34,8 @@
 #include "tcp_server.h"
 #include "err.h"
 #include "plc.h"
-#include "slice.h"
+#include <libplctag/api/libplctag.h>
+#include <utils/byte_slice.h>
 #include "socket.h"
 #include "thread.h"
 #include "utils.h"
@@ -51,7 +52,7 @@ static THREAD_FUNC(conn_handler);
 
 struct tcp_server {
     SOCKET sock_fd;
-    slice_s (*handler)(slice_s input, slice_s output, void *context);
+    tcp_server_handler_t handler;
     void *context;
     size_t context_size;
 };
@@ -61,14 +62,13 @@ struct client_session {
     tcp_server_p server;
     void *server_context;
     bool *server_done;
-    slice_s buffer;
     thread_p thread;
 };
 typedef struct client_session *client_session_p;
 
 
 tcp_server_p tcp_server_create(const char *host, const char *port,
-                               slice_s (*handler)(slice_s input, slice_s output, void *context), void *context,
+                               tcp_server_handler_t handler, void *context,
                                size_t context_size) {
     tcp_server_p server = calloc(1, sizeof(*server));
 
@@ -108,40 +108,39 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
 
     do {
         SOCKET client_fd = INVALID_SOCKET;
-        int accept_status = socket_accept(server->sock_fd, 1000, &client_fd); /* MAGIC */
+        int32_t accept_status = socket_accept(server->sock_fd, 1000, &client_fd); /* MAGIC */
 
-        if(accept_status == ERR_OK) {
-            struct client_session *session = NULL;
-
+        if(accept_status == PLCTAG_STATUS_OK) {
             /* The client thread is responsible for freeing these */
-            /* TODO: A malloc'ed blob inside a malloc'ed blob is too much. Simplify. */
-            // FIXME - combine the allocations and use calloc or memset to get zeroed memory
-            session = malloc(sizeof(struct client_session));
+            struct client_session *session = calloc(1, sizeof(*session));
+            void *context = calloc(1, server->context_size);
 
-            if(!session) { log_error("Unable to allocate memory for the session!"); }
-
-            // NOLINTNEXTLINE
-            memset(session, 0, sizeof(*session));
-
-            session->server_context = malloc(server->context_size);
-
-            if(!session->server_context) { log_error("Unable to allocate memory for the server context!"); }
+            /* B9: drop the connection rather than run without memory. */
+            if(!session || !context) {
+                log_error("Unable to allocate memory for the session!");
+                free(session);
+                free(context);
+                socket_close(client_fd);
+                continue;
+            }
 
             /* Make a copy of the server context so the thread can use it without threading concerns. */
-            // NOLINTNEXTLINE
-            memcpy(session->server_context, server->context, server->context_size);
+            memcpy(session->server_context = context, server->context, server->context_size);
             session->client_fd = client_fd; /* copy of a temporary value - no thread safety concerns */
             session->server = server;       /* reference to a long-lived struct, which has values and the original context */
             session->server_done = &done;   /* reference to a flag that any thread can raise (and all must monitor) */
 
-            if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) != THREAD_STATUS_OK) {
+            if(thread_create(&(session->thread), conn_handler, session) != PLCTAG_STATUS_OK) {
                 log_error("ERROR: Unable to create connection handler thread!");
+                free(context);
+                free(session);
+                socket_close(client_fd);
             }
-        } else if(accept_status == ERR_SOCKET_TIMEOUT) {
+        } else if(accept_status == PLCTAG_ERR_TIMEOUT) {
             log_info("Timed out waiting for new client connection.");
             continue;
         } else {
-            log_error("ERROR: Received error, %s, accepting new client connection!", err_to_string(accept_status));
+            log_error("ERROR: Received error, %d, accepting new client connection!", accept_status);
             done = true;
         }
 
@@ -170,10 +169,8 @@ THREAD_FUNC(conn_handler) {
     uint8_t input_buf[65536 + 128];                      /* Rockwell supports up to 64k (Micro800) */
     uint8_t output_buf[65536 + 128];                     /* plus some extra for headers etc. */
     tcp_server_p server = (tcp_server_p)session->server; /* need to cast for C++ */
-    slice_s accumulated_data = {0};                      /* slice representing all data received so far */
-    slice_s read_target = {0};                           /* slice representing where to read next data */
-    slice_s tmp_output = {0};
-    int rc = TCP_SERVER_DONE;
+    byte_slice_t pending = byte_slice_make(input_buf, 0); /* unhandled input, always at the start of input_buf */
+    bool need_read = true;
     plc_s *plc = (plc_s *)session->server_context;
 
     log_info("Got new client connection, going into processing loop.");
@@ -182,94 +179,74 @@ THREAD_FUNC(conn_handler) {
     /* no one will join this thread, so clean ourselves up. */
     thread_detach();
 
-    accumulated_data = slice_make(input_buf, 0);            /* start with zero accumulated data */
-    read_target = slice_make(input_buf, sizeof(input_buf)); /* read into entire buffer initially */
-    tmp_output = slice_make(output_buf, sizeof(output_buf));
+    /* make sure another thread hasn't killed the server */
+    while(*(session->server_done) != true) {
+        byte_slice_t reply = {0};
+        byte_slice_t rest = {0};
 
-    do {
-        /* get data from the socket into the input buffer */
-        slice_s new_data = socket_read(session->client_fd, read_target, 1000); /* MAGIC */
+        if(need_read) {
+            byte_slice_t space = byte_slice_skip(byte_slice_make(input_buf, (int32_t)sizeof(input_buf)), byte_slice_len(pending));
+            byte_slice_t new_data = {0};
 
-        /* check for errors */
-        if(slice_has_err(new_data)) {
-            int err = slice_get_err(new_data);
-            if(err == ERR_SOCKET_TIMEOUT) {
+            if(byte_slice_len(space) == 0) {
+                log_info("WARN: Request does not fit in %zu bytes!", sizeof(input_buf));
+                break;
+            }
+
+            new_data = socket_read(session->client_fd, space, 1000); /* MAGIC */
+
+            if(byte_slice_get_error(new_data) == PLCTAG_ERR_TIMEOUT) {
                 log_info("Timed out waiting for client to send us a request.");
                 continue;
-            } else {
-                log_info("Error, %s, reading data from the client!", err_to_string(err));
+            }
+
+            if(byte_slice_has_error(new_data)) {
+                log_info("Error, %d, reading data from the client!", byte_slice_get_error(new_data));
                 break;
             }
+
+            pending = byte_slice_make(input_buf, byte_slice_len(pending) + byte_slice_len(new_data));
         }
 
-        /* update accumulated_data to include the newly read bytes */
-        accumulated_data = slice_make(input_buf, slice_len(accumulated_data) + slice_len(new_data));
-
-        /* try to process the packet. */
         log_info("Handler input:");
-        log_info_slice(accumulated_data);
+        log_info_byte_slice(pending);
 
-        tmp_output = server->handler(accumulated_data, tmp_output, session->server_context);
+        /* ponytail: handlers may rely on a zeroed output buffer; drop this once P2-P5 make every writer a chain. */
+        memset(output_buf, 0, sizeof(output_buf));
 
-        /* check the response. */
-        if(!slice_has_err(tmp_output)) {
+        rest = server->handler(pending, byte_slice_make(output_buf, (int32_t)sizeof(output_buf)), &reply, session->server_context);
+
+        if(byte_slice_has_error(rest)) {
+            log_info("Closing connection: %d.", byte_slice_get_error(rest));
+            break;
+        }
+
+        /* nothing used: the request is incomplete. */
+        if(byte_slice_len(rest) == byte_slice_len(pending)) {
+            need_read = true;
+            continue;
+        }
+
+        if(byte_slice_len(reply) > 0) {
+            byte_slice_t write_res = {0};
+
             log_info("Handler output:");
-            log_info_slice(tmp_output);
+            log_info_byte_slice(reply);
 
-            slice_s write_res = socket_write(session->client_fd, tmp_output, 1000); /* MAGIC*/
+            write_res = socket_write(session->client_fd, reply, 1000); /* MAGIC*/
 
-            if(slice_has_err(write_res)) {
-                log_info("Error, %s, writing packet!", err_to_string(slice_get_err(write_res)));
+            if(byte_slice_has_error(write_res)) {
+                log_info("Error, %d, writing packet!", byte_slice_get_error(write_res));
                 break;
             }
-
-            /* all good. Reset the buffers etc. */
-
-            memset(input_buf, 0, sizeof(input_buf));
-            memset(output_buf, 0, sizeof(output_buf));
-
-            accumulated_data = slice_make(input_buf, 0);
-            read_target = slice_make(input_buf, sizeof(input_buf));
-            tmp_output = slice_make(output_buf, sizeof(output_buf));
-            rc = ERR_TCP_PROCESSED;
         } else {
-            /* there was some sort of error or exceptional condition. */
-            switch((rc = slice_get_err(tmp_output))) {
-                case ERR_TCP_DONE:
-                    /* Connection is done, exit this handler thread but don't shut down the server.
-                       The server should continue accepting new connections. */
-                    break;
-
-                case ERR_TCP_INCOMPLETE:
-                    /* next read should go after the accumulated data */
-                    read_target = slice_from_slice(slice_make(input_buf, sizeof(input_buf)), slice_len(accumulated_data),
-                                                   sizeof(input_buf) - slice_len(accumulated_data));
-                    break;
-
-                case ERR_TCP_PROCESSED: break;
-
-                case ERR_TCP_DROP_RESPONSE:
-                    /* as the success path, minus the write. */
-                    log_info("Deliberately not answering this request.");
-
-                    memset(input_buf, 0, sizeof(input_buf));
-                    memset(output_buf, 0, sizeof(output_buf));
-
-                    accumulated_data = slice_make(input_buf, 0);
-                    read_target = slice_make(input_buf, sizeof(input_buf));
-                    tmp_output = slice_make(output_buf, sizeof(output_buf));
-                    break;
-
-                case ERR_TCP_BAD_REQUEST:
-                    log_info("WARN: Bad request!");
-                    log_info_slice(accumulated_data);
-                    break;
-
-                default: log_info("WARN: Unsupported return code %d!", rc); break;
-            }
+            log_info("Deliberately not answering this request.");
         }
-    } while((rc == ERR_TCP_INCOMPLETE || rc == ERR_TCP_PROCESSED || rc == ERR_TCP_DROP_RESPONSE)
-            && (*(session->server_done) != true)); /* make sure another thread hasn't killed the server */
+
+        /* keep pipelined bytes and try them before reading again. */
+        pending = byte_slice_compress(rest);
+        need_read = (byte_slice_len(pending) == 0);
+    }
 
     socket_close(session->client_fd);
 

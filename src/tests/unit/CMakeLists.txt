@@ -83,6 +83,15 @@ target_include_directories(test_backoff PRIVATE
 target_link_libraries(test_backoff PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
 # test_tag_schedule: the protocol handlers' sorted active-tag list.  Pure computation.
+add_executable(test_byte_slice test_byte_slice.c)
+
+target_include_directories(test_byte_slice PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
 add_executable(test_tag_schedule test_tag_schedule.c)
 
 target_include_directories(test_tag_schedule PRIVATE
@@ -198,11 +207,12 @@ add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
 add_test(NAME unit_test_backoff COMMAND test_backoff)
+add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
 add_test(NAME unit_test_tag_schedule COMMAND test_tag_schedule)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_tag_schedule test_cip_status ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_tag_schedule test_cip_status ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

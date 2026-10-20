@@ -33,19 +33,23 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stdbool.h>
 #include <stdint.h>
 
+#include "cip.h"
 #include "plc.h"
-#include "slice.h"
+#include <utils/byte_slice.h>
 
 /*
  * The Omron NJ/NX services that are not plain Logix-style tag access: the Tag Name Server's
  * instance list (0x5F on class 0x6A), Get Attributes All on a variable or on the Variable Type
- * Object (class 0x6C), and reads and writes carrying a Simple Data Segment (0x80).
- *
- * Returns true and sets *response when the request is one of those; false leaves it to the
- * ordinary CIP dispatcher.
+ * Object (class 0x6C), and reads and writes carrying a Simple Data Segment (0x80).  Each writes
+ * its reply at the start of out and returns what is left of out.
  */
-extern bool omron_dispatch_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
-                                   plc_s *plc, slice_s *response);
+#define OMRON_SIMPLE_DATA_SEGMENT ((uint8_t)0x80)
+
+extern byte_slice_t omron_get_instance_list(cip_request_t *req, byte_slice_t out, plc_s *plc);
+extern byte_slice_t omron_variable_get_attributes_all(cip_request_t *req, byte_slice_t out, plc_s *plc);
+extern byte_slice_t omron_variable_type_get_attributes_all(cip_request_t *req, byte_slice_t out, plc_s *plc);
+
+/* a read or write of tag; segment is the Simple Data Segment at the end of the path. */
+extern byte_slice_t omron_segment_access(cip_request_t *req, tag_def_s *tag, byte_slice_t segment, byte_slice_t out);

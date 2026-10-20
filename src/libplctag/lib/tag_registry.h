@@ -34,6 +34,7 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
+#include <stdbool.h>
 
 /*
  * The global tag-handle registry: the map from the int32_t handle the application
@@ -46,8 +47,11 @@ extern plc_tag_p lookup_tag(int32_t tag_id);
 /* Assign the tag a fresh id and publish it in the registry. */
 extern int add_tag_lookup(plc_tag_p tag);
 
-/* Remove a tag from the registry.  The caller still holds its own reference. */
-extern void remove_tag_lookup(plc_tag_p tag);
+/*
+ * Remove a tag from the registry.  The caller still holds its own reference.  Returns false if
+ * the tag was no longer there: whoever removed it owns raising its DESTROYED event.
+ */
+extern bool remove_tag_lookup(plc_tag_p tag);
 
 /* Remove a tag by id and return it, or NULL if no such tag is registered. */
 extern plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id);

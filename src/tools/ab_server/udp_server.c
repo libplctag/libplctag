@@ -35,9 +35,10 @@
 #include "eip.h"
 #include "log.h"
 #include "plc.h"
-#include "slice.h"
 #include "socket.h"
+#include <utils/byte_slice.h>
 #include "thread.h"
+#include <libplctag/api/libplctag.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,7 +74,7 @@ udp_server_p udp_server_start(const char *port, plc_s *plc, volatile sig_atomic_
     server->plc = *plc;
     server->terminate = terminate;
 
-    if(thread_create(&server->thread, udp_handler, 32 * 1024, server) != THREAD_STATUS_OK) {
+    if(thread_create(&server->thread, udp_handler, server) != PLCTAG_STATUS_OK) {
         log_error("Unable to create the UDP thread!");
         socket_close(server->sock);
         free(server);
@@ -103,20 +104,24 @@ static THREAD_FUNC(udp_handler) {
 
     while(!*server->terminate) {
         socket_peer_s peer;
-        slice_s request = socket_read_from(server->sock, slice_make(in_data, sizeof(in_data)), UDP_POLL_MS, &peer);
-        slice_s response = {0};
+        byte_slice_t request = socket_read_from(server->sock, byte_slice_make(in_data, (int32_t)sizeof(in_data)), UDP_POLL_MS, &peer);
+        uint16_t command = 0;
+        byte_slice_t response = {0};
 
-        if(slice_has_err(request)) { continue; }
+        if(byte_slice_has_error(request)) { continue; }
+
+        byte_slice_read_u16_le(request, &command);
 
         /* only discovery travels over UDP here. */
-        if(slice_len(request) < EIP_HEADER_SIZE || slice_get_uint16_le(request, 0) != EIP_LIST_IDENTITY_COMMAND) {
+        if(byte_slice_len(request) < EIP_HEADER_SIZE || command != EIP_LIST_IDENTITY_COMMAND) {
             log_info("Ignoring a UDP datagram that is not ListIdentity.");
             continue;
         }
 
         server->plc.local_ip = socket_local_ipv4_toward(&peer);
-        response = eip_dispatch_request(request, slice_make(out_data, sizeof(out_data)), &server->plc);
-        if(!slice_has_err(response)) { socket_write_to(server->sock, response, &peer); }
+
+        response = eip_dispatch_request(request, byte_slice_make(out_data, (int32_t)sizeof(out_data)), &server->plc);
+        socket_write_to(server->sock, response, &peer); /* an error slice sends nothing */
     }
 
     THREAD_RETURN(0);

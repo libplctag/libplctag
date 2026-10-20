@@ -405,6 +405,13 @@ void tag_registry_destroy_all_tags(tag_registry_p registry) {
                            tag->tag_id);
                     tag = rc_inc(tag);
                 }
+
+                /*
+                 * Take it out of the table in the same critical section that found it.  The
+                 * remover owns DESTROYED, and a create still running checks with
+                 * remove_tag_lookup() whether shutdown got here first.
+                 */
+                if(tag) { hashtable_remove(registry->tags, (int64_t)tag->tag_id); }
             }
         }
 
@@ -413,13 +420,11 @@ void tag_registry_destroy_all_tags(tag_registry_p registry) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Destroying tag %" PRId32 ".", tag->tag_id);
 
             /*
-             * Remove from the hashtable and run the common destroy tail here, using the
-             * registry we already hold, rather than going through the public
-             * plc_tag_destroy(): its tag_registry_acquire() would correctly (and
-             * unhelpfully) fail, since the gate is deliberately already closed to stop
-             * any *new* tag creation.
+             * Run the common destroy tail here, using the registry we already hold, rather
+             * than going through the public plc_tag_destroy(): its tag_registry_acquire()
+             * would correctly (and unhelpfully) fail, since the gate is deliberately already
+             * closed to stop any *new* tag creation.
              */
-            critical_block(registry->tag_lookup_mutex) { hashtable_remove(registry->tags, (int64_t)tag->tag_id); }
             destroy_tag_common(tag);
 
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -432,10 +437,14 @@ void tag_registry_destroy_all_tags(tag_registry_p registry) {
 
 
 /* Remove a tag from the registry.  The caller still holds its own reference. */
-void remove_tag_lookup(plc_tag_p tag) {
-    if(!tag || !tag->instance) { return; }
+bool remove_tag_lookup(plc_tag_p tag) {
+    void *removed = NULL;
 
-    critical_block(tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+    if(!tag || !tag->instance) { return false; }
+
+    critical_block(tag->instance->tag_lookup_mutex) { removed = hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+
+    return removed == tag;
 }
 
 

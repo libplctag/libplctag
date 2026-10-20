@@ -34,6 +34,7 @@
 #include "compat.h"
 
 #include <stdbool.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,18 +52,20 @@
 #include "args.h"
 #include "eip.h"
 #include "err.h"
+#include "fairness.h"
 #include "fault.h"
 #include "mutex.h"
 #include "plc.h"
-#include "slice.h"
 #include "tcp_server.h"
+#include <libplctag/api/libplctag.h>
+#include <utils/byte_slice.h>
 #include "udp_server.h"
 #include "utils.h"
 #include "mutex.h"
 #include "log.h"
 
 static void usage(void);
-static void process_args(int argc, const char **argv, plc_s *plc);
+static void process_args(int32_t argc, const char **argv, plc_s *plc);
 static bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path);
 static void parse_path(const char *path, plc_s *plc);
 static void parse_pccc_tag(const char *tag, plc_s *plc);
@@ -70,7 +73,7 @@ static void parse_cip_tag(const char *tag, plc_s *plc);
 static bool lookup_atomic_type(const char *type_str, tag_type_t *type, size_t *size);
 static void parse_udt(const char *udt_str, plc_s *plc);
 static uint16_t udt_crc(udt_def_s *udt);
-static slice_s request_handler(slice_s input, slice_s output, void *plc);
+static byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice_t *reply, void *plc);
 
 /* tcp_server.c gives every accepted connection its own memcpy'd copy of the
  * plc_s context (see plc_s.dup_conn_id_tries), so the ForwardOpen-rejection
@@ -89,26 +92,26 @@ static atomic_int32_t g_fault_counts[FAULT_MAX];
 
 #ifdef IS_WINDOWS
 
-typedef volatile int sig_flag_t;
+typedef volatile int32_t sig_flag_t;
 
 sig_flag_t done = 0;
 
 /* straight from MS' web site :-) */
 int WINAPI CtrlHandler(DWORD fdwCtrlType) {
     switch(fdwCtrlType) {
-            // Handle the CTRL-C signal.
+            /* Handle the CTRL-C signal. */
         case CTRL_C_EVENT:
             log_info("^C event");
             done = 1;
             return TRUE;
 
-            // CTRL-CLOSE: confirm that the user wants to exit.
+            /* CTRL-CLOSE: confirm that the user wants to exit. */
         case CTRL_CLOSE_EVENT:
             log_info("Close event");
             done = 1;
             return TRUE;
 
-            // Pass other signals to the next handler.
+            /* Pass other signals to the next handler. */
         case CTRL_BREAK_EVENT:
             log_info("^Break event");
             done = 1;
@@ -152,7 +155,7 @@ void setup_break_handler(void) {
     struct sigaction act;
 
     /* set up signal handler. */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     memset(&act, 0, sizeof(act));
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
@@ -170,7 +173,7 @@ int main(int argc, const char **argv) {
     setup_break_handler();
 
     /* clear out context to make sure we do not get gremlins */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     memset(&plc, 0, sizeof(plc));
 
     /* shared across every connection's copy of plc -- see plc_s.dup_conn_id_tries. */
@@ -179,7 +182,7 @@ int main(int argc, const char **argv) {
     plc.no_reply_count = &g_no_reply_count;
     plc.reject_size_count = &g_reject_size_count;
     plc.link_offline_count = &g_link_offline_count;
-    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
+    for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
     /* set the random seed. */
     srand((unsigned int)time(NULL));
@@ -212,7 +215,7 @@ int main(int argc, const char **argv) {
 
 
 void usage(void) {
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] [--port=<port>] --tag=<tag>\n"
                     "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
                     "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\", \"Micrologix\" or\n"
@@ -253,7 +256,7 @@ void usage(void) {
      * A second call rather than more of the same literal: C99 only guarantees 4095 characters
      * in one string literal and the first half is already at that limit.
      */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     fprintf(stderr, "    Fault injection, for testing client error handling:\n"
                     "        --dup-conn-id-tries=<n>\n"
                     "                               fail the next <n> ForwardOpen requests with a duplicate\n"
@@ -401,7 +404,7 @@ static const args_flag_def_t arg_flags[] = {
 #define NUM_ARG_FLAGS (sizeof(arg_flags) / sizeof(arg_flags[0]))
 
 
-void process_args(int argc, const char **argv, plc_s *plc) {
+void process_args(int32_t argc, const char **argv, plc_s *plc) {
     args_result_t args;
     bool needs_path = false;
     const char *path_str = NULL;
@@ -415,17 +418,17 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     atomic_store_int32(plc->no_reply_count, 0);
     atomic_store_int32(plc->reject_size_count, 0);
     atomic_store_int32(plc->link_offline_count, 0);
-    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
+    for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
 
     if(args_parse(argc, argv, arg_flags, NUM_ARG_FLAGS, &args) != UTIL_OK) {
-        int bad_flag = args_get_error_flag_index(&args);
+        int32_t bad_flag = args_get_error_flag_index(&args);
 
         /*
          * Name the flag the way the user typed it.  For a known flag the table has the name; for
          * an unrecognized one there is no table entry, so args_parse() hands back the offending
          * argv entry instead.
          */
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Error processing arguments: %s (%s)\n", args_get_error_detail(&args),
                 (bad_flag >= 0 && (size_t)bad_flag < NUM_ARG_FLAGS)
                     ? arg_flags[bad_flag].name
@@ -443,7 +446,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
      */
     plc_type_str = args_get_string(&args, "plc");
     if(!plc_type_str || !set_plc_type(plc_type_str, plc, &needs_path)) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unsupported PLC type %s!\n", plc_type_str ? plc_type_str : "(none)");
         args_free(&args);
         usage();
@@ -451,16 +454,13 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     /* debug output needs to be on before anything interesting is logged. */
-    if(args_get_bool(&args, "debug")) {
-        debug_on();
-        log_set_level(LOG_LEVEL_DETAIL);
-    }
+    if(args_get_bool(&args, "debug")) { log_set_level(LOG_LEVEL_DETAIL); }
 
     path_str = args_get_string(&args, "path");
     if(path_str) {
         parse_path(path_str, plc);
     } else if(needs_path) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "This PLC type requires a path argument.\n");
         args_free(&args);
         usage();
@@ -476,7 +476,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
         if(!udt_val.present || !udt_val.value.string_val) { continue; }
 
         if(plc->plc_type != PLC_OMRON) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "--udt is only supported for Omron.\n");
             args_free(&args);
             usage();
@@ -502,7 +502,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     if(num_tags == 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "You must define at least one tag.\n");
         args_free(&args);
         usage();
@@ -551,7 +551,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
         if(!corrupt_val.present || !corrupt_val.value.string_val) { continue; }
 
         if(!fault_parse(corrupt_val.value.string_val, plc)) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unrecognized --corrupt value \"%s\".\n", corrupt_val.value.string_val);
             args_free(&args);
             usage();
@@ -677,16 +677,16 @@ bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path) {
 
 
 void parse_path(const char *path_str, plc_s *plc) {
-    int tmp_path[2];
+    int32_t tmp_path[2];
 
-    // NOLINTNEXTLINE
-    if(str_scanf(path_str, "%d,%d", &tmp_path[0], &tmp_path[1]) == 2) {
+    /* NOLINTNEXTLINE */
+    if(str_scanf(path_str, "%" SCNd32 ",%" SCNd32, &tmp_path[0], &tmp_path[1]) == 2) {
         plc->path[0] = (uint8_t)tmp_path[0];
         plc->path[1] = (uint8_t)tmp_path[1];
 
         log_info("Processed path %d,%d.", plc->path[0], plc->path[1]);
     } else {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Error processing path \"%s\"!  Path must be two numbers separated by a comma.\n", path_str);
         usage();
     }
@@ -710,7 +710,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag_def_s *tag = calloc(1, sizeof(*tag));
     char data_file_name[200] = {0};
     char size_str[200] = {0};
-    int num_dims = 0;
+    int32_t num_dims = 0;
     size_t start = 0;
     size_t len = 0;
 
@@ -722,7 +722,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != PLCTAG_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
     /* try to match the two parts of a tag definition string. */
 
@@ -732,7 +732,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     start = 0;
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -767,7 +767,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
             tag->elem_size = 4;
             tag->data_file_num = 19;
         } else {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unknown data file %s, unable to create tag!", data_file_name);
             usage();
         }
@@ -777,7 +777,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
 
     /* get the array size delimiter. */
     if(tag_str[start] != '[') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after data file in \"%s\"!\n",
                 tag_str);
         usage();
@@ -788,7 +788,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     /* get the size field */
     len = strspn(tag_str + start, "0123456789");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot match array size in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -800,7 +800,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ']') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after size in \"%s\"!\n",
                 tag_str);
         usage();
@@ -812,17 +812,17 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[2] = 1;
 
     /* match the size. */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     num_dims = str_scanf(size_str, "%zu", &tag->dimensions[0]);
     if(num_dims != 1) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag size in \"%s\"!\n", tag_str);
         usage();
     }
 
     /* check the size. */
     if(tag->dimensions[0] <= 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "The array size must least 1 and may not be negative!\n");
         usage();
     } else {
@@ -833,7 +833,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if(!tag->name) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate a copy of the data file \"%s\"!\n", data_file_name);
         exit(1);
     }
@@ -843,7 +843,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag->data_size = tag->elem_count * tag->elem_size;
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
         exit(1);
@@ -880,7 +880,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     char tag_name[200] = {0};
     char type_str[200] = {0};
     char dim_str[200] = {0};
-    int num_dims = 0;
+    int32_t num_dims = 0;
     size_t start = 0;
     size_t len = 0;
 
@@ -890,11 +890,11 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != PLCTAG_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != PLCTAG_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
 
     /* try to match the three parts of a tag definition string. */
@@ -903,7 +903,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     start = 0;
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -915,7 +915,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ':') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find colon after tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -925,7 +925,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* get the type field, which may name a UDT. */
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot match tag type in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -937,7 +937,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != '[') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after tag type in \"%s\"!\n",
                 tag_str);
         usage();
@@ -948,7 +948,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* get the dimension field */
     len = strspn(tag_str + start, "0123456789,");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot match dimension in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -960,7 +960,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ']') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after tag type in \"%s\"!\n",
                 tag_str);
         usage();
@@ -1021,7 +1021,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         }
 
         if(!tag->udt) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
             usage();
         }
@@ -1055,17 +1055,17 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[1] = 0;
     tag->dimensions[2] = 0;
 
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     num_dims = str_scanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
     if(num_dims < 1 || num_dims > 3) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Tag dimensions must have at least one dimension non-zero and no more than three dimensions.");
         usage();
     }
 
     /* check the dimensions. */
     if(tag->dimensions[0] <= 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "The first tag dimension must be at least 1 and may not be negative!\n");
         usage();
     } else {
@@ -1090,7 +1090,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if(!tag->name) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate a copy of the tag name \"%s\"!\n", tag_name);
         exit(1);
     }
@@ -1112,7 +1112,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
 
         tag->data = calloc(tag->data_size, 1);
         if(!tag->data) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unable to allocate tag data buffer!\n");
             free(tag->name);
             exit(1);
@@ -1141,7 +1141,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         tag->data_size = tag->elem_count * tag->elem_size;
         tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
         if(!tag->data) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unable to allocate tag data buffer!\n");
             free(tag->name);
             exit(1);
@@ -1202,14 +1202,14 @@ void parse_udt(const char *udt_str, plc_s *plc) {
     size_t align = 1;
 
     if(!udt || !copy) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate memory for UDT \"%s\"!\n", udt_str);
         exit(1);
     }
 
     member_list = strchr(copy, ':');
     if(!member_list || member_list == copy) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "UDT definition \"%s\" must be <name>:<member>:<type>,...!\n", udt_str);
         usage();
     }
@@ -1228,7 +1228,7 @@ void parse_udt(const char *udt_str, plc_s *plc) {
         type_str = strchr(member, ':');
 
         if(!type_str || type_str == member || udt->num_members >= UDT_MAX_MEMBERS) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Bad member \"%s\" in UDT \"%s\", or more than %d members!\n", member, udt_str, UDT_MAX_MEMBERS);
             usage();
         }
@@ -1237,7 +1237,7 @@ void parse_udt(const char *udt_str, plc_s *plc) {
         type_str++;
 
         if(!lookup_atomic_type(type_str, &m->type, &m->size)) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "UDT member type \"%s\" must be an atomic type!\n", type_str);
             usage();
         }
@@ -1253,7 +1253,7 @@ void parse_udt(const char *udt_str, plc_s *plc) {
     }
 
     if(udt->num_members == 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "UDT \"%s\" has no members!\n", udt_str);
         usage();
     }
@@ -1294,41 +1294,50 @@ uint16_t udt_crc(udt_def_s *udt) {
  * request type handler.
  */
 
-slice_s request_handler(slice_s input, slice_s output, void *plc_arg) {
-    // Remember that we get a copy of the plc_arg/context contents. So values are frozen
-    // in time, but references are to a shared resource and must be mutex'ed.
+byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice_t *reply, void *plc_arg) {
+    /*
+     * Remember that we get a copy of the plc_arg/context contents. So values are frozen
+     * in time, but references are to a shared resource and must be mutex'ed.
+     */
     plc_s *plc = (plc_s *)plc_arg;
+    byte_slice_t packet = {0};
+    byte_slice_t rest = {0};
+    uint16_t eip_command = 0;
+    uint16_t eip_len = 0;
+    byte_slice_t resp = {0};
 
-    /* check to see if we have a full packet. */
-    if(slice_len(input) >= EIP_HEADER_SIZE) {
-        uint16_t eip_len = slice_get_uint16_le(input, 2);
+    byte_slice_cut(output, 0, reply, NULL);
 
-        if(slice_len(input) >= (size_t)(EIP_HEADER_SIZE + eip_len)) {
-            uint16_t eip_command = slice_get_uint16_le(input, 0);
-            slice_s resp = eip_dispatch_request(input, output, plc);
+    /* no whole packet yet: use nothing. */
+    if(byte_slice_len(input) < EIP_HEADER_SIZE) { return input; }
 
-            /* if there is a response delay requested, then wait a bit. */
-            if(plc->response_delay > 0) { util_sleep_ms(plc->response_delay); }
+    byte_slice_read_u16_le(byte_slice_read_u16_le(input, &eip_command), &eip_len);
 
-            /*
-             * --no_reply: throw the response away and tell the server loop the packet is
-             * still incomplete, which leaves the connection open and the client waiting.
-             *
-             * Connected sends only.  Session registration and ForwardOpen both arrive as
-             * unconnected sends, and swallowing one of those wedges the client before it has
-             * a connection to read over -- which it recovers from by retrying, so it proves
-             * nothing.  The target is a read on an established connection.
-             */
-            if(eip_command == EIP_CONNECTED_SEND && atomic_dec_int32(plc->no_reply_count) > 0) {
-                log_info("Dropping the response to this request.");
+    rest = byte_slice_take(input, EIP_HEADER_SIZE + eip_len, &packet);
+    if(byte_slice_has_error(rest)) { return input; }
 
-                return slice_make_err(ERR_TCP_DROP_RESPONSE);
-            }
+    resp = eip_dispatch_request(packet, output, plc);
 
-            return resp;
-        }
+    /* PLCTAG_ERR_CLOSE after UnregisterSession: close. */
+    if(byte_slice_has_error(resp)) { return byte_slice_fail(rest, byte_slice_get_error(resp)); }
+
+    /* if there is a response delay requested, then wait a bit. */
+    if(plc->response_delay > 0) { util_sleep_ms(plc->response_delay); }
+
+    /*
+     * --no_reply: use the packet and send nothing, which leaves the connection open and the
+     * client waiting.
+     *
+     * Connected sends only.  Session registration and ForwardOpen both arrive as
+     * unconnected sends, and swallowing one of those wedges the client before it has
+     * a connection to read over -- which it recovers from by retrying, so it proves
+     * nothing.  The target is a read on an established connection.
+     */
+    if(eip_command == EIP_CONNECTED_SEND && atomic_dec_int32(plc->no_reply_count) > 0) {
+        log_info("Dropping the response to this request.");
+    } else {
+        *reply = resp;
     }
 
-    /* we do not have a complete packet, get more data. */
-    return slice_make_err(TCP_SERVER_INCOMPLETE);
+    return rest;
 }

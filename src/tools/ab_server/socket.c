@@ -56,9 +56,11 @@
 #endif
 
 
-#include "slice.h"
 #include "socket.h"
 #include "err.h"
+#include <libplctag/api/libplctag.h>
+#include <utils/byte_slice.h>
+#include <stdbool.h>
 #include "utils.h"
 #include "log.h"
 #include <stdio.h>
@@ -68,7 +70,8 @@
 
 /* lengths for socket read and write. */
 #ifdef IS_WINDOWS
-typedef SOCKET sock_io_len_t;
+typedef int sock_io_len_t;
+#    define MSG_NOSIGNAL (0)
 #else
 typedef int SOCKET;
 typedef size_t sock_io_len_t;
@@ -79,106 +82,17 @@ typedef struct timeval TIMEVAL;
 #define LISTEN_QUEUE (10)
 
 
-SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) {
-    SOCKET sock = INVALID_SOCKET;
-    int rc = 0;
-    struct sockaddr_in serv_addr = {0};
-    struct timeval timeout = {0};
-    struct linger so_linger = {0};
+static SOCKET open_bound_socket(const char *listening_port, int32_t type);
+static int32_t wait_ready(SOCKET sock, uint32_t timeout_ms, bool for_write);
+static bool last_error_would_block(void);
 
+
+/* the OS code of the last socket error: WSAGetLastError() and errno are separate namespaces. */
+static int32_t socket_last_error(void) {
 #ifdef IS_WINDOWS
-    /* Windows needs special initialization. */
-    static WSADATA winsock_data;
-    rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
-
-    if(rc != NO_ERROR) {
-        log_info("WSAStartup failed with error: %d\n", rc);
-        return (SOCKET)ERR_SOCKET_STARTUP;
-    }
-#endif
-
-    /* create the socket */
-    sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
-    if(sock == INVALID_SOCKET) {
-        log_info("ERROR: socket() failed: %s\n", gai_strerror((int)sock));
-        return (SOCKET)ERR_SOCKET_CREATE;
-    }
-
-#ifdef SO_NOSIGPIPE
-    int sock_opt = 1;
-
-    /* On *BSD and macOS, set the socket option to prevent SIGPIPE. */
-    rc = setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt));
-    if(rc) {
-        socket_close(sock);
-        log_info("ERROR: Setting SO_NOSIGPIPE on socket failed: %s\n", gai_strerror(rc));
-        return (SOCKET)ERR_SOCKET_SETOPT;
-    }
-#endif
-
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
-
-    rc = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    if(rc) {
-        socket_close(sock);
-        log_info("ERROR: Setting SO_RCVTIMEO on socket failed: %s\n", gai_strerror(rc));
-        return (SOCKET)ERR_SOCKET_SETOPT;
-    }
-
-    rc = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
-    if(rc) {
-        socket_close(sock);
-        log_info("ERROR: Setting SO_SNDTIMEO on socket failed: %s\n", gai_strerror(rc));
-        return (SOCKET)ERR_SOCKET_SETOPT;
-    }
-
-    /* abort the connection on close. */
-    so_linger.l_onoff = 1;
-    so_linger.l_linger = 0;
-
-    rc = setsockopt(sock, SOL_SOCKET, SO_LINGER, (char *)&so_linger, sizeof(so_linger));
-    if(rc) {
-        socket_close(sock);
-        log_info("ERROR: Setting SO_LINGER on socket failed: %s\n", gai_strerror(rc));
-        return (SOCKET)ERR_SOCKET_SETOPT;
-    }
-
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons((uint16_t)atoi(remote_port));
-
-    if((rc = inet_pton(AF_INET, remote_host, &serv_addr.sin_addr)) <= 0) {
-        socket_close(sock);
-        log_info("ERROR: Getting IP address for remote server, %s, failed: %d\n", remote_host, rc);
-        return (SOCKET)ERR_SOCKET_BAD_PARAM;
-    }
-
-    /* now connect to the remote server */
-    if(connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) {
-        socket_close(sock);
-        log_info("ERROR: Connecting to remote server, %s, failed: %d\n", remote_host, rc);
-        return (SOCKET)ERR_SOCKET_CONNECT;
-    }
-
-    return sock;
-}
-
-
-/*
- * Last error from a socket call, mapped into the project's unified error space.
- *
- * Winsock reports through WSAGetLastError() and POSIX through errno. They are
- * separate namespaces -- strerror() on a Winsock code is meaningless -- so pick
- * the right source per platform and let err_to_string() render it.
- */
-static SOCKET open_bound_socket(const char *listening_port, int type);
-
-
-static int socket_last_error(void) {
-#ifdef IS_WINDOWS
-    return err_from_winsock(WSAGetLastError());
+    return (int32_t)WSAGetLastError();
 #else
-    return err_from_errno(errno);
+    return (int32_t)errno;
 #endif
 }
 
@@ -186,7 +100,7 @@ static int socket_last_error(void) {
 /*
  * Returns INVALID_SOCKET on every failure, never an error code.
  *
- * The ERR_* values are POSITIVE (ERR_SOCKET_BIND == 1002) while SOCKET is a plain
+ * Error codes used to be POSITIVE while SOCKET is a plain
  * int, so returning one produced a "socket" that sailed through the caller's
  * `sock >= 0` check and was stored as a live fd. A failed bind then left the
  * server running its accept loop against a descriptor that was never opened:
@@ -195,15 +109,15 @@ static int socket_last_error(void) {
  */
 SOCKET socket_open_tcp_server(const char *listening_port) {
     SOCKET sock = open_bound_socket(listening_port, SOCK_STREAM);
-    int rc = 0;
+    int32_t rc = 0;
 
     if(sock == INVALID_SOCKET) { return INVALID_SOCKET; }
 
     rc = listen(sock, LISTEN_QUEUE);
     if(rc < 0) {
-        int listen_err = socket_last_error();
+        int32_t listen_err = socket_last_error();
 
-        log_error("ERROR: Unable to listen() on port %s: %s", listening_port, err_to_string(listen_err));
+        log_error("ERROR: Unable to listen() on port %s: OS error %d", listening_port, listen_err);
         socket_close(sock);
         return INVALID_SOCKET;
     }
@@ -216,11 +130,11 @@ SOCKET socket_open_udp_server(const char *listening_port) { return open_bound_so
 
 
 /* a socket of the given type bound to the port on every interface, or INVALID_SOCKET. */
-static SOCKET open_bound_socket(const char *listening_port, int type) {
+static SOCKET open_bound_socket(const char *listening_port, int32_t type) {
     struct sockaddr_in address = {0};
     SOCKET sock = INVALID_SOCKET;
     SOCKET sock_opt = 0;
-    int rc = 0;
+    int32_t rc = 0;
 
 #ifdef IS_WINDOWS
     /* Windows needs special initialization.  It counts calls, so a second one is harmless. */
@@ -236,7 +150,7 @@ static SOCKET open_bound_socket(const char *listening_port, int type) {
     /* create the socket */
     sock = socket(AF_INET, type, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
-        log_error("ERROR: socket() failed for port %s: %s", listening_port, err_to_string(socket_last_error()));
+        log_error("ERROR: socket() failed for port %s: OS error %d", listening_port, socket_last_error());
         return INVALID_SOCKET;
     }
 
@@ -249,7 +163,7 @@ static SOCKET open_bound_socket(const char *listening_port, int type) {
     rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt));
     if(rc) {
         socket_close(sock);
-        log_error("ERROR: Setting SO_REUSEADDR failed for port %s: %s", listening_port, err_to_string(socket_last_error()));
+        log_error("ERROR: Setting SO_REUSEADDR failed for port %s: OS error %d", listening_port, socket_last_error());
         return INVALID_SOCKET;
     }
 
@@ -258,9 +172,9 @@ static SOCKET open_bound_socket(const char *listening_port, int type) {
     rc = bind(sock, (struct sockaddr *)&address, (socklen_t)sizeof(address));
     if(rc < 0) {
         /* capture the error before socket_close() can overwrite it. */
-        int bind_err = socket_last_error();
+        int32_t bind_err = socket_last_error();
 
-        log_error("ERROR: Unable to bind() to port %s: %s", listening_port, err_to_string(bind_err));
+        log_error("ERROR: Unable to bind() to port %s: OS error %d", listening_port, bind_err);
         socket_close(sock);
         return INVALID_SOCKET;
     }
@@ -280,209 +194,135 @@ void socket_close(SOCKET sock) {
 }
 
 
-int socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd) {
-    fd_set accept_fd_set;
-    TIMEVAL timeout;
-    int num_accept_ready = 0;
+int32_t socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd) {
+    int32_t rc = PLCTAG_STATUS_OK;
 
-    if(!out_client_fd) { return (SOCKET)ERR_SOCKET_BAD_PARAM; }
+    if(!out_client_fd) { return PLCTAG_ERR_NULL_PTR; }
 
     *out_client_fd = INVALID_SOCKET;
 
-    /* set the timeout to zero */
-    timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    if((rc = wait_ready(sock, timeout_ms, false)) != PLCTAG_STATUS_OK) { return (rc == PLCTAG_ERR_TIMEOUT) ? rc : PLCTAG_ERR_OPEN; }
 
-    /* zero out the file descriptor set. */
-    FD_ZERO(&accept_fd_set);
+    *out_client_fd = accept(sock, NULL, NULL);
 
-    /* set our socket's bit in the set. */
-    FD_SET(sock, &accept_fd_set);
-
-    /* do a select to see if anything is ready to accept. */
-    num_accept_ready = select((int)(unsigned int)sock + 1, &accept_fd_set, NULL, NULL, &timeout);
-    if(num_accept_ready > 0) {
-        SOCKET client_fd = INVALID_SOCKET;
-
-        log_info("Ready to accept on %d sockets.", num_accept_ready);
-
-        client_fd = accept(sock, NULL, NULL);
-        if(client_fd == INVALID_SOCKET) {
-            return ERR_SOCKET_ACCEPT;
-        } else {
-            *out_client_fd = client_fd;
-            return ERR_OK;
-        }
-    } else if(num_accept_ready < 0) {
-        log_info("Error selecting the listen socket!");
-        return ERR_SOCKET_SELECT;
-    } else {
-        /* no client connection, timeout */
-        return ERR_SOCKET_TIMEOUT;
-    }
+    return (*out_client_fd == INVALID_SOCKET) ? PLCTAG_ERR_OPEN : PLCTAG_STATUS_OK;
 }
 
 
-slice_s socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms) {
-    fd_set read_fd_set;
-    TIMEVAL timeout;
-    int num_read_ready = 0;
+byte_slice_t socket_read(SOCKET sock, byte_slice_t space, uint32_t timeout_ms) {
+    byte_slice_t filled = space;
+    int32_t rc = 0;
 
-    /* set the timeout to zero */
-    timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    if(byte_slice_has_error(space)) { return space; }
 
-    /* zero out the file descriptor set. */
-    FD_ZERO(&read_fd_set);
+    if((rc = wait_ready(sock, timeout_ms, false)) != PLCTAG_STATUS_OK) { return byte_slice_fail(space, rc); }
 
-    /* set our socket's bit in the set. */
-    FD_SET(sock, &read_fd_set);
+    rc = (int32_t)recv(sock, (char *)byte_slice_get_data(space), (sock_io_len_t)byte_slice_len(space), 0);
 
-    /* do a select to see if anything is ready to read. */
-    num_read_ready = select((int)(unsigned int)sock + 1, &read_fd_set, NULL, NULL, &timeout);
-    if(num_read_ready > 0) {
-        int rc = 0;
-#ifdef IS_WINDOWS
-        rc = (int)recv(sock, (char *)slice_get_bytes(in_buf, 0), (int)slice_len(in_buf), 0);
-#else
-        rc = (int)recv(sock, (char *)slice_get_bytes(in_buf, 0), (size_t)slice_len(in_buf), 0);
-#endif
-        if(rc > 0) {
-            return slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc);
-        } else if(rc == 0) {
-            /* socket is closed. */
-            log_info("Unable to read.  The socket is closed.");
-            return slice_make_err(ERR_SOCKET_EOF);
-        } else {
-#ifdef IS_WINDOWS
-            rc = WSAGetLastError();
-            if(rc == WSAEWOULDBLOCK) {
-#else
-            rc = errno;
-            if(rc == EAGAIN || rc == EWOULDBLOCK) {
-#endif
-                /* the read was interrupted.  We will return as if it was a timeout. */
-                log_info("Read interrupted.");
-                return slice_make_err(ERR_SOCKET_TIMEOUT);
-            } else {
-                log_info("Socket read error rc=%d.\n", rc);
-                return slice_make_err(ERR_SOCKET_READ);
-            }
-        }
-    } else if(num_read_ready == 0) {
-        /* num_read_ready sockets is zero, so we timed out. */
-        log_info("Timeout waiting for data to read.");
-        return slice_make_err(ERR_SOCKET_TIMEOUT);
-    } else {
-        log_info("Socket select error trying to read!\n");
-        return slice_make_err(ERR_SOCKET_SELECT);
+    if(rc == 0) {
+        log_info("Unable to read.  The socket is closed.");
+        return byte_slice_fail(space, PLCTAG_ERR_CLOSE);
     }
+
+    /* an interrupted read is treated as a timeout. */
+    if(rc < 0) { return byte_slice_fail(space, last_error_would_block() ? PLCTAG_ERR_TIMEOUT : PLCTAG_ERR_READ); }
+
+    byte_slice_cut(space, rc, &filled, NULL);
+
+    return filled;
 }
 
 
-/* this blocks until all the data is written or there is an error. */
-slice_s socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms) {
-    fd_set write_fd_set;
-    TIMEVAL timeout;
-    int num_write_ready = 0;
+/* B8: send() may take only part of the data, so loop until it is all gone. */
+byte_slice_t socket_write(SOCKET sock, byte_slice_t data, uint32_t timeout_ms) {
+    while(byte_slice_len(data) > 0) {
+        int32_t rc = wait_ready(sock, timeout_ms, true);
 
-    /* set the timeout to zero */
-    timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+        if(rc != PLCTAG_STATUS_OK) { return byte_slice_fail(data, rc); }
 
-    /* zero out the file descriptor set. */
-    FD_ZERO(&write_fd_set);
+        rc = (int32_t)send(sock, (const char *)byte_slice_get_data(data), (sock_io_len_t)byte_slice_len(data), MSG_NOSIGNAL);
 
-    /* set our socket's bit in the set. */
-    FD_SET(sock, &write_fd_set);
+        if(rc < 0) {
+            if(last_error_would_block()) { continue; }
 
-    /* do a select to see if anything is ready to write. */
-    num_write_ready = select((int)(unsigned int)sock + 1, NULL, &write_fd_set, NULL, &timeout);
-    if(num_write_ready > 0) {
-        int rc = 0;
-#ifdef IS_WINDOWS
-        rc = (int)send(sock, (char *)slice_get_bytes(out_buf, 0), (int)slice_len(out_buf), 0);
-#else
-        rc = (int)send(sock, (char *)slice_get_bytes(out_buf, 0), (size_t)slice_len(out_buf), MSG_NOSIGNAL);
-#endif
-        if(rc >= 0) {
-            /* Return remaining data to write (for caller that may need to retry) */
-            return slice_from_slice(out_buf, (size_t)(unsigned int)rc, (size_t)(slice_len(out_buf) - (size_t)(unsigned int)rc));
-        } else if(rc == 0) {
-            /* socket is closed. */
-            log_info("Unable to write.  The socket is closed.");
-            return slice_make_err(ERR_SOCKET_EOF);
-        } else {
-#ifdef IS_WINDOWS
-            rc = WSAGetLastError();
-            if(rc == WSAEWOULDBLOCK) {
-#else
-            rc = errno;
-            if(rc == EAGAIN || rc == EWOULDBLOCK) {
-#endif
-                /* the write was interrupted.  We will return as if it was a timeout. */
-                log_info("write interrupted.");
-                return slice_make_err(ERR_SOCKET_TIMEOUT);
-            } else {
-                log_info("Socket write error rc=%d.\n", rc);
-                return slice_make_err(ERR_SOCKET_WRITE);
-            }
+            log_info("Socket write error!");
+            return byte_slice_fail(data, PLCTAG_ERR_WRITE);
         }
-    } else if(num_write_ready == 0) {
-        /* num_write_ready sockets is zero, so we timed out. */
-        log_info("Timeout waiting for data to write.");
-        return slice_make_err(ERR_SOCKET_TIMEOUT);
-    } else {
-        log_info("Socket select error trying to write!\n");
-        return slice_make_err(ERR_SOCKET_SELECT);
+
+        data = byte_slice_skip(data, rc);
     }
+
+    return data;
 }
 
 
-slice_s socket_read_from(SOCKET sock, slice_s in_buf, uint32_t timeout_ms, socket_peer_s *peer) {
-    fd_set read_fd_set;
-    TIMEVAL timeout;
+byte_slice_t socket_read_from(SOCKET sock, byte_slice_t space, uint32_t timeout_ms, socket_peer_s *peer) {
+    byte_slice_t filled = space;
     socklen_t peer_len = (socklen_t)sizeof(peer->addr);
-    int rc = 0;
+    int32_t rc = 0;
 
-    timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    if(byte_slice_has_error(space)) { return space; }
 
-    FD_ZERO(&read_fd_set);
-    FD_SET(sock, &read_fd_set);
+    if((rc = wait_ready(sock, timeout_ms, false)) != PLCTAG_STATUS_OK) { return byte_slice_fail(space, rc); }
 
-    rc = select((int)(unsigned int)sock + 1, &read_fd_set, NULL, NULL, &timeout);
-    if(rc == 0) { return slice_make_err(ERR_SOCKET_TIMEOUT); }
-    if(rc < 0) { return slice_make_err(ERR_SOCKET_SELECT); }
-
-#ifdef IS_WINDOWS
-    rc = (int)recvfrom(sock, (char *)slice_get_bytes(in_buf, 0), (int)slice_len(in_buf), 0, (struct sockaddr *)peer->addr,
-                       &peer_len);
-#else
-    rc = (int)recvfrom(sock, (char *)slice_get_bytes(in_buf, 0), (size_t)slice_len(in_buf), 0, (struct sockaddr *)peer->addr,
-                       &peer_len);
-#endif
-    if(rc < 0) { return slice_make_err(ERR_SOCKET_READ); }
+    rc = (int32_t)recvfrom(sock, (char *)byte_slice_get_data(space), (sock_io_len_t)byte_slice_len(space), 0,
+                           (struct sockaddr *)peer->addr, &peer_len);
+    if(rc < 0) { return byte_slice_fail(space, PLCTAG_ERR_READ); }
 
     peer->len = (uint32_t)peer_len;
 
-    return slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc);
+    byte_slice_cut(space, rc, &filled, NULL);
+
+    return filled;
 }
 
 
-slice_s socket_write_to(SOCKET sock, slice_s out_buf, socket_peer_s *peer) {
-    int rc = 0;
+byte_slice_t socket_write_to(SOCKET sock, byte_slice_t data, socket_peer_s *peer) {
+    int32_t rc = 0;
 
+    if(byte_slice_has_error(data)) { return data; }
+
+    rc = (int32_t)sendto(sock, (const char *)byte_slice_get_data(data), (sock_io_len_t)byte_slice_len(data), 0,
+                         (struct sockaddr *)peer->addr, (socklen_t)peer->len);
+
+    /* a datagram goes whole or not at all */
+    if(rc != byte_slice_len(data)) { return byte_slice_fail(data, PLCTAG_ERR_WRITE); }
+
+    return byte_slice_skip(data, rc);
+}
+
+
+/* PLCTAG_STATUS_OK when sock is ready, else PLCTAG_ERR_TIMEOUT or the read/write error. */
+static int32_t wait_ready(SOCKET sock, uint32_t timeout_ms, bool for_write) {
+    fd_set fds;
+    TIMEVAL timeout;
+    int32_t rc = 0;
+
+    timeout.tv_sec = (time_t)(timeout_ms / 1000);
+    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+
+    FD_ZERO(&fds);
+    FD_SET(sock, &fds);
+
+    rc = (int32_t)select((int)(unsigned int)sock + 1, for_write ? NULL : &fds, for_write ? &fds : NULL, NULL, &timeout);
+
+    if(rc == 0) { return PLCTAG_ERR_TIMEOUT; }
+
+    if(rc < 0) {
+        log_info("Socket select error!");
+        return for_write ? PLCTAG_ERR_WRITE : PLCTAG_ERR_READ;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static bool last_error_would_block(void) {
 #ifdef IS_WINDOWS
-    rc = (int)sendto(sock, (char *)slice_get_bytes(out_buf, 0), (int)slice_len(out_buf), 0, (struct sockaddr *)peer->addr,
-                     (int)peer->len);
+    return WSAGetLastError() == WSAEWOULDBLOCK;
 #else
-    rc = (int)sendto(sock, (char *)slice_get_bytes(out_buf, 0), (size_t)slice_len(out_buf), 0, (struct sockaddr *)peer->addr,
-                     (socklen_t)peer->len);
+    return errno == EAGAIN || errno == EWOULDBLOCK;
 #endif
-    if(rc < 0) { return slice_make_err(ERR_SOCKET_WRITE); }
-
-    return slice_from_slice(out_buf, 0, (size_t)(unsigned int)rc);
 }
 
 

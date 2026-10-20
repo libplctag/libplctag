@@ -721,8 +721,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
         }
 
-        /* remove the tag from the hashtable. */
-        remove_tag_lookup(tag);
+        /*
+         * If shutdown already took the tag out of the registry, it raises DESTROYED for this id,
+         * so hand the id back: every event the caller sees is for an id it holds.
+         */
+        if(!remove_tag_lookup(tag)) {
+            rc_dec(tag);
+            return id;
+        }
 
         rc_dec(tag);
         return rc;
@@ -751,7 +757,11 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
             }
 
-            remove_tag_lookup(tag);
+            /* as above: if shutdown took the tag, it raises DESTROYED for this id. */
+            if(!remove_tag_lookup(tag)) {
+                rc_dec(tag);
+                return id;
+            }
 
             rc_dec(tag);
             return rc;

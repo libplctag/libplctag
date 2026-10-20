@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,24 +33,28 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
 #include <signal.h>
 #include <stdbool.h>
-#include "slice.h"
-
-typedef enum {
-    TCP_SERVER_INCOMPLETE = 100001,
-    TCP_SERVER_PROCESSED = 100002,
-    TCP_SERVER_DONE = 100003,
-    TCP_SERVER_BAD_REQUEST = 100004,
-    TCP_SERVER_UNSUPPORTED = 100005
-} tcp_server_status_t;
+#include <stddef.h>
+#include <utils/byte_slice.h>
 
 typedef struct tcp_server *tcp_server_p;
 
-extern tcp_server_p tcp_server_create(const char *host, const char *port,
-                                      slice_s (*handler)(slice_s input, slice_s output, void *context), void *context,
+/*
+ * The handler returns what is left of input after the one request it handled, and sets
+ * *reply to the bytes to send:
+ *
+ *   - error slice: close the connection.
+ *   - same length as input: no whole request yet, read more.
+ *   - shorter, *reply empty: request handled, send nothing.
+ *   - shorter, *reply not empty: send *reply.
+ *
+ * The server keeps the leftover and calls the handler again before reading, so pipelined
+ * requests are all answered.
+ */
+typedef byte_slice_t (*tcp_server_handler_t)(byte_slice_t input, byte_slice_t output, byte_slice_t *reply, void *context);
+
+extern tcp_server_p tcp_server_create(const char *host, const char *port, tcp_server_handler_t handler, void *context,
                                       size_t context_size);
 extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
 extern void tcp_server_destroy(tcp_server_p server);

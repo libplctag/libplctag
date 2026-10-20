@@ -23,15 +23,12 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/cpf.h
     ${CMAKE_CURRENT_SOURCE_DIR}/eip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/eip.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/err.c
     ${CMAKE_CURRENT_SOURCE_DIR}/err.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fairness.c
     ${CMAKE_CURRENT_SOURCE_DIR}/fairness.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fault.c
     ${CMAKE_CURRENT_SOURCE_DIR}/fault.h
     ${CMAKE_CURRENT_SOURCE_DIR}/main.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/memory.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/memory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mutex.c
     ${CMAKE_CURRENT_SOURCE_DIR}/mutex.h
     ${CMAKE_CURRENT_SOURCE_DIR}/omron.c
@@ -39,7 +36,6 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/pccc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/pccc.h
     ${CMAKE_CURRENT_SOURCE_DIR}/plc.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/slice.h
     ${CMAKE_CURRENT_SOURCE_DIR}/socket.c
     ${CMAKE_CURRENT_SOURCE_DIR}/socket.h
     ${CMAKE_CURRENT_SOURCE_DIR}/tcp_server.c
@@ -52,10 +48,13 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/log.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/random_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/random_utils.h
 )
 
 # Add ab_server executable
 add_executable(ab_server ${AB_SERVER_FILES})
+target_include_directories(ab_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
 
 # Link math library for ab_server (fairness.c uses math.h)
