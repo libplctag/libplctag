@@ -1461,6 +1461,7 @@ static void dispatch_reply_unsafe(modbus_plc_p plc) {
     int32_t slot = -1;
     modbus_tag_p tag = NULL;
     int rc = PLCTAG_STATUS_OK;
+    int32_t tries = 0;
 
     for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) {
         if(plc->slots[i].used && plc->slots[i].tid == tid) { slot = i; }
@@ -1475,7 +1476,7 @@ static void dispatch_reply_unsafe(modbus_plc_p plc) {
 
     while((tag = plc->slots[slot].tag) && mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
         mutex_unlock(plc->mutex);
-        sleep_ms(1);
+        sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
         mutex_lock(plc->mutex);
     }
 
@@ -1525,7 +1526,7 @@ static void send_next_unsafe(modbus_plc_p plc, int64_t now) {
         /* armed for an auto-sync deadline, or waiting for its tickle: no request to send. */
         if(!tag_op_busy(tag)) { continue; }
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
+        if(!tag_driver_try_lock((plc_tag_p)tag)) { continue; }
 
         is_read = tag_op_is_read(tag);
         rc = is_read ? create_read_request(plc, tag) : create_write_request(plc, tag);

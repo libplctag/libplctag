@@ -305,6 +305,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t bit;                                                                        \
     tag_protocol_t protocol_type;                                                       \
     atomic_bool abort_requested;                                                        \
+    /* the handler found the API mutex busy; see tag_driver_try_lock(). */             \
+    atomic_bool handler_waiting;                                                        \
     /* tag_op_state_t; see tag_op_state(). */                                          \
     atomic_int32_t op_state;                                                            \
     tag_event_t events[TAG_EVENT_RING_SIZE];                                            \

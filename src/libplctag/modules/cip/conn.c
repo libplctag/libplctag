@@ -1502,7 +1502,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
             continue;
         }
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+        if(!tag_driver_try_lock((plc_tag_p)tag)) {
             index++;
             continue;
         }
@@ -1588,10 +1588,11 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
         tag_decode_func decode = NULL;
         uint8_t *reply = NULL;
         int32_t reply_size = 0;
+        int32_t tries = 0;
 
         while(tag && mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
             mutex_unlock(conn->session_mutex);
-            sleep_ms(1);
+            sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
             mutex_lock(conn->session_mutex);
             tag = conn->slots[i].tag;
         }
@@ -1663,6 +1664,7 @@ static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc) {
 static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
     int32_t failed = 0;
     int32_t index = 0;
+    int32_t tries = 0;
 
     while(index < vector_length(conn->driver.active)) {
         cip_tag_p tag = vector_get(conn->driver.active, index);
@@ -1674,7 +1676,7 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
 
         if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
             mutex_unlock(conn->session_mutex);
-            sleep_ms(1);
+            sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
             mutex_lock(conn->session_mutex);
             index = 0;
             continue;

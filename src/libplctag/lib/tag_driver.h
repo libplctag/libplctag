@@ -45,7 +45,9 @@
  *
  * The functions named _unsafe are called with the handler's connection mutex held, which
  * guards the list.  They only try each tag's API mutex, so a tag an application thread holds
- * is skipped and stays due.  tag_driver_notify() is called with the connection mutex released.
+ * is skipped and stays due; that thread wakes the handler when it lets go
+ * (tag_driver_api_released()).  tag_driver_notify() is called with the connection mutex
+ * released.
  */
 
 #include <libplctag/lib/tag.h>
@@ -99,3 +101,20 @@ extern void tag_driver_done_unsafe(tag_driver_t *driver, plc_tag_p tag, int64_t 
 
 /* run the callbacks for every tag that has events: connection mutex released, each tag's API mutex held. */
 extern void tag_driver_notify(tag_driver_t *driver);
+
+/*
+ * The handler's try for a tag's API mutex.  On failure the tag stays marked, and the thread
+ * holding the mutex wakes the handler as it lets go, in tag_driver_api_released(), rather than
+ * the tag waiting for the handler's next tick.
+ */
+extern bool tag_driver_try_lock(plc_tag_p tag);
+
+/* called by an API function after it lets go of the tag's API mutex: wake the handler if it is waiting for it. */
+extern void tag_driver_api_released(plc_tag_p tag);
+
+/*
+ * A handler that must have a busy tag's API mutex retries with its own mutex released.  The
+ * holder is nearly always an API call that lets go within microseconds, so the first retries
+ * only yield; after these it sleeps 1ms between tries.
+ */
+#define TAG_DRIVER_LOCK_YIELDS (100) /* MAGIC */

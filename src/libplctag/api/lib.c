@@ -42,6 +42,7 @@
 #include <libplctag/lib/init.h>
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/lib/tag_driver.h>
 #include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag_string.h>
 #include <libplctag/lib/version.h>
@@ -340,6 +341,8 @@ static int plc_tag_status_impl(plc_tag_p tag) {
     }
 
     plc_tag_generic_handle_event_callbacks(tag);
+
+    tag_driver_api_released(tag);
 
     return rc;
 }
@@ -1408,6 +1411,9 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         }
     }
 
+    /* the protocol woke its handler with the API mutex still held. */
+    tag_driver_api_released(tag);
+
     if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
 
     if(rc == PLCTAG_STATUS_OK) {
@@ -1526,6 +1532,9 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
             is_done = true;
         }
     }
+
+    /* the protocol woke its handler with the API mutex still held. */
+    tag_driver_api_released(tag);
 
     if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
 
