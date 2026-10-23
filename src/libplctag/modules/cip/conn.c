@@ -70,6 +70,7 @@ static int32_t session_list_count(cip_conn_list_t *list);
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
 static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now);
 static int dispatch_replies_unsafe(cip_conn_p conn);
+static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int *bad_packet_rc);
 static void requeue_slots_unsafe(cip_conn_p conn);
 static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc);
 static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc);
@@ -1502,7 +1503,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
             continue;
         }
 
-        if(!tag_driver_try_lock((plc_tag_p)tag)) {
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
             index++;
             continue;
         }
@@ -1574,13 +1575,29 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
  * Hand each reply in the exchange to its tag's decoder.  A decoder that needs another
  * exchange puts the tag back on the list, due now; otherwise the operation is over.
  *
- * Decoding needs the tag's API mutex.  When it is busy this lets go of session_mutex while it
- * waits, so that whoever holds the API mutex can take session_mutex to abort the tag: never
- * blocking on one while holding the other is what keeps the two from deadlocking.
+ * Decoding needs the tag's API mutex.  Each pass decodes every reply whose tag it can lock and
+ * skips the rest, so one busy tag does not hold up the others.  Between passes this lets go
+ * of session_mutex, so that whoever holds an API mutex can take session_mutex to abort the
+ * tag: never blocking on one while holding the other is what keeps the two from deadlocking.
+ * A slot's tag is cleared once decoded, or by an abort, so a pass sees only what is left.
  */
 static int dispatch_replies_unsafe(cip_conn_p conn) {
-    int rc = PLCTAG_STATUS_OK;
     int bad_packet_rc = PLCTAG_STATUS_OK;
+    int32_t tries = 0;
+
+    while(dispatch_replies_pass_unsafe(conn, &bad_packet_rc) > 0) {
+        mutex_unlock(conn->session_mutex);
+        sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
+        mutex_lock(conn->session_mutex);
+    }
+
+    return bad_packet_rc;
+}
+
+
+/* One pass over the exchange.  Returns how many replies were skipped because the tag was busy. */
+static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int *bad_packet_rc) {
+    int32_t skipped = 0;
 
     for(int32_t i = 0; i < conn->slot_count; i++) {
         cip_tag_p tag = conn->slots[i].tag;
@@ -1588,17 +1605,15 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
         tag_decode_func decode = NULL;
         uint8_t *reply = NULL;
         int32_t reply_size = 0;
-        int32_t tries = 0;
+        int rc = PLCTAG_STATUS_OK;
 
-        while(tag && mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
-            mutex_unlock(conn->session_mutex);
-            sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
-            mutex_lock(conn->session_mutex);
-            tag = conn->slots[i].tag;
-        }
-
-        /* aborted or destroyed while the exchange was out. */
+        /* decoded on an earlier pass, or aborted or destroyed while the exchange was out. */
         if(!tag) { continue; }
+
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+            skipped++;
+            continue;
+        }
 
         conn->slots[i].tag = NULL;
 
@@ -1608,7 +1623,7 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
          */
         rc = find_reply(conn, i, &reply, &reply_size);
         if(rc != PLCTAG_STATUS_OK) {
-            bad_packet_rc = rc;
+            *bad_packet_rc = rc;
         } else {
             decode = is_read ? tag->vtable->decode_read : tag->vtable->decode_write;
             rc = decode ? ((cip_tag_decode_func)decode)(tag, reply, reply_size) : PLCTAG_ERR_UNSUPPORTED;
@@ -1624,7 +1639,7 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
         mutex_unlock(tag->api_mutex);
     }
 
-    return bad_packet_rc;
+    return skipped;
 }
 
 
@@ -1811,6 +1826,7 @@ static THREAD_FUNC(session_handler) {
     int auto_disconnect = 0;
     bool run_again = false;
     bool did_exchange = false;
+    int32_t lock_retries = 0;
 
 
     backoff_init(&retry_backoff, RETRY_WAIT_INITIAL_MS, RETRY_WAIT_MAX_MS);
@@ -2242,12 +2258,27 @@ static THREAD_FUNC(session_handler) {
          * own pace, so a due tag does not spin the handler through a backoff.
          */
         if(conn->state == SESSION_IDLE || conn->state == SESSION_WAIT_IDLE_RECONNECT) {
+            bool due_unserved = false;
+
             critical_block(conn->session_mutex) {
                 int64_t next_tag_time = tag_driver_next_time_unsafe(&conn->driver);
+
+                due_unserved = (next_tag_time > 0 && next_tag_time <= now);
 
                 if(next_tag_time > 0 && wait_until_time > 0 && next_tag_time < wait_until_time) {
                     wait_until_time = (next_tag_time > now) ? next_tag_time : now + 1;
                 }
+            }
+
+            /*
+             * A due tag left after a pass with no exchange was skipped because an application
+             * thread holds its API mutex.  Yield and look again, rather than wait the tick.
+             */
+            if(run_again || !due_unserved) {
+                lock_retries = 0;
+            } else if(conn->state == SESSION_IDLE && ++lock_retries < TAG_DRIVER_LOCK_YIELDS) {
+                sleep_ms(0);
+                run_again = true;
             }
         }
 

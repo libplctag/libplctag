@@ -59,7 +59,6 @@
 
 
 static void cip_tag_destroy(cip_tag_p tag);
-static int cip_tag_send(cip_tag_p tag);
 
 
 /* Default byte order for short strings */
@@ -323,19 +322,6 @@ int cip_tag_abort(cip_tag_p tag) {
 }
 
 
-/*
- * Hand the tag to its connection, whose handler encodes the request the tag's read or write
- * op state calls for, sends it, and decodes the reply with the vtable's encode_* and decode_*.
- * The caller has started the op (tag_op_start()) first.
- */
-static int cip_tag_send(cip_tag_p tag) {
-    /* a tag the library is still building waits for activate to queue it. */
-    if(!tag->activated) { return PLCTAG_STATUS_OK; }
-
-    return cip_conn_queue_tag(tag->session, tag);
-}
-
-
 int cip_tag_activate(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
 
@@ -505,16 +491,8 @@ int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *r
 
 int cip_tag_read_start(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
-    int rc = PLCTAG_STATUS_OK;
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
-
-    rc = cip_tag_send(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to queue the read, %s!", plc_tag_decode_error(rc));
-        tag->offset = 0;
-        return rc;
-    }
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -522,7 +500,6 @@ int cip_tag_read_start(plc_tag_p tag_arg) {
 
 int cip_tag_write_start(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
-    int rc = PLCTAG_STATUS_OK;
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
 
@@ -530,13 +507,6 @@ int cip_tag_write_start(plc_tag_p tag_arg) {
     if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
         pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "The create is still in flight!");
         return PLCTAG_ERR_BUSY;
-    }
-
-    rc = cip_tag_send(tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Unable to queue the write, %s!", plc_tag_decode_error(rc));
-        tag->offset = 0;
-        return rc;
     }
 
     return PLCTAG_STATUS_PENDING;

@@ -285,7 +285,7 @@ static int32_t core_get_size(plc_tag_p tag, int32_t *result) {
 
 static int32_t core_get_read_cache_ms(plc_tag_p tag, int32_t *result) {
     /* FIXME - what happens if this overflows? */
-    *result = (int32_t)tag->read_cache_ms;
+    *result = (int32_t)atomic_get_int64(&tag->read_cache_ms);
 
     return PLCTAG_STATUS_OK;
 }
@@ -295,8 +295,8 @@ static int32_t core_set_read_cache_ms(plc_tag_p tag, int32_t value) {
     if(value < 0) { return PLCTAG_ERR_OUT_OF_BOUNDS; }
 
     /* expire the cache. */
-    tag->read_cache_expire = (int64_t)0;
-    tag->read_cache_ms = (int64_t)value;
+    atomic_set_int64(&tag->read_cache_expire, 0);
+    atomic_set_int64(&tag->read_cache_ms, (int64_t)value);
 
     return PLCTAG_STATUS_OK;
 }

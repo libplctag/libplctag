@@ -315,8 +315,9 @@ extern void cip_tag_op_done(cip_tag_p tag, int rc);
 
 
 /*
- * The vtable's read and write for every CIP tag kind: queue the tag with its connection.  The
- * caller has started the op.  A write waits for the create to finish.
+ * The vtable's read and write for every CIP tag kind: check the op can start.  The caller has
+ * started the op, and queues the tag with wake_plc once it lets go of the API mutex; the
+ * handler's own auto-sync ops are already on its list.  A write waits for the create to finish.
  */
 extern int cip_tag_read_start(plc_tag_p tag_arg);
 extern int cip_tag_write_start(plc_tag_p tag_arg);

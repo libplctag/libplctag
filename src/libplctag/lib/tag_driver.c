@@ -154,36 +154,12 @@ void tag_driver_notify(tag_driver_t *driver) {
 }
 
 
-/* marked first, so that a holder letting go after the try fails sees the mark. */
-bool tag_driver_try_lock(plc_tag_p tag) {
-    atomic_set_bool(&tag->handler_waiting, true);
-
-    if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { return false; }
-
-    atomic_set_bool(&tag->handler_waiting, false);
-
-    return true;
-}
-
-
-/*
- * wake_plc makes the tag due now and wakes the handler.  A tag whose request is out is safe to
- * make due: Modbus does not queue a tag with a request slot, and a CIP exchange is over, and
- * the tag re-armed, before the handler looks at its list again.
- */
-void tag_driver_api_released(plc_tag_p tag) {
-    if(!atomic_compare_and_set_bool(&tag->handler_waiting, true, false)) { return; }
-
-    if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
-}
-
-
 /* a tag whose API mutex is busy stays on the list for next time. */
 static void tickle_tags_unsafe(tag_driver_t *driver, plc_tag_p *tags, int32_t count, int64_t now) {
     for(int32_t i = 0; i < count; i++) {
         plc_tag_p tag = tags[i];
 
-        if(!tag_driver_try_lock(tag)) { continue; }
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
 
         tickle_tag(tag);
 

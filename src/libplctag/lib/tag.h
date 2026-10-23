@@ -282,14 +282,17 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int64_t auto_sync_next_write;                                                       \
     /* When the protocol handler next needs to act on this tag; see tag_schedule.h. */   \
     int64_t op_time;                                                                    \
-    int64_t read_cache_expire;                                                          \
-    int64_t read_cache_ms;                                                              \
+    /* atomic so that plc_tag_read() can test it before taking the API mutex. */       \
+    atomic_int64_t read_cache_expire;                                                   \
+    atomic_int64_t read_cache_ms;                                                       \
     uint8_t *data;                                                                      \
     tag_byte_order_t *byte_order;                                                       \
     cond_p tag_cond_wait;                                                               \
     mutex_p api_mutex;                                                                  \
     mutex_p ext_mutex;                                                                  \
     tag_extended_callback_func callback;                                                \
+    /* callback is set; written with it, read without the API mutex. */                \
+    atomic_bool has_callback;                                                           \
     /* what made this tag; a clone of it is made the same way. */                       \
     tag_create_function create_func;                                                    \
     tag_vtable_p vtable;                                                                \
@@ -305,8 +308,6 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t bit;                                                                        \
     tag_protocol_t protocol_type;                                                       \
     atomic_bool abort_requested;                                                        \
-    /* the handler found the API mutex busy; see tag_driver_try_lock(). */             \
-    atomic_bool handler_waiting;                                                        \
     /* tag_op_state_t; see tag_op_state(). */                                          \
     atomic_int32_t op_state;                                                            \
     tag_event_t events[TAG_EVENT_RING_SIZE];                                            \

@@ -158,6 +158,7 @@ struct modbus_plc_t {
         bool used;
     } slots[MAX_MODBUS_REQUESTS];
     int32_t slots_used;
+    int32_t lock_retries; /* handler thread only; see service_tags() */
 
     /* comms timeout/disconnect - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
@@ -274,7 +275,7 @@ static void wake_plc_thread(modbus_plc_p plc);
 static int connect_plc(modbus_plc_p plc);
 static int64_t service_tags(modbus_plc_p plc);
 static void dispatch_reply_unsafe(modbus_plc_p plc);
-static void send_next_unsafe(modbus_plc_p plc, int64_t now);
+static bool send_next_unsafe(modbus_plc_p plc, int64_t now);
 static int32_t find_slot_unsafe(modbus_plc_p plc, modbus_tag_p tag);
 static void forget_tag_unsafe(modbus_plc_p plc, modbus_tag_p tag);
 static void queue_tag(modbus_tag_p tag);
@@ -296,6 +297,7 @@ static int remove_tag(modbus_plc_p plc, modbus_tag_p tag);
 static int mb_abort(plc_tag_p p_tag);
 static int mb_activate(plc_tag_p p_tag);
 static int mb_queue(plc_tag_p p_tag);
+static int mb_submit(plc_tag_p p_tag);
 static int mb_tag_data_written(plc_tag_p p_tag);
 static int mb_tag_status(plc_tag_p p_tag);
 
@@ -1425,6 +1427,7 @@ int connect_plc(modbus_plc_p plc) {
  */
 static int64_t service_tags(modbus_plc_p plc) {
     int64_t wait_ms = MODBUS_IDLE_WAIT_TIMEOUT;
+    bool skipped = false;
 
     critical_block(plc->mutex) {
         int64_t now = time_ms();
@@ -1434,7 +1437,7 @@ static int64_t service_tags(modbus_plc_p plc) {
 
         tag_driver_tickle_due_unsafe(&plc->driver, now);
 
-        if(plc->state == PLC_READY) { send_next_unsafe(plc, now); }
+        if(plc->state == PLC_READY) { skipped = send_next_unsafe(plc, now); }
 
         /* a due tag with a free slot goes out on the next pass; with none, a reply frees one. */
         next = tag_driver_next_time_unsafe(&plc->driver);
@@ -1443,6 +1446,14 @@ static int64_t service_tags(modbus_plc_p plc) {
         } else if(next && plc->slots_used < plc->max_requests_in_flight) {
             wait_ms = 1;
         }
+    }
+
+    /* a due tag held by an application thread: yield and look again, rather than wait 1ms. */
+    if(!skipped) {
+        plc->lock_retries = 0;
+    } else if(++plc->lock_retries < TAG_DRIVER_LOCK_YIELDS) {
+        sleep_ms(0);
+        wait_ms = 0;
     }
 
     tag_driver_notify(&plc->driver);
@@ -1511,10 +1522,13 @@ static void dispatch_reply_unsafe(modbus_plc_p plc) {
 /*
  * Build the request for the first due tag with an op, if the write buffer and a request slot
  * are free.  The tag leaves the list while its request is out; it keeps its op_time in case
- * the connection drops and it has to go again.
+ * the connection drops and it has to go again.  Returns true if a due tag was skipped because
+ * its API mutex was busy and nothing was built.
  */
-static void send_next_unsafe(modbus_plc_p plc, int64_t now) {
-    if(atomic_get_bool(&plc->flags.request_ready) || plc->slots_used >= plc->max_requests_in_flight) { return; }
+static bool send_next_unsafe(modbus_plc_p plc, int64_t now) {
+    bool skipped = false;
+
+    if(atomic_get_bool(&plc->flags.request_ready) || plc->slots_used >= plc->max_requests_in_flight) { return false; }
 
     for(int32_t i = 0; i < vector_length(plc->driver.active); i++) {
         modbus_tag_p tag = vector_get(plc->driver.active, i);
@@ -1526,7 +1540,10 @@ static void send_next_unsafe(modbus_plc_p plc, int64_t now) {
         /* armed for an auto-sync deadline, or waiting for its tickle: no request to send. */
         if(!tag_op_busy(tag)) { continue; }
 
-        if(!tag_driver_try_lock((plc_tag_p)tag)) { continue; }
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+            skipped = true;
+            continue;
+        }
 
         is_read = tag_op_is_read(tag);
         rc = is_read ? create_read_request(plc, tag) : create_write_request(plc, tag);
@@ -1554,8 +1571,10 @@ static void send_next_unsafe(modbus_plc_p plc, int64_t now) {
         mutex_unlock(tag->api_mutex);
 
         /* one write buffer: the next request waits for this one to go out. */
-        break;
+        return false;
     }
+
+    return skipped;
 }
 
 
@@ -2439,9 +2458,21 @@ static int mb_abort(plc_tag_p p_tag) {
 }
 
 
-/* read, write and wake: the library has started the op or changed the tag; the handler takes it from here. */
+/* wake: the library changed the tag; the handler takes it from here. */
 static int mb_queue(plc_tag_p p_tag) {
     queue_tag((modbus_tag_p)p_tag);
+
+    return PLCTAG_STATUS_PENDING;
+}
+
+
+/*
+ * read and write: the library has started the op.  plc_tag_read()/plc_tag_write() queue the
+ * tag with wake_plc once they let go of the API mutex; the handler's own auto-sync ops are
+ * already on its list.
+ */
+static int mb_submit(plc_tag_p p_tag) {
+    (void)p_tag;
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -2651,9 +2682,9 @@ static const attr_def_t mb_attribs[] = {
 
 static struct tag_vtable_t modbus_vtable = {
     .abort = mb_abort,
-    .read = mb_queue,
+    .read = mb_submit,
     .status = mb_tag_status,
-    .write = mb_queue,
+    .write = mb_submit,
     .wake_plc = mb_queue,
     .activate = mb_activate,
     .tag_data_written = mb_tag_data_written,

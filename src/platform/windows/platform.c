@@ -58,6 +58,7 @@
 #include <timeapi.h>
 
 #include <libplctag/api/libplctag.h>
+#include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
 
@@ -598,6 +599,7 @@ struct sock_t {
     SOCKET wake_read_fd;
     SOCKET wake_write_fd;
     int port;
+    atomic_bool wake_pending; /* see socket_wake() */
 };
 
 
@@ -700,6 +702,7 @@ extern int socket_create(sock_p *s) {
     (*s)->fd = INVALID_SOCKET;
     (*s)->wake_read_fd = INVALID_SOCKET;
     (*s)->wake_write_fd = INVALID_SOCKET;
+    atomic_set_bool(&(*s)->wake_pending, false);
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Setting up wake pipe.");
     rc = sock_create_event_wakeup_channel((*s));
@@ -1061,6 +1064,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             /* empty the socket. */
             while((bytes_read = (int)recv(sock->wake_read_fd, (char *)&buf[0], sizeof(buf), 0)) > 0) {}
 
+            /* cleared after the drain, so a byte written from here on stays for the next select. */
+            atomic_set_bool(&sock->wake_pending, false);
+
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket woken up.");
 
             result |= (events & SOCK_EVENT_WAKE_UP);
@@ -1182,6 +1188,13 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 }
 
 
+/*
+ * A wake writes to the wake channel only when none is already pending, so a busy handler is
+ * not sent one byte per caller.  The flag is cleared just after the channel is drained, and the
+ * handler scans its work after every wait, so a wake that finds the flag set and skips its byte
+ * still has its work seen.  Cleared before the drain, the drain could swallow a byte written
+ * after the clear and leave the flag set with nothing in the channel.
+ */
 int socket_wake(sock_p sock) {
     int rc = PLCTAG_STATUS_OK;
     const char dummy_data[] = "Dummy data.";
@@ -1202,6 +1215,9 @@ int socket_wake(sock_p sock) {
         return PLCTAG_STATUS_OK;
     }
 
+    /* the handler has a wake it has not read yet. */
+    if(atomic_compare_and_set_bool(&sock->wake_pending, false, true)) { return PLCTAG_STATUS_OK; }
+
     rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
     if(rc < 0) {
         int err = WSAGetLastError();
@@ -1219,6 +1235,8 @@ int socket_wake(sock_p sock) {
             rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "socket write error rc=%d, errno=%d", rc, err);
+            /* no byte went out, so the next wake must try again. */
+            atomic_set_bool(&sock->wake_pending, false);
             return PLCTAG_ERR_WRITE;
         }
     }

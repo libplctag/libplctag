@@ -306,10 +306,12 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
     /*
      * What this read will cost in the shared reply packet, so it can be budgeted when bundled.
      * tag->size is what the previous read returned, which is the best estimate of what this one
-     * will.  A first read has no previous size, so it cannot be budgeted and must not be packed.
+     * will; a later fragment brings only what is left past tag->offset, so the small tail of a
+     * large tag can share a packet.  A first read has no previous size, so it cannot be budgeted
+     * and must not be packed.
      */
     plan->req_size = (int32_t)(data - dest);
-    plan->reply_size = tag->size;
+    plan->reply_size = tag->size - tag->offset;
     plan->packable = (tag->allow_packing && tag->create_read_status != PLCTAG_STATUS_PENDING);
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");

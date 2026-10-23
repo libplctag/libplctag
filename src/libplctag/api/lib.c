@@ -269,6 +269,7 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
 
     /* do this early so that events can be raised early. */
     tag->callback = tag_callback_func;
+    atomic_set_bool(&tag->has_callback, (tag_callback_func != NULL));
     tag->userdata = userdata;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
@@ -293,7 +294,7 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
     if(tag->vtable && tag->vtable->wake_plc) { rc = tag->vtable->wake_plc(tag); }
 
     critical_block(tag->api_mutex) {
-        tag->read_cache_expire = (uint64_t)0;
+        atomic_set_int64(&tag->read_cache_expire, 0);
 
         /* the handler may have done the abort already, and a new op may have started since. */
         if(atomic_get_bool(&tag->abort_requested)) {
@@ -341,8 +342,6 @@ static int plc_tag_status_impl(plc_tag_p tag) {
     }
 
     plc_tag_generic_handle_event_callbacks(tag);
-
-    tag_driver_api_released(tag);
 
     return rc;
 }
@@ -634,8 +633,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         read_cache_ms = 0;
     }
 
-    tag->read_cache_expire = (int64_t)0;
-    tag->read_cache_ms = (int64_t)read_cache_ms;
+    atomic_set_int64(&tag->read_cache_expire, 0);
+    atomic_set_int64(&tag->read_cache_ms, (int64_t)read_cache_ms);
 
     /* set up any automatic read/write */
     tag->auto_sync_read_ms = attr_get_int(attribs, "auto_sync_read_ms", 0);
@@ -955,6 +954,8 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callbac
                 tag->callback = NULL;
                 tag->userdata = NULL;
             }
+
+            atomic_set_bool(&tag->has_callback, (callback_func != NULL));
         }
     }
 
@@ -993,6 +994,7 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id) {
         if(tag->callback) {
             rc = PLCTAG_STATUS_OK;
             tag->callback = NULL;
+            atomic_set_bool(&tag->has_callback, false);
             tag->userdata = NULL;
         } else {
             rc = PLCTAG_ERR_NOT_FOUND;
@@ -1212,6 +1214,7 @@ void destroy_tag_common(plc_tag_p tag) {
         plc_tag_generic_handle_event_callbacks(tag);
 
         tag->callback = NULL;
+        atomic_set_bool(&tag->has_callback, false);
         tag->userdata = NULL;
     }
 
@@ -1346,6 +1349,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
     bool is_done = false;
+    int64_t now = 0;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
 
@@ -1360,9 +1364,31 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    now = time_ms();
+
+    /*
+     * Short cuts without the API mutex: the cache, op state and callback flag are atomic, and
+     * the reference keeps the tag.  A cache hit on a tag with a callback has events to queue, so
+     * it takes the mutex below.
+     */
+    if(atomic_get_int64(&tag->read_cache_expire) > now && !atomic_get_bool(&tag->has_callback)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Returning cached data.");
+
+        /* as the locked path does: a hit restarts the cache period. */
+        atomic_set_int64(&tag->read_cache_expire, now + atomic_get_int64(&tag->read_cache_ms));
+        rc_dec(tag);
+        return PLCTAG_STATUS_OK;
+    }
+
+    if(tag_op_busy(tag) && atomic_get_int64(&tag->read_cache_expire) <= now) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "An operation is already in flight!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BUSY;
+    }
+
     critical_block(tag->api_mutex) {
         /* a cached read is a read that finished at once. */
-        if(tag->read_cache_expire > time_ms()) {
+        if(atomic_get_int64(&tag->read_cache_expire) > time_ms()) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Returning cached data.");
             tag_event_push(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
             tag_event_push(tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
@@ -1411,14 +1437,14 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         }
     }
 
-    /* the protocol woke its handler with the API mutex still held. */
-    tag_driver_api_released(tag);
+    /* queued and woken only now: woken under the API mutex, the handler would find the tag locked. */
+    if(!is_done && tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
 
     if(rc == PLCTAG_STATUS_OK) {
         /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
-        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
+        atomic_set_int64(&tag->read_cache_expire, time_ms() + atomic_get_int64(&tag->read_cache_ms));
     }
 
     plc_tag_generic_handle_event_callbacks(tag);
@@ -1458,7 +1484,16 @@ LIB_EXPORT int plc_tag_status(int32_t id) {
         }
     }
 
-    rc = plc_tag_status_impl(tag);
+    /*
+     * An op in flight is all a poll needs, and the op state is atomic, so this skips the API
+     * mutex.  Nothing under it has work then: a kind's tickler only finishes a create, and no
+     * op starts until it has, and the op's events are queued when it ends.
+     */
+    if(tag_op_busy(tag)) {
+        rc = PLCTAG_STATUS_PENDING;
+    } else {
+        rc = plc_tag_status_impl(tag);
+    }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -1498,6 +1533,13 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    /* an op in flight makes this BUSY without the API mutex: the op state is atomic, and the reference keeps the tag. */
+    if(tag_op_busy(tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BUSY;
+    }
+
     critical_block(tag->api_mutex) {
         if(tag_op_busy(tag)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
@@ -1533,8 +1575,8 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         }
     }
 
-    /* the protocol woke its handler with the API mutex still held. */
-    tag_driver_api_released(tag);
+    /* queued and woken only now: woken under the API mutex, the handler would find the tag locked. */
+    if(!is_done && tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
 
