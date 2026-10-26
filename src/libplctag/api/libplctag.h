@@ -388,11 +388,19 @@ typedef enum {
  * - PLCTAG_EVENT_DESTROYED: When a tag is being destroyed.
  * - PLCTAG_EVENT_CREATED: When a tag is created.
  *
- * @warning The callback is called outside the internal tag mutex, allowing it to call
- *          tag functions safely. However, it is called in the context of the internal
- *          tag helper thread, not the client library thread(s). YOU are responsible for
- *          ensuring all client application data structures accessed by the callback are
- *          thread-safe.
+ * @warning The callback is called INSIDE the tag's internal mutex.  The mutex is recursive,
+ *          so the callback may call tag functions on its own tag.  It may be called on a
+ *          library connection thread or on an application thread that is inside a library
+ *          call.  YOU are responsible for ensuring all client application data structures
+ *          accessed by the callback are thread-safe.
+ *
+ * @warning Because the tag's mutex is held, in the callback do not:
+ *          - call a function with a timeout (a synchronous read or write) on the same tag;
+ *            it cannot complete while the mutex is held, so it always times out.
+ *          - wait for another thread that may call a function on this tag, such as
+ *            plc_tag_destroy(); that is a deadlock.
+ *          - call functions on another tag whose callback may call functions on this tag;
+ *            two such callbacks running at once on different threads deadlock.
  *
  * @warning Do not perform blocking operations in the callback. This will degrade
  *          library performance or cause failures.

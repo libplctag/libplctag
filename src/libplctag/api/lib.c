@@ -849,15 +849,24 @@ LIB_EXPORT void plc_tag_shutdown(void) {
  *      * a tag write being aborted.
  *      * a tag being destroyed
  *
- * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
- * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
- * This means that YOU are responsible for making sure that all client application data structures the callback
- * function touches are safe to access by the callback!
+ * The callback is called INSIDE the tag's internal mutex.  The mutex is recursive, so the callback may call
+ * tag functions on its own tag.  The callback may be called on a library connection thread, or on an
+ * application thread that is inside a library call.  YOU are responsible for making sure that all client
+ * application data structures the callback function touches are safe to access by the callback!
+ *
+ * Because the tag's mutex is held, in the callback do not:
+ *
+ *      * call a function with a timeout (a synchronous read or write) on the same tag.  The operation
+ *        cannot complete while the mutex is held, so the call always times out.
+ *      * wait for another thread that may call a function on this tag, for instance plc_tag_destroy().
+ *        That thread waits for the mutex and the callback waits for that thread: deadlock.
+ *      * call functions on another tag whose callback may call functions on this tag.  Two callbacks
+ *        running at once on different threads then each wait for the other's mutex: deadlock.
  *
  * Do not do any operations in the callback that block for any significant time.   This will cause library
  * performance to be poor or even to start failing!
  *
- * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * When the callback is called with PLCTAG_EVENT_DESTROYED, do not call any tag functions on that tag.  It is
  * not guaranteed that they will work and they will possibly hang or fail.
  *
  * Return values:
@@ -911,15 +920,24 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callb
  *      * a tag write being aborted.
  *      * a tag being destroyed
  *
- * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
- * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
- * This means that YOU are responsible for making sure that all client application data structures the callback
- * function touches are safe to access by the callback!
+ * The callback is called INSIDE the tag's internal mutex.  The mutex is recursive, so the callback may call
+ * tag functions on its own tag.  The callback may be called on a library connection thread, or on an
+ * application thread that is inside a library call.  YOU are responsible for making sure that all client
+ * application data structures the callback function touches are safe to access by the callback!
+ *
+ * Because the tag's mutex is held, in the callback do not:
+ *
+ *      * call a function with a timeout (a synchronous read or write) on the same tag.  The operation
+ *        cannot complete while the mutex is held, so the call always times out.
+ *      * wait for another thread that may call a function on this tag, for instance plc_tag_destroy().
+ *        That thread waits for the mutex and the callback waits for that thread: deadlock.
+ *      * call functions on another tag whose callback may call functions on this tag.  Two callbacks
+ *        running at once on different threads then each wait for the other's mutex: deadlock.
  *
  * Do not do any operations in the callback that block for any significant time.   This will cause library
  * performance to be poor or even to start failing!
  *
- * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * When the callback is called with PLCTAG_EVENT_DESTROYED, do not call any tag functions on that tag.  It is
  * not guaranteed that they will work and they will possibly hang or fail.
  *
  * Return values:

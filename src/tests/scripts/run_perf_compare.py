@@ -13,11 +13,15 @@ ops/sec.
 
 Usage:
   run_perf_compare.py --a=perf_release --b=perf_head --server-dir=b_head/bin_dist
-      [--rounds=5] [--duration=10] [--out=perf_compare.csv]
+      [--rounds=5] [--duration=10] [--poll-ms=0] [--interleave] [--out=perf_compare.csv]
   Hardware (Logix only, no server, delay 0 only):
   run_perf_compare.py --a=... --b=... \\
       --logix-attrs="protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix" \\
       --logix-tag=TestBigArray
+  Thread sweep (100 tags per thread, 1-5, 8 and 12 threads, one shared connection vs
+  one connection per thread) instead of the default set.  Logix runs as a
+  ControlLogix, which packs requests with Multiple Service Packet (0x0A):
+  run_perf_compare.py --a=... --b=... --server-dir=... --thread-sweep=modbus|logix
   run_perf_compare.py --self-check
 """
 
@@ -56,8 +60,21 @@ def build_matrix(hardware):
     return configs
 
 
+def thread_sweep_matrix(protocol, delay=0):
+    """groups=1 shares one connection; groups=threads gives each thread its own."""
+    configs = []
+    for threads, per_thread, mode, op in itertools.product(
+            (1, 2, 3, 4, 5, 8, 12), [False, True], ["sync", "async"], ["read", "write"]):
+        if per_thread and threads == 1:
+            continue
+        configs.append(dict(protocol=protocol, delay=delay, tags=100 * threads, threads=threads,
+                            groups=threads if per_thread else 1, elems=1, mode=mode, op=op))
+    return configs
+
+
 def config_key(c):
-    return f"{c['protocol']} d{c['delay']} {c['mode']} {c['op']} {c['tags']}x{c['threads']} e{c['elems']}"
+    return (f"{c['protocol']} d{c['delay']} {c['mode']} {c['op']} {c['tags']}x{c['threads']}"
+            f" g{c.get('groups', 1)} e{c['elems']}")
 
 
 def tag_string(c, args):
@@ -110,8 +127,8 @@ def cpu_seconds_text(text):
 
 
 def run_one(binary, c, args, server):
-    cmd = [binary, f"--mode={c['mode']}", f"--op={c['op']}", "--groups=1", f"--threads={c['threads']}",
-           f"--tags={c['tags']}", f"--duration={args.duration}", f"--tag={tag_string(c, args)}"]
+    cmd = [binary, f"--mode={c['mode']}", f"--op={c['op']}", f"--groups={c.get('groups', 1)}", f"--threads={c['threads']}",
+           f"--tags={c['tags']}", f"--duration={args.duration}", f"--poll-ms={args.poll_ms}", f"--tag={tag_string(c, args)}"] + (["--interleave"] if args.interleave else [])
     cpu0, t0 = (cpu_seconds(server.pid), time.monotonic()) if server else (0, 0)
     res = subprocess.run(cmd, capture_output=True, text=True)
     server_pct = 100.0 * (cpu_seconds(server.pid) - cpu0) / (time.monotonic() - t0) if server else 0.0
@@ -149,13 +166,13 @@ def self_check():
 
 
 def summarize(results):
-    print(f"\n{'configuration':38} {'metric':11} {'median A':>10} {'median B':>10} {'change':>8}  verdict"
+    print(f"\n{'configuration':41} {'metric':11} {'median A':>10} {'median B':>10} {'change':>8}  verdict"
           f"   p95 A/B us      srv% A/B")
     for key, runs in results.items():
         a = [r for r in runs if r["side"] == "A"]
         b = [r for r in runs if r["side"] == "B"]
         if len(a) < 2 or len(b) < 2:
-            print(f"{key:38} too few successful runs")
+            print(f"{key:41} too few successful runs")
             continue
         srv = statistics.median(r["server_cpu_pct"] for r in runs)
         metric, higher = ("cpu_us_per_op", False) if srv >= SERVER_BOUND_PCT else ("ops_per_sec", True)
@@ -164,7 +181,7 @@ def summarize(results):
         p95 = lambda side: statistics.median(float(r["p95_us"]) for r in side)
         sp = lambda side: statistics.median(r["server_cpu_pct"] for r in side)
         errs = sum(int(r["errors"]) for r in runs)
-        print(f"{key:38} {metric:11} {statistics.median(va):10.1f} {statistics.median(vb):10.1f} "
+        print(f"{key:41} {metric:11} {statistics.median(va):10.1f} {statistics.median(vb):10.1f} "
               f"{change * 100:+7.1f}%  {word:7}  {p95(a):6.0f}/{p95(b):<6.0f}  {sp(a):4.0f}/{sp(b):<4.0f}"
               + (f"  {errs} errors" if errs else ""))
 
@@ -180,6 +197,10 @@ def main():
     p.add_argument("--logix-attrs", help="hardware Logix attributes (without name); skips servers and Modbus")
     p.add_argument("--logix-tag", default="TestDINTArray")
     p.add_argument("--only", help="run only configurations whose key contains this text")
+    p.add_argument("--thread-sweep", choices=["modbus", "logix"], help="run the thread sweep instead")
+    p.add_argument("--poll-ms", type=int, default=0, help="async: sleep this long between status passes instead of yielding")
+    p.add_argument("--delay", type=int, default=0, help="thread sweep: ab_server response delay in ms (Logix only)")
+    p.add_argument("--interleave", action="store_true", help="create tags round-robin across threads")
     p.add_argument("--self-check", action="store_true")
     args = p.parse_args()
 
@@ -190,7 +211,8 @@ def main():
     if not args.a or not args.b or (not hardware and not args.server_dir):
         p.error("--a, --b and --server-dir (or --logix-attrs) are required")
 
-    configs = [c for c in build_matrix(hardware) if not args.only or args.only in config_key(c)]
+    matrix = thread_sweep_matrix(args.thread_sweep, args.delay) if args.thread_sweep else build_matrix(hardware)
+    configs = [c for c in matrix if not args.only or args.only in config_key(c)]
     total_s = len(configs) * 2 * args.rounds * (args.duration + 1)
     print(f"{len(configs)} configurations, {args.rounds} rounds, about {total_s // 60} min", flush=True)
 

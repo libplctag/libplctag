@@ -40,8 +40,8 @@
  *
  * Usage:
  *   perf_benchmark --mode=sync|async|auto --groups=N --threads=M --tags=T
- *                  --tag=BASE_TAG_PATH [--op=read|write] [--auto-ms=P]
- *                  [--duration=S]
+ *                  --tag=BASE_TAG_PATH [--op=read|write] [--auto-ms=P] [--poll-ms=M]
+ *                  [--duration=S] [--interleave]
  *
  * BASE_TAG_PATH is the full tag attribute string without connection_group_id,
  * which the benchmark appends automatically per tag.  Example:
@@ -50,7 +50,13 @@
  * Tags is the primary axis.  Threads and groups must be <= tags (groups
  * also capped at 100).  Each thread owns an exclusive slice of the tags
  * array -- no tag is shared across threads, so no locking is needed.
- * Tags are distributed across connection groups round-robin.
+ * --interleave creates the tags round-robin across the threads' slices
+ * (thread 0's first, thread 1's first, ...), so tags used by different
+ * threads get adjacent IDs, as when threads create their tags concurrently.
+ * Sync/async: each thread's tags share one connection group, and threads are
+ * assigned to groups round-robin, so --groups=1 shares one connection and
+ * --groups=threads gives each thread its own.  Auto: tags are assigned to
+ * groups round-robin.
  *
  * Sync:  thread calls plc_tag_read/write(tag, timeout) in a blocking loop.
  *        Latency is the duration of each call.
@@ -102,7 +108,7 @@
 #define DEFAULT_DURATION_S (10)
 #define DEFAULT_AUTO_MS (1)
 
-#define MAX_TAGS (1100)
+#define MAX_TAGS (2000)
 #define MAX_THREADS (1100)
 
 /* Tag path template.  connection_group_id (and auto_sync_read_ms) are appended to the base path. */
@@ -151,6 +157,8 @@ static void usage(const char *prog);
 
 static compat_atomic_int32_t go = {0};   /* set to 1 to start measuring */
 static compat_atomic_int32_t done = {0}; /* set to 1 to stop */
+static int32_t poll_ms = 0;              /* async: sleep between status passes; 0 just yields */
+static bool interleave = false;          /* create tags round-robin across thread slices */
 static compat_atomic_int32_t terminate = {0};
 
 
@@ -340,7 +348,13 @@ static void *thread_func(void *arg) {
                     pending--;
                 }
 
-                if(pending > 0) { compat_thread_yield(); }
+                if(pending > 0) {
+                    if(poll_ms > 0) {
+                        compat_sleep_ms((uint32_t)poll_ms, NULL);
+                    } else {
+                        compat_thread_yield();
+                    }
+                }
             }
         }
 
@@ -387,7 +401,9 @@ static void usage(const char *prog) {
             "  --tag         base tag attribute string (connection_group_id is appended)\n"
             "  --op          read or write (default: read; auto supports read only)\n"
             "  --auto-ms     auto_sync_read_ms for auto mode (default: %d)\n"
+            "  --poll-ms     async: sleep this long between status passes (default: 0, yield only)\n"
             "  --duration    test duration in seconds (default: %d)\n"
+            "  --interleave  sync/async: create tags round-robin across threads (tags must divide evenly)\n"
             "\n"
             "Example:\n"
             "  %s --mode=sync --groups=1 --threads=1 --tags=10 --duration=10\n"
@@ -447,6 +463,10 @@ int main(int argc, char **argv) {
             num_tags = (int32_t)atoi(argv[i] + 7);
         } else if(strncmp(argv[i], "--duration=", 11) == 0) {
             duration_s = (int32_t)atoi(argv[i] + 11);
+        } else if(strncmp(argv[i], "--poll-ms=", 10) == 0) {
+            poll_ms = (int32_t)atoi(argv[i] + 10);
+        } else if(strcmp(argv[i], "--interleave") == 0) {
+            interleave = true;
         } else if(strncmp(argv[i], "--auto-ms=", 10) == 0) {
             auto_ms = (int32_t)atoi(argv[i] + 10);
         } else if(strncmp(argv[i], "--tag=", 6) == 0) {
@@ -465,6 +485,11 @@ int main(int argc, char **argv) {
 
     if(mode == MODE_AUTO && is_write) {
         fprintf(stderr, "Error: --mode=auto supports --op=read only.\n");
+        usage(argv[0]);
+    }
+
+    if(interleave && (mode == MODE_AUTO || num_tags % num_threads != 0)) {
+        fprintf(stderr, "Error: --interleave needs sync/async and tags divisible by threads.\n");
         usage(argv[0]);
     }
 
@@ -504,9 +529,21 @@ int main(int argc, char **argv) {
     /*--- Create tags ---*/
     fprintf(stderr, "Creating %" PRId32 " tags...\n", num_tags);
     int64_t create_start = now_us();
-    for(int32_t i = 0; i < num_tags; i++) {
+    for(int32_t k = 0; k < num_tags; k++) {
         char path[512];
+        /* k is the creation order, i the position in tag_handles. */
+        int32_t i = interleave ? (k % num_threads) * (num_tags / num_threads) + k / num_threads : k;
         int32_t group_id = (i % num_groups) + 1;
+
+        if(mode != MODE_AUTO) {
+            /* Same contiguous slicing as the thread setup below. */
+            int32_t base = num_tags / num_threads;
+            int32_t remainder = num_tags % num_threads;
+            int32_t split = remainder * (base + 1);
+            int32_t owner = (i < split) ? i / (base + 1) : remainder + (i - split) / base;
+
+            group_id = (owner % num_groups) + 1;
+        }
 
         if(mode == MODE_AUTO) {
             snprintf(path, sizeof(path), TAG_PATH_AUTO_FMT, base_tag_path, group_id, auto_ms);
@@ -518,7 +555,9 @@ int main(int argc, char **argv) {
         if(tag_handles[i] < 0) {
             fprintf(stderr, "ERROR: Failed to create tag %" PRId32 " (group %" PRId32 "): %s\n", i, group_id,
                     plc_tag_decode_error(tag_handles[i]));
-            for(int32_t j = 0; j < i; j++) { plc_tag_destroy(tag_handles[j]); }
+            for(int32_t j = 0; j < num_tags; j++) {
+                if(tag_handles[j] > 0) { plc_tag_destroy(tag_handles[j]); }
+            }
             free(stats);
             free(per_unit_ops);
             return 1;
