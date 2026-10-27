@@ -732,6 +732,17 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             return id;
         }
 
+        /*
+         * The caller may free userdata once this returns an error, and a handler thread can
+         * still hold a reference with events queued.  Dispatch runs under api_mutex and drops
+         * events once callback is NULL, so this also waits out a callback already running.
+         */
+        critical_block(tag->api_mutex) {
+            tag->callback = NULL;
+            atomic_set_bool(&tag->has_callback, false);
+            tag->userdata = NULL;
+        }
+
         rc_dec(tag);
         return rc;
     }
@@ -763,6 +774,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(!remove_tag_lookup(tag)) {
                 rc_dec(tag);
                 return id;
+            }
+
+            /* as above: no callback after an error return. */
+            critical_block(tag->api_mutex) {
+                tag->callback = NULL;
+                atomic_set_bool(&tag->has_callback, false);
+                tag->userdata = NULL;
             }
 
             rc_dec(tag);

@@ -303,7 +303,7 @@ REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
-    "test_callback_destroy", "test_cip_ops", "test_modbus_ops",
+    "test_callback_destroy", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
@@ -645,6 +645,10 @@ def build_manifest() -> Manifest:
     sec.test("destroy tag from inside its own callback (AB/EIP)",
               [exe("test_callback_destroy"),
                f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
+    sec.test("no callback after a failed plc_tag_create_ex() returns (AB/EIP)",
+              [exe("test_create_fail_callback"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=50",
+               f"--missing-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=DoesNotExist"], F)
     # An operation queued, packed or on the wire.  Each test gets its own simulator, because
     # each writes TestBigArray first and checks every element it reads back.  The delay holds
     # each exchange open long enough for the next reads to queue behind it and pack.

@@ -288,6 +288,9 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
  * The callback will be set as early as possible in the creation process,
  * allowing early creation-time events to be sent to user code.
  *
+ * If this returns an error, the callback is never called again once it returns, so
+ * userdata may be freed at that point.
+ *
  * @param attrib_str Protocol-specific attribute string (must include "protocol=XXX").
  * @param tag_callback_func Callback function for tag events.
  * @param userdata User-supplied data pointer passed to callback.
