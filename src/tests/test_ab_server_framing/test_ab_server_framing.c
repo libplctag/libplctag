@@ -70,12 +70,14 @@ typedef int io_len_t;
 #    include <netinet/in.h>
 #    include <sys/socket.h>
 #    include <sys/time.h>
+#    include <time.h>
 #    include <unistd.h>
 typedef int sock_t;
 typedef size_t io_len_t;
 #    define INVALID_SOCKET (-1)
 #    define sock_close close
-#    define sleep_ms(ms) usleep((useconds_t)(ms) * 1000)
+/* usleep is gone from POSIX 2008, which the build asks for. */
+#    define sleep_ms(ms) nanosleep(&(struct timespec){.tv_sec = (ms) / 1000, .tv_nsec = ((ms) % 1000) * 1000000L}, NULL)
 #endif
 
 #define EIP_HEADER_SIZE (24)
