@@ -71,6 +71,9 @@
 #define OMRON_LIST_SYSTEM ((uint8_t)1)
 #define OMRON_LIST_TYPES ((uint8_t)2)
 
+/* a variable's Get Attributes All reply is at most about 36 bytes, with 3 dimensions. */
+#define OMRON_VARIABLE_ATTRS_REPLY_SIZE ((int32_t)64)
+
 /* the Logix tag listing entry ahead of each name. */
 #define LIST_ENTRY_SIZE (22)
 #define LIST_ENTRY_TYPE_OFFSET (4)
@@ -267,8 +270,9 @@ static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacit
     }
 
     plan->req_size = (int32_t)(data - dest);
-    plan->reply_size = 0;
-    plan->packable = (tag->allow_packing != 0);
+    /* a page of names fills whatever reply space it is given, so it goes alone. */
+    plan->reply_size = (tag->udt_get_fields == OMRON_LIST_TYPES) ? OMRON_VARIABLE_ATTRS_REPLY_SIZE : 0;
+    plan->packable = (tag->allow_packing != 0) && (tag->udt_get_fields == OMRON_LIST_TYPES);
 
     return PLCTAG_STATUS_OK;
 }

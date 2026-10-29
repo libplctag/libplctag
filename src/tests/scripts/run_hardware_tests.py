@@ -169,7 +169,7 @@ REQUIRED_EXECUTABLES = [
     "tag_rw2", "test_special", "test_tag_attributes", "test_tag_type_attribute",
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
-    "test_write_before_read", "thread_stress", "test_bit_write",
+    "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
 ]
 
 
@@ -498,6 +498,14 @@ def build_manifest() -> list[Test]:
              [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=Micrologix&name=@connection"]),
         test("connection tag connection state transitions (PLC5)",
              [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&name=@connection"]),
+        # Destroy from inside READ_COMPLETED; ASan catches userdata used after DESTROYED frees it.
+        test("destroy tag from inside its own callback (ControlLogix)",
+             [exe("test_callback_destroy"),
+              f"protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray"]),
+        test("destroy tag from inside its own callback (Micrologix)",
+             [exe("test_callback_destroy"), f"protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0"]),
+        test("destroy tag from inside its own callback (PLC5)",
+             [exe("test_callback_destroy"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0"]),
     ]
 
     tests.extend(build_logix_matrix())

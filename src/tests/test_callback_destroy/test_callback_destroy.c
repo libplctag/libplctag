@@ -45,6 +45,15 @@
  * and the process must survive a subsequent plc_tag_shutdown().  Run it under ASan to get
  * any use-after-free.
  *
+ * The userdata follows the documented pattern: freed in the DESTROYED callback.  The
+ * READ_COMPLETED callback writes to it after its plc_tag_destroy() returns, as any callback
+ * still running may.  If DESTROYED is delivered nested inside that callback, the write lands
+ * on freed memory and ASan reports a heap-use-after-free.
+ *
+ * Destroying the tag in READ_STARTED or WRITE_STARTED must stop that operation.  Those cases
+ * call with timeout 0, so a waiter woken by the abort cannot hide a request still queued: the
+ * call must return an error, not PENDING or OK.
+ *
  * Usage: test_callback_destroy "<tag string>"
  */
 
@@ -59,23 +68,34 @@
 
 
 static int32_t tag_id = 0;
+static int destroy_on = PLCTAG_EVENT_READ_COMPLETED;
 static int destroy_called = 0;
 static int destroy_rc = PLCTAG_ERR_NO_DATA;
 
 
 static void tag_callback(int32_t id, int event, int status, void *userdata) {
-    (void)status;
-    (void)userdata;
+    int32_t *events_seen = (int32_t *)userdata;
 
-    /* only fire once, and only from the tag's own completion event. */
-    if(event == PLCTAG_EVENT_READ_COMPLETED && !destroy_called) {
+    (void)status;
+
+    if(event == PLCTAG_EVENT_DESTROYED) {
+        printf("  callback: DESTROYED for tag %" PRId32 ", freeing the userdata.\n", id);
+        free(events_seen);
+        return;
+    }
+
+    /* only fire once, and only from the chosen event. */
+    if(event == destroy_on && !destroy_called) {
         destroy_called = 1;
 
-        printf("  callback: READ_COMPLETED for tag %" PRId32 ", destroying it from inside the callback.\n", id);
+        printf("  callback: event %d for tag %" PRId32 ", destroying it from inside the callback.\n", event, id);
 
         destroy_rc = plc_tag_destroy(tag_id);
 
         printf("  callback: plc_tag_destroy() returned %s.\n", plc_tag_decode_error(destroy_rc));
+
+        /* this callback has not returned, so its userdata must still be live. */
+        (*events_seen)++;
     }
 }
 
@@ -93,21 +113,27 @@ static int check_gone(const char *what, int rc) {
 }
 
 
-int main(int argc, char **argv) {
+/* destroy the tag from the callback for event, during a read or a write. */
+static int run_case(const char *tag_str, int event, int is_write) {
     int rc = PLCTAG_STATUS_OK;
     int failures = 0;
+    int32_t *events_seen = NULL;
+    int timeout = (event == PLCTAG_EVENT_READ_COMPLETED) ? DATA_TIMEOUT : 0;
 
-    if(argc != 2) {
-        printf("Usage: test_callback_destroy \"<tag string>\"\n");
+    destroy_on = event;
+    destroy_called = 0;
+    destroy_rc = PLCTAG_ERR_NO_DATA;
+
+    printf("Case: destroy on event %d during a %s.\n", event, is_write ? "write" : "read");
+
+    events_seen = calloc(1, sizeof(*events_seen));
+    if(!events_seen) {
+        printf("Unable to allocate the userdata!\n");
         return 1;
     }
 
-    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        printf("Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
-        return 1;
-    }
-
-    tag_id = plc_tag_create_ex(argv[1], tag_callback, NULL, DATA_TIMEOUT);
+    /* the DESTROYED callback owns the userdata from here on. */
+    tag_id = plc_tag_create_ex(tag_str, tag_callback, events_seen, DATA_TIMEOUT);
     if(tag_id < 0) {
         printf("Unable to create tag, error %s!\n", plc_tag_decode_error(tag_id));
         return 1;
@@ -121,9 +147,9 @@ int main(int argc, char **argv) {
 
     printf("Created tag %" PRId32 ".\n", tag_id);
 
-    /* this read completes, fires the callback, and the callback destroys the tag. */
-    rc = plc_tag_read(tag_id, DATA_TIMEOUT);
-    printf("plc_tag_read() returned %s.\n", plc_tag_decode_error(rc));
+    /* the operation fires the callback, and the callback destroys the tag. */
+    rc = is_write ? plc_tag_write(tag_id, timeout) : plc_tag_read(tag_id, timeout);
+    printf("operation returned %s.\n", plc_tag_decode_error(rc));
 
     if(!destroy_called) {
         printf("FAIL: the callback never fired, so nothing was tested.\n");
@@ -139,6 +165,16 @@ int main(int argc, char **argv) {
         printf("  PASS: in-callback plc_tag_destroy() returned PLCTAG_STATUS_OK.\n");
     }
 
+    /* a STARTED callback destroyed the tag, so the operation must not have gone ahead. */
+    if(event != PLCTAG_EVENT_READ_COMPLETED) {
+        if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_STATUS_PENDING) {
+            printf("  FAIL: the operation on the destroyed tag returned %s.\n", plc_tag_decode_error(rc));
+            failures++;
+        } else {
+            printf("  PASS: the operation on the destroyed tag returned %s.\n", plc_tag_decode_error(rc));
+        }
+    }
+
     /* the ID must be dead for every entry point that takes one. */
     if(!check_gone("plc_tag_status()", plc_tag_status(tag_id))) { failures++; }
     if(!check_gone("plc_tag_read()", plc_tag_read(tag_id, 1000))) { failures++; }
@@ -146,6 +182,27 @@ int main(int argc, char **argv) {
     if(!check_gone("plc_tag_get_size()", plc_tag_get_size(tag_id))) { failures++; }
     if(!check_gone("plc_tag_abort()", plc_tag_abort(tag_id))) { failures++; }
     if(!check_gone("second plc_tag_destroy()", plc_tag_destroy(tag_id))) { failures++; }
+
+    return failures;
+}
+
+
+int main(int argc, char **argv) {
+    int failures = 0;
+
+    if(argc != 2) {
+        printf("Usage: test_callback_destroy \"<tag string>\"\n");
+        return 1;
+    }
+
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        printf("Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
+        return 1;
+    }
+
+    failures += run_case(argv[1], PLCTAG_EVENT_READ_COMPLETED, 0);
+    failures += run_case(argv[1], PLCTAG_EVENT_READ_STARTED, 0);
+    failures += run_case(argv[1], PLCTAG_EVENT_WRITE_STARTED, 1);
 
     /* the freeing itself happens after the callback returns, so make it happen here. */
     plc_tag_shutdown();

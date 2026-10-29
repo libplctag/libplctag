@@ -140,7 +140,8 @@ void tag_event_push(plc_tag_p tag, int event, int status) {
     /* do not stack up events if there is no callback. */
     if(!tag->callback) { return; }
 
-    if(tag->event_count >= TAG_EVENT_RING_SIZE) {
+    /* the last slot is kept for DESTROYED, which releases the callback. */
+    if(tag->event_count >= ((event == PLCTAG_EVENT_DESTROYED) ? TAG_EVENT_RING_SIZE : TAG_EVENT_RING_SIZE - 1)) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, tag->tag_id, "Event ring full, dropping event %d with status %s!", event,
                plc_tag_decode_error(status));
         return;
@@ -215,6 +216,11 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
          * mutex, and a handler thread holding its own reference can get here after that.
          * A callback may queue more events, or unregister itself; the loop sees both.
          */
+        /* called from a callback: the outer loop delivers these after it returns. */
+        if(tag->dispatching) { break; }
+
+        tag->dispatching = true;
+
         while(tag->event_count > 0) {
             tag_event_t event = tag->events[tag->event_head];
 
@@ -230,7 +236,17 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
                    plc_tag_decode_error(event.status));
 
             tag->callback(tag->tag_id, (int)event.event, (int)event.status, tag->userdata);
+
+            /* DESTROYED is last; userdata may already be freed. */
+            if(event.event == PLCTAG_EVENT_DESTROYED) {
+                tag->callback = NULL;
+                atomic_set_bool(&tag->has_callback, false);
+                tag->userdata = NULL;
+                tag->event_count = 0;
+            }
         }
+
+        tag->dispatching = false;
     }
 }
 
@@ -1241,17 +1257,13 @@ void destroy_tag_common(plc_tag_p tag) {
     plc_tag_abort_impl(tag);
 
     /*
-     * DESTROYED, the dispatch and the clear in one block, so DESTROYED is the last event.  A
-     * handler thread can still hold a reference and queue an event after this; with no
-     * callback it is dropped.
+     * Delivering DESTROYED releases the callback.  From inside a callback the delivery waits
+     * for that callback to return.  A handler thread can still hold a reference and queue an
+     * event after this; with no callback it is dropped.
      */
     critical_block(tag->api_mutex) {
         tag_event_push(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
         plc_tag_generic_handle_event_callbacks(tag);
-
-        tag->callback = NULL;
-        atomic_set_bool(&tag->has_callback, false);
-        tag->userdata = NULL;
     }
 
     /* release the reference outside the mutex. */
@@ -1455,6 +1467,13 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         tag_op_start(tag, true);
         plc_tag_generic_handle_event_callbacks(tag);
 
+        /* the callback aborted or destroyed the tag, so the read must not start. */
+        if(!tag_op_busy(tag)) {
+            rc = PLCTAG_ERR_ABORT;
+            is_done = true;
+            break;
+        }
+
         /* the protocol implementation does not do the timeout. */
         if(tag->vtable && tag->vtable->read) {
             rc = tag->vtable->read(tag);
@@ -1592,6 +1611,13 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         /* dispatched before the write starts, so the application can fill the buffer in it. */
         tag_op_start(tag, false);
         plc_tag_generic_handle_event_callbacks(tag);
+
+        /* the callback aborted or destroyed the tag, so the write must not start. */
+        if(!tag_op_busy(tag)) {
+            rc = PLCTAG_ERR_ABORT;
+            is_done = true;
+            break;
+        }
 
         /* the protocol implementation does not do the timeout. */
         if(tag->vtable && tag->vtable->write) {

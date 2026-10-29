@@ -42,6 +42,7 @@
 #include <libplctag/modules/cip/tag.h>
 #include <libplctag/modules/cip/wire.h>
 #include <platform.h>
+#include <stdbool.h>
 #include <utils/attr.h>
 #include <utils/byteorder.h>
 #include <utils/debug.h>
@@ -515,9 +516,10 @@ int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
+    /* a page of the listing fills whatever reply space it is given, so it goes alone. */
     plan->req_size = (int32_t)(data - dest);
     plan->reply_size = 0;
-    plan->packable = (tag->allow_packing != 0);
+    plan->packable = false;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done");
 

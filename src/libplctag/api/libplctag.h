@@ -439,7 +439,9 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  *
  * @note The library holds the userdata pointer until the callback is removed.  It is safe
  *       to free it once plc_tag_unregister_callback() or plc_tag_destroy() has returned
- *       PLCTAG_STATUS_OK, and not before.
+ *       PLCTAG_STATUS_OK, or in the PLCTAG_EVENT_DESTROYED callback, and not before.
+ *       Freeing it in any other callback without unregistering first leaves the library
+ *       holding a dangling pointer.
  *
  * @see plc_tag_register_callback()
  */
@@ -566,6 +568,10 @@ LIB_EXPORT int plc_tag_abort(int32_t tag);
  * The callback IS called during this function: PLCTAG_EVENT_DESTROYED is delivered on the
  * calling thread before it returns.  Do not free anything the callback needs before
  * calling this function.
+ *
+ * Called from inside this tag's callback, it returns first, and PLCTAG_EVENT_DESTROYED is
+ * delivered on the same thread once that callback returns.  Free the userdata in the
+ * PLCTAG_EVENT_DESTROYED callback, not right after this call.
  *
  * No other return value carries this guarantee.  PLCTAG_ERR_NOT_FOUND in particular is
  * returned without touching the callback when the library is shutting down, and
