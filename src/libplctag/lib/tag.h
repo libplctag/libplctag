@@ -317,6 +317,10 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     bool created;                                                                       \
     /* Inside the dispatch loop, so nested calls only queue.  Under api_mutex. */      \
     bool dispatching;                                                                   \
+    /* Ops started, and the last one ended, so a waiter knows its own op.  Under api_mutex. */ \
+    uint32_t op_seq;                                                                    \
+    uint32_t op_end_seq;                                                                \
+    int8_t op_end_status;                                                               \
     uint8_t event_head;  /* next event to dispatch */                                   \
     uint8_t event_count; /* events queued */                                            \
     int8_t status;                                                                      \

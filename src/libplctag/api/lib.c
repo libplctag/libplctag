@@ -67,9 +67,10 @@
 /* helper functions. */
 static int plc_tag_abort_impl(plc_tag_p tag);
 static int plc_tag_status_impl(plc_tag_p tag);
-static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p tag));
-static int create_status(plc_tag_p tag);
-static int wait_for_op(plc_tag_p tag, int timeout);
+static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p tag, uint32_t seq), uint32_t seq);
+static int create_status(plc_tag_p tag, uint32_t seq);
+static int op_status(plc_tag_p tag, uint32_t seq);
+static int wait_for_op(plc_tag_p tag, int timeout, uint32_t seq);
 static int32_t plc_tag_create_impl(const char *attrib_str,
                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                    void *userdata, int timeout, plc_tag_p src_tag);
@@ -162,6 +163,7 @@ void tag_created(plc_tag_p tag, int rc) {
 
 
 void tag_op_start(plc_tag_p tag, bool is_read) {
+    tag->op_seq++;
     tag_op_set(tag, (is_read ? TAG_OP_READ_REQUEST : TAG_OP_WRITE_REQUEST));
 
     if(tag->created) { tag_event_push(tag, (is_read ? PLCTAG_EVENT_READ_STARTED : PLCTAG_EVENT_WRITE_STARTED), PLCTAG_STATUS_OK); }
@@ -173,6 +175,8 @@ void tag_op_end(plc_tag_p tag, int rc) {
 
     if(!tag_op_busy(tag)) { return; }
 
+    tag->op_end_seq = tag->op_seq;
+    tag->op_end_status = (int8_t)rc;
     tag->status = (int8_t)rc;
     tag_op_set(tag, TAG_OP_IDLE);
 
@@ -191,6 +195,11 @@ void tag_op_end(plc_tag_p tag, int rc) {
 void tag_op_abort(plc_tag_p tag) {
     bool was_busy = tag_op_busy(tag);
     bool is_read = tag_op_is_read(tag);
+
+    if(was_busy) {
+        tag->op_end_seq = tag->op_seq;
+        tag->op_end_status = (int8_t)PLCTAG_ERR_ABORT;
+    }
 
     tag_op_set(tag, TAG_OP_IDLE);
 
@@ -294,7 +303,7 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
 }
 
 
-/* must be called with a valid tag pointer and the API mutex held!*/
+/* takes the API mutex itself. */
 static int plc_tag_abort_impl(plc_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -777,7 +786,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(timeout > 0 && rc == PLCTAG_STATUS_PENDING) {
         int64_t start_time = time_ms();
 
-        rc = wait_for_status(tag, timeout, create_status);
+        rc = wait_for_status(tag, timeout, create_status, 0);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
 
@@ -1312,7 +1321,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
  * Wait until status() stops answering PENDING, up to timeout ms.  Returns its last answer,
  * PLCTAG_ERR_TIMEOUT, or why the wait itself failed.
  */
-static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p tag)) {
+static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p tag, uint32_t seq), uint32_t seq) {
     int rc = PLCTAG_STATUS_PENDING;
     int64_t end_time = time_ms() + timeout;
 
@@ -1333,7 +1342,7 @@ static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p t
             break;
         }
 
-        rc = status(tag);
+        rc = status(tag, seq);
     } while(rc == PLCTAG_STATUS_PENDING);
 
     return (rc == PLCTAG_STATUS_PENDING) ? PLCTAG_ERR_TIMEOUT : rc;
@@ -1344,8 +1353,10 @@ static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p t
  * A creating tag's status, straight from its module: no tickler and no event dispatch, because a
  * create that fails removes the tag before the application has its id.
  */
-static int create_status(plc_tag_p tag) {
+static int create_status(plc_tag_p tag, uint32_t seq) {
     int rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+
+    (void)seq;
 
     critical_block(tag->api_mutex) {
         if(tag->vtable && tag->vtable->status) { rc = tag->vtable->status(tag); }
@@ -1356,24 +1367,45 @@ static int create_status(plc_tag_p tag) {
 
 
 /*
- * Wait for the tag's op to end, up to timeout ms.  A timeout aborts the op.  Returns the
- * op's result, or PLCTAG_ERR_TIMEOUT.
+ * Op seq's result once it has ended, even if a callback has started the next op since.
+ * ponytail: if a later op has also ended, that op's result is returned; keep a result per op
+ * if that matters.
  */
-static int wait_for_op(plc_tag_p tag, int timeout) {
+static int op_status(plc_tag_p tag, uint32_t seq) {
+    int rc = plc_tag_status_impl(tag);
+
+    critical_block(tag->api_mutex) {
+        if((int32_t)(tag->op_end_seq - seq) >= 0) { rc = tag->op_end_status; }
+    }
+
+    return rc;
+}
+
+
+/*
+ * Wait for op seq to end, up to timeout ms.  A timeout aborts that op, never a later one.
+ * Returns the op's result, or PLCTAG_ERR_TIMEOUT.
+ */
+static int wait_for_op(plc_tag_p tag, int timeout, uint32_t seq) {
     int64_t start_time = time_ms();
-    int rc = wait_for_status(tag, timeout, plc_tag_status_impl);
-    bool busy = false;
+    int rc = wait_for_status(tag, timeout, op_status, seq);
 
     /*
      * The protocol layer may still be working on the request.  Without an abort the op stays in
-     * flight after the call returns, and the next one fails with PLCTAG_ERR_BUSY.
+     * flight after the call returns, and the next one fails with PLCTAG_ERR_BUSY.  Checked and
+     * aborted under one lock, so the op cannot end and another start in between.
      */
-    critical_block(tag->api_mutex) { busy = tag_op_busy(tag); }
-
-    if(busy) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Operation still in flight after %s, aborting it.",
-               plc_tag_decode_error(rc));
-        plc_tag_abort_impl(tag);
+    critical_block(tag->api_mutex) {
+        if(tag->op_seq == seq && tag_op_busy(tag)) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Operation still in flight after %s, aborting it.",
+                   plc_tag_decode_error(rc));
+            atomic_set_int64(&tag->read_cache_expire, 0);
+            tag_op_abort(tag);
+            if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+        } else if((int32_t)(tag->op_end_seq - seq) >= 0) {
+            /* it ended as the wait timed out. */
+            rc = tag->op_end_status;
+        }
     }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "elapsed time %" PRId64 "ms", (time_ms() - start_time));
@@ -1397,6 +1429,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
     bool is_done = false;
+    uint32_t seq = 0;
     int64_t now = 0;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
@@ -1465,6 +1498,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         cond_clear(tag->tag_cond_wait);
 
         tag_op_start(tag, true);
+        seq = tag->op_seq;
         plc_tag_generic_handle_event_callbacks(tag);
 
         /* the callback aborted or destroyed the tag, so the read must not start. */
@@ -1495,7 +1529,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     /* queued and woken only now: woken under the API mutex, the handler would find the tag locked. */
     if(!is_done && tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
-    if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
+    if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout, seq); }
 
     if(rc == PLCTAG_STATUS_OK) {
         /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
@@ -1574,6 +1608,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
     bool is_done = false;
+    uint32_t seq = 0;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Starting.");
 
@@ -1610,6 +1645,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
 
         /* dispatched before the write starts, so the application can fill the buffer in it. */
         tag_op_start(tag, false);
+        seq = tag->op_seq;
         plc_tag_generic_handle_event_callbacks(tag);
 
         /* the callback aborted or destroyed the tag, so the write must not start. */
@@ -1640,7 +1676,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
     /* queued and woken only now: woken under the API mutex, the handler would find the tag locked. */
     if(!is_done && tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
-    if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout); }
+    if(!is_done && timeout > 0) { rc = wait_for_op(tag, timeout, seq); }
 
     plc_tag_generic_handle_event_callbacks(tag);
 

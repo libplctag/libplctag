@@ -669,6 +669,8 @@ def build_manifest() -> Manifest:
               [exe("test_cip_ops"), "--mode=many-tags", "--count=450", cip_ops_base], F, server=cip_ops_server(0))
     sec.test("a reply arrives while the tag's callback holds its API mutex",
               [exe("test_cip_ops"), "--mode=callback-holds-mutex", cip_ops_base], F, server=cip_ops_server(0))
+    sec.test("a timed-out wait does not abort the read its callback started",
+              [exe("test_cip_ops"), "--mode=timeout-aborts-next", cip_ops_base], F, server=cip_ops_server(300))
     sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
