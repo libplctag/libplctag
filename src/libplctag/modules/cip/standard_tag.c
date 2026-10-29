@@ -334,7 +334,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
     int32_t write_size = 0;
     int32_t pad_size = 0;
     int32_t needed = 0;
-    int str_pad_to_multiple_bytes = 1;
+    int write_pad_alignment_bytes = 1;
     debug_module_t dbg = tag_debug_module(tag);
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
@@ -372,12 +372,12 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
     /*
      * Pad the data out to a multiple of 1, 2 or 4 bytes.  On some PLCs (OmronNJ) padding a
      * counted string breaks it, because the padding makes the data longer than the count says,
-     * so str_pad_to_multiple_bytes can turn this off.
+     * so write_pad_alignment_bytes can turn this off.
      */
-    str_pad_to_multiple_bytes = (int)tag->byte_order->str_pad_to_multiple_bytes;
-    if(!segmented && (str_pad_to_multiple_bytes == 2 || str_pad_to_multiple_bytes == 4) && write_size != 0
-       && write_size % str_pad_to_multiple_bytes != 0) {
-        pad_size = str_pad_to_multiple_bytes - (write_size % str_pad_to_multiple_bytes);
+    write_pad_alignment_bytes = (int)tag->byte_order->write_pad_alignment_bytes;
+    if(!segmented && (write_pad_alignment_bytes == 2 || write_pad_alignment_bytes == 4) && write_size != 0
+       && write_size % write_pad_alignment_bytes != 0) {
+        pad_size = write_pad_alignment_bytes - (write_size % write_pad_alignment_bytes);
     }
 
     needed = 1 + (int32_t)tag->encoded_name_size + (int32_t)tag->encoded_type_info_size + (int32_t)sizeof(uint16_le)

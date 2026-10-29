@@ -103,7 +103,7 @@ static tag_byte_order_t listing_tag_logix_byte_order = {.is_allocated = 0,
                                                         .str_is_zero_terminated = 0,
                                                         .str_is_byte_swapped = 0,
 
-                                                        .str_pad_to_multiple_bytes = 1,
+                                                        .write_pad_alignment_bytes = 1,
                                                         .str_count_word_bytes = 2,
                                                         .str_max_capacity = 0,
                                                         .str_total_length = 0,

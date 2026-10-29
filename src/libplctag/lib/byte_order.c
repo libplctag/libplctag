@@ -77,7 +77,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
 
     if(attr_get_str(attribs, "str_pad_bytes", NULL) != NULL) { use_default = 0; }
 
-    if(attr_get_str(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", NULL) != NULL) { use_default = 0; }
+    if(attr_get_str(attribs, "write_pad_alignment_bytes", NULL) != NULL) { use_default = 0; }
 
     /* if we need to override something, build a new byte order structure. */
     if(!use_default) {
@@ -317,18 +317,18 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             }
         }
 
-        /* Should we pad the string to a multiple of 1 (no padding), 2, or 4 bytes. Adding padding causes issues when writing
+        /* Should we pad write data to a multiple of 1 (no padding), 2, or 4 bytes. Adding padding causes issues when writing
            OmronNJ strings, 2 byte padding is required for certain AB PLCs*/
-        if(attr_get_str(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", NULL)) {
-            str_param = attr_get_int(attribs, "str_pad_to_multiple_bytes_EXPERIMENTAL", 0);
+        if(attr_get_str(attribs, "write_pad_alignment_bytes", NULL)) {
+            str_param = attr_get_int(attribs, "write_pad_alignment_bytes", 0);
             if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4) {
                 if(str_param == 0) {
                     str_param = 1;
                 } /* Padding to 0 bytes doesnt make much sense, so we overwride to 1 byte which means no padding */
-                tag->byte_order->str_pad_to_multiple_bytes = (unsigned int)str_param;
+                tag->byte_order->write_pad_alignment_bytes = (unsigned int)str_param;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                       "Tag string attribute str_pad_to_multiple_bytes must be missing, 1, 2 or 4!");
+                       "Tag string attribute write_pad_alignment_bytes must be missing, 1, 2 or 4!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }

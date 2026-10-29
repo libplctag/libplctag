@@ -70,7 +70,7 @@ static int32_t core_get_str_count_word_bytes(plc_tag_p tag, int32_t *result);
 static int32_t core_get_str_max_capacity(plc_tag_p tag, int32_t *result);
 static int32_t core_get_str_total_length(plc_tag_p tag, int32_t *result);
 static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result);
-static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result);
+static int32_t core_get_write_pad_alignment_bytes(plc_tag_p tag, int32_t *result);
 
 static int32_t core_get_int16_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
 static int32_t core_get_int16_byte_order_size(plc_tag_p tag);
@@ -171,10 +171,10 @@ static const attr_def_t core_attribs[] = {
      .description = "The number of padding bytes after the string data.",
      .get_int = core_get_str_pad_bytes},
 
-    {.name = "str_pad_to_multiple_bytes",
+    {.name = "write_pad_alignment_bytes",
      .type = ATTR_TYPE_INT,
-     .description = "Pad the string data out to a multiple of this many bytes.",
-     .get_int = core_get_str_pad_to_multiple_bytes},
+     .description = "Pad single-packet write data out to a multiple of this many bytes.",
+     .get_int = core_get_write_pad_alignment_bytes},
 
     {.name = "int16_byte_order",
      .type = ATTR_TYPE_STRING,
@@ -556,8 +556,8 @@ static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result) {
 }
 
 
-static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result) {
-    *result = (int32_t)tag->byte_order->str_pad_to_multiple_bytes;
+static int32_t core_get_write_pad_alignment_bytes(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->write_pad_alignment_bytes;
 
     return PLCTAG_STATUS_OK;
 }
