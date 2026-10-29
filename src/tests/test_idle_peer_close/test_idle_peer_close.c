@@ -58,8 +58,11 @@
     "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&connection_inactivity_timeout_ms=60000&name=%s"
 
 #ifdef WINDOWS_PLATFORM
-#    define SERVER_START "start /B %s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] >nul 2>&1"
-#    define SERVER_STOP "taskkill /IM ab_server.exe /F >nul 2>&1"
+/* a pidfile per port, as on POSIX, so only this test's server is killed.  The log name is unused. */
+#    define SERVER_START \
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
+        "'--plc=ControlLogix','--path=1,0','--port=%s','--tag=TestBigArray:DINT[10]').Id\" > ab_server_%.0s%s.pid"
+#    define SERVER_STOP "for /f %%p in (ab_server_%s.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%s.pid >nul 2>&1"
 #else
 /* a port-specific pidfile, so only this test's server is killed. */
 #    define SERVER_START \
@@ -155,11 +158,7 @@ int main(int argc, char **argv) {
 static void start_server(const char *ab_server_cmd) {
     char cmd[1024];
 
-#ifdef WINDOWS_PLATFORM
-    snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_cmd, port);
-#else
     snprintf(cmd, sizeof(cmd), SERVER_START, ab_server_cmd, port, port, port);
-#endif
 
     if(system(cmd) != 0) {
         fprintf(stderr, "FAIL: could not start ab_server: \"%s\"\n", cmd);
@@ -176,11 +175,7 @@ static void start_server(const char *ab_server_cmd) {
 static void stop_server(void) {
     char cmd[256];
 
-#ifdef WINDOWS_PLATFORM
-    snprintf(cmd, sizeof(cmd), "%s", SERVER_STOP);
-#else
     snprintf(cmd, sizeof(cmd), SERVER_STOP, port, port);
-#endif
 
     /* the server may already be gone; only a shell failure matters. */
     if(system(cmd) < 0) { fprintf(stderr, "Could not run \"%s\".\n", cmd); }

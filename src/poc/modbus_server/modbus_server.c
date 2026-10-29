@@ -461,6 +461,11 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
               "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
 
+        /* --reorder: the next request may have arrived but not been read yet; read without waiting. */
+        if(client->server->reorder && client->held_size == 0) {
+            (void)socket_recv_frame(fd, &client->recv_buf, modbus_frame_check, NULL);
+        }
+
         /* --reorder: a whole request already waits behind this one, so answer it first. */
         if(client->server->reorder && client->held_size == 0 && modbus_frame_check(&client->recv_buf, NULL) == UTIL_OK
            && buf_write_pos(&client->send_buf) <= sizeof(client->held_buffer)) {

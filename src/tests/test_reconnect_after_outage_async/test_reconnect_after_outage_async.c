@@ -88,11 +88,11 @@
 static const char *g_port = "44818";
 
 #ifdef WINDOWS_PLATFORM
-/* Not parallel-safe: taskkill here is by image name, not PID, so two instances of
- * this test running at once would kill each other's server. run_simulator_tests.sh
- * only launches these in parallel on POSIX; Windows still runs them sequentially. */
-#    define SERVER_START "start /B %s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] >nul 2>&1"
-#    define SERVER_STOP "taskkill /IM ab_server.exe /F"
+/* a pidfile per port, as on POSIX, so only this test's server is killed.  The log name is unused. */
+#    define SERVER_START \
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
+        "'--plc=ControlLogix','--path=1,0','--port=%s','--tag=TestBigArray:DINT[10]').Id\" > ab_server_%.0s%s.pid"
+#    define SERVER_STOP "for /f %%p in (ab_server_%s.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%s.pid >nul 2>&1"
 #else
 /* Capture the backgrounded server's PID into a port-specific pidfile so
  * stop_server() can kill exactly this instance -- pkill-by-name would also kill a
@@ -210,11 +210,7 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
 void start_server(test_state_t *test_state) {
     char start_cmd[1024] = {0};
 
-#ifdef WINDOWS_PLATFORM
-    snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd, g_port);
-#else
     snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd, g_port, g_port, g_port);
-#endif
 
     if(system(start_cmd) != 0) {
         log("Error starting AB server! Make sure it's compiled.\n");
@@ -232,11 +228,7 @@ void start_server(test_state_t *test_state) {
 void stop_server(void) {
     char stop_cmd[256] = {0};
 
-#ifdef WINDOWS_PLATFORM
-    snprintf(stop_cmd, sizeof(stop_cmd), "%s", SERVER_STOP);
-#else
     snprintf(stop_cmd, sizeof(stop_cmd), SERVER_STOP, g_port, g_port);
-#endif
 
     if(system(stop_cmd) < 0) {
         log("Error stopping AB server!\n");

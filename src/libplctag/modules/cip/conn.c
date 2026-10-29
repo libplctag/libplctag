@@ -1998,7 +1998,7 @@ static THREAD_FUNC(session_handler) {
 
                     if(conn->fo_dup_retries <= CIP_FO_MAX_DUP_RETRIES) {
                         /* the serial number is redrawn on every encode, so simply asking again is enough. */
-                        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0,
                                "Duplicate connection ID, retry %" PRIu32 " of %d with a new one.", conn->fo_dup_retries,
                                CIP_FO_MAX_DUP_RETRIES);
 
@@ -2183,7 +2183,7 @@ static THREAD_FUNC(session_handler) {
 
                 timeout_time = now + retry_wait_ms;
 
-                pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0,
+                pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0,
                        "Retry %" PRIu32 ", waiting %" PRId64 "ms before reconnecting.", retry_backoff.attempts,
                        retry_wait_ms);
 
