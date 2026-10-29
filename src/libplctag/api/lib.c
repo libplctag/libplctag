@@ -1993,7 +1993,8 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    critical_block(tag->api_mutex) { rc = resize_tag_buffer_unsafe(tag, new_size); }
+    /* the I/O thread uses the size while an op is in flight. */
+    critical_block(tag->api_mutex) { rc = tag_op_busy(tag) ? PLCTAG_ERR_BUSY : resize_tag_buffer_unsafe(tag, new_size); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);

@@ -156,13 +156,14 @@ def conflicts(a: frozenset, b: frozenset) -> bool:
     return False
 
 
-def test(name: str, cmd: list[str], *, expect_error: Optional[str] = None, group: str = "functional") -> Test:
+def test(name: str, cmd: list[str], *, expect_error: Optional[str] = None, group: str = "functional",
+         resources: Optional[frozenset] = None) -> Test:
     tid = _next_id[0]
     _next_id[0] += 1
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
     log_file = str(LOG_DIR / f"{tid}_{slug}.log")
     return Test(id=tid, name=name, cmd=cmd, log_file=log_file, expect_error=expect_error, group=group,
-                resources=resources_of(cmd, group))
+                resources=resources if resources is not None else resources_of(cmd, group))
 
 
 REQUIRED_EXECUTABLES = [
@@ -170,6 +171,7 @@ REQUIRED_EXECUTABLES = [
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
+    "test_cip_ops", "test_timeout_next",
 ]
 
 
@@ -506,6 +508,14 @@ def build_manifest() -> list[Test]:
              [exe("test_callback_destroy"), f"protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0"]),
         test("destroy tag from inside its own callback (PLC5)",
              [exe("test_callback_destroy"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0"]),
+        # Needs a round trip of several milliseconds, which the PLC/5 has.
+        test("a timed-out wait does not abort the read its callback started (PLC5)",
+             [exe("test_timeout_next"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0"]),
+        # The command line names no tag; it writes TestBigArray[0..19].
+        test("plc_tag_set_size fails with BUSY while a read or write is in flight (ControlLogix)",
+             [exe("test_cip_ops"), "--mode=set-size-busy",
+              f"--base=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix"],
+             resources=frozenset({("logix", "TestBigArray", True)})),
     ]
 
     tests.extend(build_logix_matrix())

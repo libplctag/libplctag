@@ -303,7 +303,7 @@ REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
-    "test_callback_destroy", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops",
+    "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
@@ -670,7 +670,10 @@ def build_manifest() -> Manifest:
     sec.test("a reply arrives while the tag's callback holds its API mutex",
               [exe("test_cip_ops"), "--mode=callback-holds-mutex", cip_ops_base], F, server=cip_ops_server(0))
     sec.test("a timed-out wait does not abort the read its callback started",
-              [exe("test_cip_ops"), "--mode=timeout-aborts-next", cip_ops_base], F, server=cip_ops_server(300))
+              [exe("test_timeout_next"), f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[7]"],
+              F, server=cip_ops_server(300))
+    sec.test("plc_tag_set_size fails with BUSY while a read or write is in flight",
+              [exe("test_cip_ops"), "--mode=set-size-busy", cip_ops_base], F, server=cip_ops_server(300))
     sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",

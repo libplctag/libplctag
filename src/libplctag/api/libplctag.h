@@ -404,6 +404,10 @@ typedef enum {
  *            plc_tag_destroy(); that is a deadlock.
  *          - call functions on another tag whose callback may call functions on this tag;
  *            two such callbacks running at once on different threads deadlock.
+ *          - take an application lock that is held by any thread calling a function on
+ *            this tag; the two lock orders are opposite, which deadlocks.  Copy what you
+ *            need and hand it off without blocking instead.
+ *          - call plc_tag_lock(); if another thread holds that lock, it deadlocks.
  *
  * @warning Do not perform blocking operations in the callback. This will degrade
  *          library performance or cause failures.
@@ -467,6 +471,12 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id,
  * pointer will not be used again.  A callback already running on another thread has
  * returned before this function returns.  See plc_tag_destroy() for the same guarantee at
  * tag teardown.
+ *
+ * Replacing a callback:
+ *
+ * Swap callbacks only while the tag is idle.  Events of an operation in flight are dropped
+ * while no callback is registered, and events queued but not yet delivered when a new
+ * callback is registered go to the new callback, with the new userdata.
  */
 
 LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
@@ -520,6 +530,12 @@ LIB_EXPORT int plc_tag_unregister_logger(void);
  *
  * This should be used to initially lock a tag when starting operations with it
  * followed by a call to plc_tag_unlock when you have everything you need from the tag.
+ *
+ * This only excludes other threads calling plc_tag_lock().  It does not stop the library
+ * from changing the tag data, so values read with several getter calls while a read is
+ * in flight, or while auto-sync is on, can come from different PLC scans.
+ *
+ * Do not call this from a tag callback; see plc_tag_register_callback().
  */
 
 
@@ -542,6 +558,11 @@ LIB_EXPORT int plc_tag_unlock(int32_t tag);
  * Abort any outstanding IO to the PLC.  If there is something in flight, then
  * it is marked invalid.  Note that this does not abort anything that might
  * be still processing in the report PLC.
+ *
+ * An abort applies to the tag, not to one operation.  If another thread starts a read
+ * or write at the same time, the abort may stop that new operation instead.  The tag is
+ * not guaranteed to be idle when this returns: the ABORTED callback, or another thread,
+ * may already have started a new operation.
  *
  * The status will be PLCTAG_STATUS_OK unless there is an error such as
  * a null pointer.
@@ -585,10 +606,20 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag);
 /*
  * plc_tag_read
  *
- * Start a read.  If the timeout value is zero, then wait until the read
+ * Start a read.  If the timeout value is not zero, then wait until the read
  * returns or the timeout occurs, whichever is first.  Return the status.
  * If the timeout value is zero, then plc_tag_read will normally return
  * PLCTAG_STATUS_PENDING.
+ *
+ * Do not use the tag data until the read ends.  A setter during the read is overwritten
+ * by the reply, and a getter during a read in several packets can see a mix of two scans.
+ *
+ * With read_cache_ms set, a read inside the cache period returns OK without
+ * going to the PLC.  The cache is best-effort:
+ *   - local changes made with setters are not sent, but a cache hit keeps them,
+ *     so a "read" can return data the PLC never had.  Write before reading.
+ *   - a read in flight while read_cache_ms is changed or the tag is aborted can
+ *     restart the cache period after that change.
  *
  * This is a function provided by the underlying protocol implementation.
  */
@@ -602,6 +633,10 @@ LIB_EXPORT int plc_tag_read(int32_t tag, int timeout);
  * an uncompleted IO operation.  It will be PLCTAG_STATUS_OK if everything is fine.  Other
  * errors will be returned as appropriate.
  *
+ * Getters and setters also set the status, so on a tag shared between threads, use the
+ * return value of plc_tag_read() or plc_tag_write(), or the callback's status, to learn
+ * how an operation ended.
+ *
  * This is a function provided by the underlying protocol implementation.
  */
 LIB_EXPORT int plc_tag_status(int32_t tag);
@@ -610,11 +645,16 @@ LIB_EXPORT int plc_tag_status(int32_t tag);
 /*
  * plc_tag_write
  *
- * Start a write.  If the timeout value is zero, then wait until the write
+ * Start a write.  If the timeout value is not zero, then wait until the write
  * returns or the timeout occurs, whichever is first.  Return the status.
  * If the timeout value is zero, then plc_tag_write will usually return
  * PLCTAG_STATUS_PENDING.  The write is considered done
  * when it has been written to the socket.
+ *
+ * The data is copied from the tag when the request is built, not when this is called.
+ * Do not change the tag data until the write ends: a change before then may be sent,
+ * may be lost without an error, or, for a write in several packets, may leave the PLC
+ * with a mix of old and new values.
  *
  * This is a function provided by the underlying protocol implementation.
  */
@@ -654,7 +694,7 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t tag, const char *attrib_
 LIB_EXPORT int plc_tag_get_attribute_size(int32_t tag, const char *attrib_name);
 
 LIB_EXPORT int plc_tag_get_size(int32_t tag);
-/* return the old size or negative for errors. */
+/* return the old size or negative for errors.  PLCTAG_ERR_BUSY while a read or write is in flight. */
 LIB_EXPORT int plc_tag_set_size(int32_t tag, int new_size);
 
 LIB_EXPORT int plc_tag_get_bit(int32_t tag, int offset_bit);

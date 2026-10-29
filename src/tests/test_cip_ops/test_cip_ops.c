@@ -47,9 +47,8 @@
  *                          Multiple Service Packet; all complete with good data.
  *   callback-holds-mutex   a tag's reply arrives while its own callback is running, and so
  *                          holding the tag's API mutex; the write completes once it returns.
- *   timeout-aborts-next    a read with a timeout completes, and its callback starts the next
- *                          read; the first call returns OK and the next read is not aborted
- *                          when the first call's timeout runs out.  Needs a server delay.
+ *   set-size-busy          plc_tag_set_size fails with BUSY while a read or write is in flight, and
+ *                          works once it ends.  Needs a server delay.
  *
  * Every tag is an element of TestBigArray, a DINT array the simulator must provide with at
  * least --count elements.  The test writes element i as i * 3 + 1 first, so each read checks
@@ -78,7 +77,7 @@ static int32_t run_abort_packed(const char *base, int32_t count);
 static int32_t run_destroy_in_flight(const char *base, int32_t count);
 static int32_t run_many_tags(const char *base, int32_t count);
 static int32_t run_callback_holds_mutex(const char *base);
-static int32_t run_timeout_aborts_next(const char *base);
+static int32_t run_set_size_busy(const char *base);
 static int32_t write_values(const char *base, int32_t count);
 static int32_t create_elem(const char *base, int32_t index, int32_t timeout);
 static int32_t wait_not_pending(const int32_t *ids, int32_t count, int32_t timeout_ms);
@@ -90,10 +89,6 @@ static int32_t ids[MAX_TAGS];
 static compat_atomic_int32_t callback_armed;
 static compat_atomic_int32_t callback_slept;
 static compat_atomic_int32_t writes_completed;
-static compat_atomic_int32_t restart_armed;
-static compat_atomic_int32_t restart_rc;
-static compat_atomic_int32_t reads_completed;
-static compat_atomic_int32_t last_read_status;
 
 
 static int32_t value_of(int32_t index) { return index * 3 + 1; }
@@ -116,7 +111,7 @@ int main(int argc, char **argv) {
     }
 
     if(!mode || !base || count < 2 || count > MAX_TAGS) {
-        printf("Usage: test_cip_ops --mode=<abort-packed|destroy-in-flight|many-tags|callback-holds-mutex|timeout-aborts-next> "
+        printf("Usage: test_cip_ops --mode=<abort-packed|destroy-in-flight|many-tags|callback-holds-mutex|set-size-busy> "
                "--base=\"<tag string>\" [--count=2..%d]\n",
                MAX_TAGS);
         return 1;
@@ -137,8 +132,8 @@ int main(int argc, char **argv) {
         failures = run_many_tags(base, count);
     } else if(strcmp(mode, "callback-holds-mutex") == 0) {
         failures = run_callback_holds_mutex(base);
-    } else if(strcmp(mode, "timeout-aborts-next") == 0) {
-        failures = run_timeout_aborts_next(base);
+    } else if(strcmp(mode, "set-size-busy") == 0) {
+        failures = run_set_size_busy(base);
     } else {
         printf("Unknown mode \"%s\"!\n", mode);
         return 1;
@@ -348,89 +343,10 @@ static int32_t run_callback_holds_mutex(const char *base) {
 }
 
 
-static int32_t run_timeout_aborts_next(const char *base) {
-    char attrs[ATTR_LEN];
-    int32_t failures = 0;
-    int32_t index = 7;
-    int32_t id = 0;
-    int32_t rc = PLCTAG_STATUS_OK;
-    int64_t start = 0;
-    int32_t round_trip = 0;
-    int32_t timeout = 0;
-
-    compat_snprintf(attrs, sizeof(attrs), "%s&elem_count=1&name=TestBigArray[%" PRId32 "]", base, index);
-
-    id = plc_tag_create_ex(attrs, callback, NULL, DATA_TIMEOUT);
-    if(id < 0) {
-        printf("FAIL: unable to create the tag, %s.\n", plc_tag_decode_error(id));
-        return 1;
-    }
-
-    start = compat_time_ms();
-    rc = plc_tag_read(id, DATA_TIMEOUT);
-    round_trip = (int32_t)(compat_time_ms() - start);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("FAIL: the first read returned %s.\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(id);
-        return 1;
-    }
-
-    /* the first read ends inside the timeout, and the one its callback starts ends after it. */
-    timeout = round_trip * 3 / 2;
-    printf("Round trip %" PRId32 "ms, timeout %" PRId32 "ms.\n", round_trip, timeout);
-
-    compat_atomic_store_int32(&reads_completed, 0);
-    compat_atomic_store_int32(&restart_rc, PLCTAG_ERR_NO_DATA);
-    compat_atomic_store_int32(&restart_armed, 1);
-
-    rc = plc_tag_read(id, timeout);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("FAIL: the read returned %s, but it completed inside its timeout.\n", plc_tag_decode_error(rc));
-        failures++;
-    }
-
-    if(compat_atomic_load_int32(&restart_rc) != PLCTAG_STATUS_PENDING) {
-        printf("FAIL: the callback's read returned %s, not PENDING, so nothing was tested.\n",
-               plc_tag_decode_error(compat_atomic_load_int32(&restart_rc)));
-        plc_tag_destroy(id);
-        return failures + 1;
-    }
-
-    /* the callback's read must finish on its own. */
-    start = compat_time_ms();
-    while(compat_atomic_load_int32(&reads_completed) < 2 && compat_time_ms() - start < DATA_TIMEOUT) {
-        compat_sleep_ms(10, NULL);
-    }
-
-    if(compat_atomic_load_int32(&reads_completed) < 2) {
-        printf("FAIL: the callback's read never completed.\n");
-        failures++;
-    } else if(compat_atomic_load_int32(&last_read_status) != PLCTAG_STATUS_OK) {
-        printf("FAIL: the callback's read completed with %s.\n",
-               plc_tag_decode_error(compat_atomic_load_int32(&last_read_status)));
-        failures++;
-    }
-
-    failures += check_value(id, index);
-
-    plc_tag_destroy(id);
-
-    return failures;
-}
-
-
 static void callback(int32_t tag_id, int event, int status, void *userdata) {
+    (void)tag_id;
+    (void)status;
     (void)userdata;
-
-    if(event == PLCTAG_EVENT_READ_COMPLETED) {
-        compat_atomic_store_int32(&last_read_status, status);
-        compat_atomic_add_int32(&reads_completed, 1);
-
-        if(compat_atomic_load_int32(&restart_armed)) {
-            compat_atomic_store_int32(&restart_armed, 0);
-            compat_atomic_store_int32(&restart_rc, plc_tag_read(tag_id, 0));
-        }
-    }
 
     if(event == PLCTAG_EVENT_READ_STARTED && compat_atomic_load_int32(&callback_armed)) {
         compat_atomic_store_int32(&callback_armed, 0);
@@ -513,4 +429,43 @@ static int32_t check_value(int32_t id, int32_t index) {
     }
 
     return 0;
+}
+
+
+static int32_t run_set_size_busy(const char *base) {
+    int32_t failures = 0;
+    int32_t id = create_elem(base, 7, DATA_TIMEOUT);
+    int32_t rc = PLCTAG_STATUS_OK;
+    int32_t is_write = 0;
+
+    if(id < 0) { return 1; }
+
+    for(is_write = 0; is_write < 2; is_write++) {
+        const char *op = is_write ? "write" : "read";
+
+        rc = is_write ? plc_tag_write(id, 0) : plc_tag_read(id, 0);
+        if(rc != PLCTAG_STATUS_PENDING) {
+            printf("FAIL: the %s returned %s, not PENDING, so nothing was tested.\n", op, plc_tag_decode_error(rc));
+            failures++;
+            continue;
+        }
+
+        rc = plc_tag_set_size(id, 8);
+        if(rc != PLCTAG_ERR_BUSY) {
+            printf("FAIL: plc_tag_set_size during a %s returned %s, not BUSY.\n", op, plc_tag_decode_error(rc));
+            failures++;
+        }
+
+        if(wait_not_pending(&id, 1, DATA_TIMEOUT) != PLCTAG_STATUS_OK) { failures++; }
+    }
+
+    rc = plc_tag_set_size(id, 8);
+    if(rc < 0) {
+        printf("FAIL: plc_tag_set_size on an idle tag returned %s.\n", plc_tag_decode_error(rc));
+        failures++;
+    }
+
+    plc_tag_destroy(id);
+
+    return failures;
 }
