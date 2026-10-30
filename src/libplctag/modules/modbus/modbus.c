@@ -1201,9 +1201,9 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "in PLC_IDLE_WAIT state.");
                 mb_plc_set_conn_status(plc, PLCTAG_CONN_STATUS_IDLE_WAIT);
 
-                /* any tag on the list needs the connection. */
+                /* a due tag needs the connection; a due destroy does not. */
                 bool has_active_tags = false;
-                critical_block(plc->mutex) { has_active_tags = (vector_length(plc->driver.active) > 0); }
+                critical_block(plc->mutex) { has_active_tags = tag_driver_has_due_unsafe(&plc->driver, time_ms()); }
                 if(has_active_tags) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, 0,
                            "PLC has active tags needing connection, transitioning to PLC_CONNECT_START.");

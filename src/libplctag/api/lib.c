@@ -684,6 +684,21 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         tag->auto_sync_next_write = 0;
     }
 
+    tag->destroy_idle_sec = attr_get_int(attribs, "destroy_tag_after_idle_sec", 0);
+    if(tag->destroy_idle_sec < 0 || (tag->destroy_idle_sec > 0 && tag->destroy_idle_sec < 10)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "destroy_tag_after_idle_sec must be zero or at least 10!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(tag->destroy_idle_sec > 0 && (tag->auto_sync_read_ms > 0 || tag->auto_sync_write_ms > 0)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "destroy_tag_after_idle_sec cannot be used with auto-sync!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     /* See if we are allowed to resize fields */
     tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
 

@@ -1850,6 +1850,10 @@ static THREAD_FUNC(session_handler) {
          * This keeps the overall memory usage lower.
          */
 
+        /* a due auto-destroy needs no connection, so it runs in every state. */
+        critical_block(conn->session_mutex) { tag_driver_expire_due_unsafe(&conn->driver, now); }
+        tag_driver_notify(&conn->driver);
+
         switch(conn->state) {
             case SESSION_OPEN_SOCKET_START:
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_OPEN_SOCKET_START state.");

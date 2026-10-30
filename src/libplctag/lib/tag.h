@@ -247,7 +247,8 @@ typedef struct tag_byte_order_s tag_byte_order_t;
 typedef enum {
     TAG_OP_IDLE = 0,
     TAG_OP_READ_REQUEST, /* a read is in progress, queued or on the wire */
-    TAG_OP_WRITE_REQUEST
+    TAG_OP_WRITE_REQUEST,
+    TAG_OP_DESTROY /* idle, and destroyed at op_time unless a read or write comes first */
 } tag_op_state_t;
 
 
@@ -300,6 +301,10 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     void *userdata;                                                                     \
     int32_t auto_sync_read_ms;                                                          \
     int32_t auto_sync_write_ms;                                                         \
+    /* 0 = off.  Under api_mutex. */                                                    \
+    int32_t destroy_idle_sec;                                                           \
+    /* out of the registry at its due time; tag_driver_notify() destroys it. */        \
+    bool auto_destroyed;                                                                \
     int32_t size;                                                                       \
     int32_t tag_id;                                                                     \
     int32_t elem_count;                                                                 \
@@ -389,7 +394,8 @@ extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
  */
 #define tag_op_state(tag) ((tag_op_state_t)atomic_get_int32(&(tag)->op_state))
 #define tag_op_set(tag, state) atomic_set_int32(&(tag)->op_state, (int32_t)(state))
-#define tag_op_busy(tag) (tag_op_state(tag) != TAG_OP_IDLE)
+/* only a read or write is busy; DESTROY is idle with a deadline. */
+#define tag_op_busy(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST || tag_op_state(tag) == TAG_OP_WRITE_REQUEST)
 #define tag_op_is_read(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST)
 
 /* queue one event; dropped when the tag has no callback. */

@@ -36,6 +36,7 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_driver.h>
+#include <libplctag/lib/tag_registry.h>
 #include <libplctag/lib/tag_schedule.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
@@ -90,10 +91,17 @@ void tag_driver_queue_unsafe(tag_driver_t *driver, plc_tag_p tag, int64_t when) 
 void tag_driver_forget_unsafe(tag_driver_t *driver, plc_tag_p tag) { tag_schedule_remove(driver->active, tag); }
 
 
+/* a due destroy needs no connection, so it does not count. */
 bool tag_driver_has_due_unsafe(tag_driver_t *driver, int64_t now) {
-    int64_t first = tag_driver_next_time_unsafe(driver);
+    for(int32_t i = 0; i < vector_length(driver->active); i++) {
+        plc_tag_p tag = vector_get(driver->active, i);
 
-    return (first && first <= now);
+        if(tag->op_time > now) { break; }
+
+        if(tag_op_state(tag) != TAG_OP_DESTROY) { return true; }
+    }
+
+    return false;
 }
 
 
@@ -114,6 +122,22 @@ void tag_driver_tickle_due_unsafe(tag_driver_t *driver, int64_t now) {
         if(tag->op_time > now) { break; }
 
         if(!tag_op_busy(tag)) { due[count++] = tag; }
+    }
+
+    tickle_tags_unsafe(driver, due, count, now);
+}
+
+
+void tag_driver_expire_due_unsafe(tag_driver_t *driver, int64_t now) {
+    plc_tag_p due[TAG_DRIVER_TICKLE_BATCH];
+    int32_t count = 0;
+
+    for(int32_t i = 0; i < vector_length(driver->active) && count < TAG_DRIVER_TICKLE_BATCH; i++) {
+        plc_tag_p tag = vector_get(driver->active, i);
+
+        if(tag->op_time > now) { break; }
+
+        if(tag_op_state(tag) == TAG_OP_DESTROY) { due[count++] = tag; }
     }
 
     tickle_tags_unsafe(driver, due, count, now);
@@ -149,6 +173,13 @@ void tag_driver_notify(tag_driver_t *driver) {
         plc_tag_p tag = vector_remove(driver->notify, 0);
 
         plc_tag_generic_handle_event_callbacks(tag);
+
+        /* the tickle took it out of the registry; the registry's reference is ours to drop. */
+        if(tag->auto_destroyed) {
+            tag->auto_destroyed = false;
+            destroy_tag_common(tag);
+        }
+
         rc_dec(tag);
     }
 }
@@ -187,6 +218,17 @@ static void tickle_tag(plc_tag_p tag) {
         if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
 
         atomic_set_bool(&tag->abort_requested, false);
+
+        return;
+    }
+
+    /* a DESTROY tag is only tickled at its due time. */
+    if(tag_op_state(tag) == TAG_OP_DESTROY) {
+        tag_op_set(tag, TAG_OP_IDLE);
+        tag->auto_destroyed = remove_tag_lookup(tag);
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Idle for %" PRId32 " s, %s.", tag->destroy_idle_sec,
+               tag->auto_destroyed ? "destroying it" : "already being destroyed");
 
         return;
     }
@@ -280,6 +322,12 @@ static void arm_unsafe(tag_driver_t *driver, plc_tag_p tag, int64_t now) {
         int64_t create_time = now + TAG_DRIVER_CREATE_RECHECK_MS;
 
         if(!when || create_time < when) { when = create_time; }
+    }
+
+    /* exclusive with auto-sync, so nothing else is due. */
+    if(tag->destroy_idle_sec > 0 && tag->created && !tag->auto_destroyed && tag_op_state(tag) == TAG_OP_IDLE) {
+        tag_op_set(tag, TAG_OP_DESTROY);
+        when = now + (int64_t)tag->destroy_idle_sec * 1000;
     }
 
     if(when) {

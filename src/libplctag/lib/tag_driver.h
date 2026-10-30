@@ -85,6 +85,9 @@ extern int64_t tag_driver_next_time_unsafe(tag_driver_t *driver);
  */
 extern void tag_driver_tickle_due_unsafe(tag_driver_t *driver, int64_t now);
 
+/* tickle only the due DESTROY tags: a handler runs this in every state, connected or not. */
+extern void tag_driver_expire_due_unsafe(tag_driver_t *driver, int64_t now);
+
 /*
  * The same for the tags still waiting for their create, wherever they are on the list: for a
  * handler that cannot reach the state where it tickles due tags, whose answer they need.

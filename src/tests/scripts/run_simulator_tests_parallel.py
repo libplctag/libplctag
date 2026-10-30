@@ -311,7 +311,7 @@ REQUIRED_EXECUTABLES = [
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
-    "test_bit_write",
+    "test_bit_write", "test_auto_destroy",
 ]
 
 
@@ -616,6 +616,11 @@ def build_manifest() -> Manifest:
     sec.test("AB/ControlLogix tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
+    sec.test("auto-destroy idle tags (AB ControlLogix)",
+              [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]"], T)
+    sec.test("auto-destroy does not reconnect an idle connection (AB ControlLogix)",
+              [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]",
+               f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], T)
     sec.test("idle disconnect and reconnect with runtime timeout change (AB ControlLogix)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], T)
     sec.test("connection_retry_max_delay_ms read, written and clamped live (AB ControlLogix)",
@@ -1605,6 +1610,11 @@ def build_manifest() -> Manifest:
                "--cycles=2",
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                "--idle-timeout-ms=5000"], T)
+    sec.test("auto-destroy idle tags (Modbus)",
+              [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
+    sec.test("auto-destroy does not reconnect an idle connection (Modbus)",
+              [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+               f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"], T)
     sec.test("test idle disconnect with Modbus",
               [exe("test_idle_disconnect"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
     sec.test("connection_retry_max_delay_ms read, written and clamped live (Modbus)",
