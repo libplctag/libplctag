@@ -41,6 +41,7 @@
 #include <platform.h>
 #include <utils/debug.h>
 #include <utils/atomic_utils.h>
+#include <utils/hash.h>
 #include <utils/hashtable.h>
 #include <utils/rc.h>
 
@@ -53,6 +54,9 @@
  */
 struct tag_registry_t {
     hashtable_p tags;
+
+    /* hash64() of the attribute string -> tag, for tags created with find_or_create_tag=1. */
+    hashtable_p reuse;
     mutex_p tag_lookup_mutex;
 
     /*
@@ -77,6 +81,8 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
 
 
 static int tag_id_inc(int id);
+static int64_t reuse_hash(const char *reuse_str);
+static void forget_reusable_unsafe(tag_registry_p registry, plc_tag_p tag);
 
 plc_tag_p lookup_tag(int32_t tag_id) {
     plc_tag_p tag = NULL;
@@ -122,9 +128,54 @@ int tag_id_inc(int id) {
 }
 
 
-int add_tag_lookup(plc_tag_p tag) {
+/* The hashtable treats key 0 as an empty slot. */
+int64_t reuse_hash(const char *reuse_str) {
+    int64_t key = (int64_t)hash64((const uint8_t *)reuse_str, (size_t)(unsigned int)str_length(reuse_str));
+
+    return (key ? key : 1);
+}
+
+
+/* Take the tag out of the reuse map, if it is there.  The caller holds tag_lookup_mutex. */
+void forget_reusable_unsafe(tag_registry_p registry, plc_tag_p tag) {
+    if(!tag->reuse_key) { return; }
+
+    hashtable_remove(registry->reuse, reuse_hash(tag->reuse_key));
+    mem_free(tag->reuse_key);
+    tag->reuse_key = NULL;
+}
+
+
+/* A new reference to the reusable tag created with exactly this string, or NULL. */
+plc_tag_p tag_registry_find_reusable(tag_registry_p registry, const char *reuse_str) {
+    plc_tag_p tag = NULL;
+
+    critical_block(registry->tag_lookup_mutex) {
+        tag = hashtable_get(registry->reuse, reuse_hash(reuse_str));
+
+        tag = ((tag && str_cmp(tag->reuse_key, reuse_str) == 0) ? rc_inc(tag) : NULL);
+    }
+
+    return tag;
+}
+
+
+/* Stop handing out this tag to creates.  Holders keep it. */
+void tag_registry_forget_reusable(plc_tag_p tag) {
+    critical_block(tag->instance->tag_lookup_mutex) { forget_reusable_unsafe(tag->instance, tag); }
+}
+
+
+/*
+ * Publish the tag.  With reuse_str, also enter it in the reuse map.  If another thread already
+ * entered a tag with the same string, publish nothing: *existing gets a reference to that tag
+ * and its id is returned.
+ */
+int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
     int rc = PLCTAG_ERR_NOT_FOUND;
     int new_id = 0;
+
+    *existing = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Starting.");
 
@@ -141,6 +192,20 @@ int add_tag_lookup(plc_tag_p tag) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, refusing to register the tag.");
             rc = PLCTAG_ERR_NOT_ALLOWED;
             break;
+        }
+
+        if(reuse_str) {
+            plc_tag_p other = hashtable_get(tag->instance->reuse, reuse_hash(reuse_str));
+
+            if(other && str_cmp(other->reuse_key, reuse_str) == 0 && (*existing = rc_inc(other))) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, other->tag_id, "Lost insert race, using the existing tag.");
+                rc = PLCTAG_STATUS_OK;
+                new_id = other->tag_id;
+                break;
+            }
+
+            /* ponytail: two strings with one 64-bit hash; the second is not shared.  Never seen yet. */
+            if(other) { reuse_str = NULL; }
         }
 
         /* only get this when we hold the mutex. */
@@ -186,6 +251,14 @@ int add_tag_lookup(plc_tag_p tag) {
              * this lock. */
             tag->tag_id = new_id;
             rc = hashtable_put(tag->instance->tags, (int64_t)new_id, tag);
+
+            /* a tag that cannot be entered is still a working tag, only not shared. */
+            if(rc == PLCTAG_STATUS_OK && reuse_str && (tag->reuse_key = str_dup(reuse_str))) {
+                if(hashtable_put(tag->instance->reuse, reuse_hash(reuse_str), tag) != PLCTAG_STATUS_OK) {
+                    mem_free(tag->reuse_key);
+                    tag->reuse_key = NULL;
+                }
+            }
         } else {
             rc = PLCTAG_ERR_NO_RESOURCES;
         }
@@ -251,6 +324,8 @@ static void tag_registry_destructor(void *arg) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag hashtable destroyed.");
     }
 
+    if(inst->reuse) { hashtable_destroy(inst->reuse); }
+
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Done.");
 }
 
@@ -311,6 +386,12 @@ int tag_registry_init(void) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable.");
     if((inst->tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag hashtable!");
+        rc_dec(inst);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    if((inst->reuse = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag reuse hashtable!");
         rc_dec(inst);
         return PLCTAG_ERR_NO_MEM;
     }
@@ -411,7 +492,10 @@ void tag_registry_destroy_all_tags(tag_registry_p registry) {
                  * remover owns DESTROYED, and a create still running checks with
                  * remove_tag_lookup() whether shutdown got here first.
                  */
-                if(tag) { hashtable_remove(registry->tags, (int64_t)tag->tag_id); }
+                if(tag) {
+                    hashtable_remove(registry->tags, (int64_t)tag->tag_id);
+                    forget_reusable_unsafe(registry, tag);
+                }
             }
         }
 
@@ -442,7 +526,10 @@ bool remove_tag_lookup(plc_tag_p tag) {
 
     if(!tag || !tag->instance) { return false; }
 
-    critical_block(tag->instance->tag_lookup_mutex) { removed = hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
+    critical_block(tag->instance->tag_lookup_mutex) {
+        removed = hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id);
+        if(removed == tag) { forget_reusable_unsafe(tag->instance, tag); }
+    }
 
     return removed == tag;
 }
@@ -454,7 +541,10 @@ plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id) {
 
     if(!registry) { return NULL; }
 
-    critical_block(registry->tag_lookup_mutex) { tag = hashtable_remove(registry->tags, (int64_t)tag_id); }
+    critical_block(registry->tag_lookup_mutex) {
+        tag = hashtable_remove(registry->tags, (int64_t)tag_id);
+        if(tag) { forget_reusable_unsafe(registry, tag); }
+    }
 
     return tag;
 }

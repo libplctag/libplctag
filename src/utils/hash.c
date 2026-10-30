@@ -248,6 +248,14 @@ uint32_t hash(uint8_t *k, size_t length, uint32_t initval) {
     return c;
 }
 
+uint64_t hash64(const uint8_t *k, size_t length) {
+    uint64_t h = 0xcbf29ce484222325ULL;
+
+    for(size_t i = 0; i < length; i++) { h = (h ^ k[i]) * 0x100000001b3ULL; }
+
+    return h;
+}
+
 #ifdef _MSC_VER
 #    pragma warning(pop)
 #endif

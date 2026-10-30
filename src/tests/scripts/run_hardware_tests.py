@@ -171,7 +171,7 @@ REQUIRED_EXECUTABLES = [
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
-    "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy",
+    "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
 ]
 
 
@@ -216,6 +216,10 @@ def build_manifest() -> list[Test]:
         test("auto-destroy idle tags (ControlLogix)",
              [exe("test_auto_destroy"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
+        test("find_or_create_tag finds or creates a shared tag (ControlLogix)",
+             [exe("test_find_or_create_tag"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
+              f"--missing-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=No_Such_Tag"]),
         test("auto-destroy does not reconnect an idle connection (ControlLogix)",
              [exe("test_auto_destroy"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",

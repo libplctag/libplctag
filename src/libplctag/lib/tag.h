@@ -305,6 +305,10 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int32_t destroy_idle_sec;                                                           \
     /* out of the registry at its due time; tag_driver_notify() destroys it. */        \
     bool auto_destroyed;                                                                \
+    /* created with find_or_create_tag=1. */                                               \
+    bool find_or_create_tag;                                                               \
+    /* the attribute string, set while the tag is in the reuse map.  Under tag_lookup_mutex. */ \
+    char *reuse_key;                                                                    \
     int32_t size;                                                                       \
     int32_t tag_id;                                                                     \
     int32_t elem_count;                                                                 \
@@ -320,6 +324,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     bool in_active_vector;                                                              \
     /* CREATED has been queued. */                                                      \
     bool created;                                                                       \
+    /* the status CREATED was queued with. */                                           \
+    int8_t create_result;                                                               \
     /* Inside the dispatch loop, so nested calls only queue.  Under api_mutex. */      \
     bool dispatching;                                                                   \
     /* Ops started, and the last one ended, so a waiter knows its own op.  Under api_mutex. */ \

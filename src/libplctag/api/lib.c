@@ -71,6 +71,7 @@ static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p t
 static int create_status(plc_tag_p tag, uint32_t seq);
 static int op_status(plc_tag_p tag, uint32_t seq);
 static int wait_for_op(plc_tag_p tag, int timeout, uint32_t seq);
+static int32_t reuse_existing(plc_tag_p tag, int timeout);
 static int32_t plc_tag_create_impl(const char *attrib_str,
                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                    void *userdata, int timeout, plc_tag_p src_tag);
@@ -158,6 +159,7 @@ void tag_created(plc_tag_p tag, int rc) {
     if(tag->created) { return; }
 
     tag->created = true;
+    tag->create_result = (int8_t)rc;
     tag_event_push(tag, PLCTAG_EVENT_CREATED, rc);
 }
 
@@ -551,6 +553,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     int read_cache_ms = 0;
     tag_create_function tag_constructor;
     int debug_level = -1;
+    int reuse = -1;
+    plc_tag_p existing = NULL;
     tag_registry_p inst = NULL;
 
     /* we are creating a tag, there is no ID yet. */
@@ -590,6 +594,21 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     debug_level = attr_get_int(attribs, "debug", -1);
     if(debug_level > DEBUG_NONE) { set_debug_level(debug_level); }
 
+    /* -1 tells a missing attribute from an explicit 0. */
+    reuse = attr_get_int(attribs, "find_or_create_tag", -1);
+    if(reuse < -1 || reuse > 1) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "find_or_create_tag must be 0 or 1!");
+        attr_destroy(attribs);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* a shared tag has no single owner for a callback, and a clone is a new tag by design. */
+    if(reuse == 1 && (tag_callback_func || src_tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "find_or_create_tag cannot be used with a callback or plc_tag_create_from_tag()!");
+        attr_destroy(attribs);
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     /* Acquire a reference to the running instance and transfer it into tag->instance
      * below once the tag exists. initialize_modules() above guarantees one was
      * published, but a shutdown can race in between -- tag_registry_acquire()
@@ -599,6 +618,23 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, cannot create tag.");
         attr_destroy(attribs);
         return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    if(reuse == 1 && (existing = tag_registry_find_reusable(inst, attrib_str))) {
+        bool failed = false;
+
+        critical_block(existing->api_mutex) { failed = (existing->created && existing->create_result != PLCTAG_STATUS_OK); }
+
+        /* a tag whose create failed stays failed, so this create makes a new one. */
+        if(!failed) {
+            attr_destroy(attribs);
+            rc_dec(inst);
+            return reuse_existing(existing, timeout);
+        }
+
+        tag_registry_forget_reusable(existing);
+        rc_dec(existing);
+        existing = NULL;
     }
 
     /*
@@ -699,6 +735,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    tag->find_or_create_tag = (reuse == 1);
+
     /* See if we are allowed to resize fields */
     tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
 
@@ -727,7 +765,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     rc_inc(tag);
 
     /* map the tag to a tag ID */
-    id = add_tag_lookup(tag);
+    id = add_tag_lookup(tag, (reuse == 1 ? attrib_str : NULL), &existing);
 
     /* if the mapping failed, then punt */
     if(id < 0) {
@@ -736,6 +774,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         rc_dec(tag);
         rc_dec(tag);
         return id;
+    }
+
+    /* another create entered the same string first; this tag was never published. */
+    if(existing) {
+        rc_dec(tag);
+        rc_dec(tag);
+        return reuse_existing(existing, timeout);
     }
 
     /* tag->tag_id is already set (add_tag_lookup() sets it under tag_lookup_mutex,
@@ -1383,6 +1428,43 @@ static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p t
  * A creating tag's status, straight from its module: no tickler and no event dispatch, because a
  * create that fails removes the tag before the application has its id.
  */
+/*
+ * Return the handle of a reusable tag to a create that found it, and drop the create's
+ * reference.  A create still running is waited for as a new one would be.  A failed wait
+ * leaves the tag to its other holders.
+ */
+static int32_t reuse_existing(plc_tag_p tag, int timeout) {
+    int32_t rc = PLCTAG_STATUS_OK;
+    bool created = false;
+
+    critical_block(tag->api_mutex) { created = tag->created; }
+
+    if(!created && timeout > 0 && create_status(tag, 0) == PLCTAG_STATUS_PENDING) {
+        rc = wait_for_status(tag, timeout, create_status, 0);
+    }
+
+    /* the create's own result decides, not a read that may have ended since. */
+    critical_block(tag->api_mutex) {
+        if(tag->created) { rc = tag->create_result; }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        /* a failed create stays failed, so the next create makes a new tag. */
+        if(rc != PLCTAG_ERR_TIMEOUT) { tag_registry_forget_reusable(tag); }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Reused tag failed with %s.", plc_tag_decode_error(rc));
+        rc_dec(tag);
+        return rc;
+    }
+
+    rc = tag->tag_id;
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, rc, "Reusing tag %" PRId32 ".", rc);
+    rc_dec(tag);
+
+    return rc;
+}
+
+
 static int create_status(plc_tag_p tag, uint32_t seq) {
     int rc = PLCTAG_ERR_NOT_IMPLEMENTED;
 

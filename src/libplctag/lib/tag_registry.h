@@ -45,7 +45,11 @@
 extern plc_tag_p lookup_tag(int32_t tag_id);
 
 /* Assign the tag a fresh id and publish it in the registry. */
-extern int add_tag_lookup(plc_tag_p tag);
+extern int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing);
+
+extern plc_tag_p tag_registry_find_reusable(tag_registry_p registry, const char *reuse_str);
+
+extern void tag_registry_forget_reusable(plc_tag_p tag);
 
 /*
  * Remove a tag from the registry.  The caller still holds its own reference.  Returns false if

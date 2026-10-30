@@ -55,6 +55,7 @@ static int32_t core_get_bit_num(plc_tag_p tag, int32_t *result);
 static int32_t core_get_connection_group_id(plc_tag_p tag, int32_t *result);
 static int32_t core_get_allow_field_resize(plc_tag_p tag, int32_t *result);
 static int32_t core_set_allow_field_resize(plc_tag_p tag, int32_t value);
+static int32_t core_get_find_or_create_tag(plc_tag_p tag, int32_t *result);
 
 static int32_t lib_get_version_major(plc_tag_p tag, int32_t *result);
 static int32_t lib_get_version_minor(plc_tag_p tag, int32_t *result);
@@ -137,6 +138,11 @@ static const attr_def_t core_attribs[] = {
      .description = "Allow the tag data buffer to be resized when the PLC reports a different size.",
      .get_int = core_get_allow_field_resize,
      .set_int = core_set_allow_field_resize},
+
+    {.name = "find_or_create_tag",
+     .type = ATTR_TYPE_INT,
+     .description = "A create with exactly the same tag string returns this tag.  Set when the tag is created.",
+     .get_int = core_get_find_or_create_tag},
 
     /* String and byte order layout.  Read-only after creation; they live on tag->byte_order. */
     {.name = "str_is_counted",
@@ -411,6 +417,13 @@ static int32_t core_get_connection_group_id(plc_tag_p tag, int32_t *result) {
 
 static int32_t core_get_allow_field_resize(plc_tag_p tag, int32_t *result) {
     *result = (int32_t)tag->allow_field_resize;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_find_or_create_tag(plc_tag_p tag, int32_t *result) {
+    *result = (tag->find_or_create_tag ? 1 : 0);
 
     return PLCTAG_STATUS_OK;
 }
