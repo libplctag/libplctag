@@ -58,6 +58,62 @@
 
 #define DATA_TIMEOUT (5000)
 
+/* how many creates may finish before the abort reaches them before the test gives up. */
+#define ABORT_ATTEMPTS (20)
+
+/* the CREATED event's status, or PENDING until it arrives. */
+static compat_atomic_int32_t created_status;
+
+
+static void created_callback(int32_t tag_id, int event, int status, void *userdata) {
+    (void)tag_id;
+    (void)userdata;
+
+    if(event == PLCTAG_EVENT_CREATED) { compat_atomic_store_int32(&created_status, (int32_t)status); }
+}
+
+
+/*
+ * Create and abort at once until the abort lands while the create's read is still out.  A fast
+ * PLC can answer first; CREATED with OK says so, and that tag is no use here.
+ */
+static int32_t create_and_abort(const char *tag_string) {
+    for(int32_t attempt = 0; attempt < ABORT_ATTEMPTS; attempt++) {
+        int32_t tag = 0;
+        int rc = PLCTAG_STATUS_OK;
+        int64_t deadline = 0;
+
+        compat_atomic_store_int32(&created_status, PLCTAG_STATUS_PENDING);
+
+        tag = plc_tag_create_ex(tag_string, created_callback, NULL, 0);
+        if(tag < 0) {
+            printf("ERROR %s: could not create tag!\n", plc_tag_decode_error(tag));
+            return tag;
+        }
+
+        rc = plc_tag_abort(tag);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("ERROR %s: could not abort the create's read!\n", plc_tag_decode_error(rc));
+            plc_tag_destroy(tag);
+            return rc;
+        }
+
+        deadline = compat_time_ms() + DATA_TIMEOUT;
+        while(compat_atomic_load_int32(&created_status) == PLCTAG_STATUS_PENDING && compat_time_ms() < deadline) {
+            compat_sleep_ms(10, NULL);
+        }
+
+        if(compat_atomic_load_int32(&created_status) != PLCTAG_STATUS_OK) { return tag; }
+
+        printf("The create finished before the abort reached it; trying again.\n");
+        plc_tag_destroy(tag);
+    }
+
+    printf("ERROR: every create finished before the abort reached it.\n");
+
+    return PLCTAG_ERR_TIMEOUT;
+}
+
 
 static int write_before_read(const char *tag_string, int32_t value) {
     int32_t tag = 0;
@@ -150,25 +206,16 @@ static int create_fails_for_good(const char *tag_string, bool abort_create_read)
 
     printf("--- %s\n", tag_string);
 
-    tag = plc_tag_create(tag_string, 0);
-
-    /* a PLC that answers before create returns gives the error here, with no handle to check. */
-    if(tag < 0 && !abort_create_read) {
-        printf("Create failed with %s.\n", plc_tag_decode_error(tag));
-        return 0;
-    }
-
-    if(tag < 0) {
-        printf("ERROR %s: could not create tag!\n", plc_tag_decode_error(tag));
-        return 1;
-    }
-
     if(abort_create_read) {
-        rc = plc_tag_abort(tag);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("ERROR %s: could not abort the create's read!\n", plc_tag_decode_error(rc));
-            plc_tag_destroy(tag);
-            return 1;
+        tag = create_and_abort(tag_string);
+        if(tag < 0) { return 1; }
+    } else {
+        tag = plc_tag_create(tag_string, 0);
+
+        /* a PLC that answers before create returns gives the error here, with no handle to check. */
+        if(tag < 0) {
+            printf("Create failed with %s.\n", plc_tag_decode_error(tag));
+            return 0;
         }
     }
 
