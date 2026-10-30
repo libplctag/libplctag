@@ -19,9 +19,7 @@ test gets its own ab_server, these PLCs and their tags are shared, so:
   that only writes locks it shared -- writers run alongside each other but never
   between another test's write and its check;
 - a stress test locks the whole device it talks to, as the simulator runs that
-  group in a phase of its own;
-- the MicroLogix is always locked whole: run in parallel it acknowledged a write
-  to B3:0 and then read back the old value.
+  group in a phase of its own.
 
 A test that crosses devices -- a CIP bridge to the MicroLogix, DH+ to the PLC/5
 -- holds a lock on each.  Tests that want the same lock run in manifest order.
@@ -111,12 +109,15 @@ TARGETS_OF_EXE = {
 }
 
 
-#: devices that run one test at a time whatever the test: with several sessions open the
-#: MicroLogix 1100 acknowledged a write and did not keep it.
-WHOLE_DEVICES = {"micrologix"}
-
 #: executables that write a tag and read it back, so a concurrent writer breaks them.
-CHECKING_EXES = {"test_bit_write", "test_write_before_read"}
+CHECKING_EXES = {"test_bit_write", "test_write_before_read", "test_parallel_write"}
+
+#: data files one lock covers together: the MicroLogix program drives B3/0 from N7, so a
+#: write to N7 can change B3:0 under a test that checks it.
+LINKED_FILES = {("micrologix", "N7"): "B3+N7", ("micrologix", "B3"): "B3+N7"}
+
+#: executables that may write a tag without a --write argument, so they lock it shared.
+WRITING_EXES = {"test_callback_destroy"}
 
 
 def resources_of(cmd: list[str], group: str) -> frozenset:
@@ -135,7 +136,7 @@ def resources_of(cmd: list[str], group: str) -> frozenset:
             devices.add("plc5")
         tags = set(re.findall(r"(?:[&?]name=|^name=|--read=)([A-Za-z_][A-Za-z0-9_]*)", text.replace(" ", "\n"), re.M))
         checks = "--check" in text or Path(cmd[0]).stem in CHECKING_EXES
-        if not checks and "--write" not in text:
+        if not checks and "--write" not in text and Path(cmd[0]).stem not in WRITING_EXES:
             tags = set()
     else:
         devices, tags = TARGETS_OF_EXE[Path(cmd[0]).stem]
@@ -143,8 +144,7 @@ def resources_of(cmd: list[str], group: str) -> frozenset:
 
     if group != "functional":
         return frozenset((dev, None, True) for dev in devices)
-    whole = set(devices) & WHOLE_DEVICES
-    return frozenset({(dev, tag, checks) for dev in set(devices) - whole for tag in tags} | {(dev, None, True) for dev in whole})
+    return frozenset((dev, LINKED_FILES.get((dev, tag), tag), checks) for dev in devices for tag in tags)
 
 
 def conflicts(a: frozenset, b: frozenset) -> bool:
@@ -171,7 +171,7 @@ REQUIRED_EXECUTABLES = [
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
-    "test_cip_ops", "test_timeout_next",
+    "test_cip_ops", "test_timeout_next", "test_parallel_write",
 ]
 
 
@@ -288,13 +288,25 @@ def build_manifest() -> list[Test]:
              [exe("test_bit_write"), "--bit=10", "--debug=4",
               f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0",
               f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=N7:0/10"]),
+        # Writes in flight at once from two sessions, and from one, must all stick.  Not B3:
+        # the program drives B3/0 from N7, so B3 and N7 written together disagree by design.
+        test("Micrologix writes from two sessions at once read back",
+             [exe("test_parallel_write"), "--rounds=200",
+              f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=L10:0&connection_group_id=1",
+              f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0&connection_group_id=2"]),
+        test("Micrologix writes from one session at once read back",
+             [exe("test_parallel_write"), "--rounds=200",
+              f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=L10:0",
+              f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0"]),
         test("L data file Micrologix tag read/write",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=4&name=L10:0",
               "--write=0,1,2,3", "--debug=4"]),
+        # L files are read and written only as whole words, so a bit tag is refused at create.
         test("L bit data file Micrologix tag read",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
-              "--debug=4"]),
+              "--debug=4"],
+             expect_error="PLCTAG_ERR_UNSUPPORTED"),
         test("L bit data file Micrologix tag write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
               "--write=1", "--debug=4"],

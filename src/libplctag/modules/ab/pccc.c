@@ -1170,12 +1170,15 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* make sure that the data type is B, N, L or S. */
+    /* make sure that the data type is B, N or S. */
     switch(address->file_type) {
         case PCCC_FILE_BIT: max_bit = 15; break;
         case PCCC_FILE_INT: max_bit = 15; break;
-        case PCCC_FILE_LONG_INT: max_bit = 31; break;
         case PCCC_FILE_STATUS: max_bit = 16; break;
+        case PCCC_FILE_LONG_INT:
+            /* the PLC only reads and writes whole L words. */
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Bit addresses are not supported in L files!");
+            return PLCTAG_ERR_UNSUPPORTED;
         default:
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, 0, "Unsupported file type %x!", address->file);
             return PLCTAG_ERR_BAD_PARAM;
