@@ -171,7 +171,7 @@ REQUIRED_EXECUTABLES = [
     "string_standard", "string_non_standard_udt", "test_string", "test_idle_disconnect",
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
-    "test_cip_ops", "test_timeout_next", "test_parallel_write",
+    "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy",
 ]
 
 
@@ -211,6 +211,15 @@ def build_manifest() -> list[Test]:
         test("idle disconnect and reconnect with runtime timeout change (ControlLogix)",
              [exe("test_idle_disconnect"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
+        # Reads only, so it is safe on a shared tag.  The --conn-tag run idles the connection
+        # out and checks the destroy does not bring it back.
+        test("auto-destroy idle tags (ControlLogix)",
+             [exe("test_auto_destroy"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
+        test("auto-destroy does not reconnect an idle connection (ControlLogix)",
+             [exe("test_auto_destroy"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
+              f"--conn-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
         test("Get INT bit",
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestINTArray[0].13",
