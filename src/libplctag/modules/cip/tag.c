@@ -325,7 +325,7 @@ int cip_tag_abort(cip_tag_p tag) {
 int cip_tag_activate(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
 
-    tag->activated = true;
+    atomic_set_bool(&tag->activated, true);
 
     /* the handler starts what the create started while the tag was being built, and arms auto-sync. */
     if(!tag->session) { return PLCTAG_STATUS_OK; }
@@ -342,7 +342,7 @@ int cip_tag_activate(plc_tag_p tag_arg) {
 int cip_tag_wake_plc(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
 
-    if(!tag->activated || !tag->session) { return PLCTAG_STATUS_OK; }
+    if(!atomic_get_bool(&tag->activated) || !tag->session) { return PLCTAG_STATUS_OK; }
 
     return cip_conn_queue_tag(tag->session, tag);
 }

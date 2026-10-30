@@ -39,6 +39,7 @@
 #include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/api/libplctag.h>
 #include <stdint.h>
+#include <utils/atomic_utils.h>
 #include <utils/attr.h>
 
 /* the longest encoded tag name, and the longest encoded type info, in bytes. */
@@ -200,9 +201,10 @@ struct cip_tag_t {
 
     /*
      * The library has finished creating the tag, so the connection's handler may see it.  A
-     * request started before then waits for vtable->activate to queue it.
+     * request started before then waits for vtable->activate to queue it.  Atomic: a shutdown
+     * destroying the tag reads it without the API mutex.
      */
-    bool activated;
+    atomic_bool activated;
 };
 
 typedef struct cip_tag_t *cip_tag_p;

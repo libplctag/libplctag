@@ -203,6 +203,7 @@ int main(int argc, char **argv) {
     int32_t tag = 0;
     int rc;
     int i;
+    bool second_read = false;
     int elem_count = 10;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
@@ -278,9 +279,14 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* a read refused as busy queues no events. */
+    /*
+     * A read refused as busy queues no events.  A fast reply can end the first read before this
+     * call; then this one is a second read, with its own STARTED and COMPLETED.
+     */
     rc = plc_tag_read(tag, 0);
-    if(rc != PLCTAG_ERR_BUSY) {
+    second_read = (rc == PLCTAG_STATUS_PENDING);
+    if(second_read) { printf("The first read finished before the busy check; a second read started.\n"); }
+    if(rc != PLCTAG_ERR_BUSY && !second_read) {
         printf("ERROR: A read during a read returned %s, not BUSY.\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 1;
@@ -300,10 +306,16 @@ int main(int argc, char **argv) {
 
     /* destroy aborts first, so ABORTED comes just before DESTROYED. */
     {
-        static const int expected[] = {PLCTAG_EVENT_CREATED,         PLCTAG_EVENT_READ_STARTED,  PLCTAG_EVENT_READ_COMPLETED,
-                                       PLCTAG_EVENT_WRITE_STARTED,   PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_EVENT_READ_STARTED,
-                                       PLCTAG_EVENT_READ_COMPLETED,  PLCTAG_EVENT_ABORTED,       PLCTAG_EVENT_DESTROYED};
-        int expected_count = (int)(sizeof(expected) / sizeof(expected[0]));
+        static const int expected_one[] = {PLCTAG_EVENT_CREATED,        PLCTAG_EVENT_READ_STARTED,    PLCTAG_EVENT_READ_COMPLETED,
+                                           PLCTAG_EVENT_WRITE_STARTED,  PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_EVENT_READ_STARTED,
+                                           PLCTAG_EVENT_READ_COMPLETED, PLCTAG_EVENT_ABORTED,         PLCTAG_EVENT_DESTROYED};
+        static const int expected_two[] = {PLCTAG_EVENT_CREATED,        PLCTAG_EVENT_READ_STARTED,    PLCTAG_EVENT_READ_COMPLETED,
+                                           PLCTAG_EVENT_WRITE_STARTED,  PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_EVENT_READ_STARTED,
+                                           PLCTAG_EVENT_READ_COMPLETED, PLCTAG_EVENT_READ_STARTED,    PLCTAG_EVENT_READ_COMPLETED,
+                                           PLCTAG_EVENT_ABORTED,        PLCTAG_EVENT_DESTROYED};
+        const int *expected = second_read ? expected_two : expected_one;
+        int expected_count = second_read ? (int)(sizeof(expected_two) / sizeof(expected_two[0]))
+                                         : (int)(sizeof(expected_one) / sizeof(expected_one[0]));
         bool match = (event_count == expected_count);
 
         for(i = 0; match && i < expected_count; i++) { match = (events[i] == expected[i]); }
@@ -313,7 +325,7 @@ int main(int argc, char **argv) {
         printf("\n");
 
         if(!match) {
-            printf("ERROR: The events were not the expected sequence 7 1 2 3 4 1 2 5 6.\n");
+            printf("ERROR: The events were not the expected sequence 7 1 2 3 4 1 2 %s5 6.\n", second_read ? "1 2 " : "");
             return 1;
         }
     }

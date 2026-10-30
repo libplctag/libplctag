@@ -719,6 +719,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      */
     attr_destroy(attribs);
 
+    /*
+     * The reference the tag was made with goes to the registry when it is published.  Take the
+     * creator's own first: a racing plc_tag_shutdown() can take the tag out and drop the
+     * registry's reference while this function still uses the tag.
+     */
+    rc_inc(tag);
+
     /* map the tag to a tag ID */
     id = add_tag_lookup(tag);
 
@@ -726,6 +733,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(id < 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to map tag %p to lookup table entry, rc=%s", tag,
                plc_tag_decode_error(id));
+        rc_dec(tag);
         rc_dec(tag);
         return id;
     }
@@ -783,6 +791,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             tag->userdata = NULL;
         }
 
+        /* the registry's reference, then the creator's. */
+        rc_dec(tag);
         rc_dec(tag);
         return rc;
     }
@@ -823,6 +833,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                 tag->userdata = NULL;
             }
 
+            /* the registry's reference, then the creator's. */
+            rc_dec(tag);
             rc_dec(tag);
             return rc;
         }
@@ -837,6 +849,9 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     plc_tag_generic_handle_event_callbacks(tag);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Done.");
+
+    /* the creator's own reference; the registry keeps its own. */
+    rc_dec(tag);
 
     return id;
 }

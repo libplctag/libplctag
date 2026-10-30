@@ -152,7 +152,8 @@ int main(int argc, char **argv) {
 
     if(argc > 2) { g_port = argv[2]; }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+    /* a failure here has been seen only on Windows CI; the library log is the only evidence. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* make sure the library is a usable version */
     check_library_version();
