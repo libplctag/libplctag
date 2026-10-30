@@ -332,6 +332,7 @@ typedef struct cip_conn_t {
     uint32_t fo_dup_retries;  /* duplicate connection ID retries spent */
     bool fo_tried_plain;      /* the plain Forward Open has already been refused */
     bool fo_plc_answered;     /* the last Forward Open got a reply, as opposed to no reply at all */
+    int32_t fo_refused_rc;    /* a refusal that can never succeed, failing tags that queue until the next retry; 0 if none */
     uint16_t fo_ext_status;   /* extended status of the last Forward Open refusal, 0 if it had none */
 
     uint32_t orig_connection_id;

@@ -2059,6 +2059,8 @@ static THREAD_FUNC(session_handler) {
                      * never will.  Those tags wait for the reconnect.
                      */
                     if(conn->fo_plc_answered && forward_open_error_is_configuration(conn, rc)) {
+                        conn->fo_refused_rc = rc;
+
                         critical_block(conn->session_mutex) { fail_waiting_tags_unsafe(conn, rc); }
 
                         tag_driver_notify(&conn->driver);
@@ -2197,8 +2199,18 @@ static THREAD_FUNC(session_handler) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "in SESSION_WAIT_ERR_RETRY state.");
                 session_set_connection_status(conn, PLCTAG_CONN_STATUS_ERR_WAIT);
 
+                /* a tag that queued after the refusal gets the same answer, not a wait for the retry. */
+                if(conn->fo_refused_rc != PLCTAG_STATUS_OK) {
+                    int32_t failed = 0;
+
+                    critical_block(conn->session_mutex) { failed = fail_waiting_tags_unsafe(conn, conn->fo_refused_rc); }
+
+                    if(failed > 0) { tag_driver_notify(&conn->driver); }
+                }
+
                 if(timeout_time < now) {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Transitioning to SESSION_OPEN_SOCKET_START.");
+                    conn->fo_refused_rc = PLCTAG_STATUS_OK;
                     conn->state = SESSION_OPEN_SOCKET_START;
                     run_again = true;
                 } else {
