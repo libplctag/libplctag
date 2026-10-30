@@ -274,6 +274,7 @@ static void *race_thread(void *arg) {
 
 static void case_race(void) {
     compat_thread_t threads[NUM_THREADS];
+    int32_t first_id = 0;
 
     make_str(race_str, base_tag, 7, "&" REUSE);
     compat_atomic_store_int32(&race_go, 0);
@@ -286,8 +287,10 @@ static void case_race(void) {
 
     for(size_t i = 0; i < NUM_THREADS; i++) {
         if(race_ids[i] <= 0) {
-            fail(7, "a racing create failed");
-        } else if(race_ids[i] != race_ids[0]) {
+            expect_rc(7, race_ids[i], PLCTAG_STATUS_OK, "a racing create");
+        } else if(first_id == 0) {
+            first_id = race_ids[i];
+        } else if(race_ids[i] != first_id) {
             fail(7, "racing creates got different handles");
         }
     }

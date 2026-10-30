@@ -1420,6 +1420,12 @@ static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p t
         rc = status(tag, seq);
     } while(rc == PLCTAG_STATUS_PENDING);
 
+    /*
+     * One signal wakes one waiter, and several threads can wait on a shared tag.  Pass it on
+     * so the next one checks the status too; a waiter that finds nothing new waits again.
+     */
+    cond_signal(tag->tag_cond_wait);
+
     return (rc == PLCTAG_STATUS_PENDING) ? PLCTAG_ERR_TIMEOUT : rc;
 }
 
