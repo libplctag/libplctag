@@ -151,6 +151,13 @@ static int create_fails_for_good(const char *tag_string, bool abort_create_read)
     printf("--- %s\n", tag_string);
 
     tag = plc_tag_create(tag_string, 0);
+
+    /* a PLC that answers before create returns gives the error here, with no handle to check. */
+    if(tag < 0 && !abort_create_read) {
+        printf("Create failed with %s.\n", plc_tag_decode_error(tag));
+        return 0;
+    }
+
     if(tag < 0) {
         printf("ERROR %s: could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
