@@ -463,8 +463,9 @@ int cond_create(cond_p *c) {
 int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time = time_ms();
-    int64_t end_time = start_time + timeout_ms;
+    int64_t end_time = 0;
     struct timespec timeout;
+    struct timespec wall;
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Starting. Called from %s:%d.", func, line_num);
 
@@ -488,8 +489,12 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
     /*
      * set up timeout.
      *
-     * NOTE: the time is _ABSOLUTE_!  This is not a relative delay.
+     * NOTE: the time is _ABSOLUTE_ on CLOCK_REALTIME, the clock pthread_cond_timedwait() uses
+     * by default.  time_ms() is monotonic, so it cannot be used here.
      */
+    clock_gettime(CLOCK_REALTIME, &wall);
+    end_time = ((int64_t)wall.tv_sec * 1000) + ((int64_t)wall.tv_nsec / 1000000) + timeout_ms;
+
     timeout.tv_sec = (time_t)(end_time / 1000);
     timeout.tv_nsec = (long)1000000 * (long)(end_time % 1000);
 
@@ -1853,12 +1858,13 @@ int sleep_ms(int ms) {
 /*
  * time_ms
  *
- * Return the current epoch time in milliseconds.
+ * Milliseconds on a monotonic clock, for deadlines and elapsed time only: a change to the
+ * system clock must not move them.  Not a date.
  */
 int64_t time_ms(void) {
-    struct timeval tv;
+    struct timespec ts;
 
-    gettimeofday(&tv, NULL);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
 
-    return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
+    return ((int64_t)ts.tv_sec * 1000) + ((int64_t)ts.tv_nsec / 1000000);
 }

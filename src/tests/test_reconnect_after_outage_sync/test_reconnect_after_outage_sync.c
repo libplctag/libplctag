@@ -59,9 +59,13 @@
 #define TO_STRING(x) STRINGIFY(x)
 
 
-/* uses manual plc_tag_read() calls */
+/*
+ * uses manual plc_tag_read() calls.  The retry cap keeps the reconnect well inside the
+ * 30-second last phase; the default cap of 32 seconds can outlast it after a 60-second outage.
+ */
 #define MANUAL_SYNC_TAG_ATTRIBS_FMT \
-    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]"
+    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]" \
+    "&connection_retry_max_delay_ms=5000"
 
 /* Default port; overridden by an optional second CLI argument so this test and
  * test_reconnect_after_outage_async can run against independent ab_server instances

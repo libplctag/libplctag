@@ -1786,23 +1786,19 @@ int sleep_ms(int ms) {
 /*
  * time_ms
  *
- * Return current system time in millisecond units.  This is NOT an
- * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
+ * Milliseconds on a monotonic clock, for deadlines and elapsed time only: a change to the
+ * system clock must not move them.  Not a date.  The performance counter, not
+ * GetTickCount64(): that one moves in 10-16ms steps, and deadlines are as close as 1ms.
  */
-
 int64_t time_ms(void) {
-    FILETIME ft;
-    int64_t res;
+    LARGE_INTEGER count;
+    LARGE_INTEGER freq;
 
-    GetSystemTimeAsFileTime(&ft);
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&freq);
 
-    /* calculate time as 100ns increments since Jan 1, 1601. */
-    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
-
-    /* get time in ms.   Magic offset is for Jan 1, 1970 Unix epoch baseline. */
-    res = (res - 116444736000000000) / 10000;
-
-    return res;
+    /* split so the multiply cannot overflow. */
+    return (count.QuadPart / freq.QuadPart) * 1000 + ((count.QuadPart % freq.QuadPart) * 1000) / freq.QuadPart;
 }
 
 

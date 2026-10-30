@@ -77,10 +77,13 @@
 #define TO_STRING(x) STRINGIFY(x)
 
 
-/* uses auto_sync_read_ms for automatic reads */
+/*
+ * uses auto_sync_read_ms for automatic reads.  The retry cap keeps the reconnect well inside
+ * the 30-second last phase; the default cap of 32 seconds can outlast it after a 60-second outage.
+ */
 #define AUTO_SYNC_TAG_ATTRIBS_FMT \
     "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=100" \
-    "&connection_inactivity_timeout_ms=" TO_STRING(REQUEST_TIMEOUT_MS)
+    "&connection_inactivity_timeout_ms=" TO_STRING(REQUEST_TIMEOUT_MS) "&connection_retry_max_delay_ms=5000"
 
 /* Default port; overridden by an optional second CLI argument so this test and
  * test_reconnect_after_outage_sync can run against independent ab_server instances
