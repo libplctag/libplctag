@@ -276,10 +276,14 @@ typedef struct plc_s {
      * link_offline_count makes the next N ForwardOpen requests fail with extended status
      * 0x0800 (network link offline): the route exists but the link to the target is down, as
      * when a PLC is out for maintenance.
+     *
+     * out_of_conn_count makes the next N ForwardOpen requests fail with extended status
+     * 0x0113 (out of connections): the PLC has no connection free until another closes.
      */
     atomic_int32_t *empty_frag_count;
     atomic_int32_t *reject_size_count;
     atomic_int32_t *link_offline_count;
+    atomic_int32_t *out_of_conn_count;
 
     /*
      * As above.  no_reply_count swallows the next N connected CIP requests whole: the response is

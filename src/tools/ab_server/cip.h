@@ -129,6 +129,7 @@ typedef struct {
 
 #define CIP_ERR_EX_DUPLICATE_CONN ((uint16_t)0x0100)
 #define CIP_ERR_EX_LINK_OFFLINE ((uint16_t)0x0800)
+#define CIP_ERR_EX_OUT_OF_CONNECTIONS ((uint16_t)0x0113)
 #define CIP_ERR_EX_INVALID_CONN_SIZE ((uint16_t)0x0109)
 #define CIP_ERR_EX_UC_SEND_PARAM ((uint16_t)0x0205)
 

@@ -85,6 +85,7 @@ static atomic_int32_t g_empty_frag_count;
 static atomic_int32_t g_no_reply_count;
 static atomic_int32_t g_reject_size_count;
 static atomic_int32_t g_link_offline_count;
+static atomic_int32_t g_out_of_conn_count;
 
 /* one per fault_kind_t, shared the same way -- see plc_s.fault_counts. */
 static atomic_int32_t g_fault_counts[FAULT_MAX];
@@ -182,6 +183,7 @@ int main(int argc, const char **argv) {
     plc.no_reply_count = &g_no_reply_count;
     plc.reject_size_count = &g_reject_size_count;
     plc.link_offline_count = &g_link_offline_count;
+    plc.out_of_conn_count = &g_out_of_conn_count;
     for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
     /* set the random seed. */
@@ -267,6 +269,8 @@ void usage(void) {
                     "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
                     "        --link_offline=<n>     fail the next <n> ForwardOpen requests with extended status\n"
                     "                               0x0800, \"network link offline\".\n"
+                    "        --out_of_connections=<n> fail the next <n> ForwardOpen requests with extended\n"
+                    "                               status 0x0113, \"out of connections\".\n"
                     "        --no_reply=<n>         accept the next <n> connected CIP requests and never answer\n"
                     "                               them, leaving the connection open.  Session setup and\n"
                     "                               ForwardOpen are untouched.\n"
@@ -378,6 +382,13 @@ static const args_flag_def_t arg_flags[] = {
      "link_offline",
      "Reject the first <count> ForwardOpen requests with extended status 0x0800",
      {.has_default = true, .value.int_val = 0}},
+    {"out_of_connections",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "out_of_connections",
+     "Reject the first <count> ForwardOpen requests with extended status 0x0113",
+     {.has_default = true, .value.int_val = 0}},
     {"supported_size",
      ARGS_TYPE_INT,
      ARGS_OPTIONAL,
@@ -418,6 +429,7 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
     atomic_store_int32(plc->no_reply_count, 0);
     atomic_store_int32(plc->reject_size_count, 0);
     atomic_store_int32(plc->link_offline_count, 0);
+    atomic_store_int32(plc->out_of_conn_count, 0);
     for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
 
     if(args_parse(argc, argv, arg_flags, NUM_ARG_FLAGS, &args) != UTIL_OK) {
@@ -529,6 +541,11 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
     if(args_get_int(&args, "link_offline") != 0) {
         log_info("Setting link offline count to %d.", (int)args_get_int(&args, "link_offline"));
         atomic_store_int32(plc->link_offline_count, (int32_t)args_get_int(&args, "link_offline"));
+    }
+
+    if(args_get_int(&args, "out_of_connections") != 0) {
+        log_info("Setting out of connections count to %d.", (int)args_get_int(&args, "out_of_connections"));
+        atomic_store_int32(plc->out_of_conn_count, (int32_t)args_get_int(&args, "out_of_connections"));
     }
 
     log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));

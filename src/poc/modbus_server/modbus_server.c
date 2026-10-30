@@ -68,6 +68,7 @@ typedef struct modbus_client_s modbus_client_t;
 
 #define MODBUS_RECV_BUFFER_SIZE 512
 #define MODBUS_SEND_BUFFER_SIZE 512
+#define REORDER_WAIT_US (50000) /* how long --reorder waits for a request to answer first */
 
 /* Histogram bucket boundaries (in microseconds) */
 #define HIST_BUCKET_COUNT 8
@@ -158,6 +159,7 @@ struct modbus_client_s {
     /* --reorder: the reply held back until the request behind it is answered. */
     uint8_t held_buffer[MODBUS_SEND_BUFFER_SIZE];
     size_t held_size;
+    int64_t reorder_deadline_us;
 };
 
 
@@ -461,9 +463,16 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
               "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
 
-        /* --reorder: the next request may have arrived but not been read yet; read without waiting. */
+        /*
+         * --reorder: give the next request a short while to arrive, so there is one to answer first.
+         * ponytail: polls every loop pass; the last request of a burst always pays the full wait.
+         */
         if(client->server->reorder && client->held_size == 0) {
-            (void)socket_recv_frame(fd, &client->recv_buf, modbus_frame_check, NULL);
+            client->reorder_deadline_us = util_time_us() + REORDER_WAIT_US;
+            while(socket_recv_frame(fd, &client->recv_buf, modbus_frame_check, NULL) != UTIL_OK
+                  && util_time_us() < client->reorder_deadline_us) {
+                coro_yield(handle, CORO_EVENT_ALWAYS);
+            }
         }
 
         /* --reorder: a whole request already waits behind this one, so answer it first. */

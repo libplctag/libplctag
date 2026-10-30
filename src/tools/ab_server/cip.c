@@ -640,6 +640,15 @@ static byte_slice_t forward_open(cip_request_t *req, byte_slice_t out, plc_s *pl
     }
 
     {
+        int32_t no_conn_remaining = atomic_dec_int32(plc->out_of_conn_count);
+
+        if(no_conn_remaining > 0) {
+            log_info("Forward open refused, out of connections, for debugging. %d to go.", no_conn_remaining - 1);
+            return cip_write_reply_header(out, req->service, CIP_ERR_EXT_ERR, true, CIP_ERR_EX_OUT_OF_CONNECTIONS);
+        }
+    }
+
+    {
         int32_t reject_remaining = atomic_dec_int32(plc->dup_conn_id_tries);
 
         if(reject_remaining > 0) {
