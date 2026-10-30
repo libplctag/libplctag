@@ -1096,8 +1096,13 @@ THREAD_FUNC(modbus_plc_handler) {
                     }
                 }
 
-                /* check for socket errors or disconnects. */
-                if((sock_events & SOCK_EVENT_ERROR) || (sock_events & SOCK_EVENT_DISCONNECT)) {
+                /*
+                 * Check for socket errors or disconnects.  A peer that answers and then closes or
+                 * resets reports both at once: read the answers first, or every request on the
+                 * connection goes again and a slow client never gets past them.  The close is
+                 * seen once nothing is left to read.
+                 */
+                if(!(sock_events & SOCK_EVENT_CAN_READ) && (sock_events & (SOCK_EVENT_ERROR | SOCK_EVENT_DISCONNECT))) {
                     if(sock_events & SOCK_EVENT_DISCONNECT) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unexepected socket disconnect!");
                     } else {
