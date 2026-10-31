@@ -16,9 +16,8 @@ message("Building unit tests with mini_mock (local CMocka-macro stand-in, see mi
 # from deep inside the prebuilt library would need something else.
 set(MOCK_DEFINITIONS
     "refcount_startup=mock_refcount_startup"
-    "ab_init=mock_ab_init"
+    "cip_conn_startup=mock_cip_conn_startup"
     "mb_init=mock_mb_init"
-    "omron_init=mock_omron_init"
 )
 
 # test_init: tests initialize_modules()
@@ -69,6 +68,41 @@ target_include_directories(test_tag_name_bounds PRIVATE
 
 target_link_libraries(test_tag_name_bounds PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_backoff: tests the shared connection retry backoff. Pure computation -- no socket,
+# no PLC, no threads -- so it runs anywhere and in milliseconds. It is also the UB check
+# for the retry path: the sanitizer build traps a bad shift inside backoff_wait_ms().
+add_executable(test_backoff test_backoff.c)
+
+target_include_directories(test_backoff PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_backoff PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# test_tag_schedule: the protocol handlers' sorted active-tag list.  Pure computation.
+add_executable(test_byte_slice test_byte_slice.c)
+
+target_include_directories(test_byte_slice PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+add_executable(test_tag_schedule test_tag_schedule.c)
+
+target_include_directories(test_tag_schedule PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_tag_schedule PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_eip_response_validation: checks that a response whose EIP header does not answer the
 # request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
 # because the library's own socket shim is internal, so it is skipped on Windows.
@@ -107,16 +141,78 @@ if(NOT WIN32)
     add_test(NAME unit_test_eip_forward_open_peer_close COMMAND test_eip_forward_open_peer_close)
 
     set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_eip_forward_open_peer_close)
+
+    # test_socket_high_fd: checks that the socket shim still works when every descriptor it
+    # opens is above FD_SETSIZE. It calls the shim directly, which is internal to the
+    # library, and the descriptor limit it manipulates is POSIX, so it is skipped on Windows.
+    add_executable(test_socket_high_fd test_socket_high_fd.c)
+
+    target_include_directories(test_socket_high_fd PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+        ${PLATFORM_SHIM_PATH}
+    )
+
+    target_link_libraries(test_socket_high_fd PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+    add_test(NAME unit_test_socket_high_fd COMMAND test_socket_high_fd)
+
+    set(EXTRA_UNIT_TESTS ${EXTRA_UNIT_TESTS} test_socket_high_fd)
 endif()
 
+# test_cip_status: the CIP error status prefix parser and the status codes the Forward Open
+# negotiation branches on.  Pure functions over a byte buffer -- no socket and no PLC.
+add_executable(test_cip_status test_cip_status.c)
+
+target_include_directories(test_cip_status PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_cip_status PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+# test_cip_family: how a CIP family is picked.  A wrong pick makes one family behave like
+# another rather than raising an error, and no tag-creating test can see that without a PLC
+# of every family.
+add_executable(test_cip_family test_cip_family.c)
+
+target_include_directories(test_cip_family PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_cip_family PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
+add_executable(test_conn_leak test_conn_leak.c)
+
+target_include_directories(test_conn_leak PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_conn_leak PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # Register the unit tests with CTest
+add_test(NAME unit_test_cip_status COMMAND test_cip_status)
+add_test(NAME unit_test_cip_family COMMAND test_cip_family)
+add_test(NAME unit_test_conn_leak COMMAND test_conn_leak)
 add_test(NAME unit_test_init COMMAND test_init)
 add_test(NAME unit_test_platform_str COMMAND test_platform_str)
 add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
+add_test(NAME unit_test_backoff COMMAND test_backoff)
+add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
+add_test(NAME unit_test_tag_schedule COMMAND test_tag_schedule)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_tag_schedule test_cip_status ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

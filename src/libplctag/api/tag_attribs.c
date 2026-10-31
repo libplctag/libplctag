@@ -49,10 +49,13 @@ static int32_t core_get_auto_sync_read_ms(plc_tag_p tag, int32_t *result);
 static int32_t core_set_auto_sync_read_ms(plc_tag_p tag, int32_t value);
 static int32_t core_get_auto_sync_write_ms(plc_tag_p tag, int32_t *result);
 static int32_t core_set_auto_sync_write_ms(plc_tag_p tag, int32_t value);
+static int32_t core_get_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t *result);
+static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value);
 static int32_t core_get_bit_num(plc_tag_p tag, int32_t *result);
 static int32_t core_get_connection_group_id(plc_tag_p tag, int32_t *result);
 static int32_t core_get_allow_field_resize(plc_tag_p tag, int32_t *result);
 static int32_t core_set_allow_field_resize(plc_tag_p tag, int32_t value);
+static int32_t core_get_find_or_create_tag(plc_tag_p tag, int32_t *result);
 
 static int32_t lib_get_version_major(plc_tag_p tag, int32_t *result);
 static int32_t lib_get_version_minor(plc_tag_p tag, int32_t *result);
@@ -70,7 +73,7 @@ static int32_t core_get_str_count_word_bytes(plc_tag_p tag, int32_t *result);
 static int32_t core_get_str_max_capacity(plc_tag_p tag, int32_t *result);
 static int32_t core_get_str_total_length(plc_tag_p tag, int32_t *result);
 static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result);
-static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result);
+static int32_t core_get_write_pad_alignment_bytes(plc_tag_p tag, int32_t *result);
 
 static int32_t core_get_int16_byte_order(plc_tag_p tag, uint8_t *buffer, int32_t buffer_length);
 static int32_t core_get_int16_byte_order_size(plc_tag_p tag);
@@ -84,6 +87,8 @@ static int32_t core_get_float64_byte_order(plc_tag_p tag, uint8_t *buffer, int32
 static int32_t core_get_float64_byte_order_size(plc_tag_p tag);
 
 static const attr_def_t *attr_table_find(const attr_def_t *table, const char *name);
+static int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length);
+static int32_t attr_byte_order_size(const int *order, size_t order_len);
 
 
 /* Attributes the core handles for every tag.  A protocol overrides one by listing the same
@@ -112,6 +117,12 @@ static const attr_def_t core_attribs[] = {
      .get_int = core_get_auto_sync_write_ms,
      .set_int = core_set_auto_sync_write_ms},
 
+    {.name = "destroy_tag_after_idle_sec",
+     .type = ATTR_TYPE_INT,
+     .description = "Destroy the tag after this many seconds with no read or write.  Zero disables it, the minimum is 10.",
+     .get_int = core_get_destroy_tag_after_idle_sec,
+     .set_int = core_set_destroy_tag_after_idle_sec},
+
     {.name = "bit_num",
      .type = ATTR_TYPE_INT,
      .description = "The bit within the PLC tag that this tag maps, for a tag created with a bit number.",
@@ -127,6 +138,11 @@ static const attr_def_t core_attribs[] = {
      .description = "Allow the tag data buffer to be resized when the PLC reports a different size.",
      .get_int = core_get_allow_field_resize,
      .set_int = core_set_allow_field_resize},
+
+    {.name = "find_or_create_tag",
+     .type = ATTR_TYPE_INT,
+     .description = "A create with exactly the same tag string returns this tag.  Set when the tag is created.",
+     .get_int = core_get_find_or_create_tag},
 
     /* String and byte order layout.  Read-only after creation; they live on tag->byte_order. */
     {.name = "str_is_counted",
@@ -169,10 +185,10 @@ static const attr_def_t core_attribs[] = {
      .description = "The number of padding bytes after the string data.",
      .get_int = core_get_str_pad_bytes},
 
-    {.name = "str_pad_to_multiple_bytes",
+    {.name = "write_pad_alignment_bytes",
      .type = ATTR_TYPE_INT,
-     .description = "Pad the string data out to a multiple of this many bytes.",
-     .get_int = core_get_str_pad_to_multiple_bytes},
+     .description = "Pad single-packet write data out to a multiple of this many bytes.",
+     .get_int = core_get_write_pad_alignment_bytes},
 
     {.name = "int16_byte_order",
      .type = ATTR_TYPE_STRING,
@@ -283,7 +299,7 @@ static int32_t core_get_size(plc_tag_p tag, int32_t *result) {
 
 static int32_t core_get_read_cache_ms(plc_tag_p tag, int32_t *result) {
     /* FIXME - what happens if this overflows? */
-    *result = (int32_t)tag->read_cache_ms;
+    *result = (int32_t)atomic_get_int64(&tag->read_cache_ms);
 
     return PLCTAG_STATUS_OK;
 }
@@ -293,8 +309,8 @@ static int32_t core_set_read_cache_ms(plc_tag_p tag, int32_t value) {
     if(value < 0) { return PLCTAG_ERR_OUT_OF_BOUNDS; }
 
     /* expire the cache. */
-    tag->read_cache_expire = (int64_t)0;
-    tag->read_cache_ms = (int64_t)value;
+    atomic_set_int64(&tag->read_cache_expire, 0);
+    atomic_set_int64(&tag->read_cache_ms, (int64_t)value);
 
     return PLCTAG_STATUS_OK;
 }
@@ -313,7 +329,15 @@ static int32_t core_set_auto_sync_read_ms(plc_tag_p tag, int32_t value) {
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
+    if(value > 0 && tag->destroy_idle_sec > 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "auto_sync_read_ms cannot be used with destroy_tag_after_idle_sec!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     tag->auto_sync_read_ms = value;
+
+    /* a protocol that schedules its own tags has to hear about the new period. */
+    if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     return PLCTAG_STATUS_OK;
 }
@@ -332,7 +356,44 @@ static int32_t core_set_auto_sync_write_ms(plc_tag_p tag, int32_t value) {
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
+    if(value > 0 && tag->destroy_idle_sec > 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "auto_sync_write_ms cannot be used with destroy_tag_after_idle_sec!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     tag->auto_sync_write_ms = value;
+
+    /* a protocol that schedules its own tags has to hear about the new period. */
+    if(tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t *result) {
+    *result = tag->destroy_idle_sec;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value) {
+    if(value < 0 || (value > 0 && value < 10)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "destroy_tag_after_idle_sec must be zero or at least 10!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(value > 0 && (tag->auto_sync_read_ms > 0 || tag->auto_sync_write_ms > 0)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "destroy_tag_after_idle_sec cannot be used with auto-sync!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    tag->destroy_idle_sec = value;
+
+    /* the handler re-arms an idle tag from now, or takes it off for zero; a busy one re-arms when its op ends. */
+    if(tag_op_state(tag) == TAG_OP_DESTROY) { tag_op_set(tag, TAG_OP_IDLE); }
+
+    if(!tag_op_busy(tag) && tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }
 
     return PLCTAG_STATUS_OK;
 }
@@ -356,6 +417,13 @@ static int32_t core_get_connection_group_id(plc_tag_p tag, int32_t *result) {
 
 static int32_t core_get_allow_field_resize(plc_tag_p tag, int32_t *result) {
     *result = (int32_t)tag->allow_field_resize;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_find_or_create_tag(plc_tag_p tag, int32_t *result) {
+    *result = (tag->find_or_create_tag ? 1 : 0);
 
     return PLCTAG_STATUS_OK;
 }
@@ -470,14 +538,15 @@ static int32_t attr_format_byte_order(const int *order, size_t order_len, char *
 }
 
 
-int32_t attr_byte_order_size(const int *order, size_t order_len) {
+/* Render a byte order array, e.g. {0,1,2,3}, as the "0,1,2,3" text the tag string uses. */
+static int32_t attr_byte_order_size(const int *order, size_t order_len) {
     char scratch[32] = {0};
 
     return attr_format_byte_order(order, order_len, &scratch[0], sizeof(scratch));
 }
 
 
-int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length) {
+static int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length) {
     char scratch[32] = {0};
     int32_t size = attr_format_byte_order(order, order_len, &scratch[0], sizeof(scratch));
 
@@ -547,8 +616,8 @@ static int32_t core_get_str_pad_bytes(plc_tag_p tag, int32_t *result) {
 }
 
 
-static int32_t core_get_str_pad_to_multiple_bytes(plc_tag_p tag, int32_t *result) {
-    *result = (int32_t)tag->byte_order->str_pad_to_multiple_bytes;
+static int32_t core_get_write_pad_alignment_bytes(plc_tag_p tag, int32_t *result) {
+    *result = (int32_t)tag->byte_order->write_pad_alignment_bytes;
 
     return PLCTAG_STATUS_OK;
 }

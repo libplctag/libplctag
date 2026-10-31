@@ -31,26 +31,35 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+
 #include "eip.h"
+#include "cip.h"
 #include "cpf.h"
 #include "err.h"
 #include "fault.h"
-#include "slice.h"
 #include "utils.h"
 #include "log.h"
+#include <libplctag/api/libplctag.h>
+#include <utils/byte_slice.h>
+#include <utils/random_utils.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #define EIP_REGISTER_SESSION ((uint16_t)0x0065)
-#define EIP_REGISTER_SESSION_SIZE (4) /* 4 bytes, 2 16-bit words */
-
 #define EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
-#define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
-#define EIP_CONNECTED_SEND ((uint16_t)0x0070)
+
+/* ListIdentity: no session, and over UDP as well as TCP. */
+#define EIP_LIST_IDENTITY ((uint16_t)0x0063)
+#define EIP_CPF_ITEM_IDENTITY ((uint16_t)0x000C)
+#define EIP_IDENTITY_STATE_OPERATIONAL ((uint8_t)0x03)
+#define EIP_DEFAULT_PORT (44818)
+#define EIP_AF_INET ((uint16_t)2)
 
 /* supported EIP version */
 #define EIP_VERSION ((uint16_t)1)
 
 
+/* the request header; status becomes the reply status once the request checks pass. */
 typedef struct {
     uint16_t command;
     uint16_t length;
@@ -61,70 +70,92 @@ typedef struct {
 } eip_header_s;
 
 
-static slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
-static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
+/*
+ * Command handlers write the reply body into out and return what is left of it.  On failure
+ * they set header->status to the ODVA code and return out untouched.
+ */
+static byte_slice_t register_session(byte_slice_t in, byte_slice_t out, plc_s *plc, eip_header_s *header);
+static byte_slice_t list_identity(byte_slice_t out, plc_s *plc, eip_header_s *header);
+static uint32_t check_session(plc_s *plc, eip_header_s *header);
 
 
-slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
-    log_info("eip_dispatch_request(): raw_output size = %zu, server_to_client_max_packet = %zu", slice_len(raw_output),
-             plc->server_to_client_max_packet);
-
-    slice_s output = slice_from_slice(raw_output, 0, plc->server_to_client_max_packet);
-
-    log_info("eip_dispatch_request(): output size = %zu", slice_len(output));
-
-    slice_s response = slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE);
-
-    eip_header_s header;
+byte_slice_t eip_dispatch_request(byte_slice_t packet, byte_slice_t out, plc_s *plc) {
+    eip_header_s header = {0};
+    byte_slice_t in = packet;
+    byte_slice_t hdr = {0};
+    byte_slice_t body = {0};
+    byte_slice_t rest = {0};
+    byte_slice_t reply_body = {0};
+    uint16_t response_command = 0;
+    uint32_t response_session = 0;
+    uint64_t response_context = 0;
 
     log_info("eip_dispatch_request(): got packet:");
-    log_info_slice(input);
+    log_info_byte_slice(packet);
 
-    /* unpack header. */
-    header.command = slice_get_uint16_le(input, 0);
-    header.length = slice_get_uint16_le(input, 2);
-    header.session_handle = slice_get_uint32_le(input, 4);
-    header.status = slice_get_uint32_le(input, 8);
-    header.sender_context = slice_get_uint64_le(input, 12);
-    header.options = slice_get_uint32_le(input, 20);
+    in = byte_slice_read_u16_le(in, &header.command);
+    in = byte_slice_read_u16_le(in, &header.length);
+    in = byte_slice_read_u32_le(in, &header.session_handle);
+    in = byte_slice_read_u32_le(in, &header.status);
+    in = byte_slice_read_u64_le(in, &header.sender_context);
+    in = byte_slice_read_u32_le(in, &header.options);
 
-    /* sanity checks */
-    if(slice_len(input) != (size_t)(header.length + EIP_HEADER_SIZE)) {
-        log_info("Illegal EIP packet.   Length should be %d but is %d!", header.length + EIP_HEADER_SIZE, slice_len(input));
-        return slice_make_err(ERR_TCP_BAD_REQUEST);
+    if(byte_slice_has_error(in) || byte_slice_len(in) != header.length) {
+        log_info("Illegal EIP packet.  Payload length should be %u but is %d!", header.length, byte_slice_len(in));
+        header.status = EIP_STATUS_INVALID_LENGTH;
+    } else if(header.status != EIP_STATUS_SUCCESS || header.options != 0) {
+        /* status is only set in a reply and options is reserved: a request sends zero in both. */
+        log_info("Request failed sanity check: status is %u and options is %u, both should be zero.", header.status,
+                 header.options);
+        header.status = EIP_STATUS_INCORRECT_DATA;
     }
 
-    /* dispatch the request */
-    switch(header.command) {
-        case EIP_REGISTER_SESSION:
-            response =
-                register_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
-            break;
-
-        case EIP_UNREGISTER_SESSION:
-            response =
-                unregister_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
-            break;
-
-        case EIP_UNCONNECTED_SEND:
-            response =
-                handle_cpf_unconnected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
-                                       slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
-            break;
-
-        case EIP_CONNECTED_SEND:
-            response = handle_cpf_connected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
-                                            slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
-            break;
-
-        default: response = slice_make_err(ERR_TCP_UNSUPPORTED); break;
+    if((size_t)byte_slice_len(out) > plc->server_to_client_max_packet) {
+        byte_slice_cut(out, (int32_t)plc->server_to_client_max_packet, &out, NULL);
     }
 
-    if(!slice_has_err(response)) {
-        uint16_t response_command = header.command;
-        uint32_t response_session = plc->session_handle;
-        uint64_t response_context = header.sender_context;
+    body = byte_slice_take(out, EIP_HEADER_SIZE, &hdr);
+    rest = body;
 
+    if(header.status == EIP_STATUS_SUCCESS) {
+        switch(header.command) {
+            case EIP_REGISTER_SESSION: rest = register_session(in, body, plc, &header); break;
+
+            case EIP_UNREGISTER_SESSION:
+                if(header.session_handle == plc->session_handle) {
+                    log_info("Done with connection.");
+                    return byte_slice_fail(out, PLCTAG_ERR_CLOSE);
+                }
+
+                header.status = EIP_STATUS_INVALID_SESSION;
+                break;
+
+            case EIP_LIST_IDENTITY: rest = list_identity(body, plc, &header); break;
+
+            case EIP_UNCONNECTED_SEND:
+                if((header.status = check_session(plc, &header)) == EIP_STATUS_SUCCESS) {
+                    rest = handle_cpf_unconnected(in, body, plc, &header.status);
+                }
+                break;
+
+            case EIP_CONNECTED_SEND:
+                if((header.status = check_session(plc, &header)) == EIP_STATUS_SUCCESS) {
+                    rest = handle_cpf_connected(in, body, plc, &header.status);
+                }
+                break;
+
+            default: header.status = EIP_STATUS_INVALID_COMMAND; break;
+        }
+    }
+
+    /* after the command: RegisterSession has just set the handle. */
+    response_command = header.command;
+    response_session = plc->session_handle;
+    response_context = header.sender_context;
+
+    if(header.status != EIP_STATUS_SUCCESS) {
+        rest = body;
+    } else {
         /*
          * Fault injection.  The length field still describes the bytes actually sent, because a
          * response whose length does not match its contents makes the client wait for data that
@@ -145,110 +176,118 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
         /* the client only checks the echoed context on unconnected sends. */
         if(fault_fires(plc, FAULT_CONTEXT)) { response_context = header.sender_context ^ (uint64_t)0xA5A5A5A5A5A5A5A5ULL; }
-
-        /* build response */
-        slice_set_uint16_le(output, 0, response_command);
-        slice_set_uint16_le(output, 2, (uint16_t)slice_len(response));
-        slice_set_uint32_le(output, 4, response_session);
-        slice_set_uint32_le(output, 8, (uint32_t)0); /* status == 0 -> no error */
-        slice_set_uin64_le(output, 12, response_context);
-        slice_set_uint32_le(output, 20, header.options);
-
-        /* The payload is already in place. */
-        return slice_from_slice(output, 0, EIP_HEADER_SIZE + slice_len(response));
-    } else if(slice_get_err(response) == ERR_TCP_DONE) {
-        /* just pass this through, normally not an error. */
-        log_info("Done with connection.");
-
-        return response;
-    } else {
-        /* error condition. */
-        slice_set_uint16_le(output, 0, header.command);
-        slice_set_uint16_le(output, 2, (uint16_t)0); /* no payload. */
-        slice_set_uint32_le(output, 4, plc->session_handle);
-        slice_set_uint32_le(output, 8, (uint32_t)(int32_t)slice_get_err(response)); /* status */
-        slice_set_uin64_le(output, 12, header.sender_context);
-        slice_set_uint32_le(output, 20, header.options);
-
-        return slice_from_slice(output, 0, EIP_HEADER_SIZE);
     }
+
+    reply_body = byte_slice_used(body, rest);
+
+    hdr = byte_slice_write_u16_le(hdr, response_command);
+    hdr = byte_slice_write_u16_le(hdr, (uint16_t)byte_slice_len(reply_body));
+    hdr = byte_slice_write_u32_le(hdr, response_session);
+    hdr = byte_slice_write_u32_le(hdr, header.status);
+    hdr = byte_slice_write_u64_le(hdr, response_context);
+    hdr = byte_slice_write_u32_le(hdr, header.options);
+
+    if(byte_slice_has_error(hdr)) { return hdr; }
+
+    return byte_slice_used(out, rest);
 }
 
 
-slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header) {
-    struct {
-        uint16_t eip_version;
-        uint16_t option_flags;
-    } register_request;
+/*
+ * The session checks for SendRRData and SendUnitData.  Until this existed, nothing checked the
+ * requests that carry all the actual traffic, so a client could send a malformed encapsulation
+ * header for the life of a session and never hear about it.
+ */
+static uint32_t check_session(plc_s *plc, eip_header_s *header) {
+    /* the client has to register before it can send anything else. */
+    if(plc->session_handle == (uint32_t)0) {
+        log_info("Request failed sanity check: no session has been registered yet.");
+        return EIP_STATUS_INVALID_SESSION;
+    }
 
-    register_request.eip_version = slice_get_uint16_le(input, 0);
-    register_request.option_flags = slice_get_uint16_le(input, 2);
+    if(header->session_handle != plc->session_handle) {
+        log_info("Request failed sanity check: request session handle is %u but this session is %u.",
+                 header->session_handle, plc->session_handle);
+        return EIP_STATUS_INVALID_SESSION;
+    }
 
-    /* sanity checks.  The command and packet length are checked by now. */
+    return EIP_STATUS_SUCCESS;
+}
 
-    /* session_handle must be zero. */
+
+static byte_slice_t register_session(byte_slice_t in, byte_slice_t out, plc_s *plc, eip_header_s *header) {
+    uint16_t eip_version = 0;
+    uint16_t option_flags = 0;
+
+    in = byte_slice_read_u16_le(in, &eip_version);
+    in = byte_slice_read_u16_le(in, &option_flags);
+
+    if(byte_slice_has_error(byte_slice_end(in))) {
+        log_info("Request failed sanity check: RegisterSession payload must be 4 bytes.");
+        header->status = EIP_STATUS_INVALID_LENGTH;
+        return out;
+    }
+
     if(header->session_handle != (uint32_t)0) {
         log_info("Request failed sanity check: request session handle is %u but should be zero.", header->session_handle);
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
+        header->status = EIP_STATUS_INCORRECT_DATA;
+        return out;
     }
 
-    /* session status must be zero. */
-    if(header->status != (uint32_t)0) {
-        log_info("Request failed sanity check: request status is %u but should be zero.", header->status);
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
+    if(eip_version != EIP_VERSION) {
+        log_info("Request failed sanity check: request EIP version is %u but should be %u.", eip_version, EIP_VERSION);
+        header->status = EIP_STATUS_UNSUPPORTED_VERSION;
+        return out;
     }
 
-    /* session sender plc must be zero. */
-    if(header->sender_context != (uint64_t)0) {
-        log_info("Request failed sanity check: request sender context should be zero.");
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
+    if(option_flags != (uint16_t)0) {
+        log_info("Request failed sanity check: request option flags field is %u but should be zero.", option_flags);
+        header->status = EIP_STATUS_INCORRECT_DATA;
+        return out;
     }
 
-    /* session options must be zero. */
-    if(header->options != (uint32_t)0) {
-        log_info("Request failed sanity check: request options is %u but should be zero.", header->options);
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
-    }
-
-    /* EIP version must be 1. */
-    if(register_request.eip_version != EIP_VERSION) {
-        log_info("Request failed sanity check: request EIP version is %u but should be %u.", register_request.eip_version,
-                 EIP_VERSION);
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
-    }
-
-    /* Session request option flags must be zero. */
-    if(register_request.option_flags != (uint16_t)0) {
-        log_info("Request failed sanity check: request option flags field is %u but should be zero.",
-                 register_request.option_flags);
-
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
-    }
-
-    /* all good, generate a session handle. */
     plc->session_handle = header->session_handle = (uint32_t)(random_u64(UINT32_MAX) + 1);
 
-    /* build the response. */
-    slice_set_uint16_le(output, 0, register_request.eip_version);
-    slice_set_uint16_le(output, 2, register_request.option_flags);
-
-    return slice_from_slice(output, 0, EIP_REGISTER_SESSION_SIZE);
+    out = byte_slice_write_u16_le(out, eip_version);
+    return byte_slice_write_u16_le(out, option_flags);
 }
 
 
-slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header) {
-    (void)input;
-    (void)output;
-    (void)header;
+/*
+ * ListIdentity reply: one CPF item of type 0x0C holding the encapsulation version, a sockaddr
+ * in network byte order, the Identity attributes and a state byte.
+ *
+ * The sockaddr address is the interface facing the sender, which scan_eip_network prints.
+ * ponytail: over TCP it is 0.0.0.0, because the TCP server does not record its local address;
+ * a TCP client already knows it.
+ */
+static byte_slice_t list_identity(byte_slice_t out, plc_s *plc, eip_header_s *header) {
+    uint16_t port = (uint16_t)(plc->port_str ? atoi(plc->port_str) : EIP_DEFAULT_PORT);
+    byte_slice_t item_len = {0};
+    byte_slice_t item = {0};
+    byte_slice_t rest = {0};
 
-    if(header->session_handle == plc->session_handle) {
-        return slice_make_err(ERR_TCP_DONE);
-    } else {
-        return slice_make_err(EIP_ERR_BAD_REQUEST);
+    rest = byte_slice_write_u16_le(out, 1); /* one item */
+    rest = byte_slice_write_u16_le(rest, EIP_CPF_ITEM_IDENTITY);
+    item = byte_slice_take(rest, 2, &item_len); /* filled in once the item is written */
+
+    rest = byte_slice_write_u16_le(item, EIP_VERSION);
+    rest = byte_slice_write_u16_be(rest, EIP_AF_INET);
+    rest = byte_slice_write_u16_be(rest, port);
+    rest = byte_slice_write_u32_be(rest, plc->local_ip);
+    rest = byte_slice_write_u64_be(rest, 0); /* sin_zero */
+
+    rest = cip_encode_identity(rest, plc);
+    rest = byte_slice_write_u8(rest, EIP_IDENTITY_STATE_OPERATIONAL);
+
+    byte_slice_write_u16_le(item_len, (uint16_t)byte_slice_len(byte_slice_used(item, rest)));
+
+    if(byte_slice_has_error(rest)) {
+        header->status = EIP_STATUS_INSUFFICIENT_MEMORY;
+        return out;
     }
+
+    log_info("Answering ListIdentity.");
+
+    return rest;
 }

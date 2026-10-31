@@ -300,16 +300,18 @@ def kill_stray_servers() -> None:
 
 
 REQUIRED_EXECUTABLES = [
-    "ab_server", "modbus_server", "list_tags_logix", "string_non_standard_udt", "string_standard",
+    "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
+    "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
-    "test_callback_destroy",
+    "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
-    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect",
+    "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
-    "test_reconnect_after_outage_sync", "test_shutdown",
+    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_ab_server_framing",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
-    "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
+    "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
+    "test_bit_write", "test_auto_destroy", "test_find_or_create_tag",
 ]
 
 
@@ -373,16 +375,86 @@ def build_manifest() -> Manifest:
                         "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]",
                         "--tag=TestReal:REAL[1]", "--tag=TestLReal:LREAL[1]",
                         "--tag=TestLint:LINT[1]", "--tag=TestSint:SINT[1]",
+                        "--tag=TestIntArray:INT[10]",
                         "--tag=TestString:STRING[4]"],
         startup_wait_s=3,
     )
     gw = "127.0.0.1:{PORT}"
 
+    def list_identity(section, plc, vendor, device_type, product_code, product_name):
+        """scan_eip_network's ListIdentity over UDP, and the one device line it must print."""
+        scan = section.test(f"ListIdentity discovery over UDP ({plc})",
+                  [exe("scan_eip_network"), "--network=127.0.0.1/32", "--delay-max-ms=500", "--port={PORT}"], F)
+        section.test(f"check: ListIdentity discovery over UDP ({plc})", None, F, depends_on=scan.id, ports_needed=0,
+                  check=CheckSpec(log_file=scan.log_file,
+                                  pattern=rf'^127\.0\.0\.1\t\d+\t{vendor}\t{device_type}\t{product_code}\t.*\t'
+                                          rf'{re.escape(product_name)}\t3$',
+                                  expected=1))
+
     sec = m.section("controllogix_fast", server=fast_server)
+    list_identity(sec, "ControlLogix", 1, 14, 164, "1756-L81E/B")
+
+    # @identity: Get_Attributes_All on the Identity object, class 1 instance 1.  With a path
+    # the request is routed inside an Unconnected Send, without one it goes out unrouted --
+    # the two branches of cip/identity_tag.c:184.  Nothing in this suite reached either before.
+    sec.test("identity, routed",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&plc=generic&name=@identity&debug=3"], F)
+    # @identity on the family's own PLC type rides the family's connection: connected by default.
+    sec.test("identity, Logix, connected",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@identity&debug=3"], F)
+    sec.test("identity, Logix, unconnected",
+              [exe("get_identity"),
+               f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@identity&debug=3"], F)
     # "STRING" is a different type on each PLC family: a UDT sent as an abbreviated struct
     # (a0 02 ce 0f) on Logix, SHORT_STRING on Micro800, the plain CIP STRING on Omron.  The
     # element stride differs with it (88/83/84 bytes), so writing one element of an array and
     # reading its neighbours back is what actually pins the encoding down.
+    # The CIP Read-Modify-Write, service 0x4e on a tag path, which is how the library sets or
+    # clears one bit.  ab_server had no handler for it until 2026-10-07, so none of this was
+    # reachable and the whole path was hardware-only.
+    sec.test("INT bit read/write (CIP read-modify-write)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13",
+               "--write=1", "--check=1", "--debug=4"], F)
+    # Clearing exercises the AND mask, setting only the OR mask.  They fail separately.
+    sec.test("INT bit clear (CIP read-modify-write)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13",
+               "--write=0", "--check=0", "--debug=4"], F)
+    sec.test("LINT bit read/write (CIP read-modify-write, 64 bit word)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43",
+               "--write=1", "--check=1", "--debug=4"], F)
+    sec.test("LINT bit clear (CIP read-modify-write, 64 bit word)",
+              [exe("tag_rw2"), "--type=bit",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43",
+               "--write=0", "--check=0", "--debug=4"], F)
+    # --check on a bit tag re-reads only that bit, so the four tests above pass even if the
+    # masks clobbered the neighbours.  These stamp a pattern on the whole word and require
+    # exactly one bit to move.  The mask width is the thing being pinned: an INT is two bytes
+    # and a LINT is eight, and ab_server now rejects any other width the way a controller does.
+    sec.test("INT bit write changes only that bit (CIP read-modify-write)",
+              [exe("test_bit_write"), "--bit=13", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[0]",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13"], F)
+    sec.test("LINT bit write changes only that bit (CIP read-modify-write, 64 bit word)",
+              [exe("test_bit_write"), "--bit=43", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestLint",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestLint.43"], F)
+    # A bit in an indexed element of an array: the RMW path has to resolve the index before it
+    # masks, and masking element 0 instead would pass every test above.
+    # Where the device applies the mask, the client's buffer cannot matter at all.
+    sec.test("INT bit write survives a stale buffer (device applies the mask)",
+              [exe("test_bit_write"), "--stale", "--bit=13", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[0]",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[0].13"], F)
+    sec.test("INT array element 7 bit write changes only that bit",
+              [exe("test_bit_write"), "--bit=2", "--debug=4",
+               f"--word-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestIntArray[7]",
+               f"--bit-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestIntArray[7].2"], F)
+
     sec.test("Logix STRING UDT read/write and element stride",
               [exe("tag_rw2"), "--type=string",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=4&name=TestString",
@@ -399,6 +471,14 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=10&name=TestBigArray",
                "--debug=4", "--write=1,2,3,4,5,6,7,8,9"], F)
+    # No plc: the connection reads the Identity object and takes the Logix row from the reply,
+    # then appends the Message Router to the path for the Forward Open.
+    no_plc_lgx = sec.test("no plc: identified as Logix, connected read/write",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&elem_count=10&name=TestBigArray",
+               "--debug=4", "--write=1,2,3,4,5,6,7,8,9", "--check"], F)
+    sec.test("check: no plc identified the device as Logix", None, F, depends_on=no_plc_lgx.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_lgx.log_file, pattern=r"Identified a Logix, connected\.", expected=1))
     sec.test("basic connected large tag read/write",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=TestBigArray",
@@ -420,6 +500,101 @@ def build_manifest() -> Manifest:
               server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)
     sec.test("CIP thread stress",
               [exe("thread_stress"), "20", f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], S)
+    # Raw CIP tags are the one tag type whose request is the CIP message alone, so
+    # they are what exercises the library's own EIP/CPF framing. Run both messaging
+    # modes: the framing is the only thing that differs between them.
+    # Split, pipelined and unknown-command requests over a raw socket: ab_server's own TCP framing.
+    sec.test("ab_server EIP framing", [exe("test_ab_server_framing"), "{PORT}"], F)
+    sec.test("raw CIP tag, connected messaging",
+              [exe("test_raw_cip"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
+               "--read=TestReal"], F)
+    sec.test("raw CIP tag, unconnected messaging",
+              [exe("test_raw_cip"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@raw",
+               "--read=TestReal"], F)
+    # Several raw tags at once so the connection bundles their CIP messages into one
+    # Multiple Service Packet, which assembles and splits differently from a lone request.
+    # Writing a tag the caller never read: the library has to fetch the type itself and
+    # still land a correct element size.  The array matters -- an element size derived
+    # from a fragmented reply rather than from one element comes out as zero.
+    sec.test("write before read, scalar and array",
+              [exe("test_write_before_read"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F)
+    # A create read that ends in an abort or a PLC error fails the create for good: status,
+    # read and write all keep reporting it.  Its own server, so nothing races the tests above.
+    create_fail_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0", "--tag=Test_Array_1:DINT[1000]"],
+        startup_wait_s=1,
+    )
+    sec.test("aborted create read fails the create for good",
+              [exe("test_write_before_read"), "--abort-create-read",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=Test_Array_1",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1000&name=Test_Array_1"], F,
+              server=create_fail_server)
+    sec.test("async create of a missing tag fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=No_Such_Tag"], F,
+              server=create_fail_server)
+    # the same with no plc, so the create waits on the probe before its read can fail.
+    sec.test("no plc: async create of a missing tag fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&elem_count=1&name=No_Such_Tag"], F,
+              server=create_fail_server)
+    # @udt reads its definition at create, so an id the server does not answer fails there.
+    sec.test("async create of a @udt the server refuses fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@udt/4000"], F,
+              server=create_fail_server)
+    # A Forward Open the PLC refuses for its route is the PLC's answer for every tag waiting on
+    # that connection: async creates fail with it, and a sync create reports it, not TIMEOUT.
+    # The same tag twice: the second create starts during the backoff after the refusal and must
+    # get the same error, not wait for the retry.
+    refused_route = f"--tag=protocol=ab-eip&gateway={gw}&path=1,5&plc=ControlLogix&elem_count=1&name=Test_Array_1"
+    sec.test("async create through a refused route fails for good",
+              [exe("test_write_before_read"), "--missing-tag", refused_route, refused_route], F,
+              server=create_fail_server)
+    # A link that is offline (0x0800) is a PLC that is down for maintenance, not a missing route:
+    # the tag waits for the reconnect and succeeds once the link is back.
+    link_offline_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[10]", "--link_offline=2"],
+        startup_wait_s=1,
+    )
+    link_offline_test = sec.test("a network link offline at Forward Open is retried, not a failure",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=3"], F, server=link_offline_server)
+    sec.test("check the link offline refusals were seen", None, F, depends_on=link_offline_test.id, ports_needed=0,
+              check=CheckSpec(log_file=link_offline_test.log_file, pattern=r"\(0x01/0x0800\)", expected=2, at_least=True))
+    # Out of connections (0x0113) clears when another connection closes: the tag waits too.
+    out_of_conn_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[10]", "--out_of_connections=2"],
+        startup_wait_s=1,
+    )
+    out_of_conn_test = sec.test("a PLC out of connections at Forward Open is retried, not a failure",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=3"], F, server=out_of_conn_server)
+    sec.test("check the out of connections refusals were seen", None, F, depends_on=out_of_conn_test.id, ports_needed=0,
+              check=CheckSpec(log_file=out_of_conn_test.log_file, pattern=r"\(0x01/0x0113\)", expected=2, at_least=True))
+    refused_route_sync = sec.test("sync create through a refused route fails with the PLC's error",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,5&plc=ControlLogix&elem_count=1&name=Test_Array_1"], F,
+              server=create_fail_server, expect_failure=True)
+    sec.test("check the refused route was reported, not a timeout",
+              None, F, depends_on=refused_route_sync.id, ports_needed=0,
+              check=CheckSpec(log_file=refused_route_sync.log_file,
+                               pattern=r"Error creating tag PLCTAG_ERR_BAD_PARAM", expected=1))
+    sec.test("raw CIP tags bundled into one packet",
+              [exe("test_raw_cip"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@raw",
+               "--read=TestReal", "--count=4"], F)
     sec.test("auto sync",
               [exe("test_auto_sync"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=600&auto_sync_write_ms=20"], T)
@@ -441,8 +616,18 @@ def build_manifest() -> Manifest:
     sec.test("AB/ControlLogix tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
+    sec.test("auto-destroy idle tags (AB ControlLogix)",
+              [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]"], T)
+    sec.test("find_or_create_tag finds or creates a shared tag (AB ControlLogix)",
+              [exe("test_find_or_create_tag"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]",
+               f"--missing-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=No_Such_Tag"], T)
+    sec.test("auto-destroy does not reconnect an idle connection (AB ControlLogix)",
+              [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]",
+               f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], T)
     sec.test("idle disconnect and reconnect with runtime timeout change (AB ControlLogix)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], T)
+    sec.test("connection_retry_max_delay_ms read, written and clamped live (AB ControlLogix)",
+              [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray"], F)
     sec.test("hard library shutdown",
               [exe("test_shutdown"),
                f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
@@ -450,6 +635,19 @@ def build_manifest() -> Manifest:
               [exe("test_shutdown_restart"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"], F)
     sec.test("connection tag connection state transitions (ControlLogix)",
               [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&connection_inactivity_timeout_ms=5000&name=@connection"], T)
+    # The status must be the connection's own and not only what callbacks were told, so an app
+    # with no callback that creates with a timeout of 0 can poll it through the sequence.  The
+    # response delay holds CONNECTING across Register Session and the Forward Open.
+    delayed_conn_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--delay=300"],
+        startup_wait_s=1,
+    )
+    sec.test("@connection status polled with no callback walks the states (ControlLogix)",
+              [exe("test_connection_tag"), "--poll",
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&connection_inactivity_timeout_ms=5000&name=@connection"],
+              T, server=delayed_conn_server)
     sec.test("multiple simultaneous @connection tags on same session (ControlLogix)",
               [exe("test_connection_tag"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection",
@@ -470,12 +668,41 @@ def build_manifest() -> Manifest:
     sec.test("destroy tag from inside its own callback (AB/EIP)",
               [exe("test_callback_destroy"),
                f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]"], F)
-    sec.test("create-from-tag API (17 permutation tests with AB/EIP)",
+    sec.test("no callback after a failed plc_tag_create_ex() returns (AB/EIP)",
+              [exe("test_create_fail_callback"),
+               f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=50",
+               f"--missing-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=DoesNotExist"], F)
+    # An operation queued, packed or on the wire.  Each test gets its own simulator, because
+    # each writes TestBigArray first and checks every element it reads back.  The delay holds
+    # each exchange open long enough for the next reads to queue behind it and pack.
+    def cip_ops_server(delay_ms: int) -> ServerSpec:
+        return ServerSpec(exe_path=exe("ab_server"),
+                          args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                                         "--tag=TestBigArray:DINT[2000]", f"--delay={delay_ms}"],
+                          startup_wait_s=1)
+    cip_ops_base = f"--base=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix"
+    abort_packed = sec.test("abort one of several packed reads; the rest complete",
+              [exe("test_cip_ops"), "--mode=abort-packed", "--count=20", cip_ops_base], F, server=cip_ops_server(100))
+    sec.test("check: the abort test's reads were packed", None, F, depends_on=abort_packed.id, ports_needed=0,
+              check=CheckSpec(log_file=abort_packed.server_log_file, pattern=r"Multi-service request contains",
+                              expected=1, at_least=True))
+    sec.test("destroy tags while their reads are queued or on the wire",
+              [exe("test_cip_ops"), "--mode=destroy-in-flight", "--count=10", cip_ops_base], F, server=cip_ops_server(50))
+    sec.test("450 tags read at once, more than one packet holds",
+              [exe("test_cip_ops"), "--mode=many-tags", "--count=450", cip_ops_base], F, server=cip_ops_server(0))
+    sec.test("a reply arrives while the tag's callback holds its API mutex",
+              [exe("test_cip_ops"), "--mode=callback-holds-mutex", cip_ops_base], F, server=cip_ops_server(0))
+    sec.test("a timed-out wait does not abort the read its callback started",
+              [exe("test_timeout_next"), f"protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[7]"],
+              F, server=cip_ops_server(300))
+    sec.test("plc_tag_set_size fails with BUSY while a read or write is in flight",
+              [exe("test_cip_ops"), "--mode=set-size-busy", cip_ops_base], F, server=cip_ops_server(300))
+    sec.test("create-from-tag API (19 permutation tests with AB/EIP)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
                "--clone-attrib=name=TestBigArray[1]&elem_count=1",
                f"--connection-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection",
-               "--timeout=10000"], F)
+               "--logix", "--timeout=10000"], F)
 
     # --- ControlLogix slot-16 path encoding section -------------------------
     slot16_server = ServerSpec(
@@ -502,7 +729,7 @@ def build_manifest() -> Manifest:
     # special from ab_server -- a nonexistent tag name / out-of-bounds index /
     # oversized element count are naturally rejected by its own tag-path and
     # bounds validation. The rest use ab_server's two error-injection knobs
-    # (--reject_fo=N, --delay=Nms) on their own dedicated server instances.
+    # (--dup-conn-id-tries=N, --delay=Nms) on their own dedicated server instances.
     error_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
@@ -561,7 +788,7 @@ def build_manifest() -> Manifest:
     bad_attr(sec, "AB out-of-range numeric segment", f"{ab_lgx}&name=TestBigArray[4294967296]",
              r"Numeric segment must be less than or equal to")
 
-    # ab_server's --reject_fo=N used to have a bug (fixed): reject_fo_count
+    # ab_server's --dup-conn-id-tries=N used to have a bug (fixed): dup_conn_id_tries
     # lived in plc_s, which tcp_server.c copies fresh into every accepted TCP
     # connection, so the decrement never persisted across the client's
     # reconnect-per-retry behavior -- N>=1 rejected forever instead of N
@@ -572,25 +799,96 @@ def build_manifest() -> Manifest:
     # alone wouldn't catch a bug that skipped the rejection and "succeeded"
     # some other way, or one that rejected every time).
     #
-    # Note: the client still doesn't take the PLCTAG_ERR_DUPLICATE-specific
-    # retry branch in session.c:1498 for this rejection -- it recovers via a
-    # different, outer session-recreation retry instead, treating it as
-    # PLCTAG_ERR_REMOTE_ERR. That's a separate, still-open issue (see the
-    # proposed byte-layout investigation) independent of this counter fix.
-    reject_fo_server = ServerSpec(
+    # The client takes the PLCTAG_ERR_DUPLICATE branch for this and retries inside the
+    # session with a fresh connection serial number, which the next check asserts.  It used
+    # to treat the rejection as PLCTAG_ERR_REMOTE_ERR and recover only via an outer
+    # session-recreation retry, tearing down the socket to re-ask a question the PLC had
+    # already told it how to fix.
+    dup_conn_id_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
-                        "--tag=TestBigArray:DINT[2000]", "--reject_fo=1"],
+                        "--tag=TestBigArray:DINT[2000]", "--dup-conn-id-tries=1"],
         startup_wait_s=3,
     )
-    reject_fo_test = sec.test("ForwardOpen rejection persists across reconnect, then succeeds",
+    dup_conn_id_test = sec.test("ForwardOpen rejection persists across reconnect, then succeeds",
               [exe("tag_rw2"), "--type=sint32",
                f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
-               "--debug=4"], T, server=reject_fo_server)
+               "--debug=4"], T, server=dup_conn_id_server)
     sec.test("check ForwardOpen was rejected exactly once before succeeding",
-              None, T, depends_on=reject_fo_test.id, ports_needed=0,
-              check=CheckSpec(log_file=reject_fo_test.log_file,
-                               pattern=r"Forward Open command failed", expected=1))
+              None, T, depends_on=dup_conn_id_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_conn_id_test.log_file,
+                               pattern=r"Forward Open failed:", expected=1))
+    # The recovery has to be the in-session retry and not the outer reconnect: one rejection
+    # spends exactly one of the five duplicate-ID retries, and the socket is never dropped.
+    sec.test("check the duplicate connection ID was retried in-session",
+              None, T, depends_on=dup_conn_id_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_conn_id_test.log_file,
+                               pattern=r"Duplicate connection ID, retry 1 of 20", expected=1))
+
+    # A PLC that refuses every connection ID is not going to be talked round, so the retries
+    # are budgeted.  Without the budget this is an unbounded loop at full speed: each refusal
+    # arrives immediately, the next request goes out immediately, and the handler thread spins
+    # for as long as the PLC keeps saying no.
+    #
+    # --dup-conn-id-tries keeps rejecting once its count is exhausted, so a count past any plausible
+    # number of attempts means every ForwardOpen in this test is refused.
+    dup_forever_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--dup-conn-id-tries=1000"],
+        startup_wait_s=1,
+    )
+    dup_forever_test = sec.test("ForwardOpen refused with a duplicate ID forever gives up",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray",
+               "--debug=4"], F, server=dup_forever_server, expect_failure=True)
+    # The whole budget is spent before giving up -- retry 20 of 20 is the last one attempted.
+    # The session then backs off and starts over, so this can appear more than once.
+    sec.test("check every duplicate ID retry in the budget was used",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"Duplicate connection ID, retry 20 of 20", expected=1, at_least=True))
+    sec.test("check the duplicate ID retry budget was enforced",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"it has no connection to give us", expected=1, at_least=True))
+    # Past the budget it must stop asking, not keep going.
+    sec.test("check the duplicate ID retries stopped at the budget",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"Duplicate connection ID, retry 21 of 20", expected=0))
+    # The backoff between give-ups has to grow.  It restarts only on reaching SESSION_IDLE, so a
+    # session that registers and then fails its ForwardOpen every time still backs off; resetting
+    # it any earlier pins the reconnect at the initial delay and spins the handler thread.
+    sec.test("check the reconnect backoff grows while the ForwardOpen keeps failing",
+              None, T, depends_on=dup_forever_test.id, ports_needed=0,
+              check=CheckSpec(log_file=dup_forever_test.log_file,
+                               pattern=r"waiting \d{4,}ms before reconnecting", expected=1, at_least=True))
+
+    # connection_retry_max_delay_ms caps that growth.  Same server and same endless refusal as
+    # above, so the only difference is the attribute: the test above reaches four-digit waits
+    # and this one must not.
+    capped_retry_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                        "--tag=TestBigArray:DINT[2000]", "--dup-conn-id-tries=1000"],
+        startup_wait_s=1,
+    )
+    capped_retry_test = sec.test("connection_retry_max_delay_ms caps the reconnect backoff",
+              [exe("tag_rw2"), "--type=sint32",
+               f"--tag=protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"
+               "&connection_retry_max_delay_ms=999",
+               "--debug=4"], F, server=capped_retry_server, expect_failure=True)
+    sec.test("check the capped backoff still retried",
+              None, T, depends_on=capped_retry_test.id, ports_needed=0,
+              check=CheckSpec(log_file=capped_retry_test.log_file,
+                               pattern=r"waiting \d+ms before reconnecting", expected=1, at_least=True))
+    # 999 and not a round number: the check is a regex over the log and cannot compare numbers,
+    # so the cap is chosen to make "over the cap" exactly "four or more digits".
+    sec.test("check the capped backoff never exceeded the attribute",
+              None, T, depends_on=capped_retry_test.id, ports_needed=0,
+              check=CheckSpec(log_file=capped_retry_test.log_file,
+                               pattern=r"waiting \d{4,}ms before reconnecting", expected=0))
 
     # A partial-transfer status with no payload is legitimate -- packing several requests into
     # one packet leaves the later ones only a bare CIP header -- so a few in a row must be
@@ -649,7 +947,7 @@ def build_manifest() -> Manifest:
     sec.test("check the tiny connection size was rejected",
               None, T, depends_on=tiny_size_test.id, ports_needed=0,
               check=CheckSpec(log_file=tiny_size_test.log_file,
-                               pattern=r"below the \d+ bytes this protocol needs", expected=1))
+                               pattern=r"No connection size left to try", expected=1))
 
     # --corrupt=<kind>[:<count>] makes the server send deliberately malformed responses, which is
     # the only way to reach the library's response-validation checks: every other fault-injection
@@ -688,8 +986,11 @@ def build_manifest() -> Manifest:
     # layer ever sees it; short_cip is connected-only, so it reaches the read response instead.
     corrupt_test(sec, "AB ForwardOpen reply too short", "short_cpf", egw, ab_corrupt_tag,
                  r"Forward Open response of \d+ bytes is too short", plc_args=ab_corrupt_args)
+    # The CIP tags carry only the CIP message now, so this length check sits in the transport
+    # (validate_response_cpf) rather than in ab_common.c / omron_common.c, neither of which sees
+    # the framing any more.  The Omron copy of this test reads the same for the same reason.
     corrupt_test(sec, "AB connected response too short for a CIP reply", "short_cip", egw, ab_corrupt_tag,
-                 r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=ab_corrupt_args)
+                 r"Connected response of \d+ bytes is too short for a CIP response", plc_args=ab_corrupt_args)
     corrupt_test(sec, "AB wrong EIP command in reply", "eip_cmd", egw, ab_corrupt_tag,
                  r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=ab_corrupt_args)
     corrupt_test(sec, "AB wrong EIP session handle", "session", egw, ab_corrupt_tag,
@@ -717,6 +1018,11 @@ def build_manifest() -> Manifest:
     # ERR_WAIT needs a port nothing is listening on; async/sync manage their
     # own ab_server internally (they take the ab_server path + port as argv).
     sec = m.section("standalone")
+    # Races plc_tag_create() against plc_tag_shutdown().  Needs no server: the creates are
+    # meant to fail to connect, and what is counted is whether every tag created during the
+    # shutdown got its DESTROYED event.
+    sec.test("create racing shutdown leaves no tag behind",
+              [exe("test_create_shutdown_race")], F, server=None, ports_needed=0)
     sec.test("@connection tag ERR_WAIT on unreachable host (no server running)",
               [exe("test_connection_tag"),
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",
@@ -733,6 +1039,10 @@ def build_manifest() -> Manifest:
               [exe("test_reconnect_after_outage_async"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
     sec.test("Test sync reconnect after PLC outage",
               [exe("test_reconnect_after_outage_sync"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
+    # Nothing is due and nothing is in flight, so only the handler watching the socket while it
+    # waits can see the server go away.
+    sec.test("a PLC closing an idle connection is noticed at once",
+              [exe("test_idle_peer_close"), exe("ab_server"), "{PORT}"], T, ports_needed=1)
 
     # --- ControlLogix functional/slow (delay=100) section -------------------
     slow_server = ServerSpec(
@@ -760,20 +1070,49 @@ def build_manifest() -> Manifest:
     micro800_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Micro800", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
-                        "--tag=TestString:STRING[4]"],
+                        "--tag=TestString:STRING[4]", "--tag=VarShort:VSHORTSTRING[4]"],
         startup_wait_s=1,
     )
 
     sec = m.section("micro800", server=micro800_server)
+    list_identity(sec, "Micro800", 1, 14, 200, "2080-LC50-24QWB")
+    sec.test("identity, unrouted",
+              [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=generic&name=@identity&debug=3"], F)
+    sec.test("identity, Micro800, connected",
+              [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=@identity&debug=3"], F)
     sec.test("basic Micro800 read/write",
               [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
-    # Micro800's STRING is a SHORT_STRING: a 1-byte count and that many characters, up to 255.
-    # Two things have to be spelled out by hand here.  First, the library maps every AB CIP PLC
-    # onto the Logix 88-byte string definition (eip_cip.c cip_tag_byte_order), so it does not
-    # know about SHORT_STRING at all.  Second, a real Micro800 returns only the count byte and
-    # the valid characters, while ab_server stores every element in a full-size 256-byte slot,
-    # so the definition below is fixed-length to match the simulator, not the hardware.
+    # No plc: identified from "2080-", connected, so the Message Router goes on the path.
+    no_plc_m800 = sec.test("no plc: identified as Micro800, read/write",
+              [exe("tag_rw2"), "--type=sint32", "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&name=TestDINTArray",
+               "--write=43", "--check", "--debug=4"], F)
+    sec.test("check: no plc identified the device as Micro800", None, F, depends_on=no_plc_m800.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_m800.log_file, pattern=r"Identified a Micro800, connected\.", expected=1))
+    # A real Micro800 packs its strings: a one-byte count and exactly that many characters, no
+    # terminator, no padding to a capacity, so an array of them has no element stride.
+    # VSHORTSTRING is the simulator's version of that, and cip_short_string_byte_order is what lets
+    # the library read it with no string attributes given at all -- the defaults used to be the
+    # Logix STRING UDT's, whose four-byte count misreads even a single string.  Element i holds
+    # i+1 copies of 'a'+i, so a client that assumes a stride reads the wrong bytes.
+    var_short_test = sec.test("Micro800 packed SHORT_STRING array, default attributes",
+              [exe("tag_rw2"), "--type=string",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4&name=VarShort",
+               "--debug=4"], F)
+    sec.test("check: Micro800 packed SHORT_STRING array", None, F, depends_on=var_short_test.id, ports_needed=0,
+              check=CheckSpec(log_file=var_short_test.log_file,
+                              pattern=r'^data\[0\]="a"$|^data\[1\]="bb"$|^data\[2\]="ccc"$|^data\[3\]="dddd"$',
+                              expected=4))
+    # Writing strings of different lengths changes the packed extent, which is what
+    # allow_field_resize permits and what the simulator has to reallocate for.
+    sec.test("Micro800 packed SHORT_STRING round trip with changed lengths",
+              [exe("tag_rw2"), "--type=string",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4"
+               "&allow_field_resize=1&name=VarShort",
+               "--debug=4", "--write=w0,ww1,www2,wwww3"], F)
+
+    # The fixed full-size SHORT_STRING slots ab_server also offers are not what hardware sends,
+    # so this one still spells the layout out by hand to match the simulator rather than the PLC.
     sec.test("Micro800 SHORT_STRING read/write",
               [exe("tag_rw2"), "--type=string",
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&elem_count=4&name=TestString"
@@ -785,12 +1124,17 @@ def build_manifest() -> Manifest:
     omron_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Omron", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
-                        "--tag=TestString:STRING[4]"],
+                        "--tag=TestString:STRING[4]", "--tag=VarStrings:VSTRING[4]",
+                        "--udt=Point:x:DINT,y:REAL,z:INT", "--tag=P1:Point[1]", "--tag=_SysFlag:DINT[1]"],
         startup_wait_s=1,
     )
     ogw = "127.0.0.1:{PORT}"
 
     sec = m.section("omron", server=omron_server)
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={ogw}&plc=generic&name=@identity&debug=3"], F)
+    sec.test("identity, Omron, connected",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@identity&debug=3"], F)
     sec.test("basic Omron read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray",
                "--write=42", "--debug=4"], F)
@@ -798,6 +1142,35 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=string",
                f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=TestString",
                "--debug=4", "--write=str_zero,str_one,CipStr,str_three"], F)
+    # A real NJ/NX packs its strings at their actual length -- two-byte count, that many
+    # characters, a zero terminator, no padding to a capacity -- so an array of them has no
+    # element stride.  VSTRING is the simulator's version of that; the STRING above is
+    # fixed-stride and cannot express it.  Element i holds i+1 copies of 'a'+i, so a client
+    # that assumes a stride reads the wrong bytes and the check below fails.
+    var_str_test = sec.test("Omron variable-length CIP STRING array",
+              [exe("tag_rw2"), "--type=string",
+               f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=4&name=VarStrings",
+               "--debug=4"], F)
+    sec.test("check: Omron variable-length CIP STRING array", None, F, depends_on=var_str_test.id, ports_needed=0,
+              check=CheckSpec(log_file=var_str_test.log_file,
+                              pattern=r'^data\[0\]="a"$|^data\[1\]="bb"$|^data\[2\]="ccc"$|^data\[3\]="dddd"$',
+                              expected=4))
+
+    # discovery: ab_server answers ListIdentity with the interface that faces the scanner.
+    list_identity(sec, "Omron", 47, 14, 142, "NX102-9000")
+
+    # Omron @tags (Get Instance List 0x5F, then Get Attributes All per variable) and @udt/N
+    # (the Variable Type Object, class 0x6C) fill the Logix layouts, so list_tags_logix reads
+    # them.  _SysFlag is a system variable, which is a second instance list walk.
+    list_omron_test = sec.test("Omron tag and UDT listing",
+              [exe("list_tags_logix"), ogw, "18,127.0.0.1", "omron-njnx"], F)
+    sec.test("check: Omron tag and UDT listing", None, F, depends_on=list_omron_test.id, ports_needed=0,
+              check=CheckSpec(log_file=list_omron_test.log_file,
+                              pattern=r'^Tag "P1" .*UDT \(0x8001\) Point\.|^Tag "_SysFlag" .*DINT|^Tag "TestDINTArray\[10\]" '
+                                      r'|^    Field 0: x, offset 0, .*DINT|^    Field 1: y, offset 4, .*REAL'
+                                      r'|^    Field 2: z, offset 8, .*INT',
+                              expected=6))
+
     # The Omron module has its own copies of the attribute checks -- same wording, different
     # module tag in the log -- so they need their own tests rather than riding on the AB ones.
     # Note that omron_common.c only guards the element count; it has no elem_size or overall
@@ -843,7 +1216,7 @@ def build_manifest() -> Manifest:
     corrupt_test(sec, "Omron ForwardOpen reply too short", "short_cpf", ogw, omron_corrupt_tag,
                  r"Forward Open response of \d+ bytes is too short", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron connected response too short for a CIP reply", "short_cip", ogw, omron_corrupt_tag,
-                 r"Connected response of \d+ bytes is too short to hold a CIP response", plc_args=omron_corrupt_args)
+                 r"Connected response of \d+ bytes is too short for a CIP response", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong EIP command in reply", "eip_cmd", ogw, omron_corrupt_tag,
                  r"Received EIP command [0-9a-f]+ in response to command [0-9a-f]+!", plc_args=omron_corrupt_args)
     corrupt_test(sec, "Omron wrong EIP session handle", "session", ogw, omron_corrupt_tag,
@@ -855,6 +1228,8 @@ def build_manifest() -> Manifest:
               [exe("thread_stress"), "10", f"protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], S)
     sec.test("idle disconnect and reconnect with runtime timeout change (Omron)",
               [exe("test_idle_disconnect"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], T)
+    sec.test("connection_retry_max_delay_ms read, written and clamped live (Omron)",
+              [exe("test_retry_attr"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray"], F)
     sec.test("@connection tag connection state transitions (Omron)",
               [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&connection_inactivity_timeout_ms=5000&name=@connection"], T)
     sec.test("multiple simultaneous @connection tags on same session (Omron)",
@@ -887,7 +1262,7 @@ def build_manifest() -> Manifest:
                "--num-tags=200", "--test-duration-secs=10"], S)
     sec.test("emulator test extended callbacks async (Omron)",
               [exe("test_callback_ex_async"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=10&name=TestDINTArray"], F)
-    sec.test("create-from-tag API (17 permutation tests with Omron)",
+    sec.test("create-from-tag API (19 permutation tests with Omron)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&elem_count=1&name=TestDINTArray[0]",
                "--clone-attrib=name=TestDINTArray[1]&elem_count=1",
@@ -914,18 +1289,71 @@ def build_manifest() -> Manifest:
     mgw = "127.0.0.1:{PORT}"
 
     sec = m.section("micrologix", server=micrologix_server)
+    list_identity(sec, "MicroLogix", 1, 12, 185, "1763-L16BWA B/12.00")
+    missing = sec.test("async create of a missing data file fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N250:0"], F)
+    sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
+              check=CheckSpec(log_file=missing.log_file, pattern=r"^Create failed with PLCTAG_ERR_NOT_FOUND\.$", expected=1))
+    # A MicroLogix reached through a ControlLogix chassis: the PCCC request must go in an
+    # Unconnected Send along the path, padded after an odd-length PCCC message as a router
+    # requires.  ab_server rejects a bad layout, but it answers an unrouted request too, so
+    # the check on its log is what proves the routing.
+    mlgx_bridged_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=Micrologix", "--port={PORT}", "--path=1,4,18,10.206.1.36", "--tag=N7[10]"],
+        startup_wait_s=1,
+    )
+    mlgx_bridged = sec.test("CIP bridged MicroLogix tag read/write",
+              [exe("tag_rw2"), "--type=sint16",
+               f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&path=1,4,18,10.206.1.36&name=N7:0",
+               "--write=42", "--check", "--debug=4"], F, server=mlgx_bridged_server)
+    sec.test("check the bridged PCCC request went in an Unconnected Send",
+              None, F, depends_on=mlgx_bridged.id, ports_needed=0,
+              check=CheckSpec(log_file=mlgx_bridged.server_log_file, pattern=r"52 02 20 06", expected=2, at_least=True))
+    # The MicroLogix and the PLC/5 answer the Identity object while their data plane is PCCC,
+    # which is the case the bench proves and nothing here did.
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0", "--write=0", "--check", "--debug=4"], F)
     sec.test("B bit data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=1", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0", "--write=42", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0", "--write=42", "--check", "--debug=4"], F)
+    # No plc: identified from "1763-L16BWA", unconnected, so no Message Router on the path.
+    no_plc_mlgx = sec.test("no plc: identified as MicroLogix, N read/write",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mgw}&name=N7:1", "--write=43", "--check", "--debug=4"], F)
+    sec.test("check: no plc identified the device as MicroLogix", None, F, depends_on=no_plc_mlgx.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_mlgx.log_file, pattern=r"Identified a MicroLogix, unconnected\.", expected=1))
     sec.test("N bit data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=1", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=1", "--check=1", "--debug=4"], F)
+    # Clearing matters as much as setting: a mask that turns on too much still passes a
+    # write-1 check.  The SLC masked write carries a mask word then a data word, and getting
+    # that layout wrong was accepted here while a real MicroLogix rejected it.
+    sec.test("B bit data file Micrologix tag clear",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--write=0", "--check=0", "--debug=4"], F)
+    sec.test("N bit data file Micrologix tag clear",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--write=0", "--check=0", "--debug=4"], F)
+    # --check on a bit tag re-reads only that bit, so a mask that also clobbered its
+    # neighbours passes every test above.  test_bit_write stamps a known alternating pattern
+    # on the whole word, flips the one bit, and reads the word back, so collateral damage in
+    # the read-modify-write is visible.  Both polarities, because an AND mask and an OR mask
+    # fail differently.
+    sec.test("Micrologix bit write changes only that bit (B3, SLC masked write)",
+              [exe("test_bit_write"), "--bit=6",
+               f"--word-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=B3:0",
+               f"--bit-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=B3:0/6", "--debug=4"], F)
+    sec.test("Micrologix bit write changes only that bit (N7, SLC masked write)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0",
+               f"--bit-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--debug=4"], F)
     sec.test("L data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0", "--write=0,1,2,3", "--debug=4"], F)
+    # L files are read and written only as whole words, so a bit tag is refused at create.
     sec.test("L bit data file Micrologix tag read",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--check=0", "--debug=4"],
+              F, expect_failure=True)
     sec.test("L bit data file Micrologix tag write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--write=1", "--debug=4"],
               F, expect_failure=True)  # this write should NOT succeed
@@ -1009,16 +1437,34 @@ def build_manifest() -> Manifest:
     lgx_pccc_tag = f"protocol=ab-eip&gateway={lgw}&plc=lgxpccc&path=1,0&elem_count=1"
 
     sec = m.section("lgx_pccc", server=lgx_pccc_server)
+    list_identity(sec, "PCCC-mapped Logix", 1, 14, 164, "1756-L81E/B")
+    missing = sec.test("async create of a missing data file fails for good",
+              [exe("test_write_before_read"), "--missing-tag", f"--tag={lgx_pccc_tag}&name=N250:0"], F)
+    sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
+              check=CheckSpec(log_file=missing.log_file, pattern=r"^Create failed with PLCTAG_ERR_NOT_FOUND\.$", expected=1))
+    sec.test("identity, routed",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={lgw}&path=1,0&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=uint16", f"--tag={lgx_pccc_tag}&name=B3:0", "--write=0", "--check", "--debug=4"], F)
     sec.test("B bit data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag={lgx_pccc_tag}&name=B3:0/6", "--write=1", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag={lgx_pccc_tag}&name=B3:0/6", "--write=1", "--check=1", "--debug=4"], F)
     sec.test("N data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=sint16", f"--tag={lgx_pccc_tag}&name=N7:0", "--write=42", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint16", f"--tag={lgx_pccc_tag}&name=N7:0", "--write=42", "--check", "--debug=4"], F)
     sec.test("L data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=sint32", f"--tag={lgx_pccc_tag}&name=L19:0", "--write=7", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint32", f"--tag={lgx_pccc_tag}&name=L19:0", "--write=7", "--check", "--debug=4"], F)
     sec.test("F data file PCCC-mapped Logix tag read/write",
-              [exe("tag_rw2"), "--type=real32", f"--tag={lgx_pccc_tag}&name=F8:0", "--write=3.5", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=real32", f"--tag={lgx_pccc_tag}&name=F8:0", "--write=3.5", "--check", "--debug=4"], F)
+
+    # PCCC-mapped Logix has no masked write of its own: eip_lgx_pccc.c never looks at
+    # tag->is_bit, so a bit write is a whole-word typed write of the buffer the tag last read.
+    # The app has to read first, as test_bit_write does without --stale; these check that a
+    # refreshed word survives the write.
+    sec.test("PCCC-mapped Logix bit write changes only that bit (B3)",
+              [exe("test_bit_write"), "--bit=6",
+               f"--word-tag={lgx_pccc_tag}&name=B3:0", f"--bit-tag={lgx_pccc_tag}&name=B3:0/6", "--debug=4"], F)
+    sec.test("PCCC-mapped Logix bit write changes only that bit (N7)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag={lgx_pccc_tag}&name=N7:0", f"--bit-tag={lgx_pccc_tag}&name=N7:0/10", "--debug=4"], F)
 
     # A multi-element read exercises the array type prefix in the typed-read reply; a single
     # element would still get one, but this is where a wrong total-size byte would show up.
@@ -1065,14 +1511,43 @@ def build_manifest() -> Manifest:
     pgw = "127.0.0.1:{PORT}"
 
     sec = m.section("plc5", server=plc5_server)
+    list_identity(sec, "PLC/5", 1, 14, 18, "PLC-5/30 C/K - 1785-ENET 2.17 ")
+    missing = sec.test("async create of a missing data file fails for good",
+              [exe("test_write_before_read"), "--missing-tag",
+               f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N250:0"], F)
+    sec.test("check: missing data file is NOT_FOUND", None, F, depends_on=missing.id, ports_needed=0,
+              check=CheckSpec(log_file=missing.log_file, pattern=r"^Create failed with PLCTAG_ERR_NOT_FOUND\.$", expected=1))
+    sec.test("identity, unrouted",
+              [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={pgw}&plc=generic&name=@identity&debug=3"], F)
     sec.test("B data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0"], F)
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0", "--debug=4", "--write=0", "--check"], F)
     sec.test("B bit data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=1"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=1", "--check=1"], F)
+    # The PLC/5 read-modify-write: an AND mask and an OR mask, one element each.
+    sec.test("B bit data file PLC5 tag clear",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0/10", "--debug=4", "--write=0", "--check=0"], F)
     sec.test("N data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0"], F)
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0", "--debug=4", "--write=0", "--check"], F)
+    no_plc_plc5 = sec.test("no plc: identified as PLC/5, N read/write",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={pgw}&elem_count=1&name=N7:1", "--debug=4", "--write=44", "--check"], F)
+    sec.test("check: no plc identified the device as PLC/5", None, F, depends_on=no_plc_plc5.id, ports_needed=0,
+              check=CheckSpec(log_file=no_plc_plc5.log_file, pattern=r"Identified a PLC/5, unconnected\.", expected=1))
     sec.test("N bit data file PLC5 tag read/write",
-              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1"], F)
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0/10", "--debug=4", "--write=1", "--check=1"], F)
+    # --check on a bit tag re-reads only that bit, so a mask that also clobbered its
+    # neighbours passes every test above.  test_bit_write stamps a known alternating pattern
+    # on the whole word, flips the one bit, and reads the word back, so collateral damage in
+    # the read-modify-write is visible.  Both polarities, because an AND mask and an OR mask
+    # fail differently.
+    sec.test("PLC5 bit write changes only that bit (B3, AND/OR mask pair)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=B3:0",
+               f"--bit-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&name=B3:0/10", "--debug=4"], F)
+    sec.test("PLC5 bit write changes only that bit (N7, AND/OR mask pair)",
+              [exe("test_bit_write"), "--bit=10",
+               f"--word-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=N7:0",
+               f"--bit-tag=protocol=ab-eip&gateway={pgw}&plc=plc5&name=N7:0/10", "--debug=4"], F)
+
     # These two are the reason the PLC/5 word-count fix matters: both files are wider than the
     # two bytes that B3 and N7 use, so both used to be rejected outright by the simulator.
     plc5_st_test = sec.test("ST string data file PLC5 tag read/write",
@@ -1091,6 +1566,28 @@ def build_manifest() -> Manifest:
               [exe("tag_rw2"), "--type=real32",
                f"--tag=protocol=ab-eip&gateway={pgw}&plc=plc5&elem_count=1&name=F8:1",
                "--write=1.5", "--debug=4"], F)
+
+    # --- PCCC high element section -------------------------------------------
+    # An address field over 254 goes on the wire as 0xFF and a u16 LE.  N7:300 reads as
+    # element 255 if the server takes the field as one byte, and every field after it shifts.
+    # Each flavour carries the address its own way, so each gets a word and a bit write.
+    def pccc_high_server(plc, extra=()):
+        return ServerSpec(exe_path=exe("ab_server"),
+                          args_template=["--debug", f"--plc={plc}", "--port={PORT}", *extra, "--tag=N7[400]"],
+                          startup_wait_s=1)
+
+    hgw = "127.0.0.1:{PORT}"
+    sec = m.section("pccc_high_element", server=None)
+    for label, plc, extra, tag in [
+            ("Micrologix", "Micrologix", (), f"protocol=ab-eip&gateway={hgw}&plc=micrologix&elem_count=1"),
+            ("PLC/5", "PLC/5", (), f"protocol=ab-eip&gateway={hgw}&plc=plc5&elem_count=1"),
+            ("PCCC-mapped Logix", "LgxPccc", ("--path=1,0",), f"protocol=ab-eip&gateway={hgw}&plc=lgxpccc&path=1,0&elem_count=1")]:
+        sec.test(f"{label} N7:300 read/write",
+                  [exe("tag_rw2"), "--type=sint16", f"--tag={tag}&name=N7:300", "--write=300", "--check", "--debug=4"], F,
+                  server=pccc_high_server(plc, extra))
+        sec.test(f"{label} N7:300/3 bit write",
+                  [exe("tag_rw2"), "--type=bit", f"--tag={tag}&name=N7:300/3", "--write=1", "--check=1", "--debug=4"], F,
+                  server=pccc_high_server(plc, extra))
 
     # --- Modbus section ------------------------------------------------------
     modbus_server = ServerSpec(
@@ -1116,8 +1613,17 @@ def build_manifest() -> Manifest:
                "--cycles=2",
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                "--idle-timeout-ms=5000"], T)
+    sec.test("auto-destroy idle tags (Modbus)",
+              [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
+    sec.test("find_or_create_tag finds or creates a shared tag (Modbus)",
+              [exe("test_find_or_create_tag"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
+    sec.test("auto-destroy does not reconnect an idle connection (Modbus)",
+              [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
+               f"--conn-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection"], T)
     sec.test("test idle disconnect with Modbus",
               [exe("test_idle_disconnect"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
+    sec.test("connection_retry_max_delay_ms read, written and clamped live (Modbus)",
+              [exe("test_retry_attr"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
     sec.test("thread stress Modbus",
               [exe("thread_stress"), "10", f"protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
     sec.test("connection stress (multiple connections) Modbus",
@@ -1125,12 +1631,14 @@ def build_manifest() -> Manifest:
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], S)
     sec.test("callback events Modbus",
               [exe("test_callback_ex_async"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=10&name=hr1"], F)
+    sec.test("destroy tag from inside its own callback (Modbus)",
+              [exe("test_callback_destroy"), f"protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
     sec.test("@connection tag late join (Modbus)",
               [exe("test_connection_tag_late_join"),
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=@connection",
                "--timeout=5000"], F)
-    sec.test("create-from-tag API (17 permutation tests with Modbus)",
+    sec.test("create-from-tag API (19 permutation tests with Modbus)",
               [exe("test_create_from_tag"),
                f"--src-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                "--clone-attrib=name=hr20&elem_count=2",
@@ -1142,6 +1650,78 @@ def build_manifest() -> Manifest:
     sec.test("Modbus tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=1&name=hr10&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
+    # Modbus operations under pipelining, reordered replies, aborts, dropped connections and
+    # auto-sync.  Each fault server is the test's own, so the fault cannot reach other tests.
+    def mb_fault_server(*fault_args: str) -> ServerSpec:
+        return ServerSpec(exe_path=exe("modbus_server"),
+                          args_template=["--listen=127.0.0.1:{PORT}", "--debug=INFO", *fault_args],
+                          startup_wait_s=1)
+    mb_ops_base = f"--base=protocol=modbus-tcp&gateway={mbgw}&path=0"
+    mb_inflight8 = f"{mb_ops_base}&max_requests_in_flight=8"
+    mb_redial = "&connection_retry_max_delay_ms=200"
+    sec.test("pipelined writes and reads, one request in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_ops_base], F, server=mb_fault_server())
+    sec.test("pipelined writes and reads, eight requests in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_inflight8], F, server=mb_fault_server())
+    reordered = sec.test("pipelined writes and reads with replies out of order (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_inflight8], F,
+              server=mb_fault_server("--reorder=true"))
+    sec.test("check: the reorder test's replies were reordered", None, F, depends_on=reordered.id, ports_needed=0,
+              check=CheckSpec(log_file=reordered.server_log_file, pattern=r"Fault: holding the reply",
+                              expected=1, at_least=True))
+    sec.test("abort storm, one request in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_ops_base], F, server=mb_fault_server())
+    sec.test("abort storm, eight requests in flight (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_inflight8], F, server=mb_fault_server())
+    sec.test("abort storm with replies out of order (Modbus)",
+              [exe("test_modbus_ops"), "--mode=abort-storm", "--count=10", mb_inflight8], F,
+              server=mb_fault_server("--reorder=true"))
+    dropped = sec.test("write and read back while the server drops every 7th request's connection (Modbus)",
+              [exe("test_modbus_ops"), "--mode=write-read", mb_ops_base + mb_redial], F,
+              server=mb_fault_server("--close-every=7"))
+    sec.test("check: the dropped-connection test's server dropped connections", None, F, depends_on=dropped.id,
+              ports_needed=0, check=CheckSpec(log_file=dropped.server_log_file, pattern=r"Fault: closing the connection",
+                                              expected=1, at_least=True))
+    dropped_pipelined = sec.test("pipelined operations resent after dropped connections (Modbus)",
+              [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_inflight8 + mb_redial], F,
+              server=mb_fault_server("--close-every=7"))
+    sec.test("check: the pipelined dropped-connection test's server dropped connections", None, F,
+              depends_on=dropped_pipelined.id, ports_needed=0,
+              check=CheckSpec(log_file=dropped_pipelined.server_log_file, pattern=r"Fault: closing the connection",
+                              expected=1, at_least=True))
+    sec.test("transaction ID wraps past 65535 (Modbus)",
+              [exe("test_modbus_ops"), "--mode=tid-wrap", "--count=16", f"{mb_ops_base}&max_requests_in_flight=16"], S,
+              server=mb_fault_server("--reorder=true"))
+    sec.test("data written during auto-sync reads reaches the server (Modbus)",
+              [exe("test_modbus_ops"), "--mode=auto-dirty", mb_ops_base], F, server=mb_fault_server())
+    sec.test("auto-sync read and write on one tag (Modbus)",
+              [exe("test_auto_sync"),
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=hr40&auto_sync_read_ms=600&auto_sync_write_ms=20",
+               "--run-ms=10000"], T)
+    sec.test("restart the library after shutdown (Modbus)",
+              [exe("test_shutdown_restart"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=hr2"], F)
+    sec.test("holding register int16 array write and read back (Modbus)",
+              [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=4&name=hr100",
+               "--write=1,-2,300,-4000", "--check"], F)
+    sec.test("holding register uint16 extremes write and read back (Modbus)",
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr110",
+               "--write=65535,7", "--check"], F)
+    sec.test("coil set and read back (Modbus)",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=co10",
+               "--write=1", "--check"], F)
+    sec.test("coil clear and read back (Modbus)",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=co11",
+               "--write=0", "--check"], F)
+    sec.test("input register read (Modbus)",
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=4&name=ir5"], F)
+    sec.test("discrete input read (Modbus)",
+              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=di5"], F)
+    ir_write = sec.test("input register write is refused (Modbus)",
+              [exe("tag_rw2"), "--type=uint16", f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=1&name=ir5",
+               "--write=1"], F, expect_failure=True)
+    sec.test("check: the input register write was refused as unsupported", None, F, depends_on=ir_write.id,
+              ports_needed=0, check=CheckSpec(log_file=ir_write.log_file, pattern=r"PLCTAG_ERR_UNSUPPORTED",
+                                              expected=1, at_least=True))
     reconnect_test = sec.test("for Modbus reconnect bug",
               [exe("test_modbus_multiple"), f"--gateway1={mbgw}", f"--gateway2={mbgw2}"], T)
     # Depends on the reconnect test's own log; a CheckSpec test always runs

@@ -80,15 +80,15 @@ tag_byte_order_t system_tag_byte_order = {.is_allocated = 0,
                                           .str_is_zero_terminated = 1, /* C-style string. */
                                           .str_is_byte_swapped = 0,
 
-                                          .str_pad_to_multiple_bytes = 1,
+                                          .write_pad_alignment_bytes = 1,
                                           .str_count_word_bytes = 0,
                                           .str_max_capacity = 0,
                                           .str_total_length = 0,
                                           .str_pad_bytes = 0};
 
 
-plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                            void *userdata, plc_tag_p src_tag) {
+int system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                      void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
     int rc = PLCTAG_STATUS_OK;
     system_tag_p tag = NULL;
     const char *name = attr_get_str(attribs, "name", NULL);
@@ -100,7 +100,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     /* check the name, if none given, punt. */
     if(!name || str_length(name) < 1) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_ERROR, 0, "System tag name is empty or missing!");
-        return PLC_TAG_P_NULL;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, 0, "Creating special tag %s", name);
@@ -114,7 +114,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
 
     if(!tag) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_ERROR, 0, "Unable to allocate memory for system tag!");
-        return PLC_TAG_P_NULL;
+        return PLCTAG_ERR_NO_MEM;
     }
 
     /*
@@ -130,7 +130,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, tag->tag_id, "Unable to initialize generic tag parts!");
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
-        return (plc_tag_p)NULL;
+        return rc;
     }
 
     /* set the byte order. */
@@ -149,7 +149,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
                MAX_SYSTEM_TAG_NAME - 2);
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
-        return (plc_tag_p)NULL;
+        return rc;
     }
 
     tag->name[MAX_SYSTEM_TAG_NAME - 1] = '\0';
@@ -172,7 +172,9 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done");
 
-    return (plc_tag_p)tag;
+    *tag_out = (plc_tag_p)tag;
+
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -233,11 +235,6 @@ static int system_tag_read(plc_tag_p ptag) {
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    /* safe here because we are still within the API mutex. */
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
-    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
-
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done.");
 
     return rc;
@@ -256,10 +253,6 @@ static int system_tag_write(plc_tag_p ptag) {
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    /* raise this here so that the callback can update the tag buffer. */
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_PENDING);
-    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
-
     /* the version is static */
     if(str_cmp_i(&tag->name[0], "debug") == 0) {
         int res = 0;
@@ -273,9 +266,6 @@ static int system_tag_write(plc_tag_p ptag) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, tag->tag_id, "Unsupported system tag %s!", tag->name);
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
-
-    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
-    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done.");
 

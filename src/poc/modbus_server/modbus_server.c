@@ -68,6 +68,7 @@ typedef struct modbus_client_s modbus_client_t;
 
 #define MODBUS_RECV_BUFFER_SIZE 512
 #define MODBUS_SEND_BUFFER_SIZE 512
+#define REORDER_WAIT_US (50000) /* how long --reorder waits for a request to answer first */
 
 /* Histogram bucket boundaries (in microseconds) */
 #define HIST_BUCKET_COUNT 8
@@ -133,6 +134,11 @@ struct server_ctx_s {
     volatile int running;
     int64_t start_time_us;
     server_stats_t stats;
+
+    /* fault injection for client tests */
+    bool reorder;         /* answer a pipelined request before the one ahead of it */
+    int64_t close_every;  /* drop the connection, unanswered, on every Nth request; 0 = never */
+    int64_t requests_seen;
 };
 
 /* ============================================================================
@@ -149,6 +155,11 @@ struct modbus_client_s {
     mbap_header_t mbap_header;
     uint16_t expected_pdu_length;
     request_timing_t timing;
+
+    /* --reorder: the reply held back until the request behind it is answered. */
+    uint8_t held_buffer[MODBUS_SEND_BUFFER_SIZE];
+    size_t held_size;
+    int64_t reorder_deadline_us;
 };
 
 
@@ -400,7 +411,16 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->recv_buf);
 
         /* get the header info */
+        size_t frame_start = buf_read_pos(&client->recv_buf);
         modbus_parse_mbap_header(&client->recv_buf, &client->mbap_header);
+        size_t frame_size = (size_t)6 + client->mbap_header.length; /* MBAP length counts from the unit ID */
+
+        client->server->requests_seen++;
+        if(client->server->close_every > 0 && (client->server->requests_seen % client->server->close_every) == 0) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: closing the connection unanswered on request %" PRId64 ".",
+                  client->server->requests_seen);
+            break;
+        }
 
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
               "MBAP Header - Transaction ID: %u, Protocol ID: %u, Length: %u, Unit ID: %u", client->mbap_header.transaction_id,
@@ -426,6 +446,11 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         /* Capture process complete time */
         client->timing.process_complete_us = util_time_us();
 
+        /* step over whatever of the frame the processing left, so the next frame starts clean. */
+        if(buf_read_pos(&client->recv_buf) < frame_start + frame_size) {
+            buf_read_advance(&client->recv_buf, frame_start + frame_size - buf_read_pos(&client->recv_buf));
+        }
+
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Request processing failed");
 
@@ -438,6 +463,29 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
               "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
         pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
 
+        /*
+         * --reorder: give the next request a short while to arrive, so there is one to answer first.
+         * ponytail: polls every loop pass; the last request of a burst always pays the full wait.
+         */
+        if(client->server->reorder && client->held_size == 0) {
+            client->reorder_deadline_us = util_time_us() + REORDER_WAIT_US;
+            while(socket_recv_frame(fd, &client->recv_buf, modbus_frame_check, NULL) != UTIL_OK
+                  && util_time_us() < client->reorder_deadline_us) {
+                coro_yield(handle, CORO_EVENT_ALWAYS);
+            }
+        }
+
+        /* --reorder: a whole request already waits behind this one, so answer it first. */
+        if(client->server->reorder && client->held_size == 0 && modbus_frame_check(&client->recv_buf, NULL) == UTIL_OK
+           && buf_write_pos(&client->send_buf) <= sizeof(client->held_buffer)) {
+            client->held_size = buf_write_pos(&client->send_buf);
+            memcpy(client->held_buffer, buf_data(&client->send_buf), client->held_size);
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_INFO, "Fault: holding the reply to transaction %u.",
+                  client->mbap_header.transaction_id);
+            memset(&client->timing, 0, sizeof(client->timing));
+            continue;
+        }
+
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
 
@@ -447,6 +495,19 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
             break;
+        }
+
+        /* the reply held back for --reorder goes out after the one that overtook it. */
+        if(client->held_size > 0) {
+            buf_reset(&client->send_buf);
+            buf_write_bytes(&client->send_buf, "held_reply", client->held_buffer, client->held_size);
+            client->held_size = 0;
+
+            while((err = socket_send_buf(fd, &client->send_buf)) == UTIL_EAGAIN) { coro_yield(handle, CORO_EVENT_WRITE); }
+            if(err != UTIL_OK) {
+                pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send held response: %s", util_err_str(err));
+                break;
+            }
         }
 
         /* Capture send complete time and calculate statistics */
@@ -629,6 +690,20 @@ int main(int argc, char *argv[]) {
          "modbus.input_registers",
          "Number of input registers",
          {.has_default = true, .value.int_val = 1000}},
+        {"reorder",
+         ARGS_TYPE_BOOL,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.reorder",
+         "Answer a pipelined request before the one ahead of it",
+         {.has_default = true, .value.bool_val = false}},
+        {"close-every",
+         ARGS_TYPE_INT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.close_every",
+         "Close the connection without answering on every Nth request (0 = never)",
+         {.has_default = true, .value.int_val = 0}},
         {"help",
          ARGS_TYPE_BOOL,
          ARGS_OPTIONAL,
@@ -691,6 +766,8 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     server.storage = temp_storage;
+    server.reorder = args_get_bool(&args_result, "reorder");
+    server.close_every = args_get_int(&args_result, "close-every");
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server starting");
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Coils: %zu", (size_t)coils_val);

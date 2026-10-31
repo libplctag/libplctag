@@ -54,6 +54,10 @@
  *  10. regular src + valid data clone attribs           -> success; read works after src destroyed
  *  11. regular src, create two clones from same src     -> both succeed independently
  *  12. previously-destroyed src ID reused               -> ERR_NOT_FOUND
+ *  18. @connection first on a fresh connection          -> connection_status reaches UP with no
+ *      callback; a data tag after it is connected and reads
+ *  19. use_connected_msg=0 on a connected connection    -> ERR_BAD_PARAM, by create and by clone
+ *      (only with --logix, the one family that lets a tag choose)
  *
  * Usage:
  *   test_create_from_tag [--src-tag=ATTRIBS] [--clone-attrib=ATTRIBS]
@@ -84,6 +88,7 @@ static const char *src_tag_attribs = NULL;
 static const char *clone_tag_attribs = NULL;
 static const char *connection_tag_attribs = NULL;
 static int timeout_ms = DEFAULT_TIMEOUT_MS;
+static bool is_logix = false; /* only Logix lets a tag choose use_connected_msg */
 
 /* Shared flags for test 16 (callback fires on clone). */
 static compat_atomic_int32_t clone_created_cb_fired = {0};
@@ -721,10 +726,10 @@ static int test_async_create_and_poll(void) {
 static void usage(const char *prog) {
     fprintf(stderr,
             "Usage: %s [--src-tag=ATTRIBS] [--clone-attrib=ATTRIBS]\n"
-            "          [--connection-tag=ATTRIBS] [--timeout=ms] [--debug=N]\n"
+            "          [--connection-tag=ATTRIBS] [--logix] [--timeout=ms] [--debug=N]\n"
             "\n"
             "Tests 1-4 and 13 (invalid/system source IDs) always run without a PLC.\n"
-            "Tests 5-12 and 14-17 run only when --src-tag, --clone-attrib, and\n"
+            "Tests 5-12 and 14-19 run only when --src-tag, --clone-attrib, and\n"
             "--connection-tag are all provided.\n"
             "\n"
             "Example (AB/EIP with simulator):\n"
@@ -746,6 +751,8 @@ static void parse_args(int argc, char **argv) {
             clone_tag_attribs = &argv[i][15];
         } else if(strncmp(argv[i], "--connection-tag=", 17) == 0) {
             connection_tag_attribs = &argv[i][17];
+        } else if(strcmp(argv[i], "--logix") == 0) {
+            is_logix = true;
         } else if(strncmp(argv[i], "--timeout=", 10) == 0) {
             timeout_ms = atoi(&argv[i][10]);
             if(timeout_ms <= 0) { timeout_ms = DEFAULT_TIMEOUT_MS; }
@@ -757,6 +764,102 @@ static void parse_args(int argc, char **argv) {
             exit(1);
         }
     }
+}
+
+/*
+ * Test 18: an @connection tag that creates the connection must make it a connected one, as a
+ * data tag would, and must report the connection's status without a callback.  The group id
+ * keeps any connection left by an earlier test out of it.
+ */
+static int test_connection_tag_first(void) {
+    char conn_attribs[512];
+    char data_attribs[512];
+    int32_t status = PLCTAG_CONN_STATUS_DOWN;
+    int64_t end_time = 0;
+    int rc = PLCTAG_STATUS_OK;
+
+    snprintf(conn_attribs, sizeof(conn_attribs), "%s&connection_group_id=18", connection_tag_attribs);
+    snprintf(data_attribs, sizeof(data_attribs), "%s&connection_group_id=18", src_tag_attribs);
+
+    int32_t conn_tag = plc_tag_create(conn_attribs, timeout_ms);
+    if(conn_tag < 0) {
+        fprintf(stderr, "  FAIL: could not create @connection tag: %s\n", plc_tag_decode_error((int)conn_tag));
+        return (int)conn_tag;
+    }
+
+    end_time = compat_time_ms() + (int64_t)timeout_ms;
+    do {
+        status = plc_tag_get_int_attribute(conn_tag, "connection_status", PLCTAG_CONN_STATUS_DOWN);
+        if(status == PLCTAG_CONN_STATUS_UP) { break; }
+        compat_sleep_ms(POLL_SLEEP_MS, NULL);
+    } while(compat_time_ms() < end_time);
+
+    if(status != PLCTAG_CONN_STATUS_UP) {
+        fprintf(stderr, "  FAIL: @connection tag without a callback reports connection_status=%d, not UP.\n", (int)status);
+        plc_tag_destroy(conn_tag);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    int32_t data_tag = plc_tag_create(data_attribs, timeout_ms);
+    if(data_tag < 0) {
+        fprintf(stderr, "  FAIL: data tag after @connection failed: %s\n", plc_tag_decode_error((int)data_tag));
+        plc_tag_destroy(conn_tag);
+        return (int)data_tag;
+    }
+
+    /* -1 is a family with no such attribute, Modbus; every CIP family here is connected. */
+    if(plc_tag_get_int_attribute(data_tag, "use_connected_msg", -1) == 0) {
+        fprintf(stderr, "  FAIL: the connection the @connection tag created is not a connected one.\n");
+        rc = PLCTAG_ERR_BAD_STATUS;
+    } else {
+        rc = plc_tag_read(data_tag, timeout_ms);
+        if(rc != PLCTAG_STATUS_OK) { fprintf(stderr, "  FAIL: data tag read failed: %s\n", plc_tag_decode_error(rc)); }
+    }
+
+    plc_tag_destroy(data_tag);
+    plc_tag_destroy(conn_tag);
+
+    return rc;
+}
+
+/* Test 19: a connection is either connected or not, so a tag asking for the other is refused. */
+static int test_use_connected_msg_conflict(void) {
+    char good_attribs[512];
+    char bad_attribs[512];
+    int rc = PLCTAG_STATUS_OK;
+
+    if(!is_logix) {
+        fprintf(stderr, "  SKIP: no --logix, so the PLC family decides use_connected_msg.\n");
+        return PLCTAG_STATUS_OK;
+    }
+
+    snprintf(good_attribs, sizeof(good_attribs), "%s&connection_group_id=19", src_tag_attribs);
+    snprintf(bad_attribs, sizeof(bad_attribs), "%s&connection_group_id=19&use_connected_msg=0", src_tag_attribs);
+
+    int32_t good = plc_tag_create(good_attribs, timeout_ms);
+    if(good < 0) {
+        fprintf(stderr, "  FAIL: could not create the connected tag: %s\n", plc_tag_decode_error((int)good));
+        return (int)good;
+    }
+
+    int32_t bad = plc_tag_create(bad_attribs, timeout_ms);
+    if(bad != PLCTAG_ERR_BAD_PARAM) {
+        fprintf(stderr, "  FAIL: conflicting create returned %s, expected ERR_BAD_PARAM.\n", plc_tag_decode_error((int)bad));
+        if(bad > 0) { plc_tag_destroy(bad); }
+        rc = PLCTAG_ERR_BAD_STATUS;
+    }
+
+    int32_t clone = plc_tag_create_from_tag(good, "name=TestBigArray[1]&elem_count=1&use_connected_msg=0", NULL, NULL,
+                                            timeout_ms);
+    if(clone != PLCTAG_ERR_BAD_PARAM) {
+        fprintf(stderr, "  FAIL: conflicting clone returned %s, expected ERR_BAD_PARAM.\n", plc_tag_decode_error((int)clone));
+        if(clone > 0) { plc_tag_destroy(clone); }
+        rc = PLCTAG_ERR_BAD_STATUS;
+    }
+
+    plc_tag_destroy(good);
+
+    return rc;
 }
 
 /* -------------------------------------------------------------------------
@@ -806,7 +909,7 @@ int main(int argc, char **argv) {
 
     /* --- With-PLC tests --- */
     if(!have_plc_args) {
-        fprintf(stderr, "\nSkipping tests 5-12 and 14-17: --src-tag, --clone-attrib, and\n"
+        fprintf(stderr, "\nSkipping tests 5-12 and 14-19: --src-tag, --clone-attrib, and\n"
                         "--connection-tag are all required.\n"
                         "Re-run with PLC arguments to execute the full test suite.\n");
     } else {
@@ -823,6 +926,8 @@ int main(int argc, char **argv) {
         RUN_TEST("15. clone of clone -> success", test_clone_of_clone());
         RUN_TEST("16. callback fires on clone (CREATED + READ_COMPLETED)", test_callback_fires_on_clone());
         RUN_TEST("17. async create (timeout=0) + poll -> success", test_async_create_and_poll());
+        RUN_TEST("18. @connection first: connected, status UP without callback", test_connection_tag_first());
+        RUN_TEST("19. use_connected_msg conflict -> ERR_BAD_PARAM", test_use_connected_msg_conflict());
     }
 
     fprintf(stderr, "\nRESULT: %d/%d passed", passed, total);

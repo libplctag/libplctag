@@ -36,7 +36,7 @@
 /*
  * The part of a connection object that a connection-status tag observes.
  *
- * Embedded in ab_session_t, omron_conn_t and modbus_plc_t so that one
+ * Embedded in cip_conn_t and modbus_plc_t so that one
  * connection-tag implementation can watch any of them.
  *
  * The ring is single-writer / multiple-reader: the connection's handler thread
@@ -44,9 +44,11 @@
  */
 
 #include <libplctag/lib/tag.h>
+#include <platform.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
+#include <utils/vector.h>
 
 
 #define CONN_EVENT_RING_SIZE (64)
@@ -64,23 +66,49 @@ typedef struct {
      */
     tag_conn_event_t ring[CONN_EVENT_RING_SIZE];
     atomic_int32_t ring_write_idx;
-} conn_watch_t;
+
+    /*
+     * The connection tags reading this ring.  The connection's handler delivers their events
+     * (connection_tag_notify_watchers()).  Raw pointers under the connection's mutex: a tag
+     * removes itself before it is freed.  Created on first use.
+     */
+    vector_p watchers;
+} conn_event_ring_t;
 
 
 /* seed the watch with its initial status.  Call before the handler thread starts. */
-extern void conn_watch_init(conn_watch_t *watch, int32_t initial_status);
+extern void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status);
 
 /*
  * Publish an event.  Single writer only: the connection's handler thread.
  * Repeating the last entry's event_type and status is dropped.
  */
-extern void conn_watch_publish(conn_watch_t *watch, int32_t event_type, int32_t status);
+extern void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t status);
+
+/*
+ * Set the connection status and publish the change, under the connection's own mutex.
+ *
+ * The status and the ring publish have to move together: connection_tag_create() takes a
+ * paired snapshot of watch.status and watch.ring_write_idx to seed a new tag, and must not
+ * see one from before this transition and the other from after it.  Repeating the current
+ * status publishes nothing.
+ *
+ * Single writer only, like conn_watch_publish(): the connection's handler thread.
+ */
+extern void conn_watch_set_status(conn_event_ring_t *watch, mutex_p mutex, int32_t new_status);
 
 /*
  * Consume the next event after *read_idx, advancing it.  Returns false when the
  * reader has caught up.  Each reader owns its own read_idx.
  */
-extern bool conn_watch_next(conn_watch_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status);
+extern bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status);
 
 /* index a newly created reader should start from to see only future events. */
-extern int32_t conn_watch_read_idx(conn_watch_t *watch);
+extern int32_t conn_watch_read_idx(conn_event_ring_t *watch);
+
+/* add or remove a connection tag reading the ring, under the connection's own mutex. */
+extern int32_t conn_watch_add_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag);
+extern void conn_watch_remove_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag);
+
+/* free what the watch allocated.  Call from the connection's destructor, when no tag is left. */
+extern void conn_watch_destroy(conn_event_ring_t *watch);

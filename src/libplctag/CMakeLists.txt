@@ -40,17 +40,39 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/api/lib.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/error_codes.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/error_codes.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/cip_tag_create.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/cip_tag_create.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/services.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/standard_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/standard_tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/plc_type.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/path.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/cip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/cip.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/conn.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/connection_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/identity_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/identity_tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/raw_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/raw_tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/connection_tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/conn.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/path.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/cip/wire.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_attribs.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_attribs.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_timeouts.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_watch.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/connection_tag.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/connection_tag.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/conn_watch.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_registry.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_driver.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_driver.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_schedule.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_schedule.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_registry.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_string.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/tag_string.h"
@@ -58,21 +80,10 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/api/tag_attribs.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_common.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_listing.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_common.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_connection_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_connection_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/cip.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/cip.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/conn.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/conn.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/defs.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_raw_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_raw_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_standard_tag.c"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_standard_tag.h"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/modules/omron/omron_listing.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/modbus/modbus.c"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/modbus/modbus.h"
                      "${CMAKE_CURRENT_SOURCE_DIR}/modules/system/system.c"
@@ -82,6 +93,8 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/byte_order.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/atomic_utils.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/attr.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/attr.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/backoff.c"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/backoff.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/byteorder.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.h"
@@ -123,14 +136,27 @@ endmacro()
 # Debugging
 # print_all_ar_link_variables()
 
+# 64-bit atomics need libatomic only where the CPU has no 64-bit atomic instructions (32-bit ARM).
+# Linking it everywhere adds a libatomic.so dependency that musl systems do not have.
+include(CheckCSourceCompiles)
+check_c_source_compiles("
+#include <stdint.h>
+static int64_t v;
+int main(void) {
+    int64_t expected = 0;
+    __atomic_compare_exchange_n(&v, &expected, 1, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return (int)__atomic_fetch_add(&v, 1, __ATOMIC_SEQ_CST);
+}" LIBPLCTAG_ATOMICS_NO_LIBATOMIC)
+
 # shared library
 # Note: No add_dependencies needed - DEBUG_GENERATED_NAMES_C in sources triggers generation automatically
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
-# Link atomic library for 64-bit atomic operations on 32-bit ARM
 # Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(plctag_dyn atomic)
+    if(NOT LIBPLCTAG_ATOMICS_NO_LIBATOMIC)
+        target_link_libraries(plctag_dyn atomic)
+    endif()
     target_link_libraries(plctag_dyn m)
 elseif(UNIX)
     # macOS: link math library
@@ -165,10 +191,11 @@ install(TARGETS plctag_dyn
 # Note: No add_dependencies needed - DEBUG_GENERATED_NAMES_C in sources triggers generation automatically
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
-# Link atomic library for 64-bit atomic operations on 32-bit ARM
 # Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(plctag_static atomic)
+    if(NOT LIBPLCTAG_ATOMICS_NO_LIBATOMIC)
+        target_link_libraries(plctag_static atomic)
+    endif()
     target_link_libraries(plctag_static m)
 elseif(UNIX)
     # macOS: link math library

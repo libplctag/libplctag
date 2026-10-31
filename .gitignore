@@ -65,3 +65,5 @@ external_docs/
 build_perf/*
 build_*/*
 ephemeral_docs/*
+__pycache__/*
+*.pyc

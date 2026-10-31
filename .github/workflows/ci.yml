@@ -117,6 +117,9 @@ jobs:
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
+
       - name: Run Simulator Tests
         run: |
           cd ${{ github.workspace }}
@@ -253,6 +256,9 @@ jobs:
 
       - name: Build
         run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+      - name: Run unit tests
+        run: cd ${{ env.BUILD }}; ctest -R unit_test --output-on-failure
 
       - name: Run Simulator Tests
         run: |
@@ -893,6 +899,17 @@ jobs:
         if: matrix.toolchain != 'mingw' || !matrix.cmake_toolchain_file
         run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
+      - name: Run unit tests (MinGW x86 with toolchain file)
+        if: matrix.toolchain == 'mingw' && matrix.cmake_toolchain_file
+        shell: msys2 {0}
+        run: |
+          cd build
+          ctest -R unit_test -C MinSizeRel --output-on-failure
+
+      - name: Run unit tests (all other Windows variants)
+        if: matrix.toolchain != 'mingw' || !matrix.cmake_toolchain_file
+        run: cd ${{ env.BUILD }}; ctest -R unit_test -C MinSizeRel --output-on-failure
+
       - name: Run Simulator Tests
         run: |
           ARGS=()
@@ -1066,6 +1083,14 @@ jobs:
         run: |
           echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
           ls -la ${{ env.DIST }} || echo "No artifacts directory found"
+
+      # 32-bit ARM is where issue #679 was worst, so the backoff tests have to run here.
+      # QEMU_LD_PREFIX points the emulator at the cross toolchain's own target libc.
+      - name: Run unit tests under QEMU
+        run: |
+          sudo apt install -y qemu-user-static binfmt-support
+          cd ${{ env.BUILD }}
+          QEMU_LD_PREFIX=/usr/${{ matrix.gcc_prefix }} ctest -R unit_test --output-on-failure
 
       - name: Create ZIP artifacts
         run: |

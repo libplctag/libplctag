@@ -1,7 +1,4 @@
 #pragma once
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #include <stddef.h>
 #include <stdint.h>
@@ -76,27 +73,27 @@ typedef enum {
  * Type of value a flag accepts
  */
 typedef enum {
-    ARGS_TYPE_STRING,      // --flag=value (string)
-    ARGS_TYPE_INT,         // --flag=123 (integer, base 10)
-    ARGS_TYPE_INT_HEX,     // --flag=0xFF (integer, base 16)
-    ARGS_TYPE_BOOL,        // --flag=true|false|yes|no|on|off|1|0
-    ARGS_TYPE_FLOAT,       // --flag=3.14 (floating point)
+    ARGS_TYPE_STRING,      /* --flag=value (string) */
+    ARGS_TYPE_INT,         /* --flag=123 (integer, base 10) */
+    ARGS_TYPE_INT_HEX,     /* --flag=0xFF (integer, base 16) */
+    ARGS_TYPE_BOOL,        /* --flag=true|false|yes|no|on|off|1|0 */
+    ARGS_TYPE_FLOAT,       /* --flag=3.14 (floating point) */
 } args_type_t;
 
 /**
  * Whether a flag is required or optional
  */
 typedef enum {
-    ARGS_REQUIRED = 0,     // Flag must be present
-    ARGS_OPTIONAL = 1,     // Flag is optional
+    ARGS_REQUIRED = 0,     /* Flag must be present */
+    ARGS_OPTIONAL = 1,     /* Flag is optional */
 } args_required_t;
 
 /**
  * Whether a flag can appear multiple times
  */
 typedef enum {
-    ARGS_ONCE = 0,         // Flag appears at most once
-    ARGS_MULTIPLE = 1,     // Flag can appear multiple times
+    ARGS_ONCE = 0,         /* Flag appears at most once */
+    ARGS_MULTIPLE = 1,     /* Flag can appear multiple times */
 } args_repetition_t;
 
 /**
@@ -126,7 +123,7 @@ typedef struct {
  * Used when flag is not provided on command line
  */
 typedef struct {
-    bool has_default;       // Whether a default is defined
+    bool has_default;       /* Whether a default is defined */
     union {
         const char *string_val;
         int64_t int_val;
@@ -157,7 +154,7 @@ typedef struct {
  *
  *   { "name", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_ONCE,
  *     "app.name", "Application name",
- *     { .has_default = false } }  // No default
+ *     { .has_default = false } }  (no default)
  */
 typedef struct {
     const char *name;
@@ -181,7 +178,7 @@ typedef struct {
     util_err_t error;
     const char *error_detail;
     const char *error_debug_name;
-    int error_flag_index;
+    int32_t error_flag_index;
 } args_result_t;
 
 /* ================================================================
@@ -198,25 +195,13 @@ typedef struct {
  * @param result OUT: Parsed result
  * @return UTIL_OK on success, error code on failure
  */
-util_err_t args_parse(int argc, const char *argv[],
+util_err_t args_parse(int32_t argc, const char *argv[],
                       const args_flag_def_t *flags, size_t flags_count,
                       args_result_t *result);
 
 /* ================================================================
  * Value Access (by Flag Name)
  * ================================================================ */
-
-/**
- * Get a flag value by name.
- *
- * @return args_value_t with presence indicator
- */
-args_value_t args_get_value(const args_result_t *result, const char *flag_name);
-
-/**
- * Get values for a repeated flag by name.
- */
-args_repeated_t args_get_repeated(const args_result_t *result, const char *flag_name);
 
 /**
  * Get string value by flag name.
@@ -235,12 +220,6 @@ int64_t args_get_int(const args_result_t *result, const char *flag_name);
  * @return true if flag present, false otherwise
  */
 bool args_get_bool(const args_result_t *result, const char *flag_name);
-
-/**
- * Get float value by flag name.
- * @return Value if present, NaN if not present or error
- */
-double args_get_float(const args_result_t *result, const char *flag_name);
 
 /* ================================================================
  * Iteration (for ARGS_MULTIPLE flags)
@@ -263,16 +242,6 @@ args_value_t args_get_at(const args_result_t *result, const char *flag_name, siz
  * ================================================================ */
 
 /**
- * Check if parsing succeeded
- */
-bool args_is_ok(const args_result_t *result);
-
-/**
- * Get error status
- */
-util_err_t args_get_error(const args_result_t *result);
-
-/**
  * Get human-readable error message
  */
 const char* args_get_error_detail(const args_result_t *result);
@@ -285,51 +254,9 @@ const char* args_get_error_debug_name(const args_result_t *result);
 /**
  * Get index of flag that caused error (-1 for general errors)
  */
-int args_get_error_flag_index(const args_result_t *result);
+int32_t args_get_error_flag_index(const args_result_t *result);
 
 /**
  * Free resources associated with parsed result
  */
 void args_free(args_result_t *result);
-
-/* ================================================================
- * Introspection
- * ================================================================ */
-
-/**
- * Look up flag definition by flag name
- * @return Pointer to flag definition, or NULL if not found
- */
-const args_flag_def_t* args_get_flag_def(const args_flag_def_t *flags,
-                                         size_t flags_count,
-                                         const char *flag_name);
-
-/**
- * Get debug name from a flag definition
- */
-const char* args_get_debug_name(const args_flag_def_t *flag_def);
-
-/**
- * Print usage/help information with program name and all flags
- */
-void args_print_help(const char *program_name,
-                     const args_flag_def_t *flags, size_t flags_count);
-
-/**
- * Print all available flags with their metadata for usage functions.
- * Displays each flag on a separate line with:
- * - Flag name
- * - Required/Optional status
- * - Single/Multiple values status
- * - Description
- *
- * This is useful for building custom usage() functions.
- *
- * @param flags Array of flag definitions
- * @param flags_count Number of flag definitions
- */
-void args_print_flags(const args_flag_def_t *flags, size_t flags_count);
-
-#ifdef __cplusplus
-}
-#endif

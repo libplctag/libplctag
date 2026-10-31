@@ -50,6 +50,13 @@
  *   Point at an unreachable address and verify CONNECTING -> ERR_WAIT.
  *   No simulator needed; run when no server is listening on the target host.
  *
+ * --poll:
+ *   Create one @connection tag with no callback and a timeout of 0, then poll its
+ *   connection_status.  The states seen must follow the expected sequence in order;
+ *   ones too brief for the poll may be missed, but CONNECTING and UP must be seen
+ *   and the last state must be reached.  Run against a server with a response delay
+ *   so CONNECTING lasts long enough to see.
+ *
  * --cycles=N --data-tag=ATTRIBS [--idle-timeout-ms=T]:
  *   Verify N consecutive connect/idle-disconnect cycles.  A data tag on the
  *   same session is read after each IDLE_WAIT to trigger a reconnect.
@@ -131,6 +138,7 @@ static bool expect_err = false;
 static int num_cycles = 1;
 static const char *data_tag_attribs = NULL;
 static int idle_timeout_ms = 0;
+static bool poll_mode = false;
 
 /* -------------------------------------------------------------------------
  * Runtime state shared between callback threads and the main thread
@@ -334,6 +342,52 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
     }
 }
 
+/*
+ * Poll one tag's connection_status until the last expected state or the deadline.  The
+ * status must be the connection's own, so every change seen has to be the next expected
+ * state or a later one.
+ */
+static int poll_connection_states(int32_t tag, int64_t end_time) {
+    int32_t last = PLCTAG_CONN_STATUS_DOWN; /* a new connection's state before its thread runs */
+    int idx = 0;
+    bool saw_connecting = false;
+    bool saw_up = false;
+
+    while(compat_atomic_load_int32(&running) && compat_time_ms() < end_time && idx < num_expected_states) {
+        int32_t cur = plc_tag_get_int_attribute(tag, "connection_status", -999);
+
+        if(cur != last) {
+            int found = idx;
+
+            while(found < num_expected_states && expected_states[found] != cur) { found++; }
+
+            fprintf(stderr, "[tag %d] polled %s\n", (int)tag, conn_status_name(cur));
+
+            if(found == num_expected_states) {
+                fprintf(stderr, "FAIL [tag %d]: polled %s out of order (next expected: %s).\n", (int)tag,
+                        conn_status_name(cur), conn_status_name(expected_states[idx]));
+                return 1;
+            }
+
+            if(cur == PLCTAG_CONN_STATUS_CONNECTING) { saw_connecting = true; }
+            if(cur == PLCTAG_CONN_STATUS_UP) { saw_up = true; }
+
+            idx = found + 1;
+            last = cur;
+        }
+
+        compat_sleep_ms(1, NULL);
+    }
+
+    if(idx < num_expected_states || !saw_connecting || !saw_up) {
+        fprintf(stderr, "FAIL [tag %d]: polling ended at %s; CONNECTING seen %d, UP seen %d.\n", (int)tag,
+                conn_status_name(last), (int)saw_connecting, (int)saw_up);
+        return 1;
+    }
+
+    return 0;
+}
+
 /* -------------------------------------------------------------------------
  * Argument parsing
  * ---------------------------------------------------------------------- */
@@ -346,6 +400,7 @@ static void parse_args(int argc, char **argv) {
         fprintf(stderr, "  --tag=ATTRIBS            @connection tag attribute string (required)\n");
         fprintf(stderr, "  --num-tags=N             simultaneous @connection tags (default 1, max %d)\n", MAX_TAGS);
         fprintf(stderr, "  --expect-err             expect CONNECTING -> ERR_WAIT (unreachable host)\n");
+        fprintf(stderr, "  --poll                   poll connection_status with no callback instead\n");
         fprintf(stderr, "  --cycles=N               connect/disconnect cycles to verify (default 1, max %d)\n", MAX_CYCLES);
         fprintf(stderr, "  --data-tag=ATTRIBS       data tag on same session; required when --cycles > 1\n");
         fprintf(stderr, "  --idle-timeout-ms=N      set connection_inactivity_timeout_ms on data tag\n");
@@ -358,6 +413,8 @@ static void parse_args(int argc, char **argv) {
             tag_path = &argv[i][6];
         } else if(strncmp(argv[i], "--num-tags=", 11) == 0) {
             num_tags = atoi(&argv[i][11]);
+        } else if(strcmp(argv[i], "--poll") == 0) {
+            poll_mode = true;
         } else if(strcmp(argv[i], "--expect-err") == 0) {
             expect_err = true;
         } else if(strncmp(argv[i], "--cycles=", 9) == 0) {
@@ -460,6 +517,25 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Setting connection_inactivity_timeout_ms = %d ms\n", idle_timeout_ms);
             plc_tag_set_int_attribute(data_tag, "connection_inactivity_timeout_ms", idle_timeout_ms);
         }
+    }
+
+    if(poll_mode) {
+        int32_t tag = plc_tag_create(tag_path, 0);
+        int failed = 0;
+
+        if(tag < 0) {
+            fprintf(stderr, "ERROR: could not create @connection tag: %s\n", plc_tag_decode_error((int)tag));
+            if(data_tag) { plc_tag_destroy(data_tag); }
+            return 1;
+        }
+
+        failed = poll_connection_states(tag, compat_time_ms() + run_duration_ms);
+
+        plc_tag_destroy(tag);
+        if(data_tag) { plc_tag_destroy(data_tag); }
+
+        fprintf(stderr, "RESULT: %s\n", (failed ? "FAIL" : "PASS"));
+        return failed;
     }
 
     for(i = 0; i < num_tags; i++) {

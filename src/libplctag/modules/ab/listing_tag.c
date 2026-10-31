@@ -36,16 +36,26 @@
 #include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/ab/ab_common.h>
-#include <libplctag/modules/ab/cip.h>
-#include <libplctag/modules/ab/defs.h>
-#include <libplctag/modules/ab/eip_cip.h> /* for the Logix decode types. */
+#include <libplctag/modules/ab/pccc.h>
 #include <libplctag/modules/cip/error_codes.h>
-#include <libplctag/modules/ab/session.h>
-#include <libplctag/modules/ab/tag.h>
+#include <libplctag/modules/cip/services.h>
+#include <libplctag/modules/cip/tag.h>
+#include <libplctag/modules/cip/wire.h>
 #include <platform.h>
+#include <stdbool.h>
 #include <utils/attr.h>
+#include <utils/byteorder.h>
 #include <utils/debug.h>
 #include <utils/vector.h>
+
+
+/*
+ * Rockwell's tag listing.  This is not a CIP service: it is a Rockwell service code
+ * reading a Rockwell object class.  OMRON lists tags a different way (service 0x5F); see
+ * modules/omron/omron_listing.c.
+ */
+#define AB_CIP_SVC_LIST_TAGS ((uint8_t)0x55)
+#define AB_CIP_CLASS_SYMBOL ((uint8_t)0x6B)
 
 START_PACK typedef struct {
     uint32_le instance_id;    /* monotonically increasing but not contiguous */
@@ -57,21 +67,23 @@ START_PACK typedef struct {
 } END_PACK tag_list_entry;
 
 /* listing tag functions. */
-static int listing_tag_read_start(ab_tag_p tag);
-static int listing_tag_tickler(ab_tag_p tag);
-// static int listing_tag_write_start(ab_tag_p tag);
-static int listing_tag_check_read_status_connected(ab_tag_p tag);
-static int listing_tag_build_read_request_connected(ab_tag_p tag);
+static int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 
 /* define the vtable for listing tag type. */
 static struct tag_vtable_t listing_tag_vtable = {
-    .abort = (tag_vtable_func)ab_tag_abort_request,
-    .read = (tag_vtable_func)listing_tag_read_start,
-    .status = (tag_vtable_func)ab_tag_status,
-    .tickler = (tag_vtable_func)listing_tag_tickler,
+    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .read = cip_tag_read_start,
+    .status = (tag_vtable_func)cip_tag_status,
+    .tickler = NULL,
     .write = NULL,
-    .wake_plc = NULL,
-    .tag_data_written = NULL,
+    .wake_plc = cip_tag_wake_plc,
+    .activate = cip_tag_activate,
+    .tag_data_written = cip_tag_wake_plc,
+    .encode_read = (tag_encode_func)listing_tag_encode_read,
+    .decode_read = (tag_decode_func)listing_tag_check_read_status_connected,
+    .encode_write = NULL,
+    .decode_write = NULL,
 
     /* attribute accessors */
     .attribs = ab_attribs,
@@ -91,7 +103,7 @@ static tag_byte_order_t listing_tag_logix_byte_order = {.is_allocated = 0,
                                                         .str_is_zero_terminated = 0,
                                                         .str_is_byte_swapped = 0,
 
-                                                        .str_pad_to_multiple_bytes = 1,
+                                                        .write_pad_alignment_bytes = 1,
                                                         .str_count_word_bytes = 2,
                                                         .str_max_capacity = 0,
                                                         .str_total_length = 0,
@@ -109,7 +121,7 @@ static tag_byte_order_t listing_tag_logix_byte_order = {.is_allocated = 0,
  * We know that we got here because the string "@tags" was in the name.
  */
 
-int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
+int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
     int rc = PLCTAG_STATUS_OK;
     char **tag_parts = NULL;
 
@@ -184,13 +196,14 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
     /* did we find a listing tag? */
     if(rc == PLCTAG_STATUS_OK) {
         /* yes we did */
-        tag->special_tag = 1;
+        tag->special_tag = true;
         tag->elem_type = CIP_TYPE_TAG_ENTRY;
         tag->elem_count = 1;
         tag->elem_size = 1;
 
         tag->byte_order = &listing_tag_logix_byte_order;
 
+        tag->create_read_status = PLCTAG_STATUS_PENDING;
         tag->vtable = &listing_tag_vtable;
 
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done. Found tag listing tag name %s.", name);
@@ -204,93 +217,6 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name) {
 
 
 /*
- * listing_tag_read_start
- *
- * This function must be called only from within one thread, or while
- * the tag's mutex is locked.
- *
- * The function starts the process of getting tag data from the PLC.
- */
-
-int listing_tag_read_start(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "A write is in progress on a listing tag!");
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Read or write operation already in flight!");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* mark the tag read in progress */
-    tag->read_in_progress = 1;
-
-    /* build the new request */
-    rc = listing_tag_build_read_request_connected(tag);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
-
-        tag->read_in_progress = 0;
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_PENDING;
-}
-
-
-int listing_tag_tickler(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    rc = check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
-
-    if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Something started a write on a listing tag.   This is not supported!");
-
-        ab_tag_abort_request(tag);
-
-        /* fire the event anyway. */
-        tag->write_complete = 1;
-
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    if(tag->read_in_progress) {
-
-        rc = listing_tag_check_read_status_connected(tag);
-
-        tag->status = (int8_t)rc;
-
-        /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->read_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Read complete.");
-            tag->read_complete = 1;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done. Read in progress.");
-        }
-
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
-
-    return tag->status;
-}
-
-
-/*
  * listing_tag_check_read_status_connected
  *
  * This routine checks for any outstanding tag list requests.  It will
@@ -300,9 +226,9 @@ int listing_tag_tickler(ab_tag_p tag) {
  * locked!
  */
 
-int listing_tag_check_read_status_connected(ab_tag_p tag) {
+int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -312,26 +238,26 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
     /* if we got here then we have a request and it was processed correctly. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)reply;
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = reply + sizeof(cip_header);
 
     /* point the end of the data */
-    data_end = tag->req->data + tag->req->request_size;
+    data_end = reply + reply_size;
 
     /* check the status */
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK)) {
+        if(cip_resp->reply_service != (AB_CIP_SVC_LIST_TAGS | CIP_SVC_REPLY)) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
                    cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
             size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
@@ -343,7 +269,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         }
 
         /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+        partial_data = (cip_resp->status == CIP_STATUS_FRAG);
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -357,10 +283,10 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
             int new_size = (int)payload_size + tag->offset;
 
             /* a PLC can keep returning fragments forever.  Do not grow without bound. */
-            if((payload_size + tag->offset) > (ptrdiff_t)AB_MAX_TAG_DATA_SIZE) {
+            if((payload_size + tag->offset) > (ptrdiff_t)CIP_MAX_TAG_DATA_SIZE) {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                        "Tag list data size of %d bytes is larger than the maximum of %d bytes!",
-                       (int)(payload_size + tag->offset), AB_MAX_TAG_DATA_SIZE);
+                       (int)(payload_size + tag->offset), CIP_MAX_TAG_DATA_SIZE);
                 rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
@@ -449,22 +375,30 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         }
     } while(0);
 
-    /* clean up the request as we are done with it. */
-    ab_tag_abort_request_only(tag);
-
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
-        /* keep going if we are not done yet, unless we are getting nowhere. */
-        if(partial_data && tag->fragment_retry_count > MAX_FRAGMENT_RETRIES) {
+        if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
+            /*
+             * The create read is a probe: one reply shows the symbol table, and the program, exist.
+             * The whole walk can take hundreds of requests and every read redoes it, so it waits
+             * for the first read, and the buffer stays empty until then.
+             */
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Create probe answered.");
+
+            tag->size = 0;
+            tag->elem_count = 1;
+            tag->offset = 0;
+            tag->next_id = 0;
+            tag->fragment_retry_count = 0;
+        } else if(partial_data && tag->fragment_retry_count > CIP_MAX_FRAGMENT_RETRIES) {
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
                    "Got %d partial responses in a row with no data.  The transfer is not making progress, giving up.",
                    tag->fragment_retry_count);
             rc = PLCTAG_ERR_PARTIAL;
         } else if(partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "calling listing_tag_build_read_request_connected() to get the next chunk.");
-            rc = listing_tag_build_read_request_connected(tag);
+            /* there are more symbols; ask for the next page. */
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "The next chunk is needed.");
+            rc = PLCTAG_STATUS_PENDING;
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -475,12 +409,8 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 
             // tag->elem_count = tag->offset;
 
-            tag->first_read = 0;
             tag->offset = 0;
             tag->next_id = 0;
-
-            /* this read is done. */
-            tag->read_in_progress = 0;
         }
     }
 
@@ -491,9 +421,6 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 
         tag->offset = 0;
         tag->next_id = 0;
-
-        /* clean up everything in case we left something dangling. */
-        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -502,33 +429,24 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 }
 
 
-int listing_tag_build_read_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
-    // tag_list_req *list_req = NULL;
-    ab_request_p req = NULL;
-    int rc = PLCTAG_STATUS_OK;
-    uint8_t *data_start = NULL;
-    uint8_t *data = NULL;
+int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    uint8_t *data = dest;
     uint16_le tmp_u16 = UINT16_LE_INIT(0);
+    int32_t name_size = (tag->encoded_name_size > 1) ? (int32_t)tag->encoded_name_size - 1 : 0;
+    /* service, path size, the name without its word count, class and instance, then six words */
+    int32_t needed = 2 + name_size + 4 + (int32_t)sizeof(tmp_u16) * 6;
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%d", rc);
-        return rc;
+    if(needed > capacity) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Listing request of %d bytes does not fit in %d bytes!",
+               needed, capacity);
+        return PLCTAG_ERR_TOO_SMALL;
     }
-
-    /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
 
     /*
      * set up the embedded CIP tag list request packet
-        uint8_t request_service;    AB_EIP_CMD_CIP_LIST_TAGS=0x55
+        uint8_t request_service;    AB_CIP_SVC_LIST_TAGS=0x55
         uint8_t request_path_size;  3 word = 6 bytes
         uint8_t request_path[6];        0x20    get class
                                         0x6B    tag info/symbol class
@@ -544,7 +462,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
                                                 0x01    attribute #1 - symbol name
     */
 
-    *data = AB_EIP_CMD_CIP_LIST_TAGS;
+    *data = AB_CIP_SVC_LIST_TAGS;
     data++;
 
     /* request path size, in 16-bit words */
@@ -561,7 +479,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     /* first the fixed part. */
     data[0] = 0x20; /* class type */
-    data[1] = 0x6B; /* tag info/symbol class */
+    data[1] = AB_CIP_CLASS_SYMBOL;
     data[2] = 0x25; /* 16-bit instance ID type */
     data[3] = 0x00; /* padding */
     data += 4;
@@ -598,51 +516,12 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
+    /* a page of the listing fills whatever reply space it is given, so it goes alone. */
+    plan->req_size = (int32_t)(data - dest);
+    plan->reply_size = 0;
+    plan->packable = false;
 
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
-
-    req->allow_packing = tag->allow_packing;
-
-    /* add the request to the session's list. */
-    tag->read_in_progress = 1;
-    rc = session_add_request(tag->session, req);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* save the request for later */
-    tag->req = req;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done");
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done");
 
     return PLCTAG_STATUS_OK;
 }

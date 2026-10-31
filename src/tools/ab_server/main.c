@@ -34,6 +34,7 @@
 #include "compat.h"
 
 #include <stdbool.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,31 +51,41 @@
 
 #include "args.h"
 #include "eip.h"
+#include "err.h"
+#include "fairness.h"
 #include "fault.h"
 #include "mutex.h"
 #include "plc.h"
-#include "slice.h"
 #include "tcp_server.h"
+#include <libplctag/api/libplctag.h>
+#include <utils/byte_slice.h>
+#include "udp_server.h"
 #include "utils.h"
 #include "mutex.h"
 #include "log.h"
 
 static void usage(void);
-static void process_args(int argc, const char **argv, plc_s *plc);
+static void process_args(int32_t argc, const char **argv, plc_s *plc);
 static bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path);
 static void parse_path(const char *path, plc_s *plc);
 static void parse_pccc_tag(const char *tag, plc_s *plc);
 static void parse_cip_tag(const char *tag, plc_s *plc);
-static slice_s request_handler(slice_s input, slice_s output, void *plc);
+static bool lookup_atomic_type(const char *type_str, tag_type_t *type, size_t *size);
+static void parse_udt(const char *udt_str, plc_s *plc);
+static uint16_t udt_crc(udt_def_s *udt);
+static byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice_t *reply, void *plc);
 
 /* tcp_server.c gives every accepted connection its own memcpy'd copy of the
- * plc_s context (see plc_s.reject_fo_count), so the ForwardOpen-rejection
+ * plc_s context (see plc_s.dup_conn_id_tries), so the ForwardOpen-rejection
  * countdown must live outside that struct to persist across the client
  * reconnecting with a new TCP session on every retry. Every copy's
- * reject_fo_count pointer points back at this one instance. */
-static atomic_int32_t g_reject_fo_count;
+ * dup_conn_id_tries pointer points back at this one instance. */
+static atomic_int32_t g_dup_conn_id_tries;
 static atomic_int32_t g_empty_frag_count;
+static atomic_int32_t g_no_reply_count;
 static atomic_int32_t g_reject_size_count;
+static atomic_int32_t g_link_offline_count;
+static atomic_int32_t g_out_of_conn_count;
 
 /* one per fault_kind_t, shared the same way -- see plc_s.fault_counts. */
 static atomic_int32_t g_fault_counts[FAULT_MAX];
@@ -82,26 +93,26 @@ static atomic_int32_t g_fault_counts[FAULT_MAX];
 
 #ifdef IS_WINDOWS
 
-typedef volatile int sig_flag_t;
+typedef volatile int32_t sig_flag_t;
 
 sig_flag_t done = 0;
 
 /* straight from MS' web site :-) */
 int WINAPI CtrlHandler(DWORD fdwCtrlType) {
     switch(fdwCtrlType) {
-            // Handle the CTRL-C signal.
+            /* Handle the CTRL-C signal. */
         case CTRL_C_EVENT:
             log_info("^C event");
             done = 1;
             return TRUE;
 
-            // CTRL-CLOSE: confirm that the user wants to exit.
+            /* CTRL-CLOSE: confirm that the user wants to exit. */
         case CTRL_CLOSE_EVENT:
             log_info("Close event");
             done = 1;
             return TRUE;
 
-            // Pass other signals to the next handler.
+            /* Pass other signals to the next handler. */
         case CTRL_BREAK_EVENT:
             log_info("^Break event");
             done = 1;
@@ -145,7 +156,7 @@ void setup_break_handler(void) {
     struct sigaction act;
 
     /* set up signal handler. */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     memset(&act, 0, sizeof(act));
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
@@ -156,20 +167,24 @@ void setup_break_handler(void) {
 
 int main(int argc, const char **argv) {
     tcp_server_p server = NULL;
+    udp_server_p udp_server = NULL;
     plc_s plc;
 
     /* set up handler for ^C etc. */
     setup_break_handler();
 
     /* clear out context to make sure we do not get gremlins */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     memset(&plc, 0, sizeof(plc));
 
-    /* shared across every connection's copy of plc -- see plc_s.reject_fo_count. */
-    plc.reject_fo_count = &g_reject_fo_count;
+    /* shared across every connection's copy of plc -- see plc_s.dup_conn_id_tries. */
+    plc.dup_conn_id_tries = &g_dup_conn_id_tries;
     plc.empty_frag_count = &g_empty_frag_count;
+    plc.no_reply_count = &g_no_reply_count;
     plc.reject_size_count = &g_reject_size_count;
-    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
+    plc.link_offline_count = &g_link_offline_count;
+    plc.out_of_conn_count = &g_out_of_conn_count;
+    for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
     /* set the random seed. */
     srand((unsigned int)time(NULL));
@@ -184,7 +199,13 @@ int main(int argc, const char **argv) {
         return 1;
     }
 
+    /* discovery: ListIdentity over UDP on the same port. */
+    udp_server = udp_server_start((plc.port_str ? plc.port_str : "44818"), &plc, &done);
+    if(!udp_server) { log_error("Unable to answer ListIdentity over UDP; continuing without it."); }
+
     tcp_server_start(server, &done);
+
+    udp_server_destroy(udp_server);
 
     /* Dump fairness statistics before shutdown */
     dump_fairness_stats(&plc);
@@ -196,7 +217,7 @@ int main(int argc, const char **argv) {
 
 
 void usage(void) {
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] [--port=<port>] --tag=<tag>\n"
                     "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
                     "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\", \"Micrologix\" or\n"
@@ -237,14 +258,22 @@ void usage(void) {
      * A second call rather than more of the same literal: C99 only guarantees 4095 characters
      * in one string literal and the first half is already at that limit.
      */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     fprintf(stderr, "    Fault injection, for testing client error handling:\n"
-                    "        --reject_fo=<n>        fail the next <n> ForwardOpen requests with a duplicate\n"
-                    "                               connection error.\n"
+                    "        --dup-conn-id-tries=<n>\n"
+                    "                               fail the next <n> ForwardOpen requests with a duplicate\n"
+                    "                               connection ID error.\n"
                     "        --reject_size=<n>      fail the next <n> ForwardOpen requests with extended status\n"
                     "                               0x0109, \"connection size not supported\", offering a smaller\n"
                     "                               size for the client to retry with.\n"
                     "        --supported_size=<n>   the size offered by --reject_size.  Defaults to 508.\n"
+                    "        --link_offline=<n>     fail the next <n> ForwardOpen requests with extended status\n"
+                    "                               0x0800, \"network link offline\".\n"
+                    "        --out_of_connections=<n> fail the next <n> ForwardOpen requests with extended\n"
+                    "                               status 0x0113, \"out of connections\".\n"
+                    "        --no_reply=<n>         accept the next <n> connected CIP requests and never answer\n"
+                    "                               them, leaving the connection open.  Session setup and\n"
+                    "                               ForwardOpen are untouched.\n"
                     "        --empty_frag=<n>       answer the next <n> read requests with a partial transfer\n"
                     "                               status and no data.  This is what a real PLC sends when\n"
                     "                               packed requests leave no room, and it makes no progress,\n"
@@ -267,7 +296,14 @@ void usage(void) {
                     "                                 pccc_tns   - PCCC transaction number we never sent.\n"
                     "                                 endless_frag - never-ending fragmented read.\n"
                     "\n"
+                    "    Omron UDTs:\n"
+                    "        --udt=<name>:<member>:<type>,<member>:<type>...\n"
+                    "                               define a structure of atomic members.  A tag of\n"
+                    "                               type <name> is then one, e.g. --tag=P:Point[1].\n"
+                    "                               An Omron tag with one dimension of 1 is a scalar.\n"
+                    "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
+                    "         ab_server --plc=Omron --udt=Point:x:DINT,y:REAL --tag=P:Point[1]\n"
                     "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n"
                     "         ab_server --plc=LgxPccc --path=1,0 --tag=N7[10]\n");
 
@@ -281,29 +317,97 @@ void usage(void) {
  * the chain did not.  Note that "tag" is ARGS_MULTIPLE -- everything else is once-only.
  */
 static const args_flag_def_t arg_flags[] = {
-    {"plc", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_ONCE, "plc",
+    {"plc",
+     ARGS_TYPE_STRING,
+     ARGS_REQUIRED,
+     ARGS_ONCE,
+     "plc",
      "PLC type to simulate: ControlLogix, Micro800, Omron, PLC/5, SLC500, Micrologix or LgxPccc",
      {.has_default = false}},
-    {"path", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "path",
-     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix and LgxPccc", {.has_default = false}},
-    {"port", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_ONCE, "port", "TCP port to listen on.  Defaults to 44818",
+    {"path",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "path",
+     "Internal path to the CPU, e.g. \"1,0\".  Required for ControlLogix and LgxPccc",
      {.has_default = false}},
-    {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated",
+    {"port",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "port",
+     "TCP port to listen on.  Defaults to 44818",
+     {.has_default = false}},
+    {"tag", ARGS_TYPE_STRING, ARGS_REQUIRED, ARGS_MULTIPLE, "tag", "Tag definition.  May be repeated", {.has_default = false}},
+    {"udt",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_MULTIPLE,
+     "udt",
+     "Omron UDT definition, <name>:<member>:<type>,<member>:<type>...  May be repeated",
      {.has_default = false}},
     {"debug", ARGS_TYPE_BOOL, ARGS_OPTIONAL, ARGS_ONCE, "debug", "Turn on debug logging", {.has_default = false}},
-    {"reject_fo", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "reject_fo",
-     "Reject the first <count> ForwardOpen requests", {.has_default = true, .value.int_val = 0}},
-    {"empty_frag", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "empty_frag",
+    {"dup-conn-id-tries",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "dup-conn-id-tries",
+     "Reject the first <count> ForwardOpen requests",
+     {.has_default = true, .value.int_val = 0}},
+    {"empty_frag",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "empty_frag",
      "Answer the first <count> read requests with a partial-transfer status and no data",
      {.has_default = true, .value.int_val = 0}},
-    {"reject_size", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "reject_size",
+    {"no_reply",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "no_reply",
+     "Silently drop the responses to the first <count> connected CIP requests",
+     {.has_default = true, .value.int_val = 0}},
+    {"reject_size",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "reject_size",
      "Reject the first <count> ForwardOpen requests with extended status 0x0109",
      {.has_default = true, .value.int_val = 0}},
-    {"supported_size", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "supported_size",
-     "Connection size to offer with a 0x0109 rejection", {.has_default = true, .value.int_val = 508}},
-    {"delay", ARGS_TYPE_INT, ARGS_OPTIONAL, ARGS_ONCE, "delay", "Delay every response by <ms> milliseconds",
+    {"link_offline",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "link_offline",
+     "Reject the first <count> ForwardOpen requests with extended status 0x0800",
      {.has_default = true, .value.int_val = 0}},
-    {"corrupt", ARGS_TYPE_STRING, ARGS_OPTIONAL, ARGS_MULTIPLE, "corrupt",
+    {"out_of_connections",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "out_of_connections",
+     "Reject the first <count> ForwardOpen requests with extended status 0x0113",
+     {.has_default = true, .value.int_val = 0}},
+    {"supported_size",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "supported_size",
+     "Connection size to offer with a 0x0109 rejection",
+     {.has_default = true, .value.int_val = 508}},
+    {"delay",
+     ARGS_TYPE_INT,
+     ARGS_OPTIONAL,
+     ARGS_ONCE,
+     "delay",
+     "Delay every response by <ms> milliseconds",
+     {.has_default = true, .value.int_val = 0}},
+    {"corrupt",
+     ARGS_TYPE_STRING,
+     ARGS_OPTIONAL,
+     ARGS_MULTIPLE,
+     "corrupt",
      "Corrupt the next <count> responses in the named way, as <kind>[:<count>].  May be repeated",
      {.has_default = false}},
 };
@@ -311,7 +415,7 @@ static const args_flag_def_t arg_flags[] = {
 #define NUM_ARG_FLAGS (sizeof(arg_flags) / sizeof(arg_flags[0]))
 
 
-void process_args(int argc, const char **argv, plc_s *plc) {
+void process_args(int32_t argc, const char **argv, plc_s *plc) {
     args_result_t args;
     bool needs_path = false;
     const char *path_str = NULL;
@@ -320,20 +424,23 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     size_t num_corruptions = 0;
 
     /* make sure that the fault injection counts are zero. */
-    atomic_store_int32(plc->reject_fo_count, 0);
+    atomic_store_int32(plc->dup_conn_id_tries, 0);
     atomic_store_int32(plc->empty_frag_count, 0);
+    atomic_store_int32(plc->no_reply_count, 0);
     atomic_store_int32(plc->reject_size_count, 0);
-    for(int fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
+    atomic_store_int32(plc->link_offline_count, 0);
+    atomic_store_int32(plc->out_of_conn_count, 0);
+    for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { atomic_store_int32(plc->fault_counts[fault], 0); }
 
     if(args_parse(argc, argv, arg_flags, NUM_ARG_FLAGS, &args) != UTIL_OK) {
-        int bad_flag = args_get_error_flag_index(&args);
+        int32_t bad_flag = args_get_error_flag_index(&args);
 
         /*
          * Name the flag the way the user typed it.  For a known flag the table has the name; for
          * an unrecognized one there is no table entry, so args_parse() hands back the offending
          * argv entry instead.
          */
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Error processing arguments: %s (%s)\n", args_get_error_detail(&args),
                 (bad_flag >= 0 && (size_t)bad_flag < NUM_ARG_FLAGS)
                     ? arg_flags[bad_flag].name
@@ -351,7 +458,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
      */
     plc_type_str = args_get_string(&args, "plc");
     if(!plc_type_str || !set_plc_type(plc_type_str, plc, &needs_path)) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unsupported PLC type %s!\n", plc_type_str ? plc_type_str : "(none)");
         args_free(&args);
         usage();
@@ -359,16 +466,13 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     /* debug output needs to be on before anything interesting is logged. */
-    if(args_get_bool(&args, "debug")) {
-        debug_on();
-        log_set_level(LOG_LEVEL_DETAIL);
-    }
+    if(args_get_bool(&args, "debug")) { log_set_level(LOG_LEVEL_DETAIL); }
 
     path_str = args_get_string(&args, "path");
     if(path_str) {
         parse_path(path_str, plc);
     } else if(needs_path) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "This PLC type requires a path argument.\n");
         args_free(&args);
         usage();
@@ -376,6 +480,23 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     if(args_get_string(&args, "port")) { plc->port_str = args_get_string(&args, "port"); }
+
+    /* UDTs before tags, so a tag can name one. */
+    for(size_t i = 0; i < args_get_count(&args, "udt"); i++) {
+        args_value_t udt_val = args_get_at(&args, "udt", i);
+
+        if(!udt_val.present || !udt_val.value.string_val) { continue; }
+
+        if(plc->plc_type != PLC_OMRON) {
+            /* NOLINTNEXTLINE */
+            fprintf(stderr, "--udt is only supported for Omron.\n");
+            args_free(&args);
+            usage();
+            return;
+        }
+
+        parse_udt(udt_val.value.string_val, plc);
+    }
 
     /* now that the PLC type is known, the tags can be interpreted. */
     num_tags = args_get_count(&args, "tag");
@@ -393,7 +514,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     if(num_tags == 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "You must define at least one tag.\n");
         args_free(&args);
         usage();
@@ -401,9 +522,10 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     /* fault injection. */
-    if(args_get_int(&args, "reject_fo") != 0) {
-        log_info("Setting reject ForwardOpen count to %d.", (int)args_get_int(&args, "reject_fo"));
-        atomic_store_int32(plc->reject_fo_count, (int32_t)args_get_int(&args, "reject_fo"));
+    if(args_get_int(&args, "dup-conn-id-tries") != 0) {
+        log_info("Failing the next %d ForwardOpen requests with a duplicate connection ID.",
+                 (int)args_get_int(&args, "dup-conn-id-tries"));
+        atomic_store_int32(plc->dup_conn_id_tries, (int32_t)args_get_int(&args, "dup-conn-id-tries"));
     }
 
     if(args_get_int(&args, "empty_frag") != 0) {
@@ -416,8 +538,23 @@ void process_args(int argc, const char **argv, plc_s *plc) {
         atomic_store_int32(plc->reject_size_count, (int32_t)args_get_int(&args, "reject_size"));
     }
 
+    if(args_get_int(&args, "link_offline") != 0) {
+        log_info("Setting link offline count to %d.", (int)args_get_int(&args, "link_offline"));
+        atomic_store_int32(plc->link_offline_count, (int32_t)args_get_int(&args, "link_offline"));
+    }
+
+    if(args_get_int(&args, "out_of_connections") != 0) {
+        log_info("Setting out of connections count to %d.", (int)args_get_int(&args, "out_of_connections"));
+        atomic_store_int32(plc->out_of_conn_count, (int32_t)args_get_int(&args, "out_of_connections"));
+    }
+
     log_info("Setting the size offered with a 0x0109 rejection to %d.", (int)args_get_int(&args, "supported_size"));
     plc->reject_size_supported = (uint16_t)args_get_int(&args, "supported_size");
+
+    if(args_get_int(&args, "no_reply") != 0) {
+        log_info("Dropping the responses to the next %d connected CIP requests.", (int)args_get_int(&args, "no_reply"));
+        atomic_store_int32(plc->no_reply_count, (int32_t)args_get_int(&args, "no_reply"));
+    }
 
     if(args_get_int(&args, "delay") != 0) {
         log_info("Setting response delay to %dms.", (int)args_get_int(&args, "delay"));
@@ -431,7 +568,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
         if(!corrupt_val.present || !corrupt_val.value.string_val) { continue; }
 
         if(!fault_parse(corrupt_val.value.string_val, plc)) {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unrecognized --corrupt value \"%s\".\n", corrupt_val.value.string_val);
             args_free(&args);
             usage();
@@ -507,8 +644,13 @@ bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path) {
         plc->path[14] = (uint8_t)0x24;
         plc->path[15] = (uint8_t)0x01;
         plc->path_len = 16;
-        plc->client_to_server_max_packet = 504;
-        plc->server_to_client_max_packet = 504;
+        /*
+         * Unconnected (UCMM) messages carry up to 502 bytes of CIP, and aphyt reads in chunks that
+         * fill that.  This limit covers the whole EIP packet, so add the 24-byte EIP header and the
+         * 16 bytes of interface handle, timeout and CPF items.  A Forward Open replaces it.
+         */
+        plc->client_to_server_max_packet = 24 + 16 + 504;
+        plc->server_to_client_max_packet = 24 + 16 + 504;
         *needs_path = false;
     } else if(str_cmp_i(plc_type_str, "PLC/5") == 0) {
         log_info_always("Selecting PLC/5 simulator.");
@@ -552,16 +694,16 @@ bool set_plc_type(const char *plc_type_str, plc_s *plc, bool *needs_path) {
 
 
 void parse_path(const char *path_str, plc_s *plc) {
-    int tmp_path[2];
+    int32_t tmp_path[2];
 
-    // NOLINTNEXTLINE
-    if(str_scanf(path_str, "%d,%d", &tmp_path[0], &tmp_path[1]) == 2) {
+    /* NOLINTNEXTLINE */
+    if(str_scanf(path_str, "%" SCNd32 ",%" SCNd32, &tmp_path[0], &tmp_path[1]) == 2) {
         plc->path[0] = (uint8_t)tmp_path[0];
         plc->path[1] = (uint8_t)tmp_path[1];
 
         log_info("Processed path %d,%d.", plc->path[0], plc->path[1]);
     } else {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Error processing path \"%s\"!  Path must be two numbers separated by a comma.\n", path_str);
         usage();
     }
@@ -585,7 +727,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag_def_s *tag = calloc(1, sizeof(*tag));
     char data_file_name[200] = {0};
     char size_str[200] = {0};
-    int num_dims = 0;
+    int32_t num_dims = 0;
     size_t start = 0;
     size_t len = 0;
 
@@ -597,7 +739,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != PLCTAG_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
     /* try to match the two parts of a tag definition string. */
 
@@ -607,7 +749,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     start = 0;
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -642,7 +784,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
             tag->elem_size = 4;
             tag->data_file_num = 19;
         } else {
-            // NOLINTNEXTLINE
+            /* NOLINTNEXTLINE */
             fprintf(stderr, "Unknown data file %s, unable to create tag!", data_file_name);
             usage();
         }
@@ -652,7 +794,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
 
     /* get the array size delimiter. */
     if(tag_str[start] != '[') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after data file in \"%s\"!\n",
                 tag_str);
         usage();
@@ -663,7 +805,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     /* get the size field */
     len = strspn(tag_str + start, "0123456789");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot match array size in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -675,7 +817,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ']') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after size in \"%s\"!\n",
                 tag_str);
         usage();
@@ -687,17 +829,17 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[2] = 1;
 
     /* match the size. */
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     num_dims = str_scanf(size_str, "%zu", &tag->dimensions[0]);
     if(num_dims != 1) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag size in \"%s\"!\n", tag_str);
         usage();
     }
 
     /* check the size. */
     if(tag->dimensions[0] <= 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "The array size must least 1 and may not be negative!\n");
         usage();
     } else {
@@ -708,16 +850,17 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if(!tag->name) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate a copy of the data file \"%s\"!\n", data_file_name);
         exit(1);
     }
 
     /* allocate the tag data array. */
     log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
+    tag->data_size = tag->elem_count * tag->elem_size;
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
         exit(1);
@@ -754,7 +897,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     char tag_name[200] = {0};
     char type_str[200] = {0};
     char dim_str[200] = {0};
-    int num_dims = 0;
+    int32_t num_dims = 0;
     size_t start = 0;
     size_t len = 0;
 
@@ -764,11 +907,11 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != PLCTAG_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
 
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
+    if(mutex_create(&(tag->data_mutex)) != PLCTAG_STATUS_OK) { log_error("Unable to create tag data mutex!"); }
 
 
     /* try to match the three parts of a tag definition string. */
@@ -777,7 +920,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     start = 0;
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -789,17 +932,17 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ':') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find colon after tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
         start++;
     }
 
-    /* get the type field */
-    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    /* get the type field, which may name a UDT. */
+    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot match tag type in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -811,7 +954,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != '[') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after tag type in \"%s\"!\n",
                 tag_str);
         usage();
@@ -822,7 +965,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* get the dimension field */
     len = strspn(tag_str + start, "0123456789,");
     if(!len) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot match dimension in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -834,31 +977,15 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ']') {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after tag type in \"%s\"!\n",
                 tag_str);
         usage();
     }
 
     /* match the type. */
-    if(str_cmp_i(type_str, "SINT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_SINT;
-        tag->elem_size = 1;
-    } else if(str_cmp_i(type_str, "INT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_INT;
-        tag->elem_size = 2;
-    } else if(str_cmp_i(type_str, "DINT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_DINT;
-        tag->elem_size = 4;
-    } else if(str_cmp_i(type_str, "LINT") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_LINT;
-        tag->elem_size = 8;
-    } else if(str_cmp_i(type_str, "REAL") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_REAL;
-        tag->elem_size = 4;
-    } else if(str_cmp_i(type_str, "LREAL") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_LREAL;
-        tag->elem_size = 8;
+    if(lookup_atomic_type(type_str, &tag->tag_type, &tag->elem_size)) {
+        /* nothing more to do. */
     } else if(str_cmp_i(type_str, "STRING") == 0) {
         /*
          * "STRING" means a different thing on each PLC family, so this needs the PLC type to
@@ -882,17 +1009,53 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
                 tag->elem_size = TAG_CIP_SIZE_STRING;
                 break;
         }
-    } else if(str_cmp_i(type_str, "BOOL") == 0) {
-        tag->tag_type = TAG_CIP_TYPE_BOOL;
-        tag->elem_size = 1;
+    } else if(str_cmp_i(type_str, "VSTRING") == 0) {
+        /*
+         * A CIP STRING packed at its actual length, which is the shape an Omron NJ/NX sends.
+         * The wire type is the ordinary CIP STRING because that is what the PLC reports; what
+         * differs is that the elements have no stride, so elem_size means nothing here.
+         */
+        tag->tag_type = TAG_CIP_TYPE_STRING;
+        tag->elem_size = 0;
+        tag->variable_elements = true;
+        tag->count_word_bytes = TAG_CIP_STRING_COUNT_WORD_BYTES;
+        tag->elements_zero_terminated = true;
+    } else if(str_cmp_i(type_str, "VSHORTSTRING") == 0) {
+        /*
+         * A CIP SHORT_STRING packed at its actual length: a one-byte count and exactly that
+         * many characters, with no terminator and no padding out to a capacity.  This is what
+         * a real Micro800 returns, as opposed to the fixed full-size slots the SHORT_STRING
+         * type above uses.
+         */
+        tag->tag_type = TAG_CIP_TYPE_SHORT_STRING;
+        tag->elem_size = 0;
+        tag->variable_elements = true;
+        tag->count_word_bytes = TAG_CIP_SHORT_STRING_COUNT_WORD_BYTES;
+        tag->elements_zero_terminated = false;
     } else {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
-        usage();
+        for(tag->udt = plc->udts; tag->udt; tag->udt = tag->udt->next_udt) {
+            if(str_cmp_i(type_str, tag->udt->name) == 0) { break; }
+        }
+
+        if(!tag->udt) {
+            /* NOLINTNEXTLINE */
+            fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
+            usage();
+        }
+
+        tag->tag_type = TAG_CIP_TYPE_STRUCT;
+        tag->elem_size = tag->udt->size;
     }
 
     /* build the encoded type as it will appear on the wire. */
-    if(tag->tag_type == TAG_CIP_STRUCT_HANDLE_STRING) {
+    if(tag->udt) {
+        /* an Omron structure goes out as an abbreviated struct carrying the UDT's CRC. */
+        tag->type_info[0] = TAG_CIP_TYPE_ABBREV_STRUCT;
+        tag->type_info[1] = 2;
+        tag->type_info[2] = (uint8_t)(tag->udt->crc & 0xFF);
+        tag->type_info[3] = (uint8_t)((tag->udt->crc >> 8) & 0xFF);
+        tag->type_info_size = 4;
+    } else if(tag->tag_type == TAG_CIP_STRUCT_HANDLE_STRING) {
         tag->type_info[0] = TAG_CIP_TYPE_ABBREV_STRUCT;
         tag->type_info[1] = 2; /* two bytes of struct handle follow. */
         tag->type_info[2] = (uint8_t)(TAG_CIP_STRUCT_HANDLE_STRING & 0xFF);
@@ -909,17 +1072,17 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[1] = 0;
     tag->dimensions[2] = 0;
 
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     num_dims = str_scanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
     if(num_dims < 1 || num_dims > 3) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Tag dimensions must have at least one dimension non-zero and no more than three dimensions.");
         usage();
     }
 
     /* check the dimensions. */
     if(tag->dimensions[0] <= 0) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "The first tag dimension must be at least 1 and may not be negative!\n");
         usage();
     } else {
@@ -944,19 +1107,62 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if(!tag->name) {
-        // NOLINTNEXTLINE
+        /* NOLINTNEXTLINE */
         fprintf(stderr, "Unable to allocate a copy of the tag name \"%s\"!\n", tag_name);
         exit(1);
     }
 
     /* allocate the tag data array. */
-    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
-    tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
-    if(!tag->data) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Unable to allocate tag data buffer!\n");
-        free(tag->name);
-        exit(1);
+    if(tag->variable_elements) {
+        /*
+         * Seed each element with a string of a different length, so the array genuinely has no
+         * stride and a client that assumes one reads the wrong bytes.  Element i holds i+1
+         * copies of 'a'+i: short, deterministic and easy to assert against.
+         */
+        size_t offset = 0;
+        size_t terminator = tag->elements_zero_terminated ? 1u : 0u;
+
+        tag->data_size = 0;
+        for(size_t i = 0; i < tag->elem_count; i++) {
+            tag->data_size += tag->count_word_bytes + i + 1 + terminator;
+        }
+
+        tag->data = calloc(tag->data_size, 1);
+        if(!tag->data) {
+            /* NOLINTNEXTLINE */
+            fprintf(stderr, "Unable to allocate tag data buffer!\n");
+            free(tag->name);
+            exit(1);
+        }
+
+        for(size_t i = 0; i < tag->elem_count; i++) {
+            size_t len = i + 1;
+
+            tag->data[offset] = (uint8_t)(len & 0xFF);
+            if(tag->count_word_bytes == 2) { tag->data[offset + 1] = (uint8_t)((len >> 8) & 0xFF); }
+            offset += tag->count_word_bytes;
+
+            for(size_t j = 0; j < len; j++) { tag->data[offset + j] = (uint8_t)('a' + (i % 26)); }
+
+            offset += len;
+
+            if(terminator) {
+                tag->data[offset] = 0;
+                offset++;
+            }
+        }
+
+        log_info("allocated %zu bytes for %zu variable-length string elements.", tag->data_size, tag->elem_count);
+    } else {
+        log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
+        tag->data_size = tag->elem_count * tag->elem_size;
+        tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
+        if(!tag->data) {
+            /* NOLINTNEXTLINE */
+            fprintf(stderr, "Unable to allocate tag data buffer!\n");
+            free(tag->name);
+            exit(1);
+        }
     }
 
     log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
@@ -968,30 +1174,187 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
 }
 
 
+/* the fixed-size CIP types a tag or UDT member can have. */
+bool lookup_atomic_type(const char *type_str, tag_type_t *type, size_t *size) {
+    static const struct {
+        const char *name;
+        tag_type_t type;
+        size_t size;
+    } atomic_types[] = {
+        {"SINT", TAG_CIP_TYPE_SINT, 1},
+        {"INT", TAG_CIP_TYPE_INT, 2},
+        {"DINT", TAG_CIP_TYPE_DINT, 4},
+        {"LINT", TAG_CIP_TYPE_LINT, 8},
+        {"REAL", TAG_CIP_TYPE_REAL, 4},
+        {"LREAL", TAG_CIP_TYPE_LREAL, 8},
+        {"BOOL", TAG_CIP_TYPE_BOOL, 1},
+    };
+
+    for(size_t i = 0; i < sizeof(atomic_types) / sizeof(atomic_types[0]); i++) {
+        if(str_cmp_i(type_str, atomic_types[i].name) == 0) {
+            *type = atomic_types[i].type;
+            *size = atomic_types[i].size;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+/*
+ * Omron UDTs are in the format:
+ *    <name>:<member>:<type>,<member>:<type>...
+ *
+ * Members are atomic types laid out at their natural alignment, and the UDT's size is rounded
+ * up to its widest member, which is how aphyt unpacks them.  A BOOL member takes two bytes, as
+ * it does on an Omron.
+ */
+void parse_udt(const char *udt_str, plc_s *plc) {
+    udt_def_s *udt = calloc(1, sizeof(*udt));
+    char *copy = strdup(udt_str);
+    char *member_list = NULL;
+    char *member = NULL;
+    char *next_member = NULL;
+    size_t align = 1;
+
+    if(!udt || !copy) {
+        /* NOLINTNEXTLINE */
+        fprintf(stderr, "Unable to allocate memory for UDT \"%s\"!\n", udt_str);
+        exit(1);
+    }
+
+    member_list = strchr(copy, ':');
+    if(!member_list || member_list == copy) {
+        /* NOLINTNEXTLINE */
+        fprintf(stderr, "UDT definition \"%s\" must be <name>:<member>:<type>,...!\n", udt_str);
+        usage();
+    }
+
+    *member_list = 0;
+    member_list++;
+    udt->name = strdup(copy);
+
+    for(member = member_list; member; member = next_member) {
+        char *type_str = NULL;
+        udt_member_s *m = &udt->members[udt->num_members];
+
+        next_member = strchr(member, ',');
+        if(next_member) { *next_member++ = 0; }
+
+        type_str = strchr(member, ':');
+
+        if(!type_str || type_str == member || udt->num_members >= UDT_MAX_MEMBERS) {
+            /* NOLINTNEXTLINE */
+            fprintf(stderr, "Bad member \"%s\" in UDT \"%s\", or more than %d members!\n", member, udt_str, UDT_MAX_MEMBERS);
+            usage();
+        }
+
+        *type_str = 0;
+        type_str++;
+
+        if(!lookup_atomic_type(type_str, &m->type, &m->size)) {
+            /* NOLINTNEXTLINE */
+            fprintf(stderr, "UDT member type \"%s\" must be an atomic type!\n", type_str);
+            usage();
+        }
+
+        if(m->type == TAG_CIP_TYPE_BOOL) { m->size = 2; }
+
+        m->name = strdup(member);
+        m->offset = (udt->size + m->size - 1) / m->size * m->size;
+        udt->size = m->offset + m->size;
+        if(m->size > align) { align = m->size; }
+
+        udt->num_members++;
+    }
+
+    if(udt->num_members == 0) {
+        /* NOLINTNEXTLINE */
+        fprintf(stderr, "UDT \"%s\" has no members!\n", udt_str);
+        usage();
+    }
+
+    udt->size = (udt->size + align - 1) / align * align;
+    udt->crc = udt_crc(udt);
+    udt->vto_id = plc->max_vto_id + 1;
+    plc->max_vto_id = udt->vto_id + (uint32_t)udt->num_members;
+
+    free(copy);
+
+    log_info("Processed UDT %s: %zu members, %zu bytes, CRC %04x, type instance %u.", udt->name, udt->num_members, udt->size,
+             udt->crc, udt->vto_id);
+
+    udt->next_udt = plc->udts;
+    plc->udts = udt;
+}
+
+
+/*
+ * Omron's CRC is over the type definition and its algorithm is not public, so any stable hash
+ * of the definition stands in: a client only echoes it back.  FNV-1a folded to 16 bits.
+ */
+uint16_t udt_crc(udt_def_s *udt) {
+    uint32_t hash = 2166136261u;
+
+    for(size_t i = 0; i < udt->num_members; i++) {
+        for(const char *c = udt->members[i].name; *c; c++) { hash = (hash ^ (uint8_t)*c) * 16777619u; }
+        hash = (hash ^ (uint8_t)(udt->members[i].type & 0xFF)) * 16777619u;
+    }
+
+    return (uint16_t)((hash >> 16) ^ (hash & 0xFFFF));
+}
+
+
 /*
  * Process each request.  Dispatch to the correct
  * request type handler.
  */
 
-slice_s request_handler(slice_s input, slice_s output, void *plc_arg) {
-    // Remember that we get a copy of the plc_arg/context contents. So values are frozen
-    // in time, but references are to a shared resource and must be mutex'ed.
+byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice_t *reply, void *plc_arg) {
+    /*
+     * Remember that we get a copy of the plc_arg/context contents. So values are frozen
+     * in time, but references are to a shared resource and must be mutex'ed.
+     */
     plc_s *plc = (plc_s *)plc_arg;
+    byte_slice_t packet = {0};
+    byte_slice_t rest = {0};
+    uint16_t eip_command = 0;
+    uint16_t eip_len = 0;
+    byte_slice_t resp = {0};
 
-    /* check to see if we have a full packet. */
-    if(slice_len(input) >= EIP_HEADER_SIZE) {
-        uint16_t eip_len = slice_get_uint16_le(input, 2);
+    byte_slice_cut(output, 0, reply, NULL);
 
-        if(slice_len(input) >= (size_t)(EIP_HEADER_SIZE + eip_len)) {
-            slice_s resp = eip_dispatch_request(input, output, plc);
+    /* no whole packet yet: use nothing. */
+    if(byte_slice_len(input) < EIP_HEADER_SIZE) { return input; }
 
-            /* if there is a response delay requested, then wait a bit. */
-            if(plc->response_delay > 0) { util_sleep_ms(plc->response_delay); }
+    byte_slice_read_u16_le(byte_slice_read_u16_le(input, &eip_command), &eip_len);
 
-            return resp;
-        }
+    rest = byte_slice_take(input, EIP_HEADER_SIZE + eip_len, &packet);
+    if(byte_slice_has_error(rest)) { return input; }
+
+    resp = eip_dispatch_request(packet, output, plc);
+
+    /* PLCTAG_ERR_CLOSE after UnregisterSession: close. */
+    if(byte_slice_has_error(resp)) { return byte_slice_fail(rest, byte_slice_get_error(resp)); }
+
+    /* if there is a response delay requested, then wait a bit. */
+    if(plc->response_delay > 0) { util_sleep_ms(plc->response_delay); }
+
+    /*
+     * --no_reply: use the packet and send nothing, which leaves the connection open and the
+     * client waiting.
+     *
+     * Connected sends only.  Session registration and ForwardOpen both arrive as
+     * unconnected sends, and swallowing one of those wedges the client before it has
+     * a connection to read over -- which it recovers from by retrying, so it proves
+     * nothing.  The target is a read on an established connection.
+     */
+    if(eip_command == EIP_CONNECTED_SEND && atomic_dec_int32(plc->no_reply_count) > 0) {
+        log_info("Dropping the response to this request.");
+    } else {
+        *reply = resp;
     }
 
-    /* we do not have a complete packet, get more data. */
-    return slice_make_err(TCP_SERVER_INCOMPLETE);
+    return rest;
 }

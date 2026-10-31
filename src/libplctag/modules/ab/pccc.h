@@ -35,31 +35,13 @@
 #define __LIBPLCTAG_AB_PCCC_H__
 
 
-#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/modules/cip/tag.h>
 #include <platform.h>
 #include <stdbool.h>
-
-typedef enum {
-    PCCC_FILE_UNKNOWN = 0x00, /* UNKNOWN! */
-    PCCC_FILE_ASCII = 0x8e,
-    PCCC_FILE_BCD = 0x8f,
-    PCCC_FILE_BIT = 0x85,
-    PCCC_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
-    PCCC_FILE_CONTROL = 0x88,
-    PCCC_FILE_COUNTER = 0x87,
-    PCCC_FILE_FLOAT = 0x8a,
-    PCCC_FILE_INPUT = 0x83,
-    PCCC_FILE_INT = 0x89,
-    PCCC_FILE_LONG_INT = 0x91,
-    PCCC_FILE_MESSAGE = 0x92,
-    PCCC_FILE_OUTPUT = 0x82,
-    PCCC_FILE_PID = 0x93,
-    PCCC_FILE_SFC = 0x00, /* UNKNOWN! */
-    PCCC_FILE_STATUS = 0x84,
-    PCCC_FILE_STRING = 0x8d,
-    PCCC_FILE_TIMER = 0x86
-} pccc_file_t;
+#include <stddef.h>
+#include <stdint.h>
+#include <utils/byteorder.h>
 
 typedef struct {
     pccc_file_t file_type;
@@ -78,20 +60,120 @@ extern int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_
 // extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
 // extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
 extern const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size);
+
+/* the library error for the same PCCC STS/EXT STS bytes pccc_decode_error() describes. */
+extern int pccc_status_to_rc(uint8_t *error_ptr, size_t error_size);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data, int data_size, int *pccc_res_type, int *pccc_res_length);
-extern int pccc_encode_dt_byte(uint8_t *data, int buf_size, uint32_t data_type, uint32_t data_size);
+
+/*
+ * The front of a PCCC request carried by the Execute PCCC service, and the PCCC command
+ * blocks that follow it.
+ *
+ * These live here rather than in pccc.c because PCCC-mapped Logix uses the same request
+ * prefix and the same command block, with its own function codes and its own payload.
+ */
+START_PACK typedef struct {
+    /* PCCC Command Req Routing */
+    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
+    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
+    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
+    uint8_t request_id_size;        /* ALWAYS 7 */
+    uint16_le vendor_id;            /* Our CIP Vendor ID */
+    uint32_le vendor_serial_number; /* Our CIP Vendor Serial Number */
+} END_PACK cip_pccc_req;
+
+START_PACK typedef struct {
+    /* PCCC Command */
+    uint8_t pccc_command;         /* CMD read, write etc. */
+    uint8_t pccc_status;          /* STS 0x00 in request */
+    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
+    uint8_t pccc_function;        /* FNC sub-function of command */
+    uint16_le pccc_offset;        /* offset of requested in total request */
+    uint16_le pccc_transfer_size; /* total number of words requested */
+} END_PACK plc5_pccc_read_cmd_req;
+
+START_PACK typedef struct {
+    /* PCCC Command */
+    uint8_t pccc_command;         /* CMD read, write etc. */
+    uint8_t pccc_status;          /* STS 0x00 in request */
+    uint16_le pccc_seq_num;       /* TNS transaction/sequence id */
+    uint8_t pccc_function;        /* FNC sub-function of command */
+    uint16_le pccc_offset;        /* offset of requested in total request */
+    uint16_le pccc_transfer_size; /* total number of words to be written */
+} END_PACK plc5_pccc_write_cmd_req;
+
 
 /* generic direct ethernet tag functions */
-extern int pccc_check_response_header(ab_tag_p tag, bool is_dhp);
-extern int pccc_tag_status(ab_tag_p tag);
-extern int pccc_tag_tickler(ab_tag_p tag);
-extern int pccc_tag_read_start(ab_tag_p tag);
-extern int pccc_tag_write_start(ab_tag_p tag);
+extern int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size, bool is_dhp);
 
-/* PCCC over DH+ */
-extern int pccc_dhp_tag_status(ab_tag_p tag);
-extern int pccc_dhp_tag_tickler(ab_tag_p tag);
-extern int pccc_dhp_tag_read_start(ab_tag_p tag);
-extern int pccc_dhp_tag_write_start(ab_tag_p tag);
+/*
+ * Write the request prefix and return the first byte after it.  is_dhp picks the DH+ routing
+ * header over the Execute PCCC header; PCCC-mapped Logix is never DH+ and passes false.
+ */
+extern uint8_t *pccc_write_prefix(cip_tag_p tag, uint8_t *dest, bool is_dhp);
+
+/*
+ * Attach a submitted request to the tag under api_mutex, or roll the operation back and
+ * release the request.  Every PCCC start function ends here.
+ */
+
+/*
+ * Check that a request needing overhead + payload bytes fits what the session will carry.
+ * Compares before subtracting, so a connection too small for the overhead cannot wrap.
+ */
+extern int pccc_check_payload_space(cip_tag_p tag, size_t overhead, size_t payload);
+
+
+/*
+ * The whole PCCC reply as it arrives once the connection has stripped the EIP and CPF
+ * framing: the CIP reply header and PCCC matching info above, then the PCCC command trailer.
+ * This is pccc_resp from modules/cip/wire.h less its 40 bytes of framing.
+ */
+START_PACK typedef struct {
+    uint8_t reply_code;
+    uint8_t reserved;
+    uint8_t general_status;
+    uint8_t status_size;
+
+    uint8_t request_id_size;
+    uint16_le vendor_id;
+    uint32_le vendor_serial_number;
+
+    uint8_t pccc_command;
+    uint8_t pccc_status;
+    uint16_le pccc_seq_num;
+} END_PACK cip_pccc_full_resp;
+
+/* four byte CIP reply header, seven bytes of PCCC matching info, four byte PCCC command. */
+_Static_assert(sizeof(cip_pccc_full_resp) == 15, "cip_pccc_full_resp wire size changed");
+
+
+/*
+ * One vtable for PLC/5, SLC and MicroLogix, plain or over a DH+ bridge.  The PLC family is
+ * in tag->plc_type and the bridge in tag->session->is_dhp; the functions above read both.
+ */
+extern struct tag_vtable_t pccc_vtable;
 
 #endif
+
+
+/*
+ * PCCC command and function codes.
+ *
+ * PCCC is Rockwell's own protocol, carried inside CIP by the Execute PCCC service.  These
+ * are its codes, not CIP's.
+ */
+#define AB_EIP_CMD_PCCC_EXECUTE ((uint8_t)0x4B) /* the CIP service that carries a PCCC message */
+
+#define AB_EIP_PCCC_TYPED_CMD ((uint8_t)0x0F)
+#define AB_EIP_PLC5_RANGE_READ_FUNC ((uint8_t)0x01)
+#define AB_EIP_PLC5_RANGE_WRITE_FUNC ((uint8_t)0x00)
+#define AB_EIP_PLC5_RMW_FUNC ((uint8_t)0x26)
+#define AB_EIP_PCCCLGX_TYPED_READ_FUNC ((uint8_t)0x68)
+#define AB_EIP_PCCCLGX_TYPED_WRITE_FUNC ((uint8_t)0x67)
+#define AB_EIP_SLC_RANGE_READ_FUNC ((uint8_t)0xA2)
+#define AB_EIP_SLC_RANGE_WRITE_FUNC ((uint8_t)0xAA)
+#define AB_EIP_SLC_RANGE_WRITE_MASK_FUNC ((uint8_t)0xAB)
+
+/* PCCC data file types, as they appear in a typed read or write. */
+#define AB_PCCC_DATA_ARRAY 9

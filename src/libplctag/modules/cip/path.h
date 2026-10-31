@@ -50,9 +50,14 @@
  * plc_type selects DH+ bridging, which only the PLC-5/SLC/MicroLogix families
  * support: a DH+ segment against any other family is rejected with
  * PLCTAG_ERR_BAD_PARAM rather than silently ignored.
+ *
+ * is_bridged says whether the path leaves the gateway's chassis: an IP segment, a DH+
+ * segment, or any port/link pair whose port is not the backplane (port 1).  Which network it
+ * leaves onto cannot be told from the string -- a port number means different things on
+ * different modules.
  */
 extern int cip_encode_path(const char *path, int *needs_connection, int plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size,
-                           int *is_dhp, uint16_t *dhp_dest);
+                           int *is_dhp, uint16_t *dhp_dest, bool *is_bridged);
 
 /* PLC families that support DH+ bridging, for cip_encode_path()'s plc_type. */
 #define CIP_PLC_KIND_OTHER (0)
@@ -60,9 +65,6 @@ extern int cip_encode_path(const char *path, int *needs_connection, int plc_type
 
 /* look up the type size in bytes based on the first byte */
 extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
-
-/* look up the element size in bytes based on the first byte */
-extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);
 
 /*
  * Everything the symbolic-name encoder needs from a tag, so that the encoder

@@ -90,6 +90,25 @@ attr_entry find_entry(attr a, const char *name) {
 extern attr attr_create(void) { return (attr)mem_alloc(sizeof(struct attr_t)); }
 
 
+extern attr attr_copy(attr src) {
+    attr res = NULL;
+
+    if(!src) { return NULL; }
+
+    res = attr_create();
+    if(!res) { return NULL; }
+
+    for(attr_entry e = src->head; e; e = e->next) {
+        if(attr_set_str(res, e->name, e->val)) {
+            attr_destroy(res);
+            return NULL;
+        }
+    }
+
+    return res;
+}
+
+
 /*
  * attr_create_from_str
  *
@@ -329,4 +348,19 @@ extern void attr_destroy(attr a) {
     }
 
     mem_free(a);
+}
+
+
+bool attr_clamp_int32(int32_t *value, int32_t min_value, int32_t max_value) {
+    if(*value < min_value) {
+        *value = min_value;
+        return true;
+    }
+
+    if(*value > max_value) {
+        *value = max_value;
+        return true;
+    }
+
+    return false;
 }

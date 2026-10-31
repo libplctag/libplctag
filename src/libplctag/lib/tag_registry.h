@@ -34,6 +34,7 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
+#include <stdbool.h>
 
 /*
  * The global tag-handle registry: the map from the int32_t handle the application
@@ -44,10 +45,17 @@
 extern plc_tag_p lookup_tag(int32_t tag_id);
 
 /* Assign the tag a fresh id and publish it in the registry. */
-extern int add_tag_lookup(plc_tag_p tag);
+extern int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing);
 
-/* Remove a tag from the registry.  The caller still holds its own reference. */
-extern void remove_tag_lookup(plc_tag_p tag);
+extern plc_tag_p tag_registry_find_reusable(tag_registry_p registry, const char *reuse_str);
+
+extern void tag_registry_forget_reusable(plc_tag_p tag);
+
+/*
+ * Remove a tag from the registry.  The caller still holds its own reference.  Returns false if
+ * the tag was no longer there: whoever removed it owns raising its DESTROYED event.
+ */
+extern bool remove_tag_lookup(plc_tag_p tag);
 
 /* Remove a tag by id and return it, or NULL if no such tag is registered. */
 extern plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id);
@@ -60,7 +68,7 @@ extern plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id
  *
  * init() builds the registry but deliberately does NOT publish it: no tag may
  * find it until every device module has started, or a module that fails to
- * start would leave a live tickler behind.  initialize_modules() calls
+ * start would leave tags no handler can serve.  initialize_modules() calls
  * publish() once they have all succeeded, or discard_pending() if one did not.
  */
 extern int tag_registry_init(void);
@@ -83,6 +91,3 @@ extern void tag_registry_stage_shutdown(tag_registry_p registry);
 
 /* Destroy every tag still registered.  Only valid after tag_registry_close(). */
 extern void tag_registry_destroy_all_tags(tag_registry_p registry);
-
-/* Wake the tickler thread and wait for it to exit. */
-extern void tag_registry_stop_tickler(tag_registry_p registry);

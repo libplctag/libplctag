@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,8 +33,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -47,10 +48,6 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_TYPE_INT ((tag_type_t)0x00C3)   /* Signed 16–bit integer value */
 #define TAG_CIP_TYPE_DINT ((tag_type_t)0x00C4)  /* Signed 32–bit integer value */
 #define TAG_CIP_TYPE_LINT ((tag_type_t)0x00C5)  /* Signed 64–bit integer value */
-#define TAG_CIP_TYPE_USINT ((tag_type_t)0x00C6) /* Unsigned 8–bit integer value */
-#define TAG_CIP_TYPE_UINT ((tag_type_t)0x00C7)  /* Unsigned 16–bit integer value */
-#define TAG_CIP_TYPE_UDINT ((tag_type_t)0x00C8) /* Unsigned 32–bit integer value */
-#define TAG_CIP_TYPE_ULINT ((tag_type_t)0x00C9) /* Unsigned 64–bit integer value */
 #define TAG_CIP_TYPE_REAL ((tag_type_t)0x00CA)  /* 32–bit floating point value, IEEE format */
 #define TAG_CIP_TYPE_LREAL ((tag_type_t)0x00CB) /* 64–bit floating point value, IEEE format */
 #define TAG_CIP_TYPE_STRING ((tag_type_t)0x00D0) /* CIP STRING: 2-byte count word + 82 chars = 84 bytes. */
@@ -80,6 +77,17 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_STRUCT_HANDLE_STRING ((uint16_t)0x0FCE)
 
 #define TAG_CIP_SIZE_STRING (84)
+
+/*
+ * A CIP STRING whose elements are packed end to end at their actual length -- a two-byte
+ * count followed by exactly that many characters, with no padding out to a capacity.  An
+ * array of them has no element stride: finding element N means walking the count words of
+ * the N before it.  Omron NJ/NX strings behave this way, which is why the Omron byte order
+ * in the library sets str_is_fixed_length to zero, and it is the case the fixed-size STRING
+ * above cannot express.
+ */
+#define TAG_CIP_STRING_COUNT_WORD_BYTES (2)
+#define TAG_CIP_SHORT_STRING_COUNT_WORD_BYTES (1)
 #define TAG_CIP_SIZE_SHORT_STRING (256) /* 1 count byte + up to 255 characters. */
 #define TAG_CIP_SIZE_LOGIX_STRING (88)
 
@@ -102,7 +110,7 @@ typedef uint16_t tag_type_t;
 
 /*
  * Deliberate corruption of outgoing responses, so the client's response-validation code can be
- * tested.  The other fault-injection flags (--reject_fo, --reject_size, --empty_frag, --delay)
+ * tested.  The other fault-injection flags (--dup-conn-id-tries, --reject_size, --empty_frag, --delay)
  * all send well-formed responses that merely say "no"; these send malformed ones.  The
  * machinery that arms and fires them lives in fault.c; the enum is here because plc_s below
  * needs one counter per kind.
@@ -137,8 +145,38 @@ typedef enum {
     FAULT_MAX
 } fault_kind_t;
 
+/*
+ * An Omron UDT from --udt: a flat structure of atomic members.  Omron describes it through the
+ * Variable Type Object (class 0x6C): one instance for the structure itself at vto_id, then one
+ * per member at vto_id + 1 + i, linked in member order.
+ */
+#define UDT_MAX_MEMBERS (32) /* ponytail: fixed table, grow it if a test needs a wider UDT. */
+#define TAG_CIP_TYPE_STRUCT ((tag_type_t)0x00A2)
+#define TAG_CIP_TYPE_ARRAY ((uint8_t)0xA3)
+
+typedef struct {
+    char *name;
+    tag_type_t type;
+    size_t size;
+    size_t offset;
+} udt_member_s;
+
+typedef struct udt_def_s {
+    struct udt_def_s *next_udt;
+    char *name;
+    uint16_t crc; /* sent as the additional info on reads and checked on writes, as an Omron does. */
+    size_t size;
+    uint32_t vto_id;
+    size_t num_members;
+    udt_member_s members[UDT_MAX_MEMBERS];
+} udt_def_s;
+
 struct tag_def_s {
     struct tag_def_s *next_tag;
+
+    /* the UDT when tag_type is TAG_CIP_TYPE_STRUCT, else NULL. */
+    udt_def_s *udt;
+
     char *name;
     tag_type_t tag_type;
 
@@ -153,6 +191,20 @@ struct tag_def_s {
 
     size_t elem_size;
     size_t elem_count;
+
+    /*
+     * True when the elements are packed at their own lengths rather than a fixed stride, so
+     * elem_size means nothing and data_size holds the real extent of data.  See
+     * TAG_CIP_STRING_COUNT_WORD_BYTES above.
+     */
+    bool variable_elements;
+    size_t data_size;
+
+    /* width of the count word ahead of each element when variable_elements is set. */
+    size_t count_word_bytes;
+
+    /* true when each element carries a zero terminator after its characters. */
+    bool elements_zero_terminated;
     size_t data_file_num;
     size_t num_dimensions;
     size_t dimensions[3];
@@ -168,7 +220,6 @@ struct tag_def_s {
     atomic_int64_t total_latency_us;     /* sum of all request latencies in microseconds */
     atomic_int64_t min_latency_us;       /* minimum request latency */
     atomic_int64_t max_latency_us;       /* maximum request latency */
-    atomic_int64_t last_request_time_us; /* timestamp when request arrived */
 };
 
 typedef struct tag_def_s tag_def_s;
@@ -190,10 +241,8 @@ typedef struct plc_s {
     uint32_t session_handle;
     uint64_t sender_context;
     uint32_t server_connection_id;
-    uint16_t server_connection_seq;
     uint32_t server_to_client_rpi;
     uint32_t client_connection_id;
-    uint16_t client_connection_seq;
     uint16_t client_connection_serial_number;
     uint16_t client_vendor_id;
     uint32_t client_serial_number;
@@ -201,9 +250,6 @@ typedef struct plc_s {
 
     uint32_t client_to_server_max_packet;
     uint32_t server_to_client_max_packet;
-
-    /* PCCC info */
-    uint16_t pccc_seq_id;
 
     /*
      * debugging. Points at a single atomic_int32_t shared by every
@@ -213,7 +259,7 @@ typedef struct plc_s {
      * new TCP session on every retry, instead of resetting to the original
      * CLI value each time.
      */
-    atomic_int32_t *reject_fo_count;
+    atomic_int32_t *dup_conn_id_tries;
 
     /*
      * As above: shared across every connection's copy of this struct.
@@ -226,9 +272,27 @@ typedef struct plc_s {
      * reject_size_count makes the next N ForwardOpen requests fail with extended status
      * 0x0109 (connection size not supported) and offer a smaller size, which is how a real
      * PLC negotiates the client down.
+     *
+     * link_offline_count makes the next N ForwardOpen requests fail with extended status
+     * 0x0800 (network link offline): the route exists but the link to the target is down, as
+     * when a PLC is out for maintenance.
+     *
+     * out_of_conn_count makes the next N ForwardOpen requests fail with extended status
+     * 0x0113 (out of connections): the PLC has no connection free until another closes.
      */
     atomic_int32_t *empty_frag_count;
     atomic_int32_t *reject_size_count;
+    atomic_int32_t *link_offline_count;
+    atomic_int32_t *out_of_conn_count;
+
+    /*
+     * As above.  no_reply_count swallows the next N connected CIP requests whole: the response is
+     * built and then dropped, and the connection is left open as though the packet were
+     * still arriving.  A client sees a request that is never answered and never refused,
+     * which no other fault here produces -- empty_frag_count and the corruptions all send
+     * something back.  It is what an auto-sync read needs to be wedged on demand.
+     */
+    atomic_int32_t *no_reply_count;
 
     /* size offered back with the 0x0109 rejection above. */
     uint16_t reject_size_supported;
@@ -240,8 +304,18 @@ typedef struct plc_s {
     atomic_int32_t *fault_counts[FAULT_MAX];
 
     /* response delay */
-    int response_delay;
+    int32_t response_delay;
+
+    /*
+     * The local IPv4 address, host order, that the ListIdentity reply advertises.  The UDP
+     * listener sets it per request to the interface facing the sender; 0 otherwise.
+     */
+    uint32_t local_ip;
 
     /* list of tags served by this "PLC" */
     struct tag_def_s *tags;
+
+    /* Omron UDTs, and the highest Variable Type Object instance they use. */
+    udt_def_s *udts;
+    uint32_t max_vto_id;
 } plc_s;

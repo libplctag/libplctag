@@ -35,6 +35,9 @@
 #pragma once
 
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <libplctag/api/libplctag.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
@@ -44,8 +47,8 @@
 
 typedef struct plc_tag_t *plc_tag_p;
 
-/* Opaque handle to the library-scoped instance (tag hashtable, its lookup mutex,
- * and the tag tickler thread/condvar). Full definition lives in lib.c. A tag holds
+/* Opaque handle to the library-scoped instance (tag hashtable and its lookup
+ * mutex). Full definition lives in tag_registry.c. A tag holds
  * a reference for its whole lifetime (see plc_tag_create_impl()/each protocol
  * destructor), so any code reachable from a valid plc_tag_p may use
  * tag->instance->tags / tag->instance->tag_lookup_mutex directly: those objects
@@ -53,6 +56,37 @@ typedef struct plc_tag_t *plc_tag_p;
 typedef struct tag_registry_t *tag_registry_p;
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
+
+/*
+ * A module's tag constructor.
+ *
+ * The return value is the error channel: PLCTAG_STATUS_OK and *tag_out set, or an error
+ * code.  A constructor that allocated a tag before it failed hands that tag back anyway so
+ * the caller can release it, so *tag_out may be non-NULL on an error return.
+ */
+typedef int (*tag_create_function)(attr attributes,
+                                   void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                   void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
+
+/*
+ * What one encoded request will cost, filled in by the encoder.  A handler that bundles
+ * several requests into one exchange budgets them with it.
+ */
+typedef struct {
+    int32_t req_size;   /* bytes the encoder wrote */
+    int32_t reply_size; /* expected reply bytes, 0 when not known yet */
+    bool packable;      /* may share an exchange with other requests */
+} tag_op_plan_t;
+
+/*
+ * Write one request into dest, which holds capacity bytes, and describe it in plan.  Returns
+ * PLCTAG_ERR_TOO_SMALL when it does not fit.  Encoding has no side effects on the tag's
+ * progress, so a request that did not fit can be encoded again later.
+ */
+typedef int (*tag_encode_func)(plc_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+
+/* Apply one reply to the tag.  Returns OK when the operation is done, PENDING when it needs another exchange. */
+typedef int (*tag_decode_func)(plc_tag_p tag, uint8_t *reply, int32_t reply_size);
 
 /*
  * Runtime attribute descriptors.  The core and each protocol publish a NULL-name-terminated
@@ -107,10 +141,6 @@ extern const attr_def_t *attr_find_lib(const char *name);
 extern int32_t attr_copy_string(const char *str, uint8_t *buffer, int32_t buffer_length);
 extern int32_t attr_string_size(const char *str);
 
-/* Render a byte order array, e.g. {0,1,2,3}, as the "0,1,2,3" text the tag string uses. */
-extern int32_t attr_copy_byte_order(const int *order, size_t order_len, uint8_t *buffer, int32_t buffer_length);
-extern int32_t attr_byte_order_size(const int *order, size_t order_len);
-
 
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {
@@ -129,8 +159,7 @@ struct tag_vtable_t {
      * do so here rather than during the protocol's own tag_create_function, since
      * that runs before the generic layer finishes setting up the tag object --
      * publishing any earlier lets the worker thread observe a half-initialized tag.
-     * NULL for protocols that only rely on the generic tag_tickler_func()/tag lookup
-     * hashtable, since add_tag_lookup() already runs after generic setup completes.
+     * NULL for tags with no worker thread to publish to.
      */
     tag_vtable_func activate;
 
@@ -140,6 +169,15 @@ struct tag_vtable_t {
      * Called while api_mutex is held.  NULL if not implemented.
      */
     tag_vtable_func tag_data_written;
+
+    /*
+     * The protocol's wire format, for a handler that drives the tag's operations itself.  NULL
+     * where the protocol does not use them or the tag does not support that direction.
+     */
+    tag_encode_func encode_read;
+    tag_decode_func decode_read;
+    tag_encode_func encode_write;
+    tag_decode_func decode_write;
 
     /* Runtime attributes this protocol publishes, NULL-name-terminated.  Consulted before
      * the core table, so a protocol can override or suppress a core attribute. */
@@ -188,7 +226,7 @@ struct tag_byte_order_s {
     unsigned int str_is_zero_terminated : 1;
     unsigned int str_is_byte_swapped : 1;
 
-    unsigned int str_pad_to_multiple_bytes;
+    unsigned int write_pad_alignment_bytes;
     unsigned int str_count_word_bytes;
     unsigned int str_max_capacity;
     unsigned int str_total_length;
@@ -206,6 +244,28 @@ struct tag_byte_order_s {
 typedef struct tag_byte_order_s tag_byte_order_t;
 
 
+typedef enum {
+    TAG_OP_IDLE = 0,
+    TAG_OP_READ_REQUEST, /* a read is in progress, queued or on the wire */
+    TAG_OP_WRITE_REQUEST,
+    TAG_OP_DESTROY /* idle, and destroyed at op_time unless a read or write comes first */
+} tag_op_state_t;
+
+
+/*
+ * ponytail: fixed 16 entries.  The tag's handler dispatches every pass, so a full ring means the
+ * dispatcher is starved; the push logs ERROR and drops the event.  Grow it if a real workload
+ * hits that.
+ */
+#define TAG_EVENT_RING_SIZE (16)
+#define TAG_EVENT_RING_MASK (TAG_EVENT_RING_SIZE - 1)
+
+typedef struct {
+    uint8_t event; /* PLCTAG_EVENT_*, all below 256 */
+    int8_t status;
+} tag_event_t;
+
+
 typedef void (*tag_callback_func)(int32_t tag_id, int event, int status);
 typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status, void *user_data);
 
@@ -221,55 +281,63 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
 #define TAG_BASE_STRUCT                                                                 \
     int64_t auto_sync_next_read;                                                        \
     int64_t auto_sync_next_write;                                                       \
-    int64_t read_cache_expire;                                                          \
-    int64_t read_cache_ms;                                                              \
+    /* When the protocol handler next needs to act on this tag; see tag_schedule.h. */   \
+    int64_t op_time;                                                                    \
+    /* atomic so that plc_tag_read() can test it before taking the API mutex. */       \
+    atomic_int64_t read_cache_expire;                                                   \
+    atomic_int64_t read_cache_ms;                                                       \
     uint8_t *data;                                                                      \
     tag_byte_order_t *byte_order;                                                       \
     cond_p tag_cond_wait;                                                               \
     mutex_p api_mutex;                                                                  \
     mutex_p ext_mutex;                                                                  \
     tag_extended_callback_func callback;                                                \
+    /* callback is set; written with it, read without the API mutex. */                \
+    atomic_bool has_callback;                                                           \
+    /* what made this tag; a clone of it is made the same way. */                       \
+    tag_create_function create_func;                                                    \
     tag_vtable_p vtable;                                                                \
     tag_registry_p instance;                                                            \
     void *userdata;                                                                     \
     int32_t auto_sync_read_ms;                                                          \
     int32_t auto_sync_write_ms;                                                         \
+    /* 0 = off.  Under api_mutex. */                                                    \
+    int32_t destroy_idle_sec;                                                           \
+    /* out of the registry at its due time; tag_driver_notify() destroys it. */        \
+    bool auto_destroyed;                                                                \
+    /* created with find_or_create_tag=1. */                                               \
+    bool find_or_create_tag;                                                               \
+    /* the attribute string, set while the tag is in the reuse map.  Under tag_lookup_mutex. */ \
+    char *reuse_key;                                                                    \
     int32_t size;                                                                       \
     int32_t tag_id;                                                                     \
-    int connection_group_id;                                                            \
-    int bit;                                                                            \
-    int protocol_type;                                                                  \
+    int32_t elem_count;                                                                 \
+    int32_t elem_size; /* bytes, except Modbus: bits */                                 \
+    int32_t connection_group_id;                                                        \
+    int32_t bit;                                                                        \
+    tag_protocol_t protocol_type;                                                       \
     atomic_bool abort_requested;                                                        \
-    /* Read by tag_tickler_func() under the global tag_lookup_mutex, while every other  \
-     * field below is written under this tag's own per-tag api_mutex -- a different     \
-     * lock domain. Packing it into the bitfield run below would race with writes to    \
-     * its sibling bits sharing the same storage byte(s), so it gets its own atomic. */ \
-    atomic_bool skip_tickler;                                                           \
-    int8_t event_creation_complete_status;                                              \
-    int8_t event_deletion_started_status;                                               \
-    int8_t event_operation_aborted_status;                                              \
-    int8_t event_read_complete_status;                                                  \
-    int8_t event_read_started_status;                                                   \
-    int8_t event_write_complete_status;                                                 \
-    int8_t event_write_started_status;                                                  \
+    /* tag_op_state_t; see tag_op_state(). */                                          \
+    atomic_int32_t op_state;                                                            \
+    tag_event_t events[TAG_EVENT_RING_SIZE];                                            \
+    /* On its handler's active list.  Written under the handler's own mutex. */         \
+    bool in_active_vector;                                                              \
+    /* CREATED has been queued. */                                                      \
+    bool created;                                                                       \
+    /* the status CREATED was queued with. */                                           \
+    int8_t create_result;                                                               \
+    /* Inside the dispatch loop, so nested calls only queue.  Under api_mutex. */      \
+    bool dispatching;                                                                   \
+    /* Ops started, and the last one ended, so a waiter knows its own op.  Under api_mutex. */ \
+    uint32_t op_seq;                                                                    \
+    uint32_t op_end_seq;                                                                \
+    int8_t op_end_status;                                                               \
+    uint8_t event_head;  /* next event to dispatch */                                   \
+    uint8_t event_count; /* events queued */                                            \
     int8_t status;                                                                      \
     uint8_t allow_field_resize : 1;                                                     \
-    uint8_t event_creation_complete : 1;                                                \
-    uint8_t event_deletion_started : 1;                                                 \
-    uint8_t event_operation_aborted : 1;                                                \
-    uint8_t event_read_complete : 1;                                                    \
-    uint8_t event_read_complete_enable : 1;                                             \
-    uint8_t event_read_started : 1;                                                     \
-    uint8_t event_write_complete : 1;                                                   \
-    uint8_t event_write_complete_enable : 1;                                            \
-    uint8_t event_write_started : 1;                                                    \
-    uint8_t had_created_event : 1;                                                      \
     uint8_t is_bit : 1;                                                                 \
-    uint8_t read_complete : 1;                                                          \
-    uint8_t read_in_flight : 1;                                                         \
-    uint8_t tag_is_dirty : 1;                                                           \
-    uint8_t write_complete : 1;                                                         \
-    uint8_t write_in_flight : 1
+    uint8_t tag_is_dirty : 1
 
 
 struct plc_tag_t {
@@ -313,108 +381,44 @@ static inline bool tag_range_is_valid(plc_tag_p tag, int offset, int count) {
 /* Remove a tag from play: abort, raise DESTROYED, drop the library reference. */
 extern void destroy_tag_common(plc_tag_p tag);
 
-extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
-#define plc_tag_tickler_wake() plc_tag_tickler_wake_impl(__func__, __LINE__)
-extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
 extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
                                     void *userdata);
 
-static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
-    /* do not stack up events if there is no callback. */
-    if(!tag->callback) { return; }
 
-    switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_ABORTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_operation_aborted = 1;
-            tag->event_operation_aborted_status = status;
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising synthesized created event on abort event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-            break;
+/*
+ * Op state and events.
+ *
+ * The op state is what the tag is doing now.  Events are what happened, queued in order on the
+ * tag's ring and dispatched by plc_tag_generic_handle_event_callbacks().  The four transitions
+ * below are the only places that queue op and creation events.  All of them, and every write of
+ * op_state, happen with the tag's API mutex held.  op_state is atomic so that a handler holding
+ * only its connection mutex can read it.
+ */
+#define tag_op_state(tag) ((tag_op_state_t)atomic_get_int32(&(tag)->op_state))
+#define tag_op_set(tag, state) atomic_set_int32(&(tag)->op_state, (int32_t)(state))
+/* only a read or write is busy; DESTROY is idle with a deadline. */
+#define tag_op_busy(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST || tag_op_state(tag) == TAG_OP_WRITE_REQUEST)
+#define tag_op_is_read(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST)
 
-        case PLCTAG_EVENT_CREATED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-                tag->had_created_event = 1;
-            } else {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_CREATED skipped due to duplication.");
-            }
-            break;
+/* queue one event; dropped when the tag has no callback. */
+extern void tag_event_push(plc_tag_p tag, int event, int status);
 
-        case PLCTAG_EVENT_DESTROYED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_DESTROYED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_deletion_started = 1;
-            tag->event_deletion_started_status = status;
-            break;
+/* IDLE -> READ_REQUEST or WRITE_REQUEST; queues READ_STARTED or WRITE_STARTED once the tag is created. */
+extern void tag_op_start(plc_tag_p tag, bool is_read);
 
-        case PLCTAG_EVENT_READ_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_READ_COMPLETED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising synthesized created event on read completed event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
+/*
+ * The op is over with rc: sets the tag status, goes IDLE, queues the COMPLETED event and wakes
+ * waiters.  An op that ends before the tag is created is its create read, and queues CREATED
+ * instead.  Does nothing on an IDLE tag.
+ */
+extern void tag_op_end(plc_tag_p tag, int rc);
 
-            if(tag->event_read_complete_enable) {
-                tag->event_read_complete = 1;
-                tag->event_read_complete_status = status;
-                tag->event_read_complete_enable = 0;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Disabled PLCTAG_EVENT_READ_COMPLETE.");
-            }
-            break;
+/* Go IDLE: CREATED(ABORT) if not yet created, COMPLETED(ABORT) if an op was running, then ABORTED. */
+extern void tag_op_abort(plc_tag_p tag);
 
-        case PLCTAG_EVENT_READ_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_READ_STARTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_read_started = 1;
-            tag->event_read_started_status = status;
-            tag->event_read_complete_enable = 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_READ_COMPLETE.");
-            break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_WRITE_COMPLETED raised with status %s.",
-                   plc_tag_decode_error(status));
-            if(!tag->had_created_event) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id,
-                       "Raising synthesized created event on write completed event.");
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
-
-            if(tag->event_write_complete_enable) {
-                tag->event_write_complete = 1;
-                tag->event_write_complete_status = status;
-                tag->event_write_complete_enable = 0;
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Disabled PLCTAG_EVENT_WRITE_COMPLETE.");
-            }
-            break;
-
-        case PLCTAG_EVENT_WRITE_STARTED:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "PLCTAG_EVENT_WRITE_STARTED raised with status %s.",
-                   plc_tag_decode_error(status));
-            tag->event_write_started = 1;
-            tag->event_write_started_status = status;
-            tag->event_write_complete_enable = 1;
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Enabled PLCTAG_EVENT_WRITE_COMPLETE.");
-            break;
-
-        default: pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unsupported event %d!", status); break;
-    }
-}
+/* queue CREATED with rc, once. */
+extern void tag_created(plc_tag_p tag, int rc);
