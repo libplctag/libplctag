@@ -139,6 +139,11 @@ struct server_ctx_s {
     bool reorder;         /* answer a pipelined request before the one ahead of it */
     int64_t close_every;  /* drop the connection, unanswered, on every Nth request; 0 = never */
     int64_t requests_seen;
+
+    /* --delay-ms: hold every response this long after its request arrives, and the delay applied. */
+    int64_t delay_us;
+    int64_t delay_applied_us;
+    int64_t delay_count;
 };
 
 /* ============================================================================
@@ -160,6 +165,10 @@ struct modbus_client_s {
     uint8_t held_buffer[MODBUS_SEND_BUFFER_SIZE];
     size_t held_size;
     int64_t reorder_deadline_us;
+
+    /* --delay-ms: when this response may go out (util_mono_us) and when its request arrived. */
+    int64_t delay_start_us;
+    int64_t delay_deadline_us;
 };
 
 
@@ -393,6 +402,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
         /* Capture timestamps after we exit the loop (data arrived or error occurred) */
         client->timing.recv_complete_us = util_time_us();
+        client->delay_start_us = util_mono_us();
         /* For simplicity, use same timestamp for first byte and complete in the refactored version
          * This is acceptable since socket_recv_frame() typically completes in one call for small Modbus frames */
         client->timing.first_byte_us = client->timing.recv_complete_us;
@@ -484,6 +494,17 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
                   client->mbap_header.transaction_id);
             memset(&client->timing, 0, sizeof(client->timing));
             continue;
+        }
+
+        /*
+         * --delay-ms: wait without blocking the other connections.  The protothread keeps no
+         * locals across a yield, so the deadline lives in the client.
+         */
+        if(client->server->delay_us > 0) {
+            client->delay_deadline_us = client->delay_start_us + client->server->delay_us;
+            if(util_mono_us() < client->delay_deadline_us) { coro_wait_until(handle, client->delay_deadline_us); }
+            client->server->delay_applied_us += util_mono_us() - client->delay_start_us;
+            client->server->delay_count++;
         }
 
         /* Capture send start time */
@@ -697,6 +718,13 @@ int main(int argc, char *argv[]) {
          "fault.reorder",
          "Answer a pipelined request before the one ahead of it",
          {.has_default = true, .value.bool_val = false}},
+        {"delay-ms",
+         ARGS_TYPE_FLOAT,
+         ARGS_OPTIONAL,
+         ARGS_ONCE,
+         "fault.delay_ms",
+         "Delay every response by this many milliseconds after its request arrives; fractions allowed",
+         {.has_default = true, .value.float_val = 0.0}},
         {"close-every",
          ARGS_TYPE_INT,
          ARGS_OPTIONAL,
@@ -768,6 +796,14 @@ int main(int argc, char *argv[]) {
     server.storage = temp_storage;
     server.reorder = args_get_bool(&args_result, "reorder");
     server.close_every = args_get_int(&args_result, "close-every");
+
+    double delay_ms = args_get_float(&args_result, "delay-ms");
+    if(!(delay_ms >= 0.0 && delay_ms <= 3600000.0)) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "The response delay must be from 0 to 3600000 milliseconds.");
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+    server.delay_us = (int64_t)((delay_ms * 1000.0) + 0.5);
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server starting");
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Coils: %zu", (size_t)coils_val);
@@ -878,6 +914,12 @@ int main(int argc, char *argv[]) {
     fflush(stderr);
 
     print_statistics(&server);
+
+    /* Same line as ab_server, so run_perf_compare.py reads both. */
+    if(server.delay_us > 0) {
+        fprintf(stderr, "Response delay: requested %" PRId64 " us, applied mean %" PRId64 " us over %" PRId64 " responses.\n",
+                server.delay_us, (server.delay_count > 0 ? server.delay_applied_us / server.delay_count : 0), server.delay_count);
+    }
 
     fflush(stderr);
 

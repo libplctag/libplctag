@@ -41,11 +41,14 @@
  * Usage:
  *   perf_benchmark --mode=sync|async|auto --groups=N --threads=M --tags=T
  *                  --tag=BASE_TAG_PATH [--op=read|write] [--auto-ms=P] [--poll-ms=M]
- *                  [--duration=S] [--interleave]
+ *                  [--duration=S] [--interleave] [--group-by=thread|tag]
  *
  * BASE_TAG_PATH is the full tag attribute string without connection_group_id,
  * which the benchmark appends automatically per tag.  Example:
  *   protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray[0]
+ * --tag may be repeated.  Connection group g (1-based) then uses base
+ * (g - 1) mod <number of bases>, so each connection can read its own server
+ * tag, or connections can be split over several gateways.
  *
  * Tags is the primary axis.  Threads and groups must be <= tags (groups
  * also capped at 100).  Each thread owns an exclusive slice of the tags
@@ -55,7 +58,9 @@
  * threads get adjacent IDs, as when threads create their tags concurrently.
  * Sync/async: each thread's tags share one connection group, and threads are
  * assigned to groups round-robin, so --groups=1 shares one connection and
- * --groups=threads gives each thread its own.  Auto: tags are assigned to
+ * --groups=threads gives each thread its own.  --group-by=tag instead spreads
+ * the tags round-robin over the groups whatever thread owns them, so one
+ * thread can use several connections.  Auto: tags are always assigned to
  * groups round-robin.
  *
  * Sync:  thread calls plc_tag_read/write(tag, timeout) in a blocking loop.
@@ -71,9 +76,22 @@
  *   mode,connection_groups,threads,tags,tags_per_thread,duration_ms,
  *   total_ops,ops_per_sec,cpu_load_pct,fairness_cv,fairness_min_max_ratio,
  *   op,errors,p50_us,p95_us,p99_us,max_us,cpu_us_per_op,rss_growth_kb,
- *   create_ms,prime_ms
+ *   create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,tag_spread,window_s
+ *
+ * Tags are created with timeout 0 and then waited for together, so create_ms
+ * is the time for all of them.
  *
  * Fairness is across threads for sync/async and across tags for auto.
+ * Completions are also counted per tag in 1 s windows from the start of the
+ * run.  window_min_max and window_cv are the worst full window across the same
+ * units, so a unit that starves for a while and then catches up still shows.
+ * A window is window_s seconds: at least PASS_WINDOWS passes over a unit's tags
+ * (pass time = tags x duration / total ops), rounded up to whole seconds, so a
+ * window never splits a slow pass.  With fewer than two such windows the run
+ * is too short and the window columns equal the whole run.
+ * conn_window_min_max is the worst full window across connection groups (1.0
+ * with one group).  tag_spread is the largest max - min of whole-run completed
+ * ops among the tags of any one connection group.
  * rss_growth_kb is peak RSS at the end minus peak RSS before tag creation.
  * Latency percentiles come from a log-linear histogram with 16 buckets per
  * power of two, so they are accurate to about 3%.
@@ -104,12 +122,19 @@
 #define REQUIRED_VERSION 2, 6, 0
 
 #define TAG_CREATE_TIMEOUT_MS (10000)
+#define TAG_CREATE_MS_PER_TAG (2) /* added to the create deadline per tag: creates are async */
+#define PASS_WINDOWS (4)          /* a fairness window spans at least this many passes */
 #define TAG_OP_TIMEOUT_MS (5000)
 #define DEFAULT_DURATION_S (10)
 #define DEFAULT_AUTO_MS (1)
 
-#define MAX_TAGS (2000)
+#define MAX_TAGS (10000)
 #define MAX_THREADS (1100)
+#define MAX_GROUPS (128)
+
+/* ponytail: windows past MAX_WINDOWS (2 min) are not counted.  Raise it with the duration. */
+#define WINDOW_US (1000000)
+#define MAX_WINDOWS (120)
 
 /* Tag path template.  connection_group_id (and auto_sync_read_ms) are appended to the base path. */
 #define TAG_PATH_FMT "%s&connection_group_id=%" PRId32
@@ -129,6 +154,7 @@ typedef struct {
     int64_t last_us; /* auto mode: time of the previous completion */
     int64_t max_us;
     uint32_t hist[HIST_BUCKETS];
+    int32_t windows[MAX_WINDOWS]; /* completions per WINDOW_US from run_start_us */
 } tag_stats_t;
 
 typedef struct {
@@ -146,7 +172,9 @@ static double get_cpu_time_ms(void);
 static int64_t get_peak_rss_kb(void);
 static size_t hist_index(int64_t v);
 static int64_t hist_value(size_t idx);
-static void record(tag_stats_t *s, int64_t us);
+static void record(tag_stats_t *s, int64_t us, int64_t t);
+static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s,
+                         double *min_max, double *cv);
 static int64_t percentile(const uint64_t *hist, uint64_t total, double p);
 static int32_t start_op(int32_t tag, bool is_write, int32_t timeout_ms);
 static void auto_callback(int32_t tag_id, int event, int status, void *userdata);
@@ -157,8 +185,10 @@ static void usage(const char *prog);
 
 static compat_atomic_int32_t go = {0};   /* set to 1 to start measuring */
 static compat_atomic_int32_t done = {0}; /* set to 1 to stop */
-static int32_t poll_ms = 0;              /* async: sleep between status passes; 0 just yields */
+static int32_t poll_ms = 1;              /* async: sleep between status passes; 0 just yields */
 static bool interleave = false;          /* create tags round-robin across thread slices */
+static bool group_by_tag = false;        /* sync/async: groups round-robin over tags, not threads */
+static int64_t run_start_us = 0;         /* written before go is set, read after */
 static compat_atomic_int32_t terminate = {0};
 
 
@@ -246,10 +276,49 @@ static int64_t hist_value(size_t idx) {
 }
 
 
-static void record(tag_stats_t *s, int64_t us) {
+/* t is the completion time, for the window counts. */
+static void record(tag_stats_t *s, int64_t us, int64_t t) {
+    int64_t w = (t - run_start_us) / WINDOW_US;
+
     s->ops++;
     s->hist[hist_index(us)]++;
     if(us > s->max_us) { s->max_us = us; }
+    if(w >= 0 && w < MAX_WINDOWS) { s->windows[w]++; }
+}
+
+
+/*
+ * Worst full window across units: the lowest min/max ratio and the highest CV.  unit_windows is
+ * num_units rows of MAX_WINDOWS one-second counts, summed window_s at a time.  Leaves 1.0 and 0.0
+ * with fewer than two units.
+ */
+static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s,
+                         double *min_max, double *cv) {
+    int *counts = NULL;
+    stats_summary_t summary;
+
+    *min_max = 1.0;
+    *cv = 0.0;
+
+    if(num_units < 2) { return; }
+
+    counts = (int *)malloc((size_t)num_units * sizeof(int));
+    if(!counts) { return; }
+
+    for(int32_t w = 0; w + window_s <= num_windows || (w == 0 && num_windows > 0); w += window_s) {
+        for(int32_t u = 0; u < num_units; u++) {
+            int64_t n = 0;
+            for(int32_t k = w; k < w + window_s && k < num_windows; k++) { n += unit_windows[(size_t)u * MAX_WINDOWS + (size_t)k]; }
+            counts[u] = (int)n;
+        }
+
+        if(stats_calculate(counts, (int)num_units, &summary) != 0) { continue; }
+
+        if(summary.min_max_ratio < *min_max) { *min_max = summary.min_max_ratio; }
+        if(summary.cv > *cv) { *cv = summary.cv; }
+    }
+
+    free(counts);
 }
 
 
@@ -294,7 +363,7 @@ static void auto_callback(int32_t tag_id, int event, int status, void *userdata)
     if(status != PLCTAG_STATUS_OK) {
         s->errors++;
     } else if(s->last_us > 0) {
-        record(s, t - s->last_us);
+        record(s, t - s->last_us, t);
     } else {
         s->ops++; /* first completion has no interval */
     }
@@ -339,7 +408,8 @@ static void *thread_func(void *arg) {
                     if(status == PLCTAG_STATUS_PENDING) { continue; }
 
                     if(status == PLCTAG_STATUS_OK) {
-                        record(&td->stats[i], now_us() - started[i]);
+                        int64_t t = now_us();
+                        record(&td->stats[i], t - started[i], t);
                     } else {
                         td->stats[i].errors++;
                     }
@@ -367,7 +437,8 @@ static void *thread_func(void *arg) {
             int32_t rc = start_op(td->tags[idx], td->is_write, TAG_OP_TIMEOUT_MS);
 
             if(rc == PLCTAG_STATUS_OK) {
-                record(&td->stats[idx], now_us() - t0);
+                int64_t t = now_us();
+                record(&td->stats[idx], t - t0, t);
             } else if(!compat_atomic_load_int32(&done)) {
                 td->stats[idx].errors++;
                 fprintf(stderr, "Thread %" PRId32 ": error %s on tag idx %" PRId32 "\n", td->thread_id,
@@ -395,15 +466,18 @@ static void usage(const char *prog) {
             "     --tag=BASE_TAG_PATH [--op=read|write] [--auto-ms=P] [--duration=S]\n"
             "\n"
             "  --mode        sync, async, or auto (auto_sync_read_ms, no threads)\n"
-            "  --groups      number of connection groups (1-100)\n"
+            "  --groups      number of connection groups (1-128)\n"
             "  --threads     number of threads (1-1000, ignored for auto)\n"
-            "  --tags        number of tags to create (1-1000)\n"
-            "  --tag         base tag attribute string (connection_group_id is appended)\n"
+            "  --tags        number of tags to create (1-10000)\n"
+            "  --tag         base tag attribute string (connection_group_id is appended).  May be\n"
+            "                repeated: group g uses base (g - 1) mod <number of bases>\n"
             "  --op          read or write (default: read; auto supports read only)\n"
             "  --auto-ms     auto_sync_read_ms for auto mode (default: %d)\n"
-            "  --poll-ms     async: sleep this long between status passes (default: 0, yield only)\n"
+            "  --poll-ms     async: sleep this long between status passes (default: 1; 0 yields in a loop)\n"
             "  --duration    test duration in seconds (default: %d)\n"
             "  --interleave  sync/async: create tags round-robin across threads (tags must divide evenly)\n"
+            "  --group-by    sync/async: thread (default; a thread's tags share a group) or tag\n"
+            "                (tags round-robin over the groups)\n"
             "\n"
             "Example:\n"
             "  %s --mode=sync --groups=1 --threads=1 --tags=10 --duration=10\n"
@@ -422,12 +496,14 @@ int main(int argc, char **argv) {
     int32_t num_tags = -1;
     int32_t duration_s = DEFAULT_DURATION_S;
     int32_t auto_ms = DEFAULT_AUTO_MS;
-    const char *base_tag_path = NULL;
+    static const char *base_tag_paths[MAX_GROUPS];
+    int32_t num_bases = 0;
 
     static int32_t tag_handles[MAX_TAGS];
     static compat_thread_t threads[MAX_THREADS];
     static thread_data_t tdata[MAX_THREADS];
     static uint64_t total_hist[HIST_BUCKETS];
+    static int32_t tag_group[MAX_TAGS];
     tag_stats_t *stats = NULL;
     int *per_unit_ops = NULL;
     int32_t num_units = 0;
@@ -467,10 +543,18 @@ int main(int argc, char **argv) {
             poll_ms = (int32_t)atoi(argv[i] + 10);
         } else if(strcmp(argv[i], "--interleave") == 0) {
             interleave = true;
+        } else if(strcmp(argv[i], "--group-by=tag") == 0) {
+            group_by_tag = true;
+        } else if(strcmp(argv[i], "--group-by=thread") == 0) {
+            group_by_tag = false;
         } else if(strncmp(argv[i], "--auto-ms=", 10) == 0) {
             auto_ms = (int32_t)atoi(argv[i] + 10);
         } else if(strncmp(argv[i], "--tag=", 6) == 0) {
-            base_tag_path = argv[i] + 6;
+            if(num_bases >= MAX_GROUPS) {
+                fprintf(stderr, "Error: at most %d --tag arguments.\n", MAX_GROUPS);
+                usage(argv[0]);
+            }
+            base_tag_paths[num_bases++] = argv[i] + 6;
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             usage(argv[0]);
@@ -478,7 +562,7 @@ int main(int argc, char **argv) {
     }
 
     if(mode < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || auto_ms <= 0
-       || base_tag_path == NULL || base_tag_path[0] == '\0') {
+       || num_bases == 0 || base_tag_paths[0][0] == '\0') {
         fprintf(stderr, "Error: --mode, --groups, --threads, --tags, and --tag are required and must be valid.\n");
         usage(argv[0]);
     }
@@ -493,8 +577,8 @@ int main(int argc, char **argv) {
         usage(argv[0]);
     }
 
-    if(num_tags > MAX_TAGS || num_threads > MAX_THREADS) {
-        fprintf(stderr, "Error: max tags=%d, max threads=%d\n", MAX_TAGS, MAX_THREADS);
+    if(num_tags > MAX_TAGS || num_threads > MAX_THREADS || num_groups > MAX_GROUPS) {
+        fprintf(stderr, "Error: max tags=%d, max threads=%d, max groups=%d\n", MAX_TAGS, MAX_THREADS, MAX_GROUPS);
         return 1;
     }
 
@@ -510,7 +594,7 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "perf_benchmark: mode=%s op=%s groups=%" PRId32 " threads=%" PRId32 " tags=%" PRId32 " duration=%" PRId32
                     "s tag=%s\n",
-            mode_names[mode], is_write ? "write" : "read", num_groups, num_threads, num_tags, duration_s, base_tag_path);
+            mode_names[mode], is_write ? "write" : "read", num_groups, num_threads, num_tags, duration_s, base_tag_paths[0]);
 
     /* Touch the stats now so their pages count in the RSS baseline, not the growth. */
     stats = (tag_stats_t *)malloc((size_t)num_tags * sizeof(tag_stats_t));
@@ -535,7 +619,7 @@ int main(int argc, char **argv) {
         int32_t i = interleave ? (k % num_threads) * (num_tags / num_threads) + k / num_threads : k;
         int32_t group_id = (i % num_groups) + 1;
 
-        if(mode != MODE_AUTO) {
+        if(mode != MODE_AUTO && !group_by_tag) {
             /* Same contiguous slicing as the thread setup below. */
             int32_t base = num_tags / num_threads;
             int32_t remainder = num_tags % num_threads;
@@ -545,23 +629,48 @@ int main(int argc, char **argv) {
             group_id = (owner % num_groups) + 1;
         }
 
+        tag_group[i] = group_id - 1;
+
         if(mode == MODE_AUTO) {
-            snprintf(path, sizeof(path), TAG_PATH_AUTO_FMT, base_tag_path, group_id, auto_ms);
+            snprintf(path, sizeof(path), TAG_PATH_AUTO_FMT, base_tag_paths[(group_id - 1) % num_bases], group_id, auto_ms);
         } else {
-            snprintf(path, sizeof(path), TAG_PATH_FMT, base_tag_path, group_id);
+            snprintf(path, sizeof(path), TAG_PATH_FMT, base_tag_paths[(group_id - 1) % num_bases], group_id);
         }
 
-        tag_handles[i] = plc_tag_create(path, TAG_CREATE_TIMEOUT_MS);
+        tag_handles[i] = plc_tag_create(path, 0);
         if(tag_handles[i] < 0) {
             fprintf(stderr, "ERROR: Failed to create tag %" PRId32 " (group %" PRId32 "): %s\n", i, group_id,
                     plc_tag_decode_error(tag_handles[i]));
-            for(int32_t j = 0; j < num_tags; j++) {
-                if(tag_handles[j] > 0) { plc_tag_destroy(tag_handles[j]); }
-            }
-            free(stats);
-            free(per_unit_ops);
-            return 1;
+            rc = 1;
+            break;
         }
+    }
+
+    /* Wait for all the creates together. */
+    int64_t create_deadline = now_us() + ((int64_t)TAG_CREATE_TIMEOUT_MS + (int64_t)num_tags * TAG_CREATE_MS_PER_TAG) * 1000;
+    for(int32_t i = 0; rc == 0 && i < num_tags;) {
+        int32_t status = (int32_t)plc_tag_status(tag_handles[i]);
+
+        if(status == PLCTAG_STATUS_OK) {
+            i++;
+        } else if(status != PLCTAG_STATUS_PENDING) {
+            fprintf(stderr, "ERROR: Failed to create tag %" PRId32 ": %s\n", i, plc_tag_decode_error(status));
+            rc = 1;
+        } else if(now_us() > create_deadline) {
+            fprintf(stderr, "ERROR: Timed out creating tag %" PRId32 ".\n", i);
+            rc = 1;
+        } else {
+            compat_sleep_ms(1, NULL);
+        }
+    }
+
+    if(rc != 0) {
+        for(int32_t j = 0; j < num_tags; j++) {
+            if(tag_handles[j] > 0) { plc_tag_destroy(tag_handles[j]); }
+        }
+        free(stats);
+        free(per_unit_ops);
+        return 1;
     }
     int64_t create_ms = (now_us() - create_start) / 1000;
     fprintf(stderr, "All %" PRId32 " tags created in %" PRId64 " ms.\n", num_tags, create_ms);
@@ -619,6 +728,7 @@ int main(int argc, char **argv) {
     double cpu_start = get_cpu_time_ms();
     int64_t wall_start = now_us();
 
+    run_start_us = wall_start;
     compat_atomic_store_int32(&go, 1);
 
     for(int32_t s = 0; s < duration_s && !compat_atomic_load_int32(&terminate); s++) { compat_sleep_ms(1000, NULL); }
@@ -673,15 +783,69 @@ int main(int argc, char **argv) {
         fairness_min_max = summary.min_max_ratio;
     }
 
+    /*--- Per-window fairness ---*/
+    int32_t num_windows = (int32_t)((duration_ms * 1000) / WINDOW_US);
+    double pass_s = (total_ops > 0) ? (double)num_tags * ((double)duration_ms / 1000.0) / (double)total_ops : 0.0;
+    int32_t window_s = (int32_t)(PASS_WINDOWS * pass_s + 0.999999);
+    double window_min_max = 1.0;
+    double window_cv = 0.0;
+    double conn_window_min_max = 1.0;
+    double conn_window_cv = 0.0;
+    int64_t tag_spread = 0;
+    int64_t *unit_windows = (int64_t *)calloc((size_t)num_units * MAX_WINDOWS, sizeof(int64_t));
+    int64_t *group_windows = (int64_t *)calloc((size_t)num_groups * MAX_WINDOWS, sizeof(int64_t));
+
+    if(num_windows > MAX_WINDOWS) { num_windows = MAX_WINDOWS; }
+    if(window_s < 1) { window_s = 1; }
+    if(num_windows / window_s < 2) {
+        fprintf(stderr, "WARNING: a fairness window is %" PRId32 " s, so the run has fewer than two; run longer.\n", window_s);
+    }
+
+    if(unit_windows && group_windows) {
+        int32_t offset = 0;
+
+        for(int32_t u = 0; u < num_units; u++) {
+            /* auto: one tag per unit; sync/async: the thread's slice. */
+            int32_t count = (mode == MODE_AUTO) ? 1 : tdata[u].num_tags;
+            for(int32_t j = offset; j < offset + count; j++) {
+                for(int32_t w = 0; w < num_windows; w++) { unit_windows[(size_t)u * MAX_WINDOWS + (size_t)w] += stats[j].windows[w]; }
+            }
+            offset += count;
+        }
+
+        for(int32_t i = 0; i < num_tags; i++) {
+            for(int32_t w = 0; w < num_windows; w++) { group_windows[(size_t)tag_group[i] * MAX_WINDOWS + (size_t)w] += stats[i].windows[w]; }
+        }
+
+        worst_window(unit_windows, num_units, num_windows, window_s, &window_min_max, &window_cv);
+        worst_window(group_windows, num_groups, num_windows, window_s, &conn_window_min_max, &conn_window_cv);
+    }
+
+    free(unit_windows);
+    free(group_windows);
+
+    for(int32_t g = 0; g < num_groups; g++) {
+        int64_t lo = INT64_MAX;
+        int64_t hi = 0;
+
+        for(int32_t i = 0; i < num_tags; i++) {
+            if(tag_group[i] != g) { continue; }
+            if(stats[i].ops < lo) { lo = stats[i].ops; }
+            if(stats[i].ops > hi) { hi = stats[i].ops; }
+        }
+
+        if(lo != INT64_MAX && hi - lo > tag_spread) { tag_spread = hi - lo; }
+    }
+
     int64_t p50 = percentile(total_hist, hist_total, 0.50);
     int64_t p95 = percentile(total_hist, hist_total, 0.95);
     int64_t p99 = percentile(total_hist, hist_total, 0.99);
 
     printf("%s,%" PRId32 ",%" PRId32 ",%" PRId32 ",%.2f,%" PRId64 ",%" PRId64 ",%.1f,%.2f,%.2f,%.4f,%s,%" PRId64 ",%" PRId64
-           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 "\n",
+           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%" PRId64 ",%" PRId32 "\n",
            mode_names[mode], num_groups, num_threads, num_tags, tags_per_thread, duration_ms, total_ops, ops_per_sec, cpu_load_pct,
            fairness_cv, fairness_min_max, is_write ? "write" : "read", total_errors, p50, p95, p99, max_us, cpu_us_per_op,
-           rss_growth_kb, create_ms, prime_ms);
+           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_spread, window_s);
     fflush(stdout);
 
     fprintf(stderr, "\n--- Results ---\n");
@@ -695,6 +859,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Create/prime:   %" PRId64 " / %" PRId64 " ms\n", create_ms, prime_ms);
     fprintf(stderr, "Fairness CV:    %.2f%%\n", fairness_cv);
     fprintf(stderr, "Fairness ratio: %.4f\n", fairness_min_max);
+    fprintf(stderr, "Worst window:   min/max %.4f  CV %.2f%%  (%" PRId32 " s windows of %" PRId32 " s)\n", window_min_max, window_cv,
+            window_s, num_windows);
+    fprintf(stderr, "Worst conn win: min/max %.4f  CV %.2f%%\n", conn_window_min_max, conn_window_cv);
+    fprintf(stderr, "Tag spread:     %" PRId64 "\n", tag_spread);
     if(have_summary) { stats_print_summary(stderr, &summary); }
 
 cleanup:

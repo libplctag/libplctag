@@ -41,6 +41,10 @@
  * 4. Time between consecutive reads per tag
  *
  * Expected: All tags should get similar read counts.
+ *
+ * --groups=C spreads the tags round-robin over C connections by appending
+ * connection_group_id=1..C to the tag string.  Fairness is then also assessed
+ * among the tags of each connection.
  */
 
 #include <inttypes.h>
@@ -78,6 +82,7 @@ void usage(const char *prog_name) {
         "  --tag=<tag_string> - The complete tag string (required)\n"
         "  --num-tags=N - Number of identical tags to create (default: %d)\n"
         "  --test-duration-secs=N - Test duration in seconds (default: %d)\n"
+        "  --groups=C - Spread the tags round-robin over C connections (default: the tag string's)\n"
         "\n"
         "Arguments can be in any order.\n"
         "\n"
@@ -159,6 +164,7 @@ int main(int argc, char **argv) {
     int num_created = 0;
     int test_duration_secs = DEFAULT_TEST_DURATION_SECS;
     const char *tag_string = NULL;
+    int32_t num_groups = 0;
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
@@ -172,6 +178,12 @@ int main(int argc, char **argv) {
             num_tags = atoi(argv[i] + 11);
             if(num_tags <= 0) {
                 fprintf(stderr, "Number of tags must be greater than zero!\n");
+                usage(argv[0]);
+            }
+        } else if(strncmp(argv[i], "--groups=", 9) == 0) {
+            num_groups = (int32_t)atoi(argv[i] + 9);
+            if(num_groups <= 0 || num_groups > 32767) {
+                fprintf(stderr, "Number of groups must be from 1 to 32767!\n");
                 usage(argv[0]);
             }
         } else if(strncmp(argv[i], "--test-duration-secs=", 21) == 0) {
@@ -216,8 +228,16 @@ int main(int argc, char **argv) {
     /* Create all tags with the same tag string */
     fprintf(stderr, "Creating tags...\n");
     for(int i = 0; i < num_tags; i++) {
+        char grouped[1024];
+        const char *this_tag = tag_string;
+
+        if(num_groups > 0) {
+            snprintf(grouped, sizeof(grouped), "%s&connection_group_id=%" PRId32, tag_string, (int32_t)(i % num_groups) + 1);
+            this_tag = grouped;
+        }
+
         /* create the tags async */
-        int32_t tag_id = plc_tag_create_ex(tag_string, tag_callback, &stats[i], 0);
+        int32_t tag_id = plc_tag_create_ex(this_tag, tag_callback, &stats[i], 0);
         if(tag_id < 0) {
             fprintf(stderr, "Failed to create tag %d: %s\n", i, plc_tag_decode_error(tag_id));
             cleanup_tags(stats, num_created);
@@ -322,6 +342,27 @@ int main(int argc, char **argv) {
 
     /* Assess fairness and set return code */
     if(stats_assess_fairness(&summary, stderr) != 0) { rc = PLCTAG_ERR_BAD_STATUS; }
+
+    /* Each connection's tags must be fair among themselves too. */
+    for(int32_t g = 0; g < num_groups && num_groups > 1; g++) {
+        int *group_counts = malloc((size_t)num_tags * sizeof(int));
+        int group_size = 0;
+        stats_summary_t group_summary;
+
+        if(!group_counts) {
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        for(int i = g; i < num_tags; i += num_groups) { group_counts[group_size++] = read_counts[i]; }
+
+        fprintf(stderr, "\nConnection %" PRId32 " (%d tags):\n", g + 1, group_size);
+        if(group_size > 1 && stats_calculate(group_counts, group_size, &group_summary) == 0) {
+            if(stats_assess_fairness(&group_summary, stderr) != 0) { rc = PLCTAG_ERR_BAD_STATUS; }
+        }
+
+        free(group_counts);
+    }
 
     free(read_counts);
 
