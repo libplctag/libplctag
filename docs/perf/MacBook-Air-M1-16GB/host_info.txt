@@ -1,11 +1,11 @@
 Host: Apple MacBookAir10,1
 CPU:  Apple M1 (8 cores, 3200 MHz (P-core))
 RAM:  16 GB
-OS:   Darwin arm64 (24.6.0)
+OS:   Darwin arm64 (27.0.0)
 ---
 os=Darwin
 arch=arm64
-kernel=24.6.0
+kernel=27.0.0
 hostname=Kyles-MacBook-Air
 manufacturer=Apple
 product=MacBookAir10,1
