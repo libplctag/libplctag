@@ -1860,11 +1860,24 @@ int sleep_ms(int ms) {
  *
  * Milliseconds on a monotonic clock, for deadlines and elapsed time only: a change to the
  * system clock must not move them.  Not a date.
+ *
+ * The clock counts time the system spends suspended on Linux, macOS and Windows, so a deadline
+ * that passes during a suspend has expired on resume.  The PLC connections are most likely dead
+ * by then anyway.  Linux CLOCK_MONOTONIC stops while suspended, so Linux uses CLOCK_BOOTTIME.
+ * macOS CLOCK_MONOTONIC already counts sleep, as does the Windows performance counter.
+ * CLOCK_BOOTTIME on Linux only: other systems that define it may give it other meanings.  The
+ * BSDs use CLOCK_MONOTONIC, not yet checked across a suspend.
  */
+#if defined(__linux__) && defined(CLOCK_BOOTTIME)
+#    define TIME_MS_CLOCK CLOCK_BOOTTIME
+#else
+#    define TIME_MS_CLOCK CLOCK_MONOTONIC
+#endif
+
 int64_t time_ms(void) {
     struct timespec ts;
 
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(TIME_MS_CLOCK, &ts);
 
     return ((int64_t)ts.tv_sec * 1000) + ((int64_t)ts.tv_nsec / 1000000);
 }

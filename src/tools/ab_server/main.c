@@ -86,6 +86,8 @@ static atomic_int32_t g_no_reply_count;
 static atomic_int32_t g_reject_size_count;
 static atomic_int32_t g_link_offline_count;
 static atomic_int32_t g_out_of_conn_count;
+static atomic_int64_t g_delay_applied_us;
+static atomic_int64_t g_delay_count;
 
 /* one per fault_kind_t, shared the same way -- see plc_s.fault_counts. */
 static atomic_int32_t g_fault_counts[FAULT_MAX];
@@ -184,6 +186,8 @@ int main(int argc, const char **argv) {
     plc.reject_size_count = &g_reject_size_count;
     plc.link_offline_count = &g_link_offline_count;
     plc.out_of_conn_count = &g_out_of_conn_count;
+    plc.delay_applied_us = &g_delay_applied_us;
+    plc.delay_count = &g_delay_count;
     for(int32_t fault = FAULT_NONE + 1; fault < FAULT_MAX; fault++) { plc.fault_counts[fault] = &g_fault_counts[fault]; }
 
     /* set the random seed. */
@@ -209,6 +213,14 @@ int main(int argc, const char **argv) {
 
     /* Dump fairness statistics before shutdown */
     dump_fairness_stats(&plc);
+
+    if(plc.response_delay_us > 0) {
+        int64_t count = atomic_load_int64(plc.delay_count);
+        int64_t applied = atomic_load_int64(plc.delay_applied_us);
+
+        log_info_always("Response delay: requested %" PRId64 " us, applied mean %" PRId64 " us over %" PRId64 " responses.",
+                        plc.response_delay_us, (count > 0 ? applied / count : 0), count);
+    }
 
     tcp_server_destroy(server);
 
@@ -278,7 +290,9 @@ void usage(void) {
                     "                               status and no data.  This is what a real PLC sends when\n"
                     "                               packed requests leave no room, and it makes no progress,\n"
                     "                               so a client must not retry it forever.\n"
-                    "        --delay=<ms>           delay every response by <ms> milliseconds.\n"
+                    "        --delay-ms=<ms>        delay every response by <ms> milliseconds.  Fractions\n"
+                    "                               are allowed: 0.3 is about 300us.  The mean delay\n"
+                    "                               actually applied is logged at exit (on SIGINT).\n"
                     "        --corrupt=<kind>[:<n>] send the next <n> responses (default 1) deliberately\n"
                     "                               malformed, to exercise the client's response checks.\n"
                     "                               May be repeated.  <kind> is one of:\n"
@@ -396,13 +410,13 @@ static const args_flag_def_t arg_flags[] = {
      "supported_size",
      "Connection size to offer with a 0x0109 rejection",
      {.has_default = true, .value.int_val = 508}},
-    {"delay",
-     ARGS_TYPE_INT,
+    {"delay-ms",
+     ARGS_TYPE_FLOAT,
      ARGS_OPTIONAL,
      ARGS_ONCE,
-     "delay",
-     "Delay every response by <ms> milliseconds",
-     {.has_default = true, .value.int_val = 0}},
+     "delay-ms",
+     "Delay every response by <ms> milliseconds, fractions allowed",
+     {.has_default = true, .value.float_val = 0.0}},
     {"corrupt",
      ARGS_TYPE_STRING,
      ARGS_OPTIONAL,
@@ -418,6 +432,7 @@ static const args_flag_def_t arg_flags[] = {
 void process_args(int32_t argc, const char **argv, plc_s *plc) {
     args_result_t args;
     bool needs_path = false;
+    double delay_ms = 0.0;
     const char *path_str = NULL;
     const char *plc_type_str = NULL;
     size_t num_tags = 0;
@@ -556,10 +571,15 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
         atomic_store_int32(plc->no_reply_count, (int32_t)args_get_int(&args, "no_reply"));
     }
 
-    if(args_get_int(&args, "delay") != 0) {
-        log_info("Setting response delay to %dms.", (int)args_get_int(&args, "delay"));
-        plc->response_delay = (int)args_get_int(&args, "delay");
+    delay_ms = args_get_float(&args, "delay-ms");
+    if(!(delay_ms >= 0.0 && delay_ms <= 3600000.0)) {
+        log_error("The response delay must be from 0 to 3600000 milliseconds.");
+        usage();
     }
+
+    plc->response_delay_us = (int64_t)((delay_ms * 1000.0) + 0.5);
+
+    if(plc->response_delay_us > 0) { log_info("Setting response delay to %" PRId64 " us.", plc->response_delay_us); }
 
     num_corruptions = args_get_count(&args, "corrupt");
     for(size_t i = 0; i < num_corruptions; i++) {
@@ -1339,7 +1359,10 @@ byte_slice_t request_handler(byte_slice_t input, byte_slice_t output, byte_slice
     if(byte_slice_has_error(resp)) { return byte_slice_fail(rest, byte_slice_get_error(resp)); }
 
     /* if there is a response delay requested, then wait a bit. */
-    if(plc->response_delay > 0) { util_sleep_ms(plc->response_delay); }
+    if(plc->response_delay_us > 0) {
+        atomic_add_int64(plc->delay_applied_us, util_sleep_us(plc->response_delay_us));
+        atomic_add_int64(plc->delay_count, 1);
+    }
 
     /*
      * --no_reply: use the packet and send nothing, which leaves the connection open and the

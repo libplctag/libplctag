@@ -38,7 +38,7 @@
 #include <utils/byte_slice.h>
 #include "log.h"
 
-extern int32_t util_sleep_ms(int32_t ms);
+extern int64_t util_sleep_us(int64_t us);
 extern int64_t util_time_us(void);
 
 extern void system_yield(void);

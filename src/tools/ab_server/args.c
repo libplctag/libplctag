@@ -436,6 +436,14 @@ bool args_get_bool(const args_result_t *result, const char *flag_name) {
     return val.value.bool_val;
 }
 
+double args_get_float(const args_result_t *result, const char *flag_name) {
+    args_value_t val = args_get_value(result, flag_name);
+    if (!val.present || val.type != ARGS_TYPE_FLOAT) {
+        return 0.0;
+    }
+    return val.value.float_val;
+}
+
 /* ================================================================
  * Iteration
  * ================================================================ */

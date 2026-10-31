@@ -59,25 +59,54 @@
  */
 
 
+/*
+ * util_sleep_us
+ *
+ * Sleep for about <us> microseconds and return how long it actually took, on a monotonic
+ * clock.  Short sleeps overshoot (macOS nanosleep, the Windows timer tick), so callers that
+ * report a delay report the return value, not the request.
+ */
+
 #if IS_WINDOWS
 
-int32_t util_sleep_ms(int32_t ms) {
-    if(ms <= 0) { return 1; }
+int64_t util_sleep_us(int64_t us) {
+    LARGE_INTEGER freq;
+    LARGE_INTEGER start;
+    LARGE_INTEGER end;
 
-    Sleep((DWORD)ms);
-    return 1;
+    if(us <= 0) { return 0; }
+
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+
+    /* ponytail: Sleep() has millisecond granularity at best, so round up. */
+    Sleep((DWORD)((us + 999) / 1000));
+
+    QueryPerformanceCounter(&end);
+
+    return ((end.QuadPart - start.QuadPart) * 1000000) / freq.QuadPart;
 }
 
 #else
 
-int32_t util_sleep_ms(int32_t ms) {
+int64_t util_sleep_us(int64_t us) {
     struct timespec req;
-    struct timespec rem = {0};
+    struct timespec start;
+    struct timespec end;
 
-    req.tv_sec = ms / 1000;
-    req.tv_nsec = (ms % 1000) * 1000000;
+    if(us <= 0) { return 0; }
 
-    return nanosleep(&req, &rem);
+    req.tv_sec = (time_t)(us / 1000000);
+    req.tv_nsec = (long)((us % 1000000) * 1000);
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    /* restart after a signal so the delay is not cut short. */
+    while(nanosleep(&req, &req) == -1 && errno == EINTR) {}
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    return ((int64_t)(end.tv_sec - start.tv_sec) * 1000000) + ((int64_t)(end.tv_nsec - start.tv_nsec) / 1000);
 }
 
 #endif

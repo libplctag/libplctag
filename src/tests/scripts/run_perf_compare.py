@@ -18,20 +18,26 @@ Usage:
   run_perf_compare.py --a=... --b=... \\
       --logix-attrs="protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix" \\
       --logix-tag=TestBigArray
-  Thread sweep (100 tags per thread, 1-5, 8 and 12 threads, one shared connection vs
+  Thread sweep (1-8 and 12 threads, 100 tags per thread, one shared connection vs
   one connection per thread) instead of the default set.  Logix runs as a
   ControlLogix, which packs requests with Multiple Service Packet (0x0A):
   run_perf_compare.py --a=... --b=... --server-dir=... --thread-sweep=modbus|logix
+      [--threads=1,2,4] [--tags-per-thread=1,10,100,1000] [--delay-ms=0.3]
+  ab_server logs the mean delay it actually applied; it is written to --out as a
+  "# server delay" line after each server's runs.
   run_perf_compare.py --self-check
 """
 
 import argparse
 import csv
 import itertools
+import re
+import signal
 import socket
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -39,6 +45,8 @@ THRESHOLD = 0.05
 SERVER_BOUND_PCT = 90.0
 LOGIX_PORT = 45100
 MODBUS_PORT = 45102
+SWEEP_THREADS = (1, 2, 3, 4, 5, 6, 7, 8, 12)
+DELAY_LINE = re.compile(r"Response delay: requested (\d+) us, applied mean (\d+) us over (\d+) responses")
 
 
 def build_matrix(hardware):
@@ -60,20 +68,24 @@ def build_matrix(hardware):
     return configs
 
 
-def thread_sweep_matrix(protocol, delay=0):
+def thread_sweep_matrix(protocol, delay_ms=0, thread_counts=SWEEP_THREADS, tags_per_thread=(100,)):
     """groups=1 shares one connection; groups=threads gives each thread its own."""
     configs = []
-    for threads, per_thread, mode, op in itertools.product(
-            (1, 2, 3, 4, 5, 8, 12), [False, True], ["sync", "async"], ["read", "write"]):
+    for threads, per_thread_tags, per_thread, mode, op in itertools.product(
+            thread_counts, tags_per_thread, [False, True], ["sync", "async"], ["read", "write"]):
         if per_thread and threads == 1:
             continue
-        configs.append(dict(protocol=protocol, delay=delay, tags=100 * threads, threads=threads,
+        configs.append(dict(protocol=protocol, delay=delay_ms, tags=per_thread_tags * threads, threads=threads,
                             groups=threads if per_thread else 1, elems=1, mode=mode, op=op))
     return configs
 
 
+def int_list(text):
+    return tuple(int(x) for x in text.split(","))
+
+
 def config_key(c):
-    return (f"{c['protocol']} d{c['delay']} {c['mode']} {c['op']} {c['tags']}x{c['threads']}"
+    return (f"{c['protocol']} d{c['delay']:g}ms {c['mode']} {c['op']} {c['tags']}x{c['threads']}"
             f" g{c.get('groups', 1)} e{c['elems']}")
 
 
@@ -97,19 +109,34 @@ def wait_port(port, proc):
     sys.exit(f"server never listened on {port}")
 
 
-def start_server(protocol, delay, server_dir):
+def start_server(protocol, delay_ms, server_dir, log):
     if protocol == "logix":
         cmd = [str(server_dir / "ab_server"), "--plc=ControlLogix", "--path=1,0", f"--port={LOGIX_PORT}",
                "--tag=TestDINTArray:DINT[2000]"]
-        if delay:
-            cmd.append(f"--delay={delay}")
+        if delay_ms:
+            cmd.append(f"--delay-ms={delay_ms:g}")
         port = LOGIX_PORT
     else:
+        if delay_ms:
+            sys.exit("modbus_server has no delay option yet")
         cmd = [str(server_dir / "modbus_server"), f"--listen=127.0.0.1:{MODBUS_PORT}"]
         port = MODBUS_PORT
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log)
     wait_port(port, proc)
     return proc
+
+
+def stop_server(proc, log):
+    """SIGINT so ab_server exits cleanly and logs the delay it applied; returns that line or None."""
+    proc.send_signal(signal.SIGINT)
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    log.seek(0)
+    found = DELAY_LINE.findall(log.read().decode(errors="replace"))
+    return found[-1] if found else None
 
 
 def cpu_seconds(pid):
@@ -162,6 +189,9 @@ def self_check():
     assert verdict([100, 100], [107, 130], True)[1] == "better"
     assert verdict([100, 106], [104, 110], True)[1] == "same"   # 6 % but overlapping
     assert abs(cpu_seconds_text("1-02:03:04.5") - (86400 + 7384.5)) < 1e-9
+    assert DELAY_LINE.findall("x Response delay: requested 300 us, applied mean 412 us over 9 responses.")[-1] == ("300", "412", "9")
+    assert len(thread_sweep_matrix("logix", 0.3, (1, 2), (1, 10))) == 2 * 2 * (1 + 2) * 2
+    assert config_key(thread_sweep_matrix("logix", 0.3, (1,), (1,))[0]).startswith("logix d0.3ms ")
     print("self-check ok")
 
 
@@ -199,7 +229,10 @@ def main():
     p.add_argument("--only", help="run only configurations whose key contains this text")
     p.add_argument("--thread-sweep", choices=["modbus", "logix"], help="run the thread sweep instead")
     p.add_argument("--poll-ms", type=int, default=0, help="async: sleep this long between status passes instead of yielding")
-    p.add_argument("--delay", type=int, default=0, help="thread sweep: ab_server response delay in ms (Logix only)")
+    p.add_argument("--delay-ms", type=float, default=0.0,
+                   help="thread sweep: ab_server response delay in ms, fractions allowed (Logix only)")
+    p.add_argument("--threads", type=int_list, default=SWEEP_THREADS, help="thread sweep: thread counts, comma separated")
+    p.add_argument("--tags-per-thread", type=int_list, default=(100,), help="thread sweep: tags per thread, comma separated")
     p.add_argument("--interleave", action="store_true", help="create tags round-robin across threads")
     p.add_argument("--self-check", action="store_true")
     args = p.parse_args()
@@ -211,7 +244,8 @@ def main():
     if not args.a or not args.b or (not hardware and not args.server_dir):
         p.error("--a, --b and --server-dir (or --logix-attrs) are required")
 
-    matrix = thread_sweep_matrix(args.thread_sweep, args.delay) if args.thread_sweep else build_matrix(hardware)
+    matrix = (thread_sweep_matrix(args.thread_sweep, args.delay_ms, args.threads, args.tags_per_thread)
+              if args.thread_sweep else build_matrix(hardware))
     configs = [c for c in matrix if not args.only or args.only in config_key(c)]
     total_s = len(configs) * 2 * args.rounds * (args.duration + 1)
     print(f"{len(configs)} configurations, {args.rounds} rounds, about {total_s // 60} min", flush=True)
@@ -222,7 +256,8 @@ def main():
         out.writerow(["# A=" + args.a, "B=" + args.b])
         out.writerow(["side", "round", "protocol", "delay_ms", "elems", "server_cpu_pct"] + HARNESS_COLUMNS)
         for (protocol, delay), group in itertools.groupby(configs, lambda c: (c["protocol"], c["delay"])):
-            server = None if hardware else start_server(protocol, delay, args.server_dir)
+            log = tempfile.TemporaryFile()
+            server = None if hardware else start_server(protocol, delay, args.server_dir, log)
             try:
                 for c in group:
                     key = config_key(c)
@@ -241,9 +276,12 @@ def main():
                         print(".", end="", flush=True)
                     print()
             finally:
-                if server:
-                    server.terminate()
-                    server.wait()
+                applied = stop_server(server, log) if server else None
+                log.close()
+                if applied:
+                    line = f"# server delay: requested {applied[0]} us, applied mean {applied[1]} us over {applied[2]} responses"
+                    f.write(line + "\n")
+                    print(line)
     summarize(results)
 
 

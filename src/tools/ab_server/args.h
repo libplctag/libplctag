@@ -221,6 +221,12 @@ int64_t args_get_int(const args_result_t *result, const char *flag_name);
  */
 bool args_get_bool(const args_result_t *result, const char *flag_name);
 
+/**
+ * Get floating point value by flag name.
+ * @return Value if present, 0.0 if not present or not a float flag
+ */
+double args_get_float(const args_result_t *result, const char *flag_name);
+
 /* ================================================================
  * Iteration (for ARGS_MULTIPLE flags)
  * ================================================================ */

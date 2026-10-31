@@ -110,7 +110,7 @@ typedef uint16_t tag_type_t;
 
 /*
  * Deliberate corruption of outgoing responses, so the client's response-validation code can be
- * tested.  The other fault-injection flags (--dup-conn-id-tries, --reject_size, --empty_frag, --delay)
+ * tested.  The other fault-injection flags (--dup-conn-id-tries, --reject_size, --empty_frag, --delay-ms)
  * all send well-formed responses that merely say "no"; these send malformed ones.  The
  * machinery that arms and fires them lives in fault.c; the enum is here because plc_s below
  * needs one counter per kind.
@@ -303,8 +303,13 @@ typedef struct plc_s {
      */
     atomic_int32_t *fault_counts[FAULT_MAX];
 
-    /* response delay */
-    int32_t response_delay;
+    /*
+     * Response delay from --delay-ms.  The delay each response actually got is
+     * summed into the shared totals, so the server can report it at exit.
+     */
+    int64_t response_delay_us;
+    atomic_int64_t *delay_applied_us;
+    atomic_int64_t *delay_count;
 
     /*
      * The local IPv4 address, host order, that the ListIdentity reply advertises.  The UDP

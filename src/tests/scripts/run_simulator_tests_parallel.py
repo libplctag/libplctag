@@ -641,7 +641,7 @@ def build_manifest() -> Manifest:
     delayed_conn_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
-                        "--tag=TestBigArray:DINT[2000]", "--delay=300"],
+                        "--tag=TestBigArray:DINT[2000]", "--delay-ms=300"],
         startup_wait_s=1,
     )
     sec.test("@connection status polled with no callback walks the states (ControlLogix)",
@@ -678,7 +678,7 @@ def build_manifest() -> Manifest:
     def cip_ops_server(delay_ms: int) -> ServerSpec:
         return ServerSpec(exe_path=exe("ab_server"),
                           args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
-                                         "--tag=TestBigArray:DINT[2000]", f"--delay={delay_ms}"],
+                                         "--tag=TestBigArray:DINT[2000]", f"--delay-ms={delay_ms}"],
                           startup_wait_s=1)
     cip_ops_base = f"--base=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix"
     abort_packed = sec.test("abort one of several packed reads; the rest complete",
@@ -729,7 +729,7 @@ def build_manifest() -> Manifest:
     # special from ab_server -- a nonexistent tag name / out-of-bounds index /
     # oversized element count are naturally rejected by its own tag-path and
     # bounds validation. The rest use ab_server's two error-injection knobs
-    # (--dup-conn-id-tries=N, --delay=Nms) on their own dedicated server instances.
+    # (--dup-conn-id-tries=N, --delay-ms=N) on their own dedicated server instances.
     error_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
@@ -998,7 +998,7 @@ def build_manifest() -> Manifest:
     corrupt_test(sec, "AB wrong sender context echoed", "context", egw, ab_corrupt_tag,
                  r"Received a response with sender context [0-9a-f]+ but we sent", plc_args=ab_corrupt_args)
 
-    # --delay= applied to every response (including session register and
+    # --delay-ms= applied to every response (including session register and
     # ForwardOpen, not just reads -- see ab_server's request_handler) paired
     # with a short client timeout deterministically hits PLCTAG_ERR_TIMEOUT,
     # instead of relying on incidental resource contention the way most
@@ -1006,7 +1006,7 @@ def build_manifest() -> Manifest:
     big_delay_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
-                        "--tag=TestBigArray:DINT[2000]", "--delay=5000"],
+                        "--tag=TestBigArray:DINT[2000]", "--delay-ms=5000"],
         startup_wait_s=3,
     )
     sec.test("deterministic timeout via injected response delay",
@@ -1049,7 +1049,7 @@ def build_manifest() -> Manifest:
         exe_path=exe("ab_server"),
         args_template=["--port={PORT}", "--plc=ControlLogix", "--path=1,0",
                         "--tag=TestBigArray:DINT[2000]", "--tag=Test_Array_1:DINT[1000]",
-                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]", "--delay=100"],
+                        "--tag=Test_Array_2x3:DINT[2,3]", "--tag=Test_Array_2x3x4:DINT[2,3,4]", "--delay-ms=100"],
         startup_wait_s=1,
     )
     sgw = "127.0.0.1:{PORT}"
@@ -1059,7 +1059,7 @@ def build_manifest() -> Manifest:
               [exe("test_callback"), f"--tag=protocol=ab-eip&gateway={sgw}&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"], F)
     # Hardcoded to the library's default gateway/port like the four
     # controllogix_fast tests above -- reuses that same pinned-port server
-    # config and serialization group (no need for --delay=100 here; this
+    # config and serialization group (no need for --delay-ms=100 here; this
     # test doesn't exercise that timing).
     sec.test("emulator test extended callbacks sync", [exe("test_callback_ex")], F,
               server=fast_default_port_server, ports_needed=0, exclusive_default_port=True)

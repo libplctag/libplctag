@@ -1789,6 +1789,9 @@ int sleep_ms(int ms) {
  * Milliseconds on a monotonic clock, for deadlines and elapsed time only: a change to the
  * system clock must not move them.  Not a date.  The performance counter, not
  * GetTickCount64(): that one moves in 10-16ms steps, and deadlines are as close as 1ms.
+ *
+ * The counter includes time the system spends suspended, so a deadline that passes during a
+ * suspend has expired on resume, as on POSIX (see the posix time_ms).
  */
 int64_t time_ms(void) {
     LARGE_INTEGER count;
