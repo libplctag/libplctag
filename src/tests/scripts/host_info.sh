@@ -71,12 +71,6 @@ detect_host_info() {
             # System model.
             HOST_MANUFACTURER="Apple"
             HOST_PRODUCT=$(sysctl -n hw.model 2>/dev/null || echo "unknown")
-            # Try to get the marketing name (e.g. "MacBook Air (M1, 2020)").
-            marketing=$(/usr/libexec/PlistBuddy -c "print 0:product-name" /dev/stdin 2>/dev/null \
-                <<< "$(ioreg -r -d 1 -c IOPlatformDevice 2>/dev/null | grep -A1 'product-name' | tail -1 | sed 's/.*= //')" 2>/dev/null || true)
-            if [ -n "$marketing" ] && [ "$marketing" != "" ]; then
-                HOST_PRODUCT="$HOST_PRODUCT ($marketing)"
-            fi
             ;;
 
         Linux)
