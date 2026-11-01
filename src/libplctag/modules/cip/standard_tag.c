@@ -155,6 +155,12 @@ static bool tag_elements_are_variable(cip_tag_p tag) {
 /* the widest type info a segmented reply carries: an abbreviated struct, A0 02 and a CRC. */
 #define CIP_SEGMENT_TYPE_INFO_SIZE ((int32_t)4)
 
+/*
+ * ponytail: a create read's reply size is unknown, so it is packed as this many bytes per element
+ * (a DINT).  A larger element just comes back partial and is finished in its own fragments.
+ */
+#define CREATE_READ_GUESS_ELEM_SIZE ((int32_t)4)
+
 
 /* true when the encoded name addresses an array element rather than a whole variable. */
 static bool name_has_index(cip_tag_p tag) {
@@ -307,12 +313,22 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
      * What this read will cost in the shared reply packet, so it can be budgeted when bundled.
      * tag->size is what the previous read returned, which is the best estimate of what this one
      * will; a later fragment brings only what is left past tag->offset, so the small tail of a
-     * large tag can share a packet.  A first read has no previous size, so it cannot be budgeted
-     * and must not be packed.
+     * large tag can share a packet.
+     *
+     * A create read has no previous size.  With the fragmented read service a reply that does not
+     * fit comes back partial and the read goes on from there, so a guess is safe: it packs at
+     * CREATE_READ_GUESS_ELEM_SIZE bytes per element.  If the PLC had no room for any of it, the
+     * reply was empty and guessing again would not help, so the retry goes alone.  Without the
+     * fragmented service (OMRON) an overflow cannot be split, so a create read is not packed.
      */
     plan->req_size = (int32_t)(data - dest);
     plan->reply_size = tag->size - tag->offset;
-    plan->packable = (tag->allow_packing && tag->create_read_status != PLCTAG_STATUS_PENDING);
+    plan->packable = (tag->allow_packing != 0);
+
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING && tag->size == 0) {
+        plan->reply_size = CREATE_READ_GUESS_ELEM_SIZE * tag->elem_count;
+        plan->packable = (plan->packable && tag->std_ops->read_service == CIP_SVC_READ_FRAG && tag->fragment_retry_count == 0);
+    }
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Done.");
 

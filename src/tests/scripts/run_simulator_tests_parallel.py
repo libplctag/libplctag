@@ -311,7 +311,7 @@ REQUIRED_EXECUTABLES = [
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
-    "test_bit_write", "test_auto_destroy", "test_find_or_create_tag",
+    "test_bit_write", "test_auto_destroy", "test_find_or_create_tag", "test_many_tags",
 ]
 
 
@@ -621,6 +621,32 @@ def build_manifest() -> Manifest:
     sec.test("find_or_create_tag finds or creates a shared tag (AB ControlLogix)",
               [exe("test_find_or_create_tag"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]",
                f"--missing-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=No_Such_Tag"], T)
+    # Create reads are packed with a guessed reply size.  At a 1 ms delay, 10000 unpacked create
+    # reads take over 12 s on one connection; packed they take well under a second.  The LINT
+    # elements are bigger than the guess, so their packed create reads come back partial.  The
+    # empty-fragment server answers the first reads with no data at all, which must send those
+    # create reads again on their own rather than guess forever.
+    many_tags_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--plc=ControlLogix", "--port={PORT}", "--path=1,0", "--delay-ms=1",
+                        "--tag=perfTag1:DINT[10000]", "--tag=perfLint1:LINT[2000]"],
+        startup_wait_s=1,
+    )
+    many_tags_frag_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--plc=ControlLogix", "--port={PORT}", "--path=1,0", "--delay-ms=1",
+                        "--tag=perfTag1:DINT[1000]", "--empty_frag=3"],
+        startup_wait_s=1,
+    )
+    sec.test("10000 tags create packed, write and read back (AB ControlLogix)",
+              [exe("test_many_tags"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix",
+               "--name=perfTag", "--tags=10000", "--max-create-ms=5000"], T, server=many_tags_server)
+    sec.test("2000 LINT tags: packed create reads larger than the guess (AB ControlLogix)",
+              [exe("test_many_tags"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix",
+               "--name=perfLint", "--tags=2000", "--threads=4"], T, server=many_tags_server)
+    sec.test("packed create reads answered with empty fragments go again alone (AB ControlLogix)",
+              [exe("test_many_tags"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix",
+               "--name=perfTag", "--tags=1000"], T, server=many_tags_frag_server)
     sec.test("auto-destroy does not reconnect an idle connection (AB ControlLogix)",
               [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]",
                f"--conn-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=@connection"], T)
