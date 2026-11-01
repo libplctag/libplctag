@@ -192,7 +192,7 @@ static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO
  * Get current epoch time in microseconds.
  * Works on Linux, BSD, macOS, and Windows.
  */
-static int64_t time_us(void) {
+static int64_t wall_time_us(void) {
 #if defined(_WIN32) || defined(_WIN64)
     /* Windows implementation using GetSystemTimePreciseAsFileTime (Windows 8+) */
     FILETIME ft;
@@ -276,7 +276,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     ensure_stderr_buffering();
 
     /* get the time parts */
-    epoch_us = time_us();
+    epoch_us = wall_time_us();
     epoch = (time_t)(epoch_us / 1000000);
     remainder_us = (int)(epoch_us % 1000000);
 

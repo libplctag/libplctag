@@ -1805,6 +1805,18 @@ int64_t time_ms(void) {
 }
 
 
+/* Microseconds on the same clock as time_ms(), for waits shorter than a millisecond. */
+int64_t time_us(void) {
+    LARGE_INTEGER count;
+    LARGE_INTEGER freq;
+
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&freq);
+
+    return (count.QuadPart / freq.QuadPart) * 1000000 + ((count.QuadPart % freq.QuadPart) * 1000000) / freq.QuadPart;
+}
+
+
 struct tm *localtime_r(const time_t *timep, struct tm *result) {
     time_t t = *timep;
 

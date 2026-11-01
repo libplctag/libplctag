@@ -1881,3 +1881,13 @@ int64_t time_ms(void) {
 
     return ((int64_t)ts.tv_sec * 1000) + ((int64_t)ts.tv_nsec / 1000000);
 }
+
+
+/* Microseconds on the same clock as time_ms(), for waits shorter than a millisecond. */
+int64_t time_us(void) {
+    struct timespec ts;
+
+    clock_gettime(TIME_MS_CLOCK, &ts);
+
+    return ((int64_t)ts.tv_sec * 1000000) + ((int64_t)ts.tv_nsec / 1000);
+}

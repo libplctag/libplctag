@@ -69,6 +69,8 @@ static int session_list_init(cip_conn_list_t *list);
 static int32_t session_list_count(cip_conn_list_t *list);
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
 static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now);
+static int32_t count_due_unsafe(cip_conn_p conn, int64_t now);
+static void settle_due_tags(cip_conn_p conn);
 static int dispatch_replies_unsafe(cip_conn_p conn);
 static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int *bad_packet_rc);
 static void requeue_slots_unsafe(cip_conn_p conn);
@@ -1223,12 +1225,17 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
     conn->data_size = 0;
     conn->data_offset = 0;
 
+    settle_due_tags(conn);
+
     critical_block(conn->session_mutex) {
         int64_t now = time_ms();
 
         tag_driver_tickle_due_unsafe(&conn->driver, now);
         slot_count = build_exchange_unsafe(conn, now);
+        conn->rebuild_pending = (slot_count > 0);
     }
+
+    if(slot_count > 0) { conn->last_slot_count = slot_count; }
 
     /* the next fragment, or tags that did not fit this packet, are due now: the handler skips its wait. */
     *did_exchange = (slot_count > 0);
@@ -1465,6 +1472,78 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Done.");
 
     return rc;
+}
+
+
+/*
+ * The tags due now that have an operation to send.  The list is in time order.
+ */
+static int32_t count_due_unsafe(cip_conn_p conn, int64_t now) {
+    int32_t count = 0;
+
+    for(int32_t i = 0; i < vector_length(conn->driver.active); i++) {
+        cip_tag_p tag = vector_get(conn->driver.active, i);
+
+        if(tag->op_time > now) { break; }
+
+        if(tag_op_busy(tag)) { count++; }
+    }
+
+    return count;
+}
+
+
+/*
+ * An application restarting a batch of tags one by one wakes this thread with the first, and
+ * sending at once splits the batch: one tag now, the rest a round trip later, every cycle.
+ * So when far fewer tags are due than went in the last exchange, wait for the count to stop
+ * growing, or for it to reach the last batch, before building.  A single-tag application
+ * never waits, as its last exchange was one tag.
+ *
+ * ponytail: yields and re-counts for at most SETTLE_MAX_US, spending that CPU.  Wait on the
+ * wake channel with a microsecond timeout if that cost shows up.  The constants are tuning
+ * knobs measured on a 1 ms simulator delay.
+ */
+#define SETTLE_MIN_BATCH ((int32_t)8)
+#define SETTLE_RATIO ((int32_t)4)
+#define SETTLE_QUIET_US ((int64_t)50)
+#define SETTLE_MAX_US ((int64_t)300)
+
+static void settle_due_tags(cip_conn_p conn) {
+    int32_t last = conn->last_slot_count;
+    int32_t due = 0;
+    int64_t start_us = 0;
+    int64_t changed_us = 0;
+
+    if(last < SETTLE_MIN_BATCH) { return; }
+
+    critical_block(conn->session_mutex) { due = count_due_unsafe(conn, time_ms()); }
+
+    if(due == 0 || (due * SETTLE_RATIO) >= last) { return; }
+
+    start_us = time_us();
+    changed_us = start_us;
+
+    while(!atomic_get_int32(&conn->terminating)) {
+        int64_t now_us = 0;
+        int32_t count = 0;
+
+        sleep_ms(0);
+
+        critical_block(conn->session_mutex) { count = count_due_unsafe(conn, time_ms()); }
+
+        now_us = time_us();
+
+        if(count != due) {
+            due = count;
+            changed_us = now_us;
+        }
+
+        if(due >= last || (now_us - changed_us) >= SETTLE_QUIET_US || (now_us - start_us) >= SETTLE_MAX_US) { break; }
+    }
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Settled %d due tags in %" PRId64 " us (last exchange %d).", (int)due,
+           time_us() - start_us, (int)last);
 }
 
 
@@ -1713,11 +1792,17 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
 
 
 int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag) {
+    bool wake = true;
+
     if(!conn || !tag) { return PLCTAG_ERR_NULL_PTR; }
 
-    critical_block(conn->session_mutex) { tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms()); }
+    /* the flag is read under the same lock the handler takes to build, so the tag is in its next look. */
+    critical_block(conn->session_mutex) {
+        tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
+        wake = !conn->rebuild_pending;
+    }
 
-    socket_wake(conn->sock);
+    if(wake) { socket_wake(conn->sock); }
 
     return PLCTAG_STATUS_OK;
 }
@@ -1750,7 +1835,21 @@ static void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
  * which would spin the handler.
  */
 static void session_wait(cip_conn_p conn, int timeout_ms) {
-    int sock_events = socket_wait_event(conn->sock, SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ, timeout_ms);
+    bool skip_wait = false;
+    int sock_events = SOCK_EVENT_NONE;
+
+    /*
+     * A failed exchange can leave the flag set, and a tag queued since then did not wake us.
+     * Clear it and go round once more instead of waiting, so the states see that tag.
+     */
+    critical_block(conn->session_mutex) {
+        skip_wait = conn->rebuild_pending;
+        conn->rebuild_pending = false;
+    }
+
+    if(skip_wait) { return; }
+
+    sock_events = socket_wait_event(conn->sock, SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ, timeout_ms);
 
     if(sock_events < 0) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error %s waiting on the session socket!", plc_tag_decode_error(sock_events));

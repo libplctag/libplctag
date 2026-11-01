@@ -408,6 +408,16 @@ typedef struct cip_conn_t {
     int32_t slot_count;
     bool exchange_unrouted;
 
+    /*
+     * Under session_mutex.  True from a build that found requests until the next build or
+     * wait: the handler looks at the tag list again before it waits, so queuing a tag need not
+     * wake it.
+     */
+    bool rebuild_pending;
+
+    /* handler thread only: the size of the last exchange, for settle_due_tags(). */
+    int32_t last_slot_count;
+
     uint64_t resp_seq_id;
 
     /*

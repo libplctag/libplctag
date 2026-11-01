@@ -288,6 +288,7 @@ extern int socket_destroy(sock_p *s);
 /* time functions */
 extern int sleep_ms(int ms);
 extern int64_t time_ms(void);
+extern int64_t time_us(void);
 extern struct tm *localtime_r(const time_t *timep, struct tm *result);
 
 /* some functions can be simply replaced */
