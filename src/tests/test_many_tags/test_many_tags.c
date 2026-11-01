@@ -33,7 +33,7 @@
 
 /*
  * Create many tags, write each one, read each one back and check it, then destroy them all.
- * Step 1.1 of ephemeral_docs/scale_and_performance_plan.md.
+ * Step 1.1 of docs/scale_and_performance_plan.md.
  *
  * Tag i is <name><a>[<e>] with a = (i mod K) + 1 and e = i / K, on connection group
  * (i mod G) + 1.  K is --arrays, default the smallest multiple of G that is at least

@@ -178,7 +178,7 @@ Fairness has two parts.
    - `conn_window_min_max`: the same across connections.
 
 Thresholds for `tag_cv` and `window_min_max` are set from measured runs on HEAD, allowing for the
-performance/efficiency core gap. They are not set yet.
+performance/efficiency core gap. Proposed values are under Results.
 
 ## Results
 
@@ -223,9 +223,44 @@ in 12.
   thread speed gap at 7× the cycle count: relative gap 1.3% on HEAD, 2.9% on v2.7.2. Connection
   windows are 0.9986 (HEAD) and 0.9988 (v2.7.2).
 
+### v2.7.2 vs HEAD 5b148252, async ControlLogix (2026-11-01)
+
+The async ControlLogix part of the matrix (`--only="logix d1ms async"`), 42 configurations, 3
+rounds, 10000 tags, no thermal warnings, server delay applied mean 1.34 ms.
+
+Read, median ops/s:
+
+| Threads × connections | v2.7.2 | HEAD | Change |
+|---|---|---|---|
+| 1 × 1 | 109k | 90k | −18% |
+| 1 × 2 | 217k | 200k | −8% |
+| 1-8 × 3-4 | 285-411k | 281-426k | same |
+| 1 × 8 | 619k | 781k | +26% |
+| 1 × 16 | 689k | 1,134k | +65% |
+| 4 × 8 | 317k | 894k | +182% |
+| 8 × 8 | 103k | 973k | +847% |
+
+- **Regression, open:** HEAD is 6-18% slower on 1-2 connections with 1-4 threads (9
+  configurations WORSE, all there). On 1 connection HEAD uses half the client CPU per operation
+  (6.9 against 13.5 µs) but its cycle is longer: median latency 56 ms against 46 ms. Either HEAD
+  packs fewer tags per packet, or the settle wait (up to 300 µs per exchange, about 40 exchanges
+  per cycle) adds the 10 ms. The earlier matrix showed −14% at 1 × 1, so the settle wait is a
+  suspect, not proven.
+- **Tag CV:** HEAD at most 0.59% anywhere (0.36% at 8 × 8). v2.7.2 up to 1.97%, above 1% at
+  4 × 8, 8 × 4 and 8 × 8, where its throughput collapses.
+- **Thread window min/max:** HEAD worst 0.857 (8 threads × 1 connection, write), v2.7.2 0.798.
+  On one shared connection both are about 0.86-0.93.
+
+Proposed thresholds, from these runs:
+
+- `tag_cv` ≤ 1% (HEAD's worst is 0.59%).
+- `window_min_max` ≥ 0.80 (HEAD's worst is 0.857). To be confirmed against the
+  performance/efficiency core gap.
+
 ### Pending
 
-- Full matrix re-run on the current HEAD, with `tag_cv`, to set the fairness thresholds.
+- Find the 1-2 connection regression: count tags per exchange and settle waits on HEAD at 1 × 1.
+- Full matrix re-run (sync, Micro800, Modbus) on the current HEAD, with `tag_cv`.
 - Hardware confirmation of both fixes on a real ControlLogix.
 - Raw CSVs go in `docs/perf/MacBook-Air-M1-16GB/<version>/` with their `perf_env.txt`.
 
