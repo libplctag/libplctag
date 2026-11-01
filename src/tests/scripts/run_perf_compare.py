@@ -202,7 +202,7 @@ def run_one(binary, c, args, server):
 HARNESS_COLUMNS = ("mode,connection_groups,threads,tags,tags_per_thread,duration_ms,total_ops,ops_per_sec,"
                    "cpu_load_pct,fairness_cv,fairness_min_max_ratio,op,errors,p50_us,p95_us,p99_us,max_us,"
                    "cpu_us_per_op,rss_growth_kb,create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,"
-                   "tag_spread,window_s").split(",")
+                   "tag_cv,tag_std_dev,window_s").split(",")
 
 
 def verdict(a, b, higher_better):
@@ -235,7 +235,7 @@ def self_check():
 
 def summarize(results):
     print(f"\n{'configuration':41} {'metric':11} {'median A':>10} {'median B':>10} {'change':>8}  verdict"
-          f"   p95 A/B us      srv% A/B   win min/max A/B  spread A/B")
+          f"   p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B")
     for key, runs in results.items():
         a = [r for r in runs if r["side"] == "A"]
         b = [r for r in runs if r["side"] == "B"]
@@ -250,10 +250,10 @@ def summarize(results):
         sp = lambda side: statistics.median(r["server_cpu_pct"] for r in side)
         errs = sum(int(r["errors"]) for r in runs)
         win = lambda side: min(float(r["window_min_max"]) for r in side)
-        spread = lambda side: max(int(r["tag_spread"]) for r in side)
+        tag_cv = lambda side: max(float(r["tag_cv"]) for r in side)
         print(f"{key:41} {metric:11} {statistics.median(va):10.1f} {statistics.median(vb):10.1f} "
               f"{change * 100:+7.1f}%  {word:7}  {p95(a):6.0f}/{p95(b):<6.0f}  {sp(a):4.0f}/{sp(b):<4.0f}"
-              f"   {win(a):.3f}/{win(b):<.3f}      {spread(a)}/{spread(b)}"
+              f"   {win(a):.3f}/{win(b):<.3f}      {tag_cv(a):.2f}/{tag_cv(b):<.2f}"
               + (f"  {errs} errors" if errs else ""))
 
 

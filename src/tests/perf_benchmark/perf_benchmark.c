@@ -76,7 +76,7 @@
  *   mode,connection_groups,threads,tags,tags_per_thread,duration_ms,
  *   total_ops,ops_per_sec,cpu_load_pct,fairness_cv,fairness_min_max_ratio,
  *   op,errors,p50_us,p95_us,p99_us,max_us,cpu_us_per_op,rss_growth_kb,
- *   create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,tag_spread,window_s
+ *   create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,tag_cv,tag_std_dev,window_s
  *
  * Tags are created with timeout 0 and then waited for together, so create_ms
  * is the time for all of them.
@@ -90,8 +90,10 @@
  * window never splits a slow pass.  With fewer than two such windows the run
  * is too short and the window columns equal the whole run.
  * conn_window_min_max is the worst full window across connection groups (1.0
- * with one group).  tag_spread is the largest max - min of whole-run completed
- * ops among the tags of any one connection group.
+ * with one group).  tag_cv (%) and tag_std_dev are from the whole-run completed
+ * ops of the tags of one connection group, for the group with the largest CV.
+ * The tags of different threads move at their threads' pace, so these include
+ * the thread gap; CV is relative, so it does not grow with the cycle count.
  * rss_growth_kb is peak RSS at the end minus peak RSS before tag creation.
  * Latency percentiles come from a log-linear histogram with 16 buckets per
  * power of two, so they are accurate to about 3%.
@@ -791,7 +793,8 @@ int main(int argc, char **argv) {
     double window_cv = 0.0;
     double conn_window_min_max = 1.0;
     double conn_window_cv = 0.0;
-    int64_t tag_spread = 0;
+    double tag_cv = 0.0;
+    double tag_std_dev = 0.0;
     int64_t *unit_windows = (int64_t *)calloc((size_t)num_units * MAX_WINDOWS, sizeof(int64_t));
     int64_t *group_windows = (int64_t *)calloc((size_t)num_groups * MAX_WINDOWS, sizeof(int64_t));
 
@@ -824,28 +827,36 @@ int main(int argc, char **argv) {
     free(unit_windows);
     free(group_windows);
 
-    for(int32_t g = 0; g < num_groups; g++) {
-        int64_t lo = INT64_MAX;
-        int64_t hi = 0;
+    /* per connection group: the spread of whole-run ops across its tags. */
+    int *group_ops = (int *)malloc((size_t)num_tags * sizeof(int));
+
+    for(int32_t g = 0; group_ops && g < num_groups; g++) {
+        stats_summary_t group_summary;
+        int count = 0;
 
         for(int32_t i = 0; i < num_tags; i++) {
-            if(tag_group[i] != g) { continue; }
-            if(stats[i].ops < lo) { lo = stats[i].ops; }
-            if(stats[i].ops > hi) { hi = stats[i].ops; }
+            if(tag_group[i] == g) { group_ops[count++] = (int)stats[i].ops; }
         }
 
-        if(lo != INT64_MAX && hi - lo > tag_spread) { tag_spread = hi - lo; }
+        if(count < 2 || stats_calculate(group_ops, count, &group_summary) != 0) { continue; }
+
+        if(group_summary.cv > tag_cv) {
+            tag_cv = group_summary.cv;
+            tag_std_dev = group_summary.std_dev;
+        }
     }
+
+    free(group_ops);
 
     int64_t p50 = percentile(total_hist, hist_total, 0.50);
     int64_t p95 = percentile(total_hist, hist_total, 0.95);
     int64_t p99 = percentile(total_hist, hist_total, 0.99);
 
     printf("%s,%" PRId32 ",%" PRId32 ",%" PRId32 ",%.2f,%" PRId64 ",%" PRId64 ",%.1f,%.2f,%.2f,%.4f,%s,%" PRId64 ",%" PRId64
-           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%" PRId64 ",%" PRId32 "\n",
+           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%.2f,%.2f,%" PRId32 "\n",
            mode_names[mode], num_groups, num_threads, num_tags, tags_per_thread, duration_ms, total_ops, ops_per_sec, cpu_load_pct,
            fairness_cv, fairness_min_max, is_write ? "write" : "read", total_errors, p50, p95, p99, max_us, cpu_us_per_op,
-           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_spread, window_s);
+           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_cv, tag_std_dev, window_s);
     fflush(stdout);
 
     fprintf(stderr, "\n--- Results ---\n");
@@ -862,7 +873,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Worst window:   min/max %.4f  CV %.2f%%  (%" PRId32 " s windows of %" PRId32 " s)\n", window_min_max, window_cv,
             window_s, num_windows);
     fprintf(stderr, "Worst conn win: min/max %.4f  CV %.2f%%\n", conn_window_min_max, conn_window_cv);
-    fprintf(stderr, "Tag spread:     %" PRId64 "\n", tag_spread);
+    fprintf(stderr, "Tag ops:        CV %.2f%%  std dev %.2f  (worst connection)\n", tag_cv, tag_std_dev);
     if(have_summary) { stats_print_summary(stderr, &summary); }
 
 cleanup:
