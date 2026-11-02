@@ -257,10 +257,100 @@ Proposed thresholds, from these runs:
 - `window_min_max` ≥ 0.80 (HEAD's worst is 0.857). To be confirmed against the
   performance/efficiency core gap.
 
+### v2.7.2 vs HEAD 5b148252, tags × threads × connections, Linux (2026-11-01)
+
+A second host, for trends only: Dell Precision Tower 3420, i5-6500, 4 cores, no SMT, 32 GB,
+Debian, `powersave` governor, no pinning. Client and server share the 4 cores.
+
+- `run_perf_compare.py --scale-matrix=logix|modbus --delay-ms=1 --rounds=3 --duration=5`: 10,
+  100 and 1000 tags × 1, 2, 4 and 8 threads × 1, 2, 4 and 8 connections, sync and async, read
+  and write, tags round-robin over the connections. 192 configurations per protocol, about 1.8 h
+  each.
+- Both sides link `libplctag_static.a`, not `plctag_dyn` (built Release, no sanitizers).
+- 5 s runs hold fewer than two fairness windows in the slow cells, so only throughput is used.
+- Server delay applied mean 1.11 ms (ControlLogix), 1.14 ms (Modbus). No cell was server bound.
+- Data: `docs/perf/Precision-Tower-3420-i5-6500-32GB/v2.7.2_vs_5b148252/scale_*`.
+
+| Protocol | Better | Same | WORSE |
+|---|---|---|---|
+| ControlLogix | 41 | 124 | 27 |
+| Modbus | 8 | 177 | 7 |
+
+- **Modbus:** the same almost everywhere. The WORSE cells are 5-7%, at 1000 tags and 4-8
+  threads.
+- **ControlLogix, 10 and 100 tags:** the same or better. Async at 100 tags is up to 27% faster
+  (2 threads × 1-2 connections, 4 threads × 4-8 connections).
+- **ControlLogix, 1000 tags, 1-2 threads:** sync is 14-20% faster on every connection count
+  except 2 × 1. v2.7.2 spends 1253 µs of client CPU per op at 1 × 1 sync, HEAD 247 µs.
+- **Regression, ControlLogix, 1000 tags, 4-8 threads:** 22 of the 27 WORSE cells.
+
+  | Cell | v2.7.2 | HEAD | Change |
+  |---|---|---|---|
+  | async read 1 × 1 | 91k ops/s | 78k | −14% |
+  | async read 4 × 4 | 318k | 222k | −30% |
+  | async read 8 × 8 | 353k | 317k | −10% |
+  | sync read 8 × 8 | 6,216 | 5,148 | −17% |
+
+  - HEAD uses less client CPU in each of these (4 × 4 async: 196% against 210%; 1 × 1 async:
+    49% against 116%), and its latency is longer: sync 8 × 8 p50 1568 µs against 1248 µs.
+  - The extra 320 µs per sync op is close to the settle wait's 300 µs limit. This adds weight to
+    the settle wait as the cause of the 1-2 connection regression above. Not proven.
+
+### v2.7.2 vs HEAD 5b148252, full matrix, Linux (2026-11-01 to 11-02)
+
+The same Linux host. `--fairness-matrix --delay-ms=1 --rounds=3`, both sides on `plctag_dyn`
+(Release, no sanitizers). 252 configurations, 9.1 h, no failed runs. Server delay applied mean
+1.12 ms (ControlLogix), 1.10 ms (Micro800), 1.14 ms (Modbus). Data:
+`docs/perf/Precision-Tower-3420-i5-6500-32GB/v2.7.2_vs_5b148252/fairness_matrix*`.
+
+| Protocol | Better | Same | WORSE |
+|---|---|---|---|
+| ControlLogix | 60 | 17 | 7 |
+| Micro800 | 20 | 19 | 45 |
+| Modbus | 6 | 71 | 7 |
+
+- **ControlLogix sync:** HEAD 14-69% faster everywhere (1 thread: 620 against 415 ops/s).
+- **ControlLogix async, 8 connections or more:** v2.7.2 collapses on 4 cores, HEAD does not.
+
+  | Threads × connections | v2.7.2 | HEAD |
+  |---|---|---|
+  | 1 × 8 | 338k | 750k |
+  | 1 × 16 | 325k | 816k |
+  | 4 × 8 | 83k | 845k |
+  | 8 × 8 | 24k | 851k |
+
+- **ControlLogix async, 1-3 connections, 1 thread:** HEAD 8-19% slower (1 × 1: 94k against
+  114k). The same regression as on the M1. HEAD uses less client CPU (83% against 201%) and its
+  p50 latency is longer (56 ms against 36 ms).
+- **Regression, Micro800, open:** HEAD 5-16% slower in 45 cells.
+  - Async on every cell with 3 connections or more, and sync with 4-8 threads (8 × 8 sync:
+    5,194 against 6,206 ops/s, p50 1504 µs against 1248 µs).
+  - Single-thread sync is 12-20% faster.
+  - Not the settle wait: Micro800 does not pack, so the last exchange is one tag and
+    `settle_due_tags` returns at once.
+  - ab_server CPU per op is about 3.5× higher with HEAD (1 × 8 async: 53% at 5.9k ops/s against
+    18% at 7.0k). `strace -c` on ab_server shows the same syscalls per op for both sides (about one
+    `recvfrom`, one `sendto` and two `pselect6`), so HEAD does not send more requests. Under strace
+    the order reverses (HEAD 25.0k ops against 21.1k), so it is timing sensitive. On 4 cores, a
+    busier server takes CPU from the client.
+- **Modbus:** the same almost everywhere. WORSE cells are 5-8%.
+- **Fairness:**
+  - v2.7.2 starves threads: `window_min_max` is 0 (a thread with no finished operation in a
+    whole window) in async ControlLogix at 2-8 threads × 8 connections. HEAD's worst is 0.857 on
+    ControlLogix and 0.80 on Micro800 and Modbus, the same as v2.7.2 there.
+  - `tag_cv` is meaningless for 1-thread sync ControlLogix: 10 s at 620 ops/s does not finish one
+    pass over 10000 tags, so each tag has 0 or 1 operations (HEAD 79%, v2.7.2 120%). Elsewhere
+    HEAD's worst is 5.3% (Micro800, Modbus), the same as v2.7.2.
+
 ### Pending
 
 - Find the 1-2 connection regression: count tags per exchange and settle waits on HEAD at 1 × 1.
-- Full matrix re-run (sync, Micro800, Modbus) on the current HEAD, with `tag_cv`.
+- Find the Micro800 regression (5-16%, 3+ connections or 4+ threads; not the settle wait). Check
+  it on the M1 first: the Linux host has 4 cores, and a CPU-sensitive cause shows more there.
+- Full matrix re-run (sync, Micro800, Modbus) on the current HEAD on the M1, with `tag_cv`. Done
+  on the Linux host (above).
+- ControlLogix 1000 tags, 4-8 threads: up to 30% slower on the Linux host (scale matrix). Check
+  on the M1.
 - Hardware confirmation of both fixes on a real ControlLogix.
 - Raw CSVs go in `docs/perf/MacBook-Air-M1-16GB/<version>/` with their `perf_env.txt`.
 

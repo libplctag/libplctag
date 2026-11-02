@@ -31,6 +31,9 @@ Usage:
   write; ControlLogix, Micro800 and Modbus).  Each CIP connection reads its own
   server array, so ab_server's per-tag mutex does not mix into the result:
   run_perf_compare.py --a=... --b=... --server-dir=... --fairness-matrix [--delay-ms=1]
+  Scale matrix (10, 100, 1000 tags x 1, 2, 4, 8 threads x 1, 2, 4, 8 connections; tags
+  spread round-robin over the connections; sync and async, read and write):
+  run_perf_compare.py --a=... --b=... --server-dir=... --scale-matrix=logix|modbus|micro800 [--delay-ms=1]
   run_perf_compare.py --self-check
 """
 
@@ -58,6 +61,9 @@ MATRIX_TAGS = {"logix": 10000, "micro800": 1000, "modbus": 1000}
 MATRIX_DURATION = {"logix": 10, "micro800": 15, "modbus": 15}
 MATRIX_CELLS = [(t, c) for t in (1, 2, 4, 8) for c in (1, 2, 3, 4, 8)] + [(1, 16)]
 PER_CONN_TAGS = 16
+SCALE_TAGS = (10, 100, 1000)
+SCALE_THREADS = (1, 2, 4, 8)
+SCALE_CONNS = (1, 2, 4, 8)
 DELAY_LINE = re.compile(r"Response delay: requested (\d+) us, applied mean (\d+) us over (\d+) responses")
 
 
@@ -100,6 +106,18 @@ def fairness_matrix(delay_ms=1.0):
         configs.append(dict(protocol=protocol, delay=delay_ms, tags=MATRIX_TAGS[protocol], duration=MATRIX_DURATION[protocol],
                             threads=threads, groups=conns, group_by="tag", per_conn_tag=True, elems=1,
                             mode=mode, op=op))
+    return configs
+
+
+def scale_matrix(protocol, delay_ms=1.0):
+    """Tags x threads x connections; connections are independent of threads."""
+    configs = []
+    for tags, threads, conns, mode, op in itertools.product(
+            SCALE_TAGS, SCALE_THREADS, SCALE_CONNS, ["sync", "async"], ["read", "write"]):
+        if conns > tags or threads > tags:
+            continue
+        configs.append(dict(protocol=protocol, delay=delay_ms, tags=tags, threads=threads, groups=conns,
+                            group_by="tag", per_conn_tag=True, elems=1, mode=mode, op=op))
     return configs
 
 
@@ -230,6 +248,8 @@ def self_check():
     assert len(m) == 3 * 21 * 2 * 2 and max(c["groups"] for c in m) <= PER_CONN_TAGS
     class A: logix_attrs = None; logix_tag = "TestDINTArray"
     assert tag_strings(dict(protocol="micro800", groups=3, per_conn_tag=True, elems=1), A)[2].endswith("plc=Micro800&name=perfTag3[0]")
+    s = scale_matrix("logix")
+    assert len(s) == 3 * 4 * 4 * 2 * 2 and max(c["groups"] for c in s) <= PER_CONN_TAGS
     print("self-check ok")
 
 
@@ -270,9 +290,11 @@ def main():
     p.add_argument("--only", help="run only configurations whose key contains this text")
     p.add_argument("--thread-sweep", choices=["modbus", "logix", "micro800"], help="run the thread sweep instead")
     p.add_argument("--fairness-matrix", action="store_true", help="run the step 3A fairness matrix instead")
+    p.add_argument("--scale-matrix", choices=["modbus", "logix", "micro800"],
+                   help="run the tags x threads x connections matrix instead")
     p.add_argument("--poll-ms", type=int, default=1, help="async: sleep this long between status passes; 0 yields in a loop")
     p.add_argument("--delay-ms", type=float, default=0.0,
-                   help="thread sweep and fairness matrix: server response delay in ms, fractions allowed")
+                   help="thread sweep, fairness and scale matrices: server response delay in ms, fractions allowed")
     p.add_argument("--threads", type=int_list, default=SWEEP_THREADS, help="thread sweep: thread counts, comma separated")
     p.add_argument("--tags-per-thread", type=int_list, default=(100,), help="thread sweep: tags per thread, comma separated")
     p.add_argument("--interleave", action="store_true", help="create tags round-robin across threads")
@@ -288,6 +310,8 @@ def main():
 
     if args.fairness_matrix:
         matrix = fairness_matrix(args.delay_ms or 1.0)
+    elif args.scale_matrix:
+        matrix = scale_matrix(args.scale_matrix, args.delay_ms or 1.0)
     elif args.thread_sweep:
         matrix = thread_sweep_matrix(args.thread_sweep, args.delay_ms, args.threads, args.tags_per_thread)
     else:
