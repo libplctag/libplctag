@@ -76,7 +76,8 @@
  *   mode,connection_groups,threads,tags,tags_per_thread,duration_ms,
  *   total_ops,ops_per_sec,cpu_load_pct,fairness_cv,fairness_min_max_ratio,
  *   op,errors,p50_us,p95_us,p99_us,max_us,cpu_us_per_op,rss_growth_kb,
- *   create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,tag_cv,tag_std_dev,window_s
+ *   create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,tag_cv,tag_std_dev,window_s,
+ *   mutex_waits_per_op,mutex_wait_us_per_op,peak_rss_kb
  *
  * Tags are created with timeout 0 and then waited for together, so create_ms
  * is the time for all of them.
@@ -95,6 +96,11 @@
  * The tags of different threads move at their threads' pace, so these include
  * the thread gap; CV is relative, so it does not grow with the cycle count.
  * rss_growth_kb is peak RSS at the end minus peak RSS before tag creation.
+ * peak_rss_kb is peak RSS at the end.
+ * mutex_waits_per_op and mutex_wait_us_per_op count pthread_mutex_lock()
+ * calls that had to block, and their total wait, during the measured window.
+ * They need mutex_wait_shim LD_PRELOADed into a build linked against the
+ * shared library (Linux only); without it both are -1.
  * Latency percentiles come from a log-linear histogram with 16 buckets per
  * power of two, so they are accurate to about 3%.
  *
@@ -183,6 +189,12 @@ static void auto_callback(int32_t tag_id, int event, int status, void *userdata)
 static void *thread_func(void *arg);
 static void handle_interrupt(void);
 static void usage(const char *prog);
+static bool get_mutex_wait(int64_t *blocked, int64_t *waited_ns);
+
+#ifdef __linux__
+/* defined by mutex_wait_shim when it is LD_PRELOADed, NULL otherwise. */
+extern void perf_mutex_wait_stats(int64_t *blocked, int64_t *waited_ns) __attribute__((weak));
+#endif
 
 
 static compat_atomic_int32_t go = {0};   /* set to 1 to start measuring */
@@ -195,6 +207,19 @@ static compat_atomic_int32_t terminate = {0};
 
 
 /*--- Clocks and process statistics (cross-platform) ---*/
+
+
+static bool get_mutex_wait(int64_t *blocked, int64_t *waited_ns) {
+#ifdef __linux__
+    if(perf_mutex_wait_stats) {
+        perf_mutex_wait_stats(blocked, waited_ns);
+        return true;
+    }
+#endif
+    *blocked = 0;
+    *waited_ns = 0;
+    return false;
+}
 
 static int64_t now_us(void) {
 #ifdef WINDOWS_PLATFORM
@@ -232,7 +257,21 @@ static double get_cpu_time_ms(void) {
 
 
 static int64_t get_peak_rss_kb(void) {
-#ifdef POSIX_PLATFORM
+#ifdef __linux__
+    /* ru_maxrss keeps the high-water mark of the process that exec'd us (on vfork,
+       the parent's), so a Python runner's RSS hides ours.  VmHWM is this image only. */
+    char line[128];
+    int64_t kb = 0;
+    FILE *f = fopen("/proc/self/status", "r");
+
+    if(f) {
+        while(fgets(line, sizeof(line), f)) {
+            if(sscanf(line, "VmHWM: %" SCNd64, &kb) == 1) { break; }
+        }
+        fclose(f);
+    }
+    return kb;
+#elif defined(POSIX_PLATFORM)
     struct rusage usage;
     if(getrusage(RUSAGE_SELF, &usage) != 0) { return 0; }
 #    ifdef __APPLE__
@@ -727,6 +766,9 @@ int main(int argc, char **argv) {
     }
 
     /*--- Run the benchmark ---*/
+    int64_t mutex_blocked_start = 0;
+    int64_t mutex_wait_ns_start = 0;
+    bool have_mutex_wait = get_mutex_wait(&mutex_blocked_start, &mutex_wait_ns_start);
     double cpu_start = get_cpu_time_ms();
     int64_t wall_start = now_us();
 
@@ -742,7 +784,13 @@ int main(int argc, char **argv) {
 
     int64_t duration_ms = (now_us() - wall_start) / 1000;
     double cpu_time_ms = get_cpu_time_ms() - cpu_start;
-    int64_t rss_growth_kb = get_peak_rss_kb() - rss_base_kb;
+    int64_t peak_rss_kb = get_peak_rss_kb();
+    int64_t rss_growth_kb = peak_rss_kb - rss_base_kb;
+    int64_t mutex_blocked = 0;
+    int64_t mutex_wait_ns = 0;
+    get_mutex_wait(&mutex_blocked, &mutex_wait_ns);
+    mutex_blocked -= mutex_blocked_start;
+    mutex_wait_ns -= mutex_wait_ns_start;
 
     /*--- Aggregate results ---*/
     int64_t total_ops = 0;
@@ -774,6 +822,13 @@ int main(int argc, char **argv) {
     double cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
     double cpu_us_per_op = (total_ops > 0) ? cpu_time_ms * 1000.0 / (double)total_ops : 0.0;
     double tags_per_thread = (double)num_tags / (double)num_threads;
+    double mutex_waits_per_op = -1.0;
+    double mutex_wait_us_per_op = -1.0;
+
+    if(have_mutex_wait) {
+        mutex_waits_per_op = (total_ops > 0) ? (double)mutex_blocked / (double)total_ops : 0.0;
+        mutex_wait_us_per_op = (total_ops > 0) ? (double)mutex_wait_ns / 1000.0 / (double)total_ops : 0.0;
+    }
 
     double fairness_cv = 0.0;
     double fairness_min_max = 1.0;
@@ -853,10 +908,11 @@ int main(int argc, char **argv) {
     int64_t p99 = percentile(total_hist, hist_total, 0.99);
 
     printf("%s,%" PRId32 ",%" PRId32 ",%" PRId32 ",%.2f,%" PRId64 ",%" PRId64 ",%.1f,%.2f,%.2f,%.4f,%s,%" PRId64 ",%" PRId64
-           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%.2f,%.2f,%" PRId32 "\n",
+           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%.2f,%.2f,%" PRId32 ",%.4f,%.2f,%" PRId64 "\n",
            mode_names[mode], num_groups, num_threads, num_tags, tags_per_thread, duration_ms, total_ops, ops_per_sec, cpu_load_pct,
            fairness_cv, fairness_min_max, is_write ? "write" : "read", total_errors, p50, p95, p99, max_us, cpu_us_per_op,
-           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_cv, tag_std_dev, window_s);
+           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_cv, tag_std_dev, window_s,
+           mutex_waits_per_op, mutex_wait_us_per_op, peak_rss_kb);
     fflush(stdout);
 
     fprintf(stderr, "\n--- Results ---\n");
@@ -866,7 +922,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Ops/sec:        %.1f\n", ops_per_sec);
     fprintf(stderr, "Latency us:     p50 %" PRId64 "  p95 %" PRId64 "  p99 %" PRId64 "  max %" PRId64 "\n", p50, p95, p99, max_us);
     fprintf(stderr, "CPU load:       %.2f%%  (%.2f us/op)\n", cpu_load_pct, cpu_us_per_op);
-    fprintf(stderr, "RSS growth:     %" PRId64 " KB\n", rss_growth_kb);
+    fprintf(stderr, "RSS growth:     %" PRId64 " KB  (peak %" PRId64 " KB)\n", rss_growth_kb, peak_rss_kb);
+    if(have_mutex_wait) {
+        fprintf(stderr, "Mutex waits:    %.4f per op  (%.2f us/op waiting)\n", mutex_waits_per_op, mutex_wait_us_per_op);
+    }
     fprintf(stderr, "Create/prime:   %" PRId64 " / %" PRId64 " ms\n", create_ms, prime_ms);
     fprintf(stderr, "Fairness CV:    %.2f%%\n", fairness_cv);
     fprintf(stderr, "Fairness ratio: %.4f\n", fairness_min_max);

@@ -1,0 +1,8 @@
+272  Micro800      1000x1 g8: ops/s=    7151 n=88007 median us: to_srv=   9.1 srv= 1059.0 to_cli=   9.8 cli=   4.0
+head Micro800      1000x1 g8: ops/s=    7254 n=88691 median us: to_srv=   9.6 srv= 1059.8 to_cli=  11.1 cli=   5.4
+head Micro800      1000x1 g8: ops/s=    7244 n=88574 median us: to_srv=   9.7 srv= 1060.0 to_cli=  11.5 cli=   5.5
+272  Micro800      1000x1 g8: ops/s=    7117 n=87425 median us: to_srv=   9.2 srv= 1059.3 to_cli=   9.9 cli=   4.0
+272  Micro800      1000x1 g1: ops/s=     900 n=11724 median us: to_srv=   9.5 srv= 1060.2 to_cli=  10.0 cli=  11.8
+head Micro800      1000x1 g1: ops/s=     906 n=11736 median us: to_srv=   9.4 srv= 1059.7 to_cli=   9.4 cli=  12.8
+head Micro800      1000x1 g1: ops/s=     906 n=11734 median us: to_srv=   9.4 srv= 1059.9 to_cli=   9.5 cli=  13.3
+272  Micro800      1000x1 g1: ops/s=     901 n=11725 median us: to_srv=   9.5 srv= 1060.0 to_cli=   9.9 cli=  11.8

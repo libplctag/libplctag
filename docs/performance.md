@@ -40,6 +40,17 @@ the results so far.
   - It writes `<out_dir>/perf_env.txt`: command, commit, host info, Wi-Fi state, and thermal state
     before and after the run.
 - Runs are started under `caffeinate -i` so the machine does not sleep.
+- Linux: every run needs deep CPU idle states blocked. `perf_env.sh` refuses to start otherwise,
+  and records `deep_idle_before` and `deep_idle_after` in `perf_env.txt`. A wake from deep idle
+  costs 50-200 µs, which favors a client that spins over one that blocks (see "Deep idle states
+  blocked" below). To block them for 24 h, which needs root:
+
+  ```sh
+  sudo sh -c 'exec 3>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; exec sleep 86400' &
+  ```
+
+  The block ends when that `sleep` exits or is killed. The check counts entries into idle states
+  with an exit latency over 10 µs for 1 s; there must be none. macOS gives no such control.
 - macOS has no thread affinity API. Above 4 busy threads, efficiency cores join and per-thread
   speed differs by core type. Thread fairness thresholds must allow for that.
 
@@ -147,10 +158,23 @@ caffeinate -i src/tests/scripts/perf_env.sh out/ \
 | `p50_us` ... `max_us` | Operation latency, start to finish. |
 | `create_ms`, `prime_ms` | Time to create all tags, and to read each once. |
 | `rss_growth_kb` | Client memory growth during the run. |
+| `peak_rss_kb` | Client peak memory at the end of the run. |
+| `mutex_waits_per_op` | `pthread_mutex_lock()` calls per operation that had to block, measured window only. -1 without the shim. |
+| `mutex_wait_us_per_op` | Total time blocked in those calls, all threads, per operation. -1 without the shim. |
 | `server_cpu_pct` | Server CPU, from the harness. |
+| `server_rss_kb` | Server memory after the run, from the harness. One server serves a whole protocol and delay, so this grows across runs. |
 
 - With `--poll-ms=0` the async loop spins, and `cpu_us_per_op` measures the spin, not the library.
   All comparisons use `--poll-ms=1`.
+- The summary prints client CPU (`cli%`), client and server memory (MB), and mutex wait (µs/op) for A and B
+  next to the verdict. They do not change the verdict.
+- Mutex wait needs `--mutex-shim=<build>/bin_dist/libmutex_wait_shim.so`. It works on Linux only, with
+  perf_benchmark linked against `plctag_dyn`. The shim works with any library version, so v2.7.2 and HEAD
+  are measured the same way. A lock that `trylock` gets at once is not counted. Spin locks, atomics and the
+  relock inside `pthread_cond_wait()` are not seen.
+- Linux memory before 2026-11-02: `rss_growth_kb` came from `ru_maxrss`, which keeps the RSS of the
+  process that started the harness (about 20 MB for the Python runner). Growth below that showed as 0.
+  The harness now reads `VmHWM`, which counts only its own memory.
 
 ### Fairness
 
@@ -245,7 +269,7 @@ Read, median ops/s:
   (6.9 against 13.5 µs) but its cycle is longer: median latency 56 ms against 46 ms. Either HEAD
   packs fewer tags per packet, or the settle wait (up to 300 µs per exchange, about 40 exchanges
   per cycle) adds the 10 ms. The earlier matrix showed −14% at 1 × 1, so the settle wait is a
-  suspect, not proven.
+  suspect, not proven. Ruled out 2026-11-02 (see "Settle wait off" below).
 - **Tag CV:** HEAD at most 0.59% anywhere (0.36% at 8 × 8). v2.7.2 up to 1.97%, above 1% at
   4 × 8, 8 × 4 and 8 × 8, where its throughput collapses.
 - **Thread window min/max:** HEAD worst 0.857 (8 threads × 1 connection, write), v2.7.2 0.798.
@@ -293,8 +317,8 @@ Debian, `powersave` governor, no pinning. Client and server share the 4 cores.
 
   - HEAD uses less client CPU in each of these (4 × 4 async: 196% against 210%; 1 × 1 async:
     49% against 116%), and its latency is longer: sync 8 × 8 p50 1568 µs against 1248 µs.
-  - The extra 320 µs per sync op is close to the settle wait's 300 µs limit. This adds weight to
-    the settle wait as the cause of the 1-2 connection regression above. Not proven.
+  - The extra 320 µs per sync op is close to the settle wait's 300 µs limit, but the settle wait
+    is not the cause (see "Settle wait off" below).
 
 ### v2.7.2 vs HEAD 5b148252, full matrix, Linux (2026-11-01 to 11-02)
 
@@ -342,11 +366,107 @@ The same Linux host. `--fairness-matrix --delay-ms=1 --rounds=3`, both sides on 
     pass over 10000 tags, so each tag has 0 or 1 operations (HEAD 79%, v2.7.2 120%). Elsewhere
     HEAD's worst is 5.3% (Micro800, Modbus), the same as v2.7.2.
 
+### Settle wait off, Linux (2026-11-02)
+
+HEAD 5b148252 with `SETTLE_MIN_BATCH` set to 2^30, so `settle_due_tags` returns at once (B),
+against HEAD (A) and v2.7.2 (A). ControlLogix, 1 ms delay, 3 rounds, `plctag_dyn`.
+
+| Cell | v2.7.2 | HEAD | Settle off | Settle off vs HEAD |
+|---|---|---|---|---|
+| async read, 10000 tags, 1 × 1 | 115k | 94k | 97k | +2.9%, same |
+| async read, 10000 tags, 1 × 2 | 233k | 194k | 195-201k | +3.5%, same |
+| async read, 10000 tags, 8 × 8 | 53k | 872k | 861-871k | −0.1%, same |
+| sync read, 1000 tags, 8 × 8 | 6,204 | 5,279 | 5,145-5,181 | −2.5%, same |
+| async read, 1000 tags, 4 × 4 | 312k | 235k | 230-236k | −2.3%, same |
+
+- The settle wait is not the cause of any regression: without it HEAD is still 16-24% slower
+  than v2.7.2 in the four regressed cells.
+- It is not the cause of the 8 × 8 gain either. That gain comes from elsewhere (the skipped
+  wakes in 5101b388, or earlier).
+- It changes nothing measurable here, and it spends CPU yielding. Candidate for removal; check on
+  the M1 first, where 5101b388 was measured.
+
+### Packing count, Linux (2026-11-02)
+
+An `LD_PRELOAD` shim counts the client's `send()` calls: on a TCP socket each is one exchange,
+and on the wake socket each is one I/O thread wake. ControlLogix async read, 10000 tags, 1 × 1,
+1 ms delay, `plctag_dyn`. Exchanges in the measured window are the difference between a 6 s and
+a 2 s run (1 run each), so create and prime drop out.
+
+| Version | Tags per exchange | Exchanges/s | ms per exchange | Server delay applied | Rest of the exchange |
+|---|---|---|---|---|---|
+| v2.7.2 | 176 | 592 | 1.69 | 1.09 ms | 0.60 ms |
+| HEAD | 178 | 528 | 1.89 | 1.13 ms | 0.76 ms |
+
+- Packing is the same. The 1 × 1 loss is about 160 µs more per exchange outside the server's
+  sleep: reading the reply, finishing about 178 tags, building and sending the next request.
+- One exchange at a time per connection on both sides (`process_requests` sends, then waits for
+  the reply), so that time adds directly to the cycle.
+- Prime is one sync read per tag, one tag per exchange: 10000 exchanges and 15.7 s (HEAD) or
+  24 s (v2.7.2) per ControlLogix run, before the measured window. It is most of each run's wall
+  time and is not in the matrix time estimates.
+- Sync, 1000 tags, 8 × 8: one tag per exchange on both sides, as expected. HEAD sends 0.62-0.64
+  wakes per operation, v2.7.2 none. A wake is a syscall and a context switch, and every
+  unpacked operation pays it. This is a lead for the sync and Micro800 regressions on 4 cores.
+  Not proven.
+- A first count that divided all exchanges by the window length was wrong: it counted the
+  prime's 10000 single-tag exchanges.
+
+### Exchange split, Linux (2026-11-02)
+
+An `LD_PRELOAD` shim in both perf_benchmark and ab_server logs each `send()` and the first read
+after it, with `CLOCK_MONOTONIC` times. Joined by TCP port, each exchange splits into four
+parts: client send to server read (`to_srv`), server handling with its 1 ms sleep (`srv`),
+server send to client read (`to_cli`), and client read to the next send (`cli`). `to_srv` and
+`to_cli` are loopback plus the time for the receiving thread to wake. Async read, 1 thread,
+`plctag_dyn`, a dynamically linked copy of the HEAD ab_server (the CMake one is static, and
+`LD_PRELOAD` does not reach it). Medians of 2 runs, µs.
+
+| Cell | Version | `to_srv` | `srv` | `to_cli` | `cli` |
+|---|---|---|---|---|---|
+| Micro800 1000 tags, 8 connections | v2.7.2 | 15 | 1062 | 17 | 5 |
+| | HEAD | 52 | 1101 | 61 | 23 |
+| Micro800 1000 tags, 1 connection | v2.7.2 | 82 | 1144 | 98 | 34 |
+| | HEAD | 102 | 1162 | 104 | 55 |
+| ControlLogix 10000 tags, 1 connection | v2.7.2 | 45 | 1147 | 46 | 254 |
+| | HEAD | 67 | 1206 | 73 | 507 |
+
+- ControlLogix: `cli` doubles on HEAD, 254 to 507 µs per exchange: reply dispatch and building
+  the next packed exchange. This is the 1-2 connection regression, and it is client code.
+- Micro800: HEAD is slower in the two wake parts, not in its own code. The cause is idle-state
+  wake latency (next section).
+
+### Deep idle states blocked, Linux (2026-11-02)
+
+v2.7.2's client busy-polls: 78% CPU on Micro800 async 1 × 1, against 28% for HEAD (fairness
+matrix, `cpu_load_pct`). That keeps the cores out of deep idle states. HEAD blocks, and on this
+host each wake from C3-C8 takes 70-200 µs (`cpuidle` latencies) under the `powersave` governor.
+A re-run with `/dev/cpu_dma_latency` held at 0, which keeps the cores out of deep idle states:
+
+```sh
+sudo sh -c 'exec 3>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; sleep 900' &
+```
+
+| Cell | Deep idle | v2.7.2 ops/s | HEAD ops/s | `to_srv` / `to_cli` µs, v2.7.2 → HEAD |
+|---|---|---|---|---|
+| Micro800 1000 tags, 8 connections | allowed | 6797 | 6065 (−11%) | 15/17 → 52/61 |
+| | blocked | 7134 | 7249 (+1.6%) | 9/10 → 10/11 |
+| Micro800 1000 tags, 1 connection | allowed | 720 | 701 (−3%) | 82/98 → 102/104 |
+| | blocked | 901 | 906 (+0.6%) | 10/10 → 9/9 |
+
+- The Micro800 regression is the host's idle states, not HEAD's code. With deep idle blocked,
+  HEAD matches v2.7.2 or beats it, at about a third of the client CPU.
+- Linux runs before this one allowed deep idle. In latency-bound cells, v2.7.2's spinning wins
+  by keeping the CPU awake. Those verdicts measure wake latency, not library work.
+
 ### Pending
 
-- Find the 1-2 connection regression: count tags per exchange and settle waits on HEAD at 1 × 1.
-- Find the Micro800 regression (5-16%, 3+ connections or 4+ threads; not the settle wait). Check
-  it on the M1 first: the Linux host has 4 cores, and a CPU-sensitive cause shows more there.
+- Find the 1-2 connection ControlLogix regression: `cli` 254 to 507 µs per exchange (Exchange
+  split, above). Next: time `dispatch_replies_unsafe` and `build_exchange_unsafe` on HEAD
+  against v2.7.2's `unpack_response` and `pack_requests`.
+- Re-run the Linux scale and fairness matrices with deep idle blocked. The Linux results above
+  (before 2026-11-02, "Deep idle states blocked") allowed deep idle.
+- Micro800 regression on the M1: check whether macOS idle behaves the same way.
 - Full matrix re-run (sync, Micro800, Modbus) on the current HEAD on the M1, with `tag_cv`. Done
   on the Linux host (above).
 - ControlLogix 1000 tags, 4-8 threads: up to 30% slower on the Linux host (scale matrix). Check

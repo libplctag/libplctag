@@ -34,12 +34,15 @@ Usage:
   Scale matrix (10, 100, 1000 tags x 1, 2, 4, 8 threads x 1, 2, 4, 8 connections; tags
   spread round-robin over the connections; sync and async, read and write):
   run_perf_compare.py --a=... --b=... --server-dir=... --scale-matrix=logix|modbus|micro800 [--delay-ms=1]
+  Mutex wait (Linux only; --a and --b must link the shared library, not plctag_static):
+  run_perf_compare.py ... --mutex-shim=b_head/bin_dist/libmutex_wait_shim.so
   run_perf_compare.py --self-check
 """
 
 import argparse
 import csv
 import itertools
+import os
 import re
 import signal
 import socket
@@ -208,19 +211,25 @@ def run_one(binary, c, args, server):
     cmd += ["--interleave"] if args.interleave else []
     cmd += [f"--group-by={c['group_by']}"] if c.get("group_by") else []
     cpu0, t0 = (cpu_seconds(server.pid), time.monotonic()) if server else (0, 0)
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    env = dict(os.environ, LD_PRELOAD=str(args.mutex_shim)) if args.mutex_shim else None
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     server_pct = 100.0 * (cpu_seconds(server.pid) - cpu0) / (time.monotonic() - t0) if server else 0.0
     lines = [l for l in res.stdout.splitlines() if l.startswith(c["mode"] + ",")]
     if res.returncode != 0 or not lines:
         print(f"  FAILED rc={res.returncode}: {' '.join(cmd)}\n{res.stderr[-2000:]}", file=sys.stderr)
         return None
-    return lines[-1].split(","), server_pct
+    return lines[-1].split(","), server_pct, server_rss_kb(server.pid) if server else 0
+
+
+def server_rss_kb(pid):
+    out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return int(out) if out else 0
 
 
 HARNESS_COLUMNS = ("mode,connection_groups,threads,tags,tags_per_thread,duration_ms,total_ops,ops_per_sec,"
                    "cpu_load_pct,fairness_cv,fairness_min_max_ratio,op,errors,p50_us,p95_us,p99_us,max_us,"
                    "cpu_us_per_op,rss_growth_kb,create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,"
-                   "tag_cv,tag_std_dev,window_s").split(",")
+                   "tag_cv,tag_std_dev,window_s,mutex_waits_per_op,mutex_wait_us_per_op,peak_rss_kb").split(",")
 
 
 def verdict(a, b, higher_better):
@@ -255,7 +264,7 @@ def self_check():
 
 def summarize(results):
     print(f"\n{'configuration':41} {'metric':11} {'median A':>10} {'median B':>10} {'change':>8}  verdict"
-          f"   p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B")
+          f"   p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B   cli% A/B    cli MB A/B   srv MB A/B   mutex us/op A/B")
     for key, runs in results.items():
         a = [r for r in runs if r["side"] == "A"]
         b = [r for r in runs if r["side"] == "B"]
@@ -271,9 +280,16 @@ def summarize(results):
         errs = sum(int(r["errors"]) for r in runs)
         win = lambda side: min(float(r["window_min_max"]) for r in side)
         tag_cv = lambda side: max(float(r["tag_cv"]) for r in side)
+        cli_pct = lambda side: statistics.median(float(r["cpu_load_pct"]) for r in side)
+        mb = lambda side, col: statistics.median(float(r[col]) for r in side) / 1024
+        # -1 when the run had no --mutex-shim.
+        mutex = lambda side: statistics.median(float(r["mutex_wait_us_per_op"]) for r in side)
         print(f"{key:41} {metric:11} {statistics.median(va):10.1f} {statistics.median(vb):10.1f} "
               f"{change * 100:+7.1f}%  {word:7}  {p95(a):6.0f}/{p95(b):<6.0f}  {sp(a):4.0f}/{sp(b):<4.0f}"
               f"   {win(a):.3f}/{win(b):<.3f}      {tag_cv(a):.2f}/{tag_cv(b):<.2f}"
+              f"    {cli_pct(a):4.0f}/{cli_pct(b):<4.0f}  {mb(a, 'peak_rss_kb'):5.1f}/{mb(b, 'peak_rss_kb'):<5.1f}"
+              f"  {mb(a, 'server_rss_kb'):5.1f}/{mb(b, 'server_rss_kb'):<5.1f}"
+              f"  {mutex(a):6.2f}/{mutex(b):<6.2f}"
               + (f"  {errs} errors" if errs else ""))
 
 
@@ -298,6 +314,7 @@ def main():
     p.add_argument("--threads", type=int_list, default=SWEEP_THREADS, help="thread sweep: thread counts, comma separated")
     p.add_argument("--tags-per-thread", type=int_list, default=(100,), help="thread sweep: tags per thread, comma separated")
     p.add_argument("--interleave", action="store_true", help="create tags round-robin across threads")
+    p.add_argument("--mutex-shim", type=Path, help="LD_PRELOAD this mutex_wait_shim into the clients (Linux)")
     p.add_argument("--self-check", action="store_true")
     args = p.parse_args()
 
@@ -325,7 +342,8 @@ def main():
     with open(args.out, "w", newline="") as f:
         out = csv.writer(f)
         out.writerow(["# A=" + args.a, "B=" + args.b])
-        out.writerow(["side", "round", "protocol", "delay_ms", "elems", "server_cpu_pct"] + HARNESS_COLUMNS)
+        # server_rss_kb goes last so that older readers indexing by position still work.
+        out.writerow(["side", "round", "protocol", "delay_ms", "elems", "server_cpu_pct"] + HARNESS_COLUMNS + ["server_rss_kb"])
         for (protocol, delay), group in itertools.groupby(configs, lambda c: (c["protocol"], c["delay"])):
             log = tempfile.TemporaryFile()
             server = None if hardware else start_server(protocol, delay, args.server_dir, log)
@@ -339,10 +357,10 @@ def main():
                             got = run_one(binary, c, args, server)
                             if got is None:
                                 continue
-                            cols, srv = got
-                            out.writerow([side, rnd, protocol, delay, c["elems"], f"{srv:.1f}"] + cols)
+                            cols, srv, srv_rss = got
+                            out.writerow([side, rnd, protocol, delay, c["elems"], f"{srv:.1f}"] + cols + [srv_rss])
                             f.flush()
-                            row = dict(zip(HARNESS_COLUMNS, cols), side=side, server_cpu_pct=srv)
+                            row = dict(zip(HARNESS_COLUMNS, cols), side=side, server_cpu_pct=srv, server_rss_kb=srv_rss)
                             results.setdefault(key, []).append(row)
                         print(".", end="", flush=True)
                     print()

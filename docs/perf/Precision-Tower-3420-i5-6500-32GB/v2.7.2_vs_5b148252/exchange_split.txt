@@ -1,0 +1,12 @@
+272  Micro800      1000x1 g8: ops/s=    6702 n=85334 median us: to_srv=  16.5 srv= 1062.7 to_cli=  18.7 cli=   5.3
+head Micro800      1000x1 g8: ops/s=    6038 n=76327 median us: to_srv=  54.1 srv= 1103.3 to_cli=  63.9 cli=  24.0
+head Micro800      1000x1 g8: ops/s=    6091 n=76602 median us: to_srv=  49.7 srv= 1098.5 to_cli=  58.8 cli=  22.9
+272  Micro800      1000x1 g8: ops/s=    6891 n=87268 median us: to_srv=  14.3 srv= 1062.1 to_cli=  15.6 cli=   4.9
+272  Micro800      1000x1 g1: ops/s=     724 n=9836 median us: to_srv=  79.4 srv= 1138.3 to_cli=  94.7 cli=  33.7
+head Micro800      1000x1 g1: ops/s=     701 n=9485 median us: to_srv= 101.9 srv= 1165.1 to_cli= 104.3 cli=  55.7
+head Micro800      1000x1 g1: ops/s=     701 n=9512 median us: to_srv= 101.5 srv= 1158.9 to_cli= 104.3 cli=  53.6
+272  Micro800      1000x1 g1: ops/s=     716 n=9841 median us: to_srv=  84.0 srv= 1149.7 to_cli= 102.3 cli=  34.5
+272  ControlLogix 10000x1 g1: ops/s=  102836 n=5837 median us: to_srv=  46.2 srv= 1141.8 to_cli=  48.6 cli= 270.7
+head ControlLogix 10000x1 g1: ops/s=   93478 n=5265 median us: to_srv=  64.7 srv= 1203.9 to_cli=  73.3 cli= 462.3
+head ControlLogix 10000x1 g1: ops/s=   84705 n=4761 median us: to_srv=  68.7 srv= 1207.6 to_cli=  73.2 cli= 551.2
+272  ControlLogix 10000x1 g1: ops/s=  112673 n=6385 median us: to_srv=  43.2 srv= 1152.8 to_cli=  43.9 cli= 237.9
