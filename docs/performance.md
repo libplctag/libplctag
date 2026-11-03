@@ -146,6 +146,39 @@ caffeinate -i src/tests/scripts/perf_env.sh out/ \
         --fairness-matrix --delay-ms=1 --rounds=3 --out=out/compare.csv
 ```
 
+### The release matrix
+
+`run_perf_compare.py --release-matrix=logix` runs the configurations tracked for each release.
+The server delay defaults to 0.3 ms, a fast PLC on a fast network.
+
+| Axis | Values |
+|---|---|
+| Connections | 1, 2, 3, 4, 5 |
+| Threads | 1, 2, 4, ... up to 4 × the CPU count (1-16 on 4 CPUs, 1-32 on 8) |
+| Tags | 1, 50, 100, 150, 200, 250 |
+| Mode | sync, async (read) |
+
+- Configurations with more threads or connections than tags are skipped: 252 on 4 CPUs.
+- One ControlLogix packet holds about 180 of the harness's tags (`perfTagN[0]`). Tags spread
+  round-robin over the connections, so only 200 and 250 tags on one connection need a second
+  packet.
+- Tracked: ops per tag per second, client CPU % and client peak memory. Server CPU % and memory
+  are tracked only to catch a server regression.
+- At 3 rounds it takes about 5 h on 4 CPUs.
+
+`run_perf_compare.py --auto-matrix=logix` measures auto-sync reads: tags 1000, 2500, 5000 and
+10000 × `auto_sync_read_ms` 1, 2, 5, 10, 20, 50 and 100 × 1 and 5 connections, 56
+configurations, about 1.2 h at 3 rounds. Compare the achieved period (`p50_us`, the interval
+between completions on a tag) with the requested one, and client CPU against both. The point
+where the achieved period falls behind the requested one, or CPU climbs steeply, sets the
+practical lower limit on the period.
+
+`--summary=<dir>/summary.csv` writes the medians of every configuration and side (A, B), and
+one matrix CSV per client metric: `summary_ops_per_tag_s.csv`, `summary_cpu_load_pct.csv` and
+`summary_peak_rss_kb.csv`. Each row is a configuration without its connection count. The columns
+are A at each connection count, B at each, then B ÷ A. With colour scales in a spreadsheet, each
+is a heatmap of two axes at once. These files are the synopsis kept in `docs/perf/<host>/`.
+
 ## Metrics
 
 ### Throughput and cost
@@ -293,7 +326,6 @@ Debian, `powersave` governor, no pinning. Client and server share the 4 cores.
 - Both sides link `libplctag_static.a`, not `plctag_dyn` (built Release, no sanitizers).
 - 5 s runs hold fewer than two fairness windows in the slow cells, so only throughput is used.
 - Server delay applied mean 1.11 ms (ControlLogix), 1.14 ms (Modbus). No cell was server bound.
-- Data: `docs/perf/Precision-Tower-3420-i5-6500-32GB/v2.7.2_vs_5b148252/scale_*`.
 
 | Protocol | Better | Same | WORSE |
 |---|---|---|---|
@@ -324,8 +356,7 @@ Debian, `powersave` governor, no pinning. Client and server share the 4 cores.
 
 The same Linux host. `--fairness-matrix --delay-ms=1 --rounds=3`, both sides on `plctag_dyn`
 (Release, no sanitizers). 252 configurations, 9.1 h, no failed runs. Server delay applied mean
-1.12 ms (ControlLogix), 1.10 ms (Micro800), 1.14 ms (Modbus). Data:
-`docs/perf/Precision-Tower-3420-i5-6500-32GB/v2.7.2_vs_5b148252/fairness_matrix*`.
+1.12 ms (ControlLogix), 1.10 ms (Micro800), 1.14 ms (Modbus).
 
 | Protocol | Better | Same | WORSE |
 |---|---|---|---|
@@ -459,11 +490,91 @@ sudo sh -c 'exec 3>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; sleep 900' &
 - Linux runs before this one allowed deep idle. In latency-bound cells, v2.7.2's spinning wins
   by keeping the CPU awake. Those verdicts measure wake latency, not library work.
 
+### Settle wait × server delay, Linux, deep idle blocked (2026-11-02)
+
+ControlLogix read, each HEAD settle variant against v2.7.2 in its own A B B A pair, 3 rounds,
+`plctag_dyn`, deep idle blocked for every run (`perf_env.txt`). Settle variants are
+`SETTLE_QUIET_US` / `SETTLE_MAX_US` in `conn.c`: off (`SETTLE_MIN_BATCH` = 2^30), 25/100,
+50/300 (HEAD), 100/600. ab_server applied 158-165 µs for 0.1 ms, 359-370 µs for 0.3 ms and
+1055-1076 µs for 1 ms, so the fast end is a PLC that answers in about 160 µs. The full pivot of all
+36 cells is `docs/perf/Precision-Tower-3420-i5-6500-32GB/settle_sweep/pivot.txt`.
+
+Ops/s, HEAD (50/300) against v2.7.2:
+
+| Cell | 0.1 ms v2.7.2 | 0.1 ms HEAD | 0.3 ms v2.7.2 | 0.3 ms HEAD | 1 ms v2.7.2 | 1 ms HEAD |
+|---|---|---|---|---|---|---|
+| async 10000 1×1 | 387k | 395k | 275k | 253k (−7.5%) | 121k | 122k |
+| async 10000 1×2 | 389k | 896k | 388k | 569k | 245k | 259k |
+| async 10000 4×4 | 107k | 1042k | 116k | 914k | 398k | 508k |
+| async 10000 8×8 | 36k | 1082k | 28k | 1118k | 26k | 892k |
+| sync 10000 1×1 | 839 | 5244 | 715 | 2552 | 501 | 914 |
+| sync 10000 8×8 | 6120 | 34574 | 5215 | 18483 | 3590 | 7032 |
+| async 1000 4×4 | 435k | 715k | 453k | 705k | 337k | 367k |
+| sync 1000 8×8 | 26.6k | 34.3k | 16.6k | 18.3k | 6.7k | 7.0k |
+
+- With deep idle blocked, HEAD is better or the same in every cell but one (async 10000 1 × 1 is
+  within 2% at 0.1 and 1 ms). The earlier Linux WORSE cells (1000 tags
+  4-8 threads, 10000 tags 1 × 1 at 1 ms) were wake latency. The one loss left is async 10000 1 × 1
+  at 0.3 ms, −7.5%.
+- The faster the PLC, the bigger HEAD's lead. Sync 10000 tags is 6× v2.7.2 at 0.1 ms.
+- Client CPU: v2.7.2 uses 100-310% in every cell, because it spins. HEAD sync uses 3-17% at 10000 tags.
+- Client memory: v2.7.2 peaks at 0.9-1.6 GB in async 4 × 4 and 8 × 8 (10000 tags). HEAD stays at
+  42 MB in every cell.
+- The settle wait never helps. Across all 36 cells the four variants are within 2% of each
+  other, except async 10000 1 × 1, where any settle setting costs throughput. Ranges do not
+  overlap:
+
+  | Delay | Settle off | 25/100 | 50/300 (HEAD) | 100/600 |
+  |---|---|---|---|---|
+  | 0.1 ms | 420958 | 389727 | 394943 | 394321 |
+  | 0.3 ms | 266973 | 253273 | 253418 | 253114 |
+  | 1 ms | 125532 | 122474 | 122406 | 122207 |
+
+  With the settle off, the 0.3 ms loss against v2.7.2 shrinks from −7.5% to −2.8%.
+
+### Packet sizes without the settle wait, Linux, deep idle blocked (2026-11-03)
+
+The settle wait was added against packets that alternate 1 / 100+ / 1 tags. An `LD_PRELOAD`
+shim logs each request's size in the measured window. ControlLogix with `perfTagN[0]`: a lone
+tag is 66 bytes, and a packed exchange is 54 + 22 × tags, up to 181 tags. "Small" is 2 tags or
+fewer. Async read, one run per cell, settle off against HEAD (50/300).
+
+| Cell | Delay | Small, off / HEAD | P(small after big), off / HEAD | P(small after small), off / HEAD | ops/s, off / HEAD |
+|---|---|---|---|---|---|
+| 10000 1×1, 1×2 | all | 0-0.1% / 0% | 0-0.1% / 0% | 0% / 0% | within 5%, except one HEAD run (below) |
+| 10000 4×4 | 0.1 ms | 1.2% / 0.2% | 1.2% / 0.2% | 3.5% / 15.5% | 1041k / 1059k |
+| 1000 4×4 | 0.1 ms | 11.7% / 1.2% | 13.1% / 1.0% | 0.9% / 15.9% | 743k / 709k |
+| 1000 4×4 | 0.3 ms | 4.2% / 0.3% | 4.4% / 0.3% | 0.1% / 3.8% | 663k / 648k |
+| 1000 8×8 | 0.1 ms | 3.8% / 0.4% | 3.8% / 0.4% | 3.1% / 4.5% | 731k / 764k |
+| 1000 4×4, 8×8 | 1 ms | 0.7-1.6% / 0% | 0.7-1.6% / 0% | 0% / 0% | within 1% |
+
+- No steady alternation. A small exchange follows a big one at most 13% of the time
+  (1000 4 × 4 at 0.1 ms, sample `62 64 61 62 1 62 63 62`), and another small one almost
+  never follows it. These are isolated blips.
+- At 10000 tags on 1-2 connections, packets are full (181 tags) with or without the settle.
+- The settle cuts small packets 5-10×, but does not pay: settle off is as fast or faster in the
+  settle sweep above.
+- One HEAD run at 0.3 ms, 10000 1 × 1, gave 155k ops/s against 253k in the sweep, with half the
+  exchanges. A single traced run; treat it as noise.
+
 ### Pending
 
-- Find the 1-2 connection ControlLogix regression: `cli` 254 to 507 µs per exchange (Exchange
-  split, above). Next: time `dispatch_replies_unsafe` and `build_exchange_unsafe` on HEAD
-  against v2.7.2's `unpack_response` and `pack_requests`.
+- Removed the settle wait (`settle_due_tags` in `conn.c`, 2026-11-03). It cost 3-7% on one
+  connection with one thread, and gained nothing anywhere in the sweep above.
+- ControlLogix 1 × 1 regression: gone (2026-11-03). Exchange split, 10000 tags, async read, deep
+  idle blocked, settle removed, medians of 2 runs:
+
+  | Delay | Version | ops/s | `to_srv` | `srv` | `to_cli` | `cli` |
+  |---|---|---|---|---|---|---|
+  | 0.3 ms | v2.7.2 | 238k | 15 | 418 | 17 | 152 |
+  | | HEAD | 259k (+9%) | 11 | 405 | 10 | 217 |
+  | 1 ms | v2.7.2 | 114k | 19 | 1125 | 21 | 248 |
+  | | HEAD | 122k (+7%) | 13 | 1111 | 11 | 277 |
+
+  The earlier 254 to 507 µs `cli` gap was mostly the settle wait (up to 300 µs) plus deep idle.
+  HEAD still spends 30-65 µs more client time per exchange, but wins it back on faster wakes
+  and shorter server handling. Optional: time `dispatch_replies_unsafe` and
+  `build_exchange_unsafe` to find those 30-65 µs.
 - Re-run the Linux scale and fairness matrices with deep idle blocked. The Linux results above
   (before 2026-11-02, "Deep idle states blocked") allowed deep idle.
 - Micro800 regression on the M1: check whether macOS idle behaves the same way.
@@ -472,7 +583,8 @@ sudo sh -c 'exec 3>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; sleep 900' &
 - ControlLogix 1000 tags, 4-8 threads: up to 30% slower on the Linux host (scale matrix). Check
   on the M1.
 - Hardware confirmation of both fixes on a real ControlLogix.
-- Raw CSVs go in `docs/perf/MacBook-Air-M1-16GB/<version>/` with their `perf_env.txt`.
+- `docs/perf/<host>/` keeps only high-level data: `host_info.txt` and synopsis tables. Raw CSVs,
+  `perf_env.txt` files and per-configuration summaries stay out of the repository.
 
 ## Known limits
 

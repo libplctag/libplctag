@@ -26,7 +26,7 @@ release so a release cannot get slower or less fair unnoticed.
   register map.
 - `run_hardware_tests.sh:40` and `run_modbus_tests.sh:156` set `ulimit -n 1024`. The macOS
   default is 256.
-- `docs/perf/MacBook-Air-M1-16GB/`: earlier CSVs and plots, plus `host_info.txt`
+- `docs/perf/MacBook-Air-M1-16GB/`: `host_info.txt` (earlier raw CSVs and plots removed 2026-11-03; in git history)
   (MacBookAir10,1, 4 P + 4 E cores, 16 GB).
 - `connection_group_id` accepts 0-32767.
 - Each connection group has its own client I/O thread.
@@ -229,8 +229,8 @@ Fairness, at the "best" configuration of each protocol (definitions in step 3A):
 
 - The step 3A matrix cells that fall below the thread threshold are listed under the table, with
   threads, connections and tags per thread.
-- Under both tables: the machine, conditions and server commit, plus a link to the raw CSVs in
-  `docs/perf/MacBook-Air-M1-16GB/<version>/`.
+- Under both tables: the machine, conditions and server commit. Raw CSVs stay out of the
+  repository; `docs/perf/<host>/` keeps only high-level data.
 - A version's row is measured once, when it is released, on the same machine. Earlier versions
   are re-measured only when the machine or the method changes, and the whole table is then redone.
 

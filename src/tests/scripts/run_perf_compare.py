@@ -67,6 +67,15 @@ PER_CONN_TAGS = 16
 SCALE_TAGS = (10, 100, 1000)
 SCALE_THREADS = (1, 2, 4, 8)
 SCALE_CONNS = (1, 2, 4, 8)
+# Release matrix.  One ControlLogix packet holds about 180 of the harness's tags, so 200 and
+# 250 tags on one connection need a second packet.  Threads double up to 4 x the CPU count.
+RELEASE_TAGS = (1, 50, 100, 150, 200, 250)
+RELEASE_CONNS = (1, 2, 3, 4, 5)
+RELEASE_THREADS = tuple(sorted({min(1 << i, 4 * (os.cpu_count() or 1)) for i in range(16)}))
+# Auto-sync CPU sweep: where the client stops keeping up with auto_sync_read_ms.
+AUTO_TAGS = (1000, 2500, 5000, 10000)
+AUTO_MS = (1, 2, 5, 10, 20, 50, 100)
+AUTO_CONNS = (1, 5)
 DELAY_LINE = re.compile(r"Response delay: requested (\d+) us, applied mean (\d+) us over (\d+) responses")
 
 
@@ -124,13 +133,32 @@ def scale_matrix(protocol, delay_ms=1.0):
     return configs
 
 
+def release_matrix(protocol, delay_ms=0.3):
+    """Connections x threads x tags, sync and async, read.  Skips threads or connections with no tag."""
+    configs = []
+    for tags, threads, conns, mode in itertools.product(RELEASE_TAGS, RELEASE_THREADS, RELEASE_CONNS, ["sync", "async"]):
+        if conns > tags or threads > tags:
+            continue
+        configs.append(dict(protocol=protocol, delay=delay_ms, tags=tags, threads=threads, groups=conns,
+                            group_by="tag", per_conn_tag=True, elems=1, mode=mode, op="read"))
+    return configs
+
+
+def auto_matrix(protocol, delay_ms=0.3):
+    """Auto-sync read: tags x period x connections, for client CPU against the period."""
+    return [dict(protocol=protocol, delay=delay_ms, tags=tags, threads=1, groups=conns, group_by="tag",
+                 per_conn_tag=True, elems=1, mode="auto", op="read", auto_ms=period)
+            for tags, period, conns in itertools.product(AUTO_TAGS, AUTO_MS, AUTO_CONNS)]
+
+
 def int_list(text):
     return tuple(int(x) for x in text.split(","))
 
 
 def config_key(c):
     return (f"{c['protocol']} d{c['delay']:g}ms {c['mode']} {c['op']} {c['tags']}x{c['threads']}"
-            f" g{c.get('groups', 1)}{'t' if c.get('group_by') == 'tag' else ''} e{c['elems']}")
+            f" g{c.get('groups', 1)}{'t' if c.get('group_by') == 'tag' else ''} e{c['elems']}"
+            + (f" p{c['auto_ms']}ms" if c.get("auto_ms") else ""))
 
 
 def tag_strings(c, args):
@@ -210,6 +238,7 @@ def run_one(binary, c, args, server):
     cmd += [f"--tag={t}" for t in tag_strings(c, args)]
     cmd += ["--interleave"] if args.interleave else []
     cmd += [f"--group-by={c['group_by']}"] if c.get("group_by") else []
+    cmd += [f"--auto-ms={c['auto_ms']}"] if c.get("auto_ms") else []
     cpu0, t0 = (cpu_seconds(server.pid), time.monotonic()) if server else (0, 0)
     env = dict(os.environ, LD_PRELOAD=str(args.mutex_shim)) if args.mutex_shim else None
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -259,7 +288,67 @@ def self_check():
     assert tag_strings(dict(protocol="micro800", groups=3, per_conn_tag=True, elems=1), A)[2].endswith("plc=Micro800&name=perfTag3[0]")
     s = scale_matrix("logix")
     assert len(s) == 3 * 4 * 4 * 2 * 2 and max(c["groups"] for c in s) <= PER_CONN_TAGS
+    r = release_matrix("logix")
+    assert len(r) == 2 * (1 + 5 * len(RELEASE_THREADS) * 5) and max(c["groups"] for c in r) <= PER_CONN_TAGS
+    assert config_key(auto_matrix("logix")[0]).endswith(" p1ms")
+    rows = [dict(protocol="logix", delay=0.3, mode="sync", op="read", tags=100, threads=1, groups=g, auto_ms="", side=s,
+                 runs=3, ops_per_sec=v, ops_per_tag_s=v / 100, cpu_load_pct=10.0, peak_rss_kb=1000.0, p50_us=1.0, p95_us=2.0,
+                 server_cpu_pct=1.0, server_rss_kb=1.0)
+            for g, s, v in ((1, "A", 1000.0), (1, "B", 2000.0), (2, "A", 1500.0))]
+    with tempfile.TemporaryDirectory() as d:
+        write_summary(rows, Path(d) / "summary.csv")
+        lines = (Path(d) / "summary_ops_per_tag_s.csv").read_text().splitlines()
+        assert lines[0].endswith("A g1,A g2,B g1,B g2,B/A g1,B/A g2") and lines[1].endswith("10.0,15.0,20.0,,2.00,"), lines
     print("self-check ok")
+
+
+SUMMARY_FIELDS = ("protocol", "delay", "mode", "op", "tags", "threads", "groups", "auto_ms")
+SUMMARY_METRICS = ("ops_per_sec", "ops_per_tag_s", "cpu_load_pct", "peak_rss_kb", "p50_us", "p95_us",
+                   "server_cpu_pct", "server_rss_kb")
+
+
+def summary_rows(results, configs):
+    """Medians per configuration and side, with ops per tag per second."""
+    rows = []
+    for key, runs in results.items():
+        c = configs[key]
+        for side in ("A", "B"):
+            got = [r for r in runs if r["side"] == side]
+            if not got:
+                continue
+            med = lambda col: statistics.median(float(r[col]) for r in got)
+            row = {f: c.get(f, "") for f in SUMMARY_FIELDS}
+            row.update(side=side, runs=len(got), ops_per_sec=med("ops_per_sec"), ops_per_tag_s=med("ops_per_sec") / c["tags"],
+                       cpu_load_pct=med("cpu_load_pct"), peak_rss_kb=med("peak_rss_kb"), p50_us=med("p50_us"),
+                       p95_us=med("p95_us"), server_cpu_pct=med("server_cpu_pct"), server_rss_kb=med("server_rss_kb"))
+            rows.append(row)
+    return rows
+
+
+def write_summary(rows, path):
+    """summary.csv (one row per configuration and side), then one matrix per client metric: a row per
+    configuration without its connection count, columns connections x side, then B/A."""
+    path = Path(path)
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=("side", "runs") + SUMMARY_FIELDS + SUMMARY_METRICS)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: (f"{v:.2f}" if isinstance(v, float) else v) for k, v in r.items()})
+    conns = sorted({r["groups"] for r in rows})
+    row_fields = [f for f in SUMMARY_FIELDS if f != "groups"]
+    by_row = {}
+    for r in rows:
+        by_row.setdefault(tuple(r[f] for f in row_fields), {})[(r["groups"], r["side"])] = r
+    for metric in ("ops_per_tag_s", "cpu_load_pct", "peak_rss_kb"):
+        with open(path.with_name(f"{path.stem}_{metric}.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(row_fields + [f"{side} g{g}" for side in ("A", "B") for g in conns] + [f"B/A g{g}" for g in conns])
+            for rk in sorted(by_row, key=lambda k: tuple(str(x).zfill(8) for x in k)):
+                cell = by_row[rk]
+                val = lambda g, side: cell[(g, side)][metric] if (g, side) in cell else None
+                vals = [f"{val(g, side):.1f}" if val(g, side) is not None else "" for side in ("A", "B") for g in conns]
+                ratios = [f"{val(g, 'B') / val(g, 'A'):.2f}" if val(g, "A") and val(g, "B") is not None else "" for g in conns]
+                w.writerow(list(rk) + vals + ratios)
 
 
 def summarize(results):
@@ -303,11 +392,16 @@ def main():
     p.add_argument("--out", default="perf_compare.csv")
     p.add_argument("--logix-attrs", help="hardware Logix attributes (without name); skips servers and Modbus")
     p.add_argument("--logix-tag", default="TestDINTArray")
-    p.add_argument("--only", help="run only configurations whose key contains this text")
+    p.add_argument("--only", help="run only configurations whose key contains this text; comma separated for several")
     p.add_argument("--thread-sweep", choices=["modbus", "logix", "micro800"], help="run the thread sweep instead")
     p.add_argument("--fairness-matrix", action="store_true", help="run the step 3A fairness matrix instead")
     p.add_argument("--scale-matrix", choices=["modbus", "logix", "micro800"],
                    help="run the tags x threads x connections matrix instead")
+    p.add_argument("--release-matrix", choices=["modbus", "logix", "micro800"],
+                   help="run the release matrix (connections x threads x tags, sync and async) instead")
+    p.add_argument("--auto-matrix", choices=["logix", "micro800"],
+                   help="run the auto-sync sweep (tags x auto_sync_read_ms x connections) instead")
+    p.add_argument("--summary", help="also write medians to this CSV, plus one matrix CSV per client metric")
     p.add_argument("--poll-ms", type=int, default=1, help="async: sleep this long between status passes; 0 yields in a loop")
     p.add_argument("--delay-ms", type=float, default=0.0,
                    help="thread sweep, fairness and scale matrices: server response delay in ms, fractions allowed")
@@ -327,13 +421,17 @@ def main():
 
     if args.fairness_matrix:
         matrix = fairness_matrix(args.delay_ms or 1.0)
+    elif args.release_matrix:
+        matrix = release_matrix(args.release_matrix, args.delay_ms or 0.3)
+    elif args.auto_matrix:
+        matrix = auto_matrix(args.auto_matrix, args.delay_ms or 0.3)
     elif args.scale_matrix:
         matrix = scale_matrix(args.scale_matrix, args.delay_ms or 1.0)
     elif args.thread_sweep:
         matrix = thread_sweep_matrix(args.thread_sweep, args.delay_ms, args.threads, args.tags_per_thread)
     else:
         matrix = build_matrix(hardware)
-    configs = [c for c in matrix if not args.only or args.only in config_key(c)]
+    configs = [c for c in matrix if not args.only or any(o in config_key(c) for o in args.only.split(","))]
     # ponytail: + 2 s per run for create, prime and destroy; a guess, not measured per protocol.
     total_s = sum(2 * args.rounds * (c.get("duration", args.duration) + 2) for c in configs)
     print(f"{len(configs)} configurations, {args.rounds} rounds, about {total_s // 60} min", flush=True)
@@ -372,6 +470,8 @@ def main():
                     f.write(line + "\n")
                     print(line)
     summarize(results)
+    if args.summary:
+        write_summary(summary_rows(results, {config_key(c): c for c in configs}), args.summary)
 
 
 if __name__ == "__main__":
