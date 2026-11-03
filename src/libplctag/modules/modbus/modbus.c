@@ -2254,9 +2254,10 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Got write response %ud, with error %s, of length %d.",
                    (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
         } else {
-            int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
-            int next_register_offset = ((tag->request_num + 1) * registers_per_request);
-            int next_byte_offset = (next_register_offset * tag->elem_size) / 8;
+            /* must match the stride used by create_write_request() */
+            int32_t registers_per_request = (MAX_MODBUS_REQUEST_PAYLOAD * 8) / tag->elem_size;
+            int32_t next_register_offset = ((tag->request_num + 1) * registers_per_request);
+            int32_t next_byte_offset = (next_register_offset * tag->elem_size) / 8;
 
             /* no error. So copy the data. */
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "registers_per_request = %d", registers_per_request);
