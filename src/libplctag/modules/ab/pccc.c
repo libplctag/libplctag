@@ -1466,8 +1466,8 @@ static int pccc_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(overhead > (size_t)capacity) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC request of %zu bytes does not fit in %d bytes!", overhead,
-               capacity);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -1614,8 +1614,8 @@ static int pccc_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(overhead + (size_t)tag->size > (size_t)capacity) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC request of %zu bytes does not fit in %d bytes!",
-               overhead + (size_t)tag->size, capacity);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead + (size_t)tag->size, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -1688,8 +1688,8 @@ static int plc5_encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity,
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(overhead > (size_t)capacity) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC request of %zu bytes does not fit in %d bytes!", overhead,
-               capacity);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -1769,8 +1769,8 @@ static int slc_encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, 
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(overhead > (size_t)capacity) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC request of %zu bytes does not fit in %d bytes!", overhead,
-               capacity);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 

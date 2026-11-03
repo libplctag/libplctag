@@ -110,8 +110,8 @@ static int encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_pl
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     if(overhead > (size_t)capacity) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC request of %zu bytes does not fit in %d bytes!", overhead,
-               capacity);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
@@ -286,8 +286,8 @@ static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_p
 
     /* tag->size comes from the attribute string, so bound it before copying. */
     if(overhead + (size_t)(unsigned int)tag->size > (size_t)capacity) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC request of %zu bytes does not fit in %d bytes!",
-               overhead + (size_t)(unsigned int)tag->size, capacity);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead + (size_t)(unsigned int)tag->size, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 

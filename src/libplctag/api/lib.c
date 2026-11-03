@@ -1580,7 +1580,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
     }
 
     if(tag_op_busy(tag) && atomic_get_int64(&tag->read_cache_expire) <= now) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "An operation is already in flight!");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "An operation is already in flight!");
         rc_dec(tag);
         return PLCTAG_ERR_BUSY;
     }
@@ -1597,7 +1597,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         }
 
         if(tag_op_busy(tag)) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "An operation is already in flight!");
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "An operation is already in flight!");
             rc = PLCTAG_ERR_BUSY;
             is_done = true;
             break;
@@ -1743,14 +1743,14 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
 
     /* an op in flight makes this BUSY without the API mutex: the op state is atomic, and the reference keeps the tag. */
     if(tag_op_busy(tag)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Tag already has an operation in flight!");
         rc_dec(tag);
         return PLCTAG_ERR_BUSY;
     }
 
     critical_block(tag->api_mutex) {
         if(tag_op_busy(tag)) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
+            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Tag already has an operation in flight!");
             rc = PLCTAG_ERR_BUSY;
             is_done = true;
             break;

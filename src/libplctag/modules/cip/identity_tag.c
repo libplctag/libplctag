@@ -82,7 +82,8 @@ int cip_identity_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
     pdebug(tag->debug_module, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     if(capacity < 6) {
-        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "The 6 byte Identity request does not fit in %d bytes!", capacity);
+        pdebug(tag->debug_module, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "The 6 byte Identity request does not fit in %d bytes!", capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 

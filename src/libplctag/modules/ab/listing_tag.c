@@ -439,8 +439,8 @@ int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     if(needed > capacity) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Listing request of %d bytes does not fit in %d bytes!",
-               needed, capacity);
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+               "Listing request of %d bytes does not fit in %d bytes!", needed, capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 

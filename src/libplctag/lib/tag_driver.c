@@ -45,8 +45,11 @@
 #include <utils/vector.h>
 
 
-/* most tags one tickle pass looks at, so a pass holds the connection mutex for a bounded time. */
-#define TAG_DRIVER_TICKLE_BATCH (64)
+/*
+ * most tags one tickle pass looks at, so a pass holds the connection mutex for a bounded time.
+ * Above one packet's worth (about 180 small reads), so that auto-sync packets can fill.
+ */
+#define TAG_DRIVER_TICKLE_BATCH (512)
 
 /* how soon a create that its kind's tickler finishes (@raw, a deferred CIP tag) is looked at again. */
 #define TAG_DRIVER_CREATE_RECHECK_MS (100)
@@ -280,8 +283,8 @@ static void tickle_tag(plc_tag_p tag) {
                 periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1)) / tag->auto_sync_read_ms;
 
                 if(periods > 1) {
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods,
-                           tag->auto_sync_read_ms);
+                    pdebug(DEBUG_MODULE_LIB, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
+                           "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods, tag->auto_sync_read_ms);
                 }
 
                 tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);

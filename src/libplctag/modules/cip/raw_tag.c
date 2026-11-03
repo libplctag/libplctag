@@ -145,7 +145,8 @@ int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag
     }
 
     if(payload_size > capacity) {
-        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Request of %d bytes does not fit in %d bytes!", payload_size, capacity);
+        pdebug(dbg, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id, "Request of %d bytes does not fit in %d bytes!", payload_size,
+               capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 

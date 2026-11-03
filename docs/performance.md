@@ -557,7 +557,74 @@ fewer. Async read, one run per cell, settle off against HEAD (50/300).
 - One HEAD run at 0.3 ms, 10000 1 × 1, gave 155k ops/s against 253k in the sweep, with half the
   exchanges. A single traced run; treat it as noise.
 
+### Auto-sync saturation, Linux, deep idle blocked (2026-11-03)
+
+Auto-sync read, 1 ms period, 1 connection, 0.3 ms server delay: the period is shorter than the
+tags can be read, so every read is late. The spot check found HEAD 40-65% slower than v2.7.2
+here. `perf` showed two causes:
+
+- Every late read logged `WARN ... Skipping N periods` (`lib/tag_driver.c`), about 120000 lines a
+  second. HEAD logs it on the I/O thread under the connection mutex, so each exchange waited
+  for the log writes. v2.7.2 logs the same warning, but from its separate tickler thread.
+  perf_benchmark runs at `PLCTAG_DEBUG_WARN`, so this counts in every benchmark of the case.
+- `TAG_DRIVER_TICKLE_BATCH` = 64 capped every auto-sync packet at 64 tags.
+
+Fixed: the message is `DEBUG_DETAIL` now, and the cap is 256. Two runs each:
+
+| Tags | v2.7.2 ops/s (CPU) | HEAD before | HEAD after |
+|---|---|---|---|
+| 1000 | 176k (134%) | 98k (42%) | 326k (29%) |
+| 10000 | 169k (152%) | 57k (66%) | 170k (62%) |
+
+- 1000 tags: 1.9x v2.7.2 at about a fifth of its CPU. Achieved period 3.1 ms against 5.5 ms.
+- 10000 tags: equal throughput at 40% of the CPU. What is left is the linear search in the
+  tag list (`vector_find_index`); a tree keyed on (op_time, sequence) removes it (Pending).
+
+### Async 250 tags, 1 × 1, 1 ms polling, Linux, deep idle blocked (2026-11-03)
+
+The spot check found HEAD 30% slower here. It is the harness's poll interval, not library cost:
+HEAD uses 16% CPU against 80% for v2.7.2, and logging off changes nothing.
+
+A cycle starts all tags, then the app checks status and sleeps 1 ms until all are done. Both
+versions take three round trips per cycle: the first `plc_tag_read` wakes the I/O thread, which
+sends the 3-6 tags started so far; then a full packet (161-181 tags); then the rest. Traced
+cycle, HEAD (v2.7.2 in brackets), µs from the first `plc_tag_read`:
+
+| Phase | µs |
+|---|---|
+| Start loop, 250 `plc_tag_read` calls | 320 (731) |
+| Last reply | 1255 (1270) |
+| App wakes after last reply | +145 (+571) |
+| Cycle | 1453 (1910) |
+
+The app wakes about start loop + 1 ms after the cycle starts. HEAD's start loop is faster, so its
+wake lands within tens of µs of the last reply; when the reply is later, the cycle takes a second
+1 ms sleep (2.3 ms). Even the trace shim's few ns per call moved HEAD to one sleep (165k ops/s).
+Sweep, ops/s, one 3 s run each:
+
+| Tags | v2.7.2 poll 1 | HEAD poll 1 | | v2.7.2 poll 0 | HEAD poll 0 | |
+|---|---|---|---|---|---|---|
+| 150 | 116k | 125k | +8% | 146k | 170k | +16% |
+| 175 | 127k | 148k | +16% | 168k | 195k | +16% |
+| 200 | 126k | 164k | +31% | 139k | 208k | +50% |
+| 225 | 141k | 100k | -29% | 152k | 170k | +12% |
+| 250 | 154k | 109k | -29% | 165k | 187k | +13% |
+| 275 | 155k | 119k | -24% | 174k | 206k | +18% |
+| 300 | 161k | 129k | -20% | 187k | 212k | +13% |
+
+- HEAD's cliff sits between 200 and 225 tags, where three round trips (about 1.25 ms) pass the
+  app's wake. v2.7.2 has the same cliff at a different count. Without the sleep, HEAD wins at
+  every count.
+- Library-side gain still open: the first 3-6 tag packet costs one server delay per cycle.
+  Two round trips (181 + 69) would be about 0.85 ms and stay under the 1 ms wake.
+
 ### Pending
+
+- Replace the tag list vector with an intrusive red-black tree keyed on (op_time, insertion
+  sequence), every tag in it, idle tags at now + 1 year. Scratchpad benchmark, 600-byte tags, 181
+  tags per exchange: auto-sync list cost at 10000 tags 248 µs to 9 µs per exchange; polling 6 to
+  16 µs (all tags in the tree cost two more tree operations per op). Needs the rightmost and finger
+  insert shortcuts.
 
 - Removed the settle wait (`settle_due_tags` in `conn.c`, 2026-11-03). It cost 3-7% on one
   connection with one thread, and gained nothing anywhere in the sweep above.
@@ -582,7 +649,8 @@ fewer. Async read, one run per cell, settle off against HEAD (50/300).
   on the Linux host (above).
 - ControlLogix 1000 tags, 4-8 threads: up to 30% slower on the Linux host (scale matrix). Check
   on the M1.
-- Hardware confirmation of both fixes on a real ControlLogix.
+- Hardware tests pass (2026-11-03) with the settle wait removed and the auto-sync fixes. Hardware
+  performance numbers are still to measure.
 - `docs/perf/<host>/` keeps only high-level data: `host_info.txt` and synopsis tables. Raw CSVs,
   `perf_env.txt` files and per-configuration summaries stay out of the repository.
 

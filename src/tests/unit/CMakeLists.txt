@@ -103,6 +103,18 @@ target_include_directories(test_tag_schedule PRIVATE
 
 target_link_libraries(test_tag_schedule PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_debug_limit: the per call site log limit in pdebug().  Pure computation.
+add_executable(test_debug_limit test_debug_limit.c)
+
+target_include_directories(test_debug_limit PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_debug_limit PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_eip_response_validation: checks that a response whose EIP header does not answer the
 # request we sent is rejected. It uses POSIX sockets directly to stand up a hostile server,
 # because the library's own socket shim is internal, so it is skipped on Windows.
@@ -209,10 +221,11 @@ add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
 add_test(NAME unit_test_backoff COMMAND test_backoff)
 add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
 add_test(NAME unit_test_tag_schedule COMMAND test_tag_schedule)
+add_test(NAME unit_test_debug_limit COMMAND test_debug_limit)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_tag_schedule test_cip_status ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_tag_schedule test_debug_limit test_cip_status ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"
