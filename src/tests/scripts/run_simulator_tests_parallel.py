@@ -303,7 +303,7 @@ REQUIRED_EXECUTABLES = [
     "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
-    "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops",
+    "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops", "test_modbus_split_write",
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
@@ -1718,6 +1718,12 @@ def build_manifest() -> Manifest:
     sec.test("transaction ID wraps past 65535 (Modbus)",
               [exe("test_modbus_ops"), "--mode=tid-wrap", "--count=16", f"{mb_ops_base}&max_requests_in_flight=16"], S,
               server=mb_fault_server("--reorder=true"))
+    sec.test("writes split over two requests reach every holding register, 120-130 of 140 (Modbus, #686)",
+              [exe("test_modbus_split_write"), "--type=hr", "--total=140", "--first=120", "--last=130", mb_ops_base], F,
+              server=mb_fault_server("--holding-registers=140"))
+    sec.test("writes split over two requests reach every coil, 1963-1973 of 2000 (Modbus, #686)",
+              [exe("test_modbus_split_write"), "--type=co", "--total=2000", "--first=1963", "--last=1973", mb_ops_base], F,
+              server=mb_fault_server("--coils=2000"))
     sec.test("data written during auto-sync reads reaches the server (Modbus)",
               [exe("test_modbus_ops"), "--mode=auto-dirty", mb_ops_base], F, server=mb_fault_server())
     sec.test("auto-sync read and write on one tag (Modbus)",
