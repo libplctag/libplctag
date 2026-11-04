@@ -658,7 +658,8 @@ The core runs from the Linux host, on the M1: `--scale-matrix=logix`, `--scale-m
 (`--duration=5`) and `--fairness-matrix`, all `--delay-ms=1 --rounds=3`, both sides on
 `plctag_dyn` (Release, clang, no sanitizers). 636 configurations, 12.9 h, on mains power, no
 failed runs, no thermal warnings. Server delay applied mean 1.35-1.48 ms. macOS cannot block deep
-idle, so these runs allow it. Judged on all three measures (`--from-csv`):
+idle, so these runs allow it. Summaries are in `docs/perf/MacBook-Air-M1-16GB/v2.7.2_vs_4b5ce255/`.
+Judged on all three measures (`--from-csv`):
 
 | Run | Better | Same | WORSE | CPU/op WORSE | Memory WORSE |
 |---|---|---|---|---|---|
