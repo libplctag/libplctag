@@ -688,7 +688,16 @@ Judged on all three measures (`--from-csv`):
 ### Pending
 
 - ControlLogix async 5-15% slower on the M1 (above). Find out whether it is wake latency or
-  the 30-65 µs more client time per exchange measured on Linux.
+  the 30-65 µs more client time per exchange measured on Linux. Two timing runs, both on the M1,
+  ControlLogix async read, 10000 tags, 1 × 1, 1 ms delay, HEAD only:
+  1. **Client code per exchange.** Time `dispatch_replies_unsafe` and `build_exchange_unsafe`
+     (`modules/cip/conn.c`) with `CLOCK_MONOTONIC` on entry and exit; report the median and p95
+     of each, µs per exchange. Their sum against the 30-65 µs gap says whether the client code
+     is the loss.
+  2. **Wake latency per exchange.** The exchange split ("Exchange split, Linux") on both
+     v2.7.2 and HEAD: `to_srv`, `srv`, `to_cli`, `cli`. On macOS the shim loads with
+     `DYLD_INSERT_LIBRARIES` instead of `LD_PRELOAD`. If HEAD's `to_srv` + `to_cli` is larger by
+     about the ops/s loss, the loss is wake latency, which macOS cannot block.
 - Re-run the auto-sync saturation cells with the current code (cap 512, rate-limited warning).
 - Re-run the Linux scale and fairness matrices with deep idle blocked. The Linux results above
   (before 2026-11-02, "Deep idle states blocked") allowed deep idle.
@@ -699,12 +708,11 @@ Judged on all three measures (`--from-csv`):
   exchange; polling 6 to 16 µs (all tags in the tree cost two more tree operations per op).
   Needs the rightmost and finger insert shortcuts. Only auto-sync at 10000 tags gains, and there
   HEAD already matches v2.7.2 throughput at 40% of its CPU.
-- Optional: time `dispatch_replies_unsafe` and `build_exchange_unsafe` to find the 30-65 µs.
 - Optional: send the first 3-6 tag packet of an async cycle with the full one (one server delay
   per cycle).
 
-`docs/perf/<host>/` keeps only high-level data: `host_info.txt` and synopsis tables. Raw CSVs,
-`perf_env.txt` files and per-configuration summaries stay out of the repository.
+`docs/perf/<host>/` keeps only high-level data: `host_info.txt`, each run's verdict summary and
+its `--summary` CSVs. Raw CSVs (`--out`) and `perf_env.txt` files stay out of the repository.
 
 ## Known limits
 
