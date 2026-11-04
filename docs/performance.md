@@ -25,6 +25,9 @@ the results so far.
 - **Two properties:**
   1. Throughput and cost: operations per second, client CPU per operation, latency.
   2. Fairness: every tag and every thread gets its share of the connection (see below).
+- HEAD must beat v2.7.2 on all three client measures: higher `ops_per_sec`, lower
+  `cpu_us_per_op` and lower `peak_rss_kb`. A cell that loses on any one of them is a regression,
+  even when it wins on the other two.
 
 ## Test setup
 
@@ -248,7 +251,8 @@ in 12.
 - Async ControlLogix at 4-8 threads × 4-8 connections: HEAD up to 6× faster. v2.7.2 falls to
   110-300k ops/s there.
 - Async ControlLogix with 1-2 threads on many connections: HEAD slower. 1 thread × 16
-  connections: HEAD 206-298k ops/s at 526-597% client CPU, v2.7.2 690-704k at 271-273%.
+  connections: HEAD 206-298k ops/s at 526-597% client CPU, v2.7.2 690-704k at 271-273%. Fixed
+  by 5101b388: 1.34 µs/op against 4.06 (see "Fixes since").
 - Tag create, 10000 ControlLogix tags: HEAD about 160× slower (14.9 s against 93 ms on 1
   connection), because create reads were not packed.
 
@@ -264,7 +268,8 @@ in 12.
 
 - **Packet packing no longer alternates** (5101b388). The I/O thread sent one tag, then all the
   rest, in turn: the first tag restarted after a reply woke it before the others were queued.
-  It now skips redundant wakes and waits up to 300 µs for a batch to settle. Async ControlLogix
+  It now skips redundant wakes and waits up to 300 µs for a batch to settle (the settle wait was
+  removed later, see "Settle wait removed"). Async ControlLogix
   read, 10000 tags, 1 round:
 
   | Threads × connections | v2.7.2 | HEAD |
@@ -414,8 +419,8 @@ against HEAD (A) and v2.7.2 (A). ControlLogix, 1 ms delay, 3 rounds, `plctag_dyn
   than v2.7.2 in the four regressed cells.
 - It is not the cause of the 8 × 8 gain either. That gain comes from elsewhere (the skipped
   wakes in 5101b388, or earlier).
-- It changes nothing measurable here, and it spends CPU yielding. Candidate for removal; check on
-  the M1 first, where 5101b388 was measured.
+- It changes nothing measurable here, and it spends CPU yielding. Removed 2026-11-03 (see
+  "Settle wait removed").
 
 ### Packing count, Linux (2026-11-02)
 
@@ -569,7 +574,14 @@ here. `perf` showed two causes:
   perf_benchmark runs at `PLCTAG_DEBUG_WARN`, so this counts in every benchmark of the case.
 - `TAG_DRIVER_TICKLE_BATCH` = 64 capped every auto-sync packet at 64 tags.
 
-Fixed: the message is `DEBUG_DETAIL` now, and the cap is 256. Two runs each:
+Fixed:
+
+- The message stays `DEBUG_WARN`, now with `DEBUG_RATE_LIMIT` (5eb4370f): it prints the first time,
+  then at most once every 5 s (`DEBUG_LIMIT_MS`) with a count of the dropped lines.
+- The cap is 512 now (4b5ce255).
+
+The table below was measured with the earlier fix: the message at `DEBUG_DETAIL` and a cap of 256.
+It has not been re-run with the current code. Two runs each:
 
 | Tags | v2.7.2 ops/s (CPU) | HEAD before | HEAD after |
 |---|---|---|---|
@@ -618,18 +630,14 @@ Sweep, ops/s, one 3 s run each:
 - Library-side gain still open: the first 3-6 tag packet costs one server delay per cycle.
   Two round trips (181 + 69) would be about 0.85 ms and stay under the 1 ms wake.
 
-### Pending
+### Settle wait removed (2026-11-03)
 
-- Replace the tag list vector with an intrusive red-black tree keyed on (op_time, insertion
-  sequence), every tag in it, idle tags at now + 1 year. Scratchpad benchmark, 600-byte tags, 181
-  tags per exchange: auto-sync list cost at 10000 tags 248 µs to 9 µs per exchange; polling 6 to
-  16 µs (all tags in the tree cost two more tree operations per op). Needs the rightmost and finger
-  insert shortcuts.
+`settle_due_tags` and the `SETTLE_*` constants are gone from `conn.c`. The settle wait cost 3-7%
+on one connection with one thread, and gained nothing anywhere in the sweep above.
 
-- Removed the settle wait (`settle_due_tags` in `conn.c`, 2026-11-03). It cost 3-7% on one
-  connection with one thread, and gained nothing anywhere in the sweep above.
-- ControlLogix 1 × 1 regression: gone (2026-11-03). Exchange split, 10000 tags, async read, deep
-  idle blocked, settle removed, medians of 2 runs:
+### ControlLogix 1 × 1 regression gone, Linux, deep idle blocked (2026-11-03)
+
+Exchange split, 10000 tags, async read, settle removed, medians of 2 runs:
 
   | Delay | Version | ops/s | `to_srv` | `srv` | `to_cli` | `cli` |
   |---|---|---|---|---|---|---|
@@ -638,21 +646,64 @@ Sweep, ops/s, one 3 s run each:
   | 1 ms | v2.7.2 | 114k | 19 | 1125 | 21 | 248 |
   | | HEAD | 122k (+7%) | 13 | 1111 | 11 | 277 |
 
-  The earlier 254 to 507 µs `cli` gap was mostly the settle wait (up to 300 µs) plus deep idle.
-  HEAD still spends 30-65 µs more client time per exchange, but wins it back on faster wakes
-  and shorter server handling. Optional: time `dispatch_replies_unsafe` and
-  `build_exchange_unsafe` to find those 30-65 µs.
+- The earlier 254 to 507 µs `cli` gap was mostly the settle wait (up to 300 µs) plus deep idle.
+- HEAD still spends 30-65 µs more client time per exchange, but wins it back on faster wakes and
+  shorter server handling.
+
+Hardware tests pass (2026-11-03) with the settle wait removed and the auto-sync fixes.
+
+### v2.7.2 vs HEAD 4b5ce255, scale and fairness matrices, M1 (2026-11-03 to 11-04)
+
+The core runs from the Linux host, on the M1: `--scale-matrix=logix`, `--scale-matrix=modbus`
+(`--duration=5`) and `--fairness-matrix`, all `--delay-ms=1 --rounds=3`, both sides on
+`plctag_dyn` (Release, clang, no sanitizers). 636 configurations, 12.9 h, on mains power, no
+failed runs, no thermal warnings. Server delay applied mean 1.35-1.48 ms. macOS cannot block deep
+idle, so these runs allow it. Judged on all three measures (`--from-csv`):
+
+| Run | Better | Same | WORSE | CPU/op WORSE | Memory WORSE |
+|---|---|---|---|---|---|
+| Scale, ControlLogix | 156 | 6 | 30 | 0 | 0 |
+| Scale, Modbus | 190 | 0 | 2 | 0 | 0 |
+| Fairness matrix | 241 | 0 | 11 | 0 | 0 |
+
+- **CPU per op:** HEAD lower or the same in every cell: 30-94% lower on ControlLogix in the
+  fairness matrix, 25-88% on Micro800, 10-69% on Modbus.
+- **Memory:** HEAD lower or the same in every cell. Async ControlLogix 10000 tags at 4 × 4:
+  44 MB against 2.6 GB.
+- **Ops/s:** every WORSE cell is a throughput loss of 5-15%, always with lower CPU and a longer
+  p95:
+  - ControlLogix async, 1000 tags (scale, 30 cells) and 10000 tags with 1-4 threads on 1-3
+    connections (fairness, 8 cells). Worst: 10000 tags 2 × 1 write, −15.1% (73k against 86k
+    ops/s, 12.0 against 18.5 µs/op). 1 × 1 read is −14.0%.
+  - Modbus sync 1000 tags 8 × 8, −6 to −7%, at about half the CPU per op. In both runs.
+  - Micro800 async write 1 × 16, −5.4%.
+- **Gains:** async ControlLogix 8 × 8 is 7.3× v2.7.2 (907k against 124k ops/s), 1 × 16 +50%.
+  Sync ControlLogix 1 × 16 +27%.
+- **Micro800:** no regression on the M1 apart from the one cell above.
+- The ControlLogix async loss is the cell set that went away on Linux once deep idle was blocked.
+  v2.7.2 spins (84-180% client CPU in those cells against 32-127% for HEAD); HEAD blocks and pays
+  the wake. macOS cannot block idle, so the M1 cannot test that directly.
+
+### Pending
+
+- ControlLogix async 5-15% slower on the M1 (above). Find out whether it is wake latency or
+  the 30-65 µs more client time per exchange measured on Linux.
+- Re-run the auto-sync saturation cells with the current code (cap 512, rate-limited warning).
 - Re-run the Linux scale and fairness matrices with deep idle blocked. The Linux results above
   (before 2026-11-02, "Deep idle states blocked") allowed deep idle.
-- Micro800 regression on the M1: check whether macOS idle behaves the same way.
-- Full matrix re-run (sync, Micro800, Modbus) on the current HEAD on the M1, with `tag_cv`. Done
-  on the Linux host (above).
-- ControlLogix 1000 tags, 4-8 threads: up to 30% slower on the Linux host (scale matrix). Check
-  on the M1.
-- Hardware tests pass (2026-11-03) with the settle wait removed and the auto-sync fixes. Hardware
-  performance numbers are still to measure.
-- `docs/perf/<host>/` keeps only high-level data: `host_info.txt` and synopsis tables. Raw CSVs,
-  `perf_env.txt` files and per-configuration summaries stay out of the repository.
+- Hardware performance numbers.
+- Optional: replace the tag list vector with an intrusive red-black tree keyed on (op_time,
+  insertion sequence), every tag in it, idle tags at now + 1 year. Scratchpad benchmark,
+  600-byte tags, 181 tags per exchange: auto-sync list cost at 10000 tags 248 µs to 9 µs per
+  exchange; polling 6 to 16 µs (all tags in the tree cost two more tree operations per op).
+  Needs the rightmost and finger insert shortcuts. Only auto-sync at 10000 tags gains, and there
+  HEAD already matches v2.7.2 throughput at 40% of its CPU.
+- Optional: time `dispatch_replies_unsafe` and `build_exchange_unsafe` to find the 30-65 µs.
+- Optional: send the first 3-6 tag packet of an async cycle with the full one (one server delay
+  per cycle).
+
+`docs/perf/<host>/` keeps only high-level data: `host_info.txt` and synopsis tables. Raw CSVs,
+`perf_env.txt` files and per-configuration summaries stay out of the repository.
 
 ## Known limits
 

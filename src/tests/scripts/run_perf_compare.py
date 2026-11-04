@@ -7,9 +7,10 @@ A B B A ... for --rounds rounds so drift hits both sides equally.  Writes
 every raw run to --out and prints one verdict line per configuration.
 
 A difference counts only if the medians differ by more than 5 % and the
-min-max ranges do not overlap.  When the server uses most of a core the
-run is server-bound, so the verdict uses client CPU per op instead of
-ops/sec.
+min-max ranges do not overlap.  Each configuration is judged on ops/sec,
+client CPU per op and client peak memory; B is WORSE if it loses on any
+one of them.  When the server uses most of a core the run is server-bound,
+so its ops/sec does not count.
 
 Usage:
   run_perf_compare.py --a=perf_release --b=perf_head --server-dir=b_head/bin_dist
@@ -55,6 +56,9 @@ from pathlib import Path
 
 THRESHOLD = 0.05
 SERVER_BOUND_PCT = 90.0
+# B must beat or match A on all three client measures (docs/performance.md): (column, higher is
+# better, divisor for display).  peak_rss_kb is shown in MB.
+VERDICT_METRICS = (("ops_per_sec", True, 1), ("cpu_us_per_op", False, 1), ("peak_rss_kb", False, 1024))
 LOGIX_PORT = 45100
 MODBUS_PORT = 45102
 SWEEP_THREADS = (1, 2, 3, 4, 5, 6, 7, 8, 12)
@@ -278,6 +282,9 @@ def self_check():
     assert verdict(noise_a, drop, False)[1] == "better"
     assert verdict([100, 100], [107, 130], True)[1] == "better"
     assert verdict([100, 106], [104, 110], True)[1] == "same"   # 6 % but overlapping
+    assert overall(["better", "better", "WORSE"]) == "WORSE"
+    assert overall(["better", "same", "same"]) == "better"
+    assert overall(["same", "same", "same"]) == "same"
     assert abs(cpu_seconds_text("1-02:03:04.5") - (86400 + 7384.5)) < 1e-9
     assert DELAY_LINE.findall("x Response delay: requested 300 us, applied mean 412 us over 9 responses.")[-1] == ("300", "412", "9")
     assert len(thread_sweep_matrix("logix", 0.3, (1, 2), (1, 10))) == 2 * 2 * (1 + 2) * 2
@@ -351,9 +358,33 @@ def write_summary(rows, path):
                 w.writerow(list(rk) + vals + ratios)
 
 
+def results_from_csv(path):
+    """Rebuild summarize()'s input from an --out file."""
+    results = {}
+    with open(path, newline="") as f:
+        rows = csv.reader(l for l in f if not l.startswith("#"))
+        head = next(rows)
+        for cols in rows:
+            r = dict(zip(head, cols))
+            r["server_cpu_pct"] = float(r["server_cpu_pct"])
+            # ponytail: the CSV does not record group_by, so the key has no "t" suffix.
+            c = dict(protocol=r["protocol"], delay=float(r["delay_ms"]), mode=r["mode"], op=r["op"], tags=r["tags"],
+                     threads=r["threads"], groups=r["connection_groups"], elems=r["elems"])
+            results.setdefault(config_key(c), []).append(r)
+    return results
+
+
+def overall(words):
+    """B must win or tie on every measure: one WORSE makes the configuration WORSE."""
+    if "WORSE" in words:
+        return "WORSE"
+    return "better" if "better" in words else "same"
+
+
 def summarize(results):
-    print(f"\n{'configuration':41} {'metric':11} {'median A':>10} {'median B':>10} {'change':>8}  verdict"
-          f"   p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B   cli% A/B    cli MB A/B   srv MB A/B   mutex us/op A/B")
+    print(f"\n{'configuration':41} {'verdict':7}  {'ops/s A':>10} {'ops/s B':>10} {'change':>7} {'':6}"
+          f"  {'us/op A':>8} {'us/op B':>8} {'change':>7} {'':6}  {'MB A':>6} {'MB B':>6} {'change':>7} {'':6}"
+          f"  p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B   cli% A/B    srv MB A/B   mutex us/op A/B")
     for key, runs in results.items():
         a = [r for r in runs if r["side"] == "A"]
         b = [r for r in runs if r["side"] == "B"]
@@ -361,9 +392,17 @@ def summarize(results):
             print(f"{key:41} too few successful runs")
             continue
         srv = statistics.median(r["server_cpu_pct"] for r in runs)
-        metric, higher = ("cpu_us_per_op", False) if srv >= SERVER_BOUND_PCT else ("ops_per_sec", True)
-        va, vb = [float(r[metric]) for r in a], [float(r[metric]) for r in b]
-        change, word = verdict(va, vb, higher)
+        cols, words = [], []
+        for metric, higher, scale in VERDICT_METRICS:
+            va, vb = [float(r[metric]) / scale for r in a], [float(r[metric]) / scale for r in b]
+            change, word = verdict(va, vb, higher)
+            # A server-bound run's throughput measures the server, so it does not count.
+            if metric == "ops_per_sec" and srv >= SERVER_BOUND_PCT:
+                word = "srv"
+            else:
+                words.append(word)
+            cols.append(f"{statistics.median(va):{10 if higher else 8}.1f} {statistics.median(vb):{10 if higher else 8}.1f}"
+                        f" {change * 100:+6.1f}% {word:6}")
         p95 = lambda side: statistics.median(float(r["p95_us"]) for r in side)
         sp = lambda side: statistics.median(r["server_cpu_pct"] for r in side)
         errs = sum(int(r["errors"]) for r in runs)
@@ -373,10 +412,10 @@ def summarize(results):
         mb = lambda side, col: statistics.median(float(r[col]) for r in side) / 1024
         # -1 when the run had no --mutex-shim.
         mutex = lambda side: statistics.median(float(r["mutex_wait_us_per_op"]) for r in side)
-        print(f"{key:41} {metric:11} {statistics.median(va):10.1f} {statistics.median(vb):10.1f} "
-              f"{change * 100:+7.1f}%  {word:7}  {p95(a):6.0f}/{p95(b):<6.0f}  {sp(a):4.0f}/{sp(b):<4.0f}"
+        print(f"{key:41} {overall(words):7}  " + "  ".join(cols) +
+              f"  {p95(a):6.0f}/{p95(b):<6.0f}  {sp(a):4.0f}/{sp(b):<4.0f}"
               f"   {win(a):.3f}/{win(b):<.3f}      {tag_cv(a):.2f}/{tag_cv(b):<.2f}"
-              f"    {cli_pct(a):4.0f}/{cli_pct(b):<4.0f}  {mb(a, 'peak_rss_kb'):5.1f}/{mb(b, 'peak_rss_kb'):<5.1f}"
+              f"    {cli_pct(a):4.0f}/{cli_pct(b):<4.0f}"
               f"  {mb(a, 'server_rss_kb'):5.1f}/{mb(b, 'server_rss_kb'):<5.1f}"
               f"  {mutex(a):6.2f}/{mutex(b):<6.2f}"
               + (f"  {errs} errors" if errs else ""))
@@ -410,10 +449,14 @@ def main():
     p.add_argument("--interleave", action="store_true", help="create tags round-robin across threads")
     p.add_argument("--mutex-shim", type=Path, help="LD_PRELOAD this mutex_wait_shim into the clients (Linux)")
     p.add_argument("--self-check", action="store_true")
+    p.add_argument("--from-csv", type=Path, help="print the verdicts for an earlier --out file, without running anything")
     args = p.parse_args()
 
     if args.self_check:
         self_check()
+        return
+    if args.from_csv:
+        summarize(results_from_csv(args.from_csv))
         return
     hardware = bool(args.logix_attrs)
     if not args.a or not args.b or (not hardware and not args.server_dir):
