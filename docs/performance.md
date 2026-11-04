@@ -581,7 +581,7 @@ Fixed:
 - The cap is 512 now (4b5ce255).
 
 The table below was measured with the earlier fix: the message at `DEBUG_DETAIL` and a cap of 256.
-It has not been re-run with the current code. Two runs each:
+The re-run with the current code follows it. Two runs each:
 
 | Tags | v2.7.2 ops/s (CPU) | HEAD before | HEAD after |
 |---|---|---|---|
@@ -591,6 +591,20 @@ It has not been re-run with the current code. Two runs each:
 - 1000 tags: 1.9x v2.7.2 at about a fifth of its CPU. Achieved period 3.1 ms against 5.5 ms.
 - 10000 tags: equal throughput at 40% of the CPU. What is left is the linear search in the
   tag list (`vector_find_index`); a tree keyed on (op_time, sequence) removes it (Pending).
+
+Re-run with the current code (58ee20be: rate-limited warning, cap 512), 2026-11-04,
+`--auto-matrix=logix`, `--rounds=2 --duration=5`. Summaries are in
+`docs/perf/Precision-Tower-3420-i5-6500-32GB/v2.7.2_vs_58ee20be/`:
+
+| Tags | Verdict | ops/s A / B | µs/op A / B | MB A / B | cli% A / B |
+|---|---|---|---|---|---|
+| 1000 | better | 155k / 301k (+94%) | 8.1 / 0.9 | 12.5 / 6.6 | 126 / 28 |
+| 10000 | better | 140k / 171k (+22%) | 10.2 / 3.5 | 76.0 / 42.2 | 141 / 60 |
+
+- HEAD wins on all three measures in both cells. HEAD's numbers match the earlier fix; v2.7.2 ran
+  10-17% lower this time, and it still logs every late read.
+- The 1000-tag cell is about 8% below the 326k measured with the warning at `DEBUG_DETAIL`. One run
+  pair, so this may be noise; the rate-limit check costs one `time_ms()` per late read.
 
 ### Async 250 tags, 1 × 1, 1 ms polling, Linux, deep idle blocked (2026-11-03)
 
@@ -698,7 +712,6 @@ Judged on all three measures (`--from-csv`):
      v2.7.2 and HEAD: `to_srv`, `srv`, `to_cli`, `cli`. On macOS the shim loads with
      `DYLD_INSERT_LIBRARIES` instead of `LD_PRELOAD`. If HEAD's `to_srv` + `to_cli` is larger by
      about the ops/s loss, the loss is wake latency, which macOS cannot block.
-- Re-run the auto-sync saturation cells with the current code (cap 512, rate-limited warning).
 - Re-run the Linux scale and fairness matrices with deep idle blocked. The Linux results above
   (before 2026-11-02, "Deep idle states blocked") allowed deep idle.
 - Hardware performance numbers.

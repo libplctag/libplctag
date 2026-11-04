@@ -1,0 +1,5 @@
+side,runs,protocol,delay,mode,op,tags,threads,groups,auto_ms,ops_per_sec,ops_per_tag_s,cpu_load_pct,peak_rss_kb,p50_us,p95_us,server_cpu_pct,server_rss_kb
+A,2,logix,0.30,auto,read,1000,1,1,1,155427.35,155.43,125.95,12844.00,6144.00,8960.00,8.44,1108.00
+B,2,logix,0.30,auto,read,1000,1,1,1,301238.30,301.24,28.19,6790.00,3264.00,4608.00,9.86,1108.00
+A,2,logix,0.30,auto,read,10000,1,1,1,140005.60,14.00,140.88,77786.00,73216.00,86016.00,5.40,1108.00
+B,2,logix,0.30,auto,read,10000,1,1,1,170646.80,17.06,59.95,43216.00,56320.00,66048.00,11.00,1108.00
