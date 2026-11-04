@@ -162,6 +162,8 @@ elseif(UNIX)
     # macOS: link math library
     target_link_libraries(plctag_dyn m)
 endif()
+target_compile_definitions(plctag_dyn PRIVATE TAG_SLOT_COUNT=${TAG_SLOT_COUNT})
+
 set_target_properties(plctag_dyn PROPERTIES
     VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}"
     SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}"
@@ -202,7 +204,7 @@ elseif(UNIX)
     target_link_libraries(plctag_static m)
 endif()
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
-target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)
+target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1 TAG_SLOT_COUNT=${TAG_SLOT_COUNT})
 
 # if(STATIC_LINK_OPTIONS)
 #     target_link_options(plctag_static PUBLIC "${EXTRA_LINK_FLAGS} ${STATIC_LINK_OPTIONS}")

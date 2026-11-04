@@ -47,14 +47,12 @@
 
 
 /*
- * The tag registry: the tag hashtable and its lookup mutex.  Allocated with rc_alloc() so its lifetime
- * can be shared between "the registry is running" (current_registry holds the
- * genesis reference) and "a tag that outlived shutdown still needs it"
- * (tag->instance holds one per tag).
+ * The tag registry: the reuse map and the mutex that serialises creates and removes.  Allocated
+ * with rc_alloc() so its lifetime can be shared between "the registry is running"
+ * (current_registry holds the genesis reference) and "a tag that outlived shutdown still needs
+ * it" (tag->instance holds one per tag).  Tags themselves live in tag_slots[] below.
  */
 struct tag_registry_t {
-    hashtable_p tags;
-
     /* hash64() of the attribute string -> tag, for tags created with find_or_create_tag=1. */
     hashtable_p reuse;
     mutex_p tag_lookup_mutex;
@@ -79,35 +77,58 @@ struct tag_registry_t {
  * handle held by the application would resolve to an unrelated tag. */
 static volatile int32_t next_tag_id = 10; /* MAGIC */
 
+/*
+ * Tag id -> tag.  A tag lives in slot (id & TAG_SLOT_MASK), so a lookup is one slot and one
+ * spinlock, and lookups of different tags do not contend.  Creates pick an id whose slot is
+ * free.  Writers take tag_lookup_mutex, then the slot lock; lookup_tag() takes only the slot
+ * lock.  A tag in a slot holds the registry's reference, so rc_inc() under the slot lock
+ * cannot see a freed tag.
+ *
+ * The table is fixed, so TAG_SLOT_COUNT is the most tags open at once.  CMake sets it from the
+ * TAG_SLOT_COUNT cache variable.
+ */
+#ifndef TAG_SLOT_COUNT
+#    define TAG_SLOT_COUNT (262144)
+#endif
+
+#if(TAG_SLOT_COUNT & (TAG_SLOT_COUNT - 1)) || TAG_SLOT_COUNT > (TAG_ID_MASK + 1)
+#    error "TAG_SLOT_COUNT must be a power of two no larger than the tag id space."
+#endif
+
+#define TAG_SLOT_MASK (TAG_SLOT_COUNT - 1)
+
+typedef struct {
+    int32_t tag_id;
+    lock_t lock;
+    plc_tag_p tag;
+} tag_slot_t;
+
+static tag_slot_t tag_slots[TAG_SLOT_COUNT];
+
 
 static int tag_id_inc(int id);
 static int64_t reuse_hash(const char *reuse_str);
 static void forget_reusable_unsafe(tag_registry_p registry, plc_tag_p tag);
+static plc_tag_p take_slot_unsafe(int32_t tag_id, plc_tag_p tag);
 
+/*
+ * No registry reference here: shutdown clears lib_active before it sweeps the slots, and a tag
+ * still in a slot is alive.
+ */
 plc_tag_p lookup_tag(int32_t tag_id) {
+    tag_slot_t *slot = &tag_slots[tag_id & TAG_SLOT_MASK];
     plc_tag_p tag = NULL;
-    tag_registry_p inst = tag_registry_acquire();
 
-    if(!inst) {
+    if(!atomic_get_bool(&lib_active)) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Library not running, returning NULL for tag lookup.");
         return NULL;
     }
 
-    critical_block(inst->tag_lookup_mutex) {
-        tag = hashtable_get(inst->tags, (int64_t)tag_id);
-
-        if(tag && tag->tag_id == tag_id) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag_id, "Found tag %p with id %d.", tag, tag->tag_id);
-            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "rc_inc: Acquiring reference to tag %" PRId32 ".", tag->tag_id);
-            tag = rc_inc(tag);
-        } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag with ID %d not found.", tag_id);
-
-            tag = NULL;
-        }
+    spin_block(&slot->lock) {
+        if(slot->tag && slot->tag_id == tag_id) { tag = rc_inc(slot->tag); }
     }
 
-    rc_dec(inst);
+    if(!tag) { pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Tag with ID %d not found.", tag_id); }
 
     return tag;
 }
@@ -133,6 +154,26 @@ int64_t reuse_hash(const char *reuse_str) {
     int64_t key = (int64_t)hash64((const uint8_t *)reuse_str, (size_t)(unsigned int)str_length(reuse_str));
 
     return (key ? key : 1);
+}
+
+
+/*
+ * Empty the slot for tag_id and return what was in it.  With tag set, only if it holds that
+ * tag.  The caller holds tag_lookup_mutex.
+ */
+plc_tag_p take_slot_unsafe(int32_t tag_id, plc_tag_p tag) {
+    tag_slot_t *slot = &tag_slots[tag_id & TAG_SLOT_MASK];
+    plc_tag_p found = NULL;
+
+    spin_block(&slot->lock) {
+        if(slot->tag && slot->tag_id == tag_id && (!tag || slot->tag == tag)) {
+            found = slot->tag;
+            slot->tag = NULL;
+            slot->tag_id = 0;
+        }
+    }
+
+    return found;
 }
 
 
@@ -180,9 +221,6 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Starting.");
 
     critical_block(tag->instance->tag_lookup_mutex) {
-        int32_t attempts = 0;
-        int32_t max_attempts = 0;
-
         /*
          * The library is being torn down and the tag table has already been swept, so
          * publishing here would leave a tag that nothing will ever destroy.  See the
@@ -208,59 +246,35 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
             if(other) { reuse_str = NULL; }
         }
 
-        /* only get this when we hold the mutex. */
+        /* only get this when we hold the mutex.  Every slot is tried once before giving up. */
         new_id = next_tag_id;
+        rc = PLCTAG_ERR_NO_RESOURCES;
 
-        /*
-         * Every live tag occupies exactly one id, so one probe per live tag plus one
-         * must land on a free id.  A fixed bound instead fails while the id space is
-         * nearly empty, whenever the ids in use happen to form a run longer than the
-         * bound.  See issue 681.
-         */
-        max_attempts = (int32_t)hashtable_entries(tag->instance->tags) + 1;
+        for(int32_t attempts = 0; attempts < TAG_SLOT_COUNT && rc != PLCTAG_STATUS_OK; attempts++) {
+            tag_slot_t *slot = NULL;
 
-        do {
             new_id = tag_id_inc(new_id);
+            slot = &tag_slots[new_id & TAG_SLOT_MASK];
 
-            if(new_id <= 0) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "ID %d is illegal!", new_id);
-                attempts = max_attempts;
-                break;
-            }
-
-            pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, 0, "Trying new ID %d.", new_id);
-
-            if(!hashtable_get(tag->instance->tags, (int64_t)new_id)) {
-                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Found unused ID %d", new_id);
-                break;
-            }
-
-            attempts++;
-        } while(attempts < max_attempts);
-
-        if(attempts < max_attempts) {
-            /* Set tag->tag_id before the tag is published into the hashtable (in
-             * the same tag_lookup_mutex critical section as the hashtable_put()
-             * below), not after: any thread that can observe this tag at all had
-             * to acquire this same mutex to do so (lookup_tag()), so
-             * by the time it later reads tag->tag_id -- even outside this lock,
-             * even in a branch that never takes tag->api_mutex -- that read is
-             * ordered after this write by the mutex's release/acquire pair. This
-             * closes the race where the write used to happen later, under
-             * api_mutex alone, after the tag was already hashtable-visible under
-             * this lock. */
-            tag->tag_id = new_id;
-            rc = hashtable_put(tag->instance->tags, (int64_t)new_id, tag);
-
-            /* a tag that cannot be entered is still a working tag, only not shared. */
-            if(rc == PLCTAG_STATUS_OK && reuse_str && (tag->reuse_key = str_dup(reuse_str))) {
-                if(hashtable_put(tag->instance->reuse, reuse_hash(reuse_str), tag) != PLCTAG_STATUS_OK) {
-                    mem_free(tag->reuse_key);
-                    tag->reuse_key = NULL;
+            /* tag_id is set before the tag is visible, so a lookup that finds it reads the right id. */
+            spin_block(&slot->lock) {
+                if(!slot->tag) {
+                    tag->tag_id = new_id;
+                    slot->tag_id = new_id;
+                    slot->tag = tag;
+                    rc = PLCTAG_STATUS_OK;
                 }
             }
-        } else {
-            rc = PLCTAG_ERR_NO_RESOURCES;
+        }
+
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "All %d tag slots are in use!", TAG_SLOT_COUNT);
+        } else if(reuse_str && (tag->reuse_key = str_dup(reuse_str))) {
+            /* a tag that cannot be entered is still a working tag, only not shared. */
+            if(hashtable_put(tag->instance->reuse, reuse_hash(reuse_str), tag) != PLCTAG_STATUS_OK) {
+                mem_free(tag->reuse_key);
+                tag->reuse_key = NULL;
+            }
         }
 
         next_tag_id = new_id;
@@ -275,7 +289,7 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
 
 
 #define INITIAL_TAG_TABLE_SIZE (201)
-/* The library-scoped instance: the tag hashtable and its lookup mutex. Allocated with rc_alloc() so its lifetime can be shared
+/* The library-scoped instance: the reuse map and the create/remove mutex. Allocated with rc_alloc() so its lifetime can be shared
  * safely between "the library is running" (current_instance holds the genesis
  * reference) and "a tag that outlives shutdown still needs it"
  * (tag->instance holds one per tag). */
@@ -316,12 +330,6 @@ static void tag_registry_destructor(void *arg) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag lookup mutex.");
         mutex_destroy(&inst->tag_lookup_mutex);
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag lookup mutex destroyed.");
-    }
-
-    if(inst->tags) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "About to destroy tag hashtable.");
-        hashtable_destroy(inst->tags);
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag hashtable destroyed.");
     }
 
     if(inst->reuse) { hashtable_destroy(inst->reuse); }
@@ -382,13 +390,6 @@ int tag_registry_init(void) {
 
     /* rc_alloc() does not promise zeroed memory, so do not rely on it for the gate. */
     inst->shutting_down = false;
-
-    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable.");
-    if((inst->tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag hashtable!");
-        rc_dec(inst);
-        return PLCTAG_ERR_NO_MEM;
-    }
 
     if((inst->reuse = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag reuse hashtable!");
@@ -455,47 +456,31 @@ void tag_registry_stage_shutdown(tag_registry_p registry) { shutting_down_instan
  * teardown, which may take other locks.
  */
 void tag_registry_destroy_all_tags(tag_registry_p registry) {
-    int tag_table_entries = 0;
-
     if(!registry) { return; }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Closing all tags.");
 
     /*
      * Shut the door before walking the table, so no create still in flight can publish a
-     * tag into a bucket this sweep has already passed.
+     * tag into a slot this sweep has already passed.
      */
-    critical_block(registry->tag_lookup_mutex) {
-        registry->shutting_down = true;
-        tag_table_entries = hashtable_capacity(registry->tags);
-    }
+    critical_block(registry->tag_lookup_mutex) { registry->shutting_down = true; }
 
-    for(int i = 0; i < tag_table_entries; i++) {
+    for(int32_t i = 0; i < TAG_SLOT_COUNT; i++) {
         plc_tag_p tag = NULL;
 
         critical_block(registry->tag_lookup_mutex) {
-            tag_table_entries = hashtable_capacity(registry->tags);
+            /*
+             * Take it out of the table in the same critical section that found it.  The
+             * remover owns DESTROYED, and a create still running checks with
+             * remove_tag_lookup() whether shutdown got here first.  The slot's reference
+             * becomes ours; this returns NULL if the tag's count already reached zero.
+             */
+            tag = take_slot_unsafe(tag_slots[i].tag_id, NULL);
 
-            if(i < tag_table_entries && tag_table_entries >= 0) {
-                tag = hashtable_get_index(registry->tags, i);
-
-                /* make sure the tag does not go away while we are using the pointer. */
-                if(tag) {
-                    /* this returns NULL if the existing ref-count is zero. */
-                    pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "rc_inc: Acquiring reference to tag %" PRId32 ".",
-                           tag->tag_id);
-                    tag = rc_inc(tag);
-                }
-
-                /*
-                 * Take it out of the table in the same critical section that found it.  The
-                 * remover owns DESTROYED, and a create still running checks with
-                 * remove_tag_lookup() whether shutdown got here first.
-                 */
-                if(tag) {
-                    hashtable_remove(registry->tags, (int64_t)tag->tag_id);
-                    forget_reusable_unsafe(registry, tag);
-                }
+            if(tag) {
+                forget_reusable_unsafe(registry, tag);
+                tag = rc_inc(tag);
             }
         }
 
@@ -522,13 +507,13 @@ void tag_registry_destroy_all_tags(tag_registry_p registry) {
 
 /* Remove a tag from the registry.  The caller still holds its own reference. */
 bool remove_tag_lookup(plc_tag_p tag) {
-    void *removed = NULL;
+    plc_tag_p removed = NULL;
 
     if(!tag || !tag->instance) { return false; }
 
     critical_block(tag->instance->tag_lookup_mutex) {
-        removed = hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id);
-        if(removed == tag) { forget_reusable_unsafe(tag->instance, tag); }
+        removed = take_slot_unsafe(tag->tag_id, tag);
+        if(removed) { forget_reusable_unsafe(tag->instance, tag); }
     }
 
     return removed == tag;
@@ -542,7 +527,7 @@ plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id) {
     if(!registry) { return NULL; }
 
     critical_block(registry->tag_lookup_mutex) {
-        tag = hashtable_remove(registry->tags, (int64_t)tag_id);
+        tag = take_slot_unsafe(tag_id, NULL);
         if(tag) { forget_reusable_unsafe(registry, tag); }
     }
 

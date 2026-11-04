@@ -103,6 +103,18 @@ target_include_directories(test_tag_schedule PRIVATE
 
 target_link_libraries(test_tag_schedule PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
+# test_tag_registry: the tag id -> tag slot table.
+add_executable(test_tag_registry test_tag_registry.c)
+
+target_include_directories(test_tag_registry PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../libplctag/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+    ${PLATFORM_SHIM_PATH}
+)
+
+target_link_libraries(test_tag_registry PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
+
 # test_debug_limit: the per call site log limit in pdebug().  Pure computation.
 add_executable(test_debug_limit test_debug_limit.c)
 
@@ -221,11 +233,12 @@ add_test(NAME unit_test_tag_name_bounds COMMAND test_tag_name_bounds)
 add_test(NAME unit_test_backoff COMMAND test_backoff)
 add_test(NAME unit_test_byte_slice COMMAND test_byte_slice)
 add_test(NAME unit_test_tag_schedule COMMAND test_tag_schedule)
+add_test(NAME unit_test_tag_registry COMMAND test_tag_registry)
 add_test(NAME unit_test_debug_limit COMMAND test_debug_limit)
 
 # Create a convenient `make unit_tests` target
 add_custom_target(unit_tests
-    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_tag_schedule test_debug_limit test_cip_status ${EXTRA_UNIT_TESTS}
+    DEPENDS test_init test_platform_str test_tag_name_bounds test_backoff test_byte_slice test_tag_schedule test_tag_registry test_debug_limit test_cip_status ${EXTRA_UNIT_TESTS}
     COMMAND ${CMAKE_CTEST_COMMAND} -R "unit_test" --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running unit tests"

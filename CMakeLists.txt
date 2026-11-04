@@ -69,6 +69,10 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
+
+# Tag id lookup table size: the most tags one process can have open at once.  16 bytes per
+# slot of static memory; a power of two no larger than 268435456 (2^28).
+set(TAG_SLOT_COUNT 262144 CACHE STRING "Most tags open at once; a power of two, at most 2^28")
 set(USE_MEM_SANITIZERS 1 CACHE BOOL "Build the client library/tests/tools with memory debug sanitizers (ASan/UBSan/LeakSan) or not")
 set(USE_THREAD_SANITIZERS 0 CACHE BOOL "Build the client library/tests/tools with ThreadSanitizer instead of ASan/UBSan (mutually exclusive)")
 
