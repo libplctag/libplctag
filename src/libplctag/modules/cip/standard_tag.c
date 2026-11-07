@@ -247,7 +247,7 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     if(fixed_size > capacity) {
-        pdebug(dbg, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id, "Read request of %d bytes does not fit in %d bytes!", fixed_size,
+        pdebug(dbg, DEBUG_DETAIL | DEBUG_RATE_LIMIT, tag->tag_id, "Read request of %d bytes does not fit in %d bytes!", fixed_size,
                capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
@@ -271,7 +271,7 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
         if(chunk > tag->size - tag->offset) { chunk = tag->size - tag->offset; }
 
         if(fixed_size + CIP_DATA_SEGMENT_SIZE > capacity) {
-            pdebug(dbg, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id, "Segmented read request does not fit in %d bytes!", capacity);
+            pdebug(dbg, DEBUG_DETAIL | DEBUG_RATE_LIMIT, tag->tag_id, "Segmented read request does not fit in %d bytes!", capacity);
             return PLCTAG_ERR_TOO_SMALL;
         }
 
@@ -402,7 +402,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
              + pad_size;
 
     if(needed > capacity) {
-        pdebug(dbg, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id, "Write request of %d bytes does not fit in %d bytes!", needed,
+        pdebug(dbg, DEBUG_DETAIL | DEBUG_RATE_LIMIT, tag->tag_id, "Write request of %d bytes does not fit in %d bytes!", needed,
                capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
@@ -491,7 +491,7 @@ static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
     }
 
     if(needed > capacity) {
-        pdebug(dbg, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id, "Bit write request of %d bytes does not fit in %d bytes!", needed,
+        pdebug(dbg, DEBUG_DETAIL | DEBUG_RATE_LIMIT, tag->tag_id, "Bit write request of %d bytes does not fit in %d bytes!", needed,
                capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }

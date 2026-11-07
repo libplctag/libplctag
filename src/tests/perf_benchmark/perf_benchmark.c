@@ -72,7 +72,8 @@
  *        "Latency" is the interval between completions on a tag, i.e.
  *        the achieved period.  --op=write is not supported.
  *
- * Output (stdout): one CSV line:
+ * Output (stdout): "# window start" and "# window end" around the measured run, so a
+ * harness can sample the server's CPU over the same window, then one CSV line:
  *   mode,connection_groups,threads,tags,tags_per_thread,duration_ms,
  *   total_ops,ops_per_sec,cpu_load_pct,fairness_cv,fairness_min_max_ratio,
  *   op,errors,p50_us,p95_us,p99_us,max_us,cpu_us_per_op,rss_growth_kb,
@@ -136,7 +137,7 @@
 #define DEFAULT_DURATION_S (10)
 #define DEFAULT_AUTO_MS (1)
 
-#define MAX_TAGS (10000)
+#define MAX_TAGS (100000)
 #define MAX_THREADS (1100)
 #define MAX_GROUPS (128)
 
@@ -716,13 +717,21 @@ int main(int argc, char **argv) {
     int64_t create_ms = (now_us() - create_start) / 1000;
     fprintf(stderr, "All %" PRId32 " tags created in %" PRId64 " ms.\n", num_tags, create_ms);
 
-    /* One sync read per tag primes the connections and, for writes, the buffer contents. */
+    /* One read per tag, all started together, primes the connections and, for writes, the buffer contents. */
     int64_t prime_start = now_us();
-    for(int32_t i = 0; i < num_tags; i++) {
-        int32_t prc = (int32_t)plc_tag_read(tag_handles[i], TAG_OP_TIMEOUT_MS);
+    for(int32_t i = 0; i < num_tags; i++) { plc_tag_read(tag_handles[i], 0); }
+    int64_t prime_deadline = now_us() + ((int64_t)TAG_OP_TIMEOUT_MS + (int64_t)num_tags * TAG_CREATE_MS_PER_TAG) * 1000;
+    for(int32_t i = 0; i < num_tags;) {
+        int32_t prc = (int32_t)plc_tag_status(tag_handles[i]);
+
+        if(prc == PLCTAG_STATUS_PENDING && now_us() <= prime_deadline) {
+            compat_sleep_ms(1, NULL);
+            continue;
+        }
         if(prc != PLCTAG_STATUS_OK) {
             fprintf(stderr, "WARNING: prime read failed on tag %" PRId32 ": %s\n", i, plc_tag_decode_error(prc));
         }
+        i++;
     }
     int64_t prime_ms = (now_us() - prime_start) / 1000;
 
@@ -774,10 +783,14 @@ int main(int argc, char **argv) {
 
     run_start_us = wall_start;
     compat_atomic_store_int32(&go, 1);
+    printf("# window start\n");
+    fflush(stdout);
 
     for(int32_t s = 0; s < duration_s && !compat_atomic_load_int32(&terminate); s++) { compat_sleep_ms(1000, NULL); }
 
     compat_atomic_store_int32(&done, 1);
+    printf("# window end\n");
+    fflush(stdout);
 
     for(int32_t i = 0; i < threads_started; i++) { compat_thread_join(threads[i], NULL); }
     threads_started = 0;

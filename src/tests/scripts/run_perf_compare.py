@@ -243,13 +243,30 @@ def run_one(binary, c, args, server):
     cmd += ["--interleave"] if args.interleave else []
     cmd += [f"--group-by={c['group_by']}"] if c.get("group_by") else []
     cmd += [f"--auto-ms={c['auto_ms']}"] if c.get("auto_ms") else []
-    cpu0, t0 = (cpu_seconds(server.pid), time.monotonic()) if server else (0, 0)
     env = dict(os.environ, LD_PRELOAD=str(args.mutex_shim)) if args.mutex_shim else None
-    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
-    server_pct = 100.0 * (cpu_seconds(server.pid) - cpu0) / (time.monotonic() - t0) if server else 0.0
-    lines = [l for l in res.stdout.splitlines() if l.startswith(c["mode"] + ",")]
-    if res.returncode != 0 or not lines:
-        print(f"  FAILED rc={res.returncode}: {' '.join(cmd)}\n{res.stderr[-2000:]}", file=sys.stderr)
+    # Server CPU over the client's measured window (its "# window" lines), so create and prime
+    # are not counted.  A client without the markers falls back to its whole run.
+    sample = (lambda: (cpu_seconds(server.pid), time.monotonic())) if server else (lambda: (0.0, 0.0))
+    start = end = None
+    whole = sample()
+    with tempfile.TemporaryFile(mode="w+") as err:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True, env=env)
+        stdout = []
+        for line in proc.stdout:
+            if line.startswith("# window start"):
+                start = sample()
+            elif line.startswith("# window end"):
+                end = sample()
+            stdout.append(line)
+        proc.wait()
+        err.seek(0)
+        stderr = err.read()
+    if not start or not end:
+        start, end = whole, sample()
+    server_pct = 100.0 * (end[0] - start[0]) / (end[1] - start[1]) if server else 0.0
+    lines = [l.rstrip("\n") for l in stdout if l.startswith(c["mode"] + ",")]
+    if proc.returncode != 0 or not lines:
+        print(f"  FAILED rc={proc.returncode}: {' '.join(cmd)}\n{stderr[-2000:]}", file=sys.stderr)
         return None
     return lines[-1].split(","), server_pct, server_rss_kb(server.pid) if server else 0
 
@@ -442,8 +459,8 @@ def main():
                    help="run the auto-sync sweep (tags x auto_sync_read_ms x connections) instead")
     p.add_argument("--summary", help="also write medians to this CSV, plus one matrix CSV per client metric")
     p.add_argument("--poll-ms", type=int, default=1, help="async: sleep this long between status passes; 0 yields in a loop")
-    p.add_argument("--delay-ms", type=float, default=0.0,
-                   help="thread sweep, fairness and scale matrices: server response delay in ms, fractions allowed")
+    p.add_argument("--delay-ms", type=float, default=None,
+                   help="server response delay in ms, fractions allowed; 0 is no delay; omitted uses the matrix default")
     p.add_argument("--threads", type=int_list, default=SWEEP_THREADS, help="thread sweep: thread counts, comma separated")
     p.add_argument("--tags-per-thread", type=int_list, default=(100,), help="thread sweep: tags per thread, comma separated")
     p.add_argument("--interleave", action="store_true", help="create tags round-robin across threads")
@@ -463,15 +480,15 @@ def main():
         p.error("--a, --b and --server-dir (or --logix-attrs) are required")
 
     if args.fairness_matrix:
-        matrix = fairness_matrix(args.delay_ms or 1.0)
+        matrix = fairness_matrix(1.0 if args.delay_ms is None else args.delay_ms)
     elif args.release_matrix:
-        matrix = release_matrix(args.release_matrix, args.delay_ms or 0.3)
+        matrix = release_matrix(args.release_matrix, 0.3 if args.delay_ms is None else args.delay_ms)
     elif args.auto_matrix:
-        matrix = auto_matrix(args.auto_matrix, args.delay_ms or 0.3)
+        matrix = auto_matrix(args.auto_matrix, 0.3 if args.delay_ms is None else args.delay_ms)
     elif args.scale_matrix:
-        matrix = scale_matrix(args.scale_matrix, args.delay_ms or 1.0)
+        matrix = scale_matrix(args.scale_matrix, 1.0 if args.delay_ms is None else args.delay_ms)
     elif args.thread_sweep:
-        matrix = thread_sweep_matrix(args.thread_sweep, args.delay_ms, args.threads, args.tags_per_thread)
+        matrix = thread_sweep_matrix(args.thread_sweep, args.delay_ms or 0, args.threads, args.tags_per_thread)
     else:
         matrix = build_matrix(hardware)
     configs = [c for c in matrix if not args.only or any(o in config_key(c) for o in args.only.split(","))]

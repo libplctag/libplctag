@@ -201,11 +201,6 @@ static void system_tag_destroy(plc_tag_p ptag) {
         tag->byte_order = NULL;
     }
 
-    if(ptag->instance) {
-        rc_dec(ptag->instance);
-        ptag->instance = NULL;
-    }
-
     return;
 }
 

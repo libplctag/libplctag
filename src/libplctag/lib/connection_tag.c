@@ -320,11 +320,6 @@ static void connection_tag_destructor(void *ptr) {
         tag->data = NULL;
     }
 
-    if(tag->instance) {
-        rc_dec(tag->instance);
-        tag->instance = NULL;
-    }
-
     pdebug(tag->debug_module, DEBUG_INFO, tag->tag_id, "Done.");
 }
 

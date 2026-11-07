@@ -47,14 +47,6 @@
 
 typedef struct plc_tag_t *plc_tag_p;
 
-/* Opaque handle to the library-scoped instance (tag hashtable and its lookup
- * mutex). Full definition lives in tag_registry.c. A tag holds
- * a reference for its whole lifetime (see plc_tag_create_impl()/each protocol
- * destructor), so any code reachable from a valid plc_tag_p may use
- * tag->instance->tags / tag->instance->tag_lookup_mutex directly: those objects
- * cannot be destroyed while a tag referencing them still exists. */
-typedef struct tag_registry_t *tag_registry_p;
-
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
 /*
@@ -297,7 +289,6 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     /* what made this tag; a clone of it is made the same way. */                       \
     tag_create_function create_func;                                                    \
     tag_vtable_p vtable;                                                                \
-    tag_registry_p instance;                                                            \
     void *userdata;                                                                     \
     int32_t auto_sync_read_ms;                                                          \
     int32_t auto_sync_write_ms;                                                         \
@@ -307,7 +298,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     bool auto_destroyed;                                                                \
     /* created with find_or_create_tag=1. */                                               \
     bool find_or_create_tag;                                                               \
-    /* the attribute string, set while the tag is in the reuse map.  Under tag_lookup_mutex. */ \
+    /* the attribute string, set while the tag is in the reuse map.  Under reuse_lock. */  \
     char *reuse_key;                                                                    \
     int32_t size;                                                                       \
     int32_t tag_id;                                                                     \
@@ -352,11 +343,6 @@ struct plc_tag_t {
 extern atomic_bool lib_active;
 
 
-/* Acquire a reference to the current library instance, or NULL if the library is
- * not running (never started, or a shutdown has closed the gate). Safe to call
- * from any thread at any time; the caller must rc_dec() the result when done,
- * unless it is being transferred into a tag's tag->instance field (in which case
- * the tag's own destructor is the release). */
 /*
  * tag_range_is_valid
  *

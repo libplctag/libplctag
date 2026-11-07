@@ -73,9 +73,7 @@ static const struct {
 /*
  * Startup order.  Each entry must succeed before the next is tried.
  *
- * refcount comes first because tag_registry_init() allocates the registry with
- * rc_alloc().  The registry comes before the device modules because their tags live
- * in it.
+ * The registry comes before the device modules because their tags live in it.
  *
  * Teardown is NOT the reverse of this list and so is not driven from it -- see
  * destroy_modules().
@@ -153,9 +151,9 @@ void destroy_modules(void) {
      *
      * The device modules do unwind in reverse.  refcount and the tag registry do not:
      * refcount starts BEFORE the registry and must also stop BEFORE it, because draining
-     * the deferred destructors runs tag teardown that touches the tag table and lookup
-     * mutex that tag_registry_teardown() then destroys.  That pair is not a
-     * stack, and pretending otherwise in a table would be wrong rather than tidy.
+     * the deferred destructors runs tag teardown that forgets reuse keys in the map that
+     * tag_registry_teardown() then frees.  That pair is not a stack, and pretending
+     * otherwise in a table would be wrong rather than tidy.
      */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
@@ -255,22 +253,16 @@ int initialize_modules(void) {
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start %s!", lib_components[i].name);
 
-            /*
-             * The registry was built but never published, so nothing can have found it.
-             * Discard it rather than leaving it allocated.  Harmless before the
-             * registry itself has started.
-             */
-            tag_registry_discard_pending();
+            /* the registry was never published, so no tag is in it.  Harmless before it started. */
+            tag_registry_teardown();
             atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
             return rc;
         }
     }
 
     /*
-     * Publish the registry tag_registry_init() built above -- making it visible to
-     * tag_registry_acquire() -- now that every
-     * component has started successfully.  This stays outside lib_components[] on
-     * purpose: only the registry has a visibility gate, and a hook for one
+     * Open the registry to creates now that every component has started.  This stays outside
+     * lib_components[] on purpose: only the registry has a gate, and a hook for one
      * implementation would be an abstraction with a single user.  Must happen before
      * library_state is set to RUNNING below.
      */

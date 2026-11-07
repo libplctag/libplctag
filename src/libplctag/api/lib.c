@@ -54,8 +54,6 @@
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
-#include <utils/hash.h>
-#include <utils/hashtable.h>
 #include <utils/random_utils.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
@@ -555,7 +553,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     int debug_level = -1;
     int reuse = -1;
     plc_tag_p existing = NULL;
-    tag_registry_p inst = NULL;
 
     /* we are creating a tag, there is no ID yet. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting");
@@ -609,18 +606,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return PLCTAG_ERR_NOT_ALLOWED;
     }
 
-    /* Acquire a reference to the running instance and transfer it into tag->instance
-     * below once the tag exists. initialize_modules() above guarantees one was
-     * published, but a shutdown can race in between -- tag_registry_acquire()
-     * returning NULL here means exactly that. */
-    inst = tag_registry_acquire();
-    if(!inst) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, cannot create tag.");
-        attr_destroy(attribs);
-        return PLCTAG_ERR_NOT_ALLOWED;
-    }
-
-    if(reuse == 1 && (existing = tag_registry_find_reusable(inst, attrib_str))) {
+    /* a shutdown racing this create is refused by add_tag_lookup() below. */
+    if(reuse == 1 && (existing = tag_registry_find_reusable(attrib_str))) {
         bool failed = false;
 
         critical_block(existing->api_mutex) { failed = (existing->created && existing->create_result != PLCTAG_STATUS_OK); }
@@ -628,7 +615,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         /* a tag whose create failed stays failed, so this create makes a new one. */
         if(!failed) {
             attr_destroy(attribs);
-            rc_dec(inst);
             return reuse_existing(existing, timeout);
         }
 
@@ -650,7 +636,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(!tag_constructor) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, no tag constructor found for tag type!");
         attr_destroy(attribs);
-        rc_dec(inst);
         return src_tag ? PLCTAG_ERR_NOT_ALLOWED : PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -661,12 +646,10 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
         /*
          * A constructor that failed after allocating still hands the tag back so it can be
-         * released here.  rc_dec() tolerates NULL, so the two cases need no separate paths,
-         * and the instance reference was never transferred, so it is released here too.
+         * released here.  rc_dec() tolerates NULL, so the two cases need no separate paths.
          */
         attr_destroy(attribs);
         rc_dec(tag);
-        rc_dec(inst);
 
         return rc;
     }
@@ -674,18 +657,10 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, skipping mutex creation and other generic setup.");
         attr_destroy(attribs);
-        rc_dec(inst);
         return PLCTAG_ERR_CREATE;
     }
 
     tag->create_func = tag_constructor;
-
-    /* Transfer the acquired reference into the tag; the tag's own destructor
-     * releases it (see each protocol destructor's rc_dec(tag->instance)). Every
-     * failure path below this point already routes through rc_dec(tag), so it does
-     * not need its own rc_dec(inst) -- that would double-release. */
-    tag->instance = inst;
-    inst = NULL;
 
     /* set up the read cache config. */
     read_cache_ms = attr_get_int(attribs, "read_cache_ms", 0);
@@ -783,16 +758,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return reuse_existing(existing, timeout);
     }
 
-    /* tag->tag_id is already set (add_tag_lookup() sets it under tag_lookup_mutex,
-     * in the same critical section that publishes the tag into the hashtable --
-     * see the comment there). */
+    /* tag->tag_id is already set: add_tag_lookup() sets it under the entry lock that publishes the tag. */
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Returning mapped tag ID %d", id);
 
     /* Let protocols with their own worker-thread publishing step (e.g. Modbus) do it
      * now that every generic field above is set. See the comment on activate in
      * tag.h for why this can't happen earlier, inside the protocol's tag_create_function.
      *
-     * The tag is already published into the hashtable (add_tag_lookup() above), so the
+     * The tag is already published in the registry (add_tag_lookup() above), so the
      * PLC handler thread can already find and tickle it -- activate() must take api_mutex
      * like status()/abort() below do, or its reads/writes of tag fields (e.g. tag->op in
      * mb_activate/mb_read_start) race the handler thread's tickle_tag(), which changes
@@ -911,18 +884,10 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
  */
 
 LIB_EXPORT void plc_tag_shutdown(void) {
-    tag_registry_p inst = NULL;
-
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Starting.");
 
-    /* Atomically close the gate: exactly one caller -- concurrent or repeated --
-     * can ever observe current_instance non-NULL and clear it. Every other caller
-     * sees NULL and returns immediately. This replaces the old two-load
-     * "if(!tags || !lib_active)" guard, which could let concurrent or repeated
-     * plc_tag_shutdown() calls both proceed. */
-    inst = tag_registry_close();
-
-    if(!inst) {
+    /* exactly one caller, concurrent or repeated, closes the registry and goes on. */
+    if(!tag_registry_close()) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0,
                "plc_tag_shutdown() called after previous shutdown, or library not running. Ignoring.");
         return;
@@ -932,12 +897,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     atomic_set_bool(&lib_active, false);
 
     /* close all tags. */
-    tag_registry_destroy_all_tags(inst);
-
-    /* Stage the registry for tag_registry_teardown() (called via destroy_modules() below) to
-     * drop the last ("genesis") reference, once refcount_teardown() has drained
-     * every tag's own reference too. */
-    tag_registry_stage_shutdown(inst);
+    tag_registry_destroy_all_tags();
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Cleaning up library resources.");
 
@@ -1325,13 +1285,8 @@ LIB_EXPORT int plc_tag_abort(int32_t id) {
  */
 
 
-/* Common tail of tag destruction, given a tag already found and already removed
- * from the tag hashtable. Factored out so plc_tag_shutdown()'s own tag-destroy
- * loop -- which already holds the instance and does its own hashtable_remove --
- * does not have to go through plc_tag_destroy()'s fresh tag_registry_acquire(),
- * which by that point in shutdown correctly (and unhelpfully) returns NULL: the
- * gate is deliberately closed before that loop runs, to stop new tags being
- * created, but tags already found by the loop are not "new". */
+/* Common tail of tag destruction, given a tag already found and already removed from the
+ * registry: plc_tag_destroy() and the shutdown sweep both end here. */
 void destroy_tag_common(plc_tag_p tag) {
     int32_t tag_id = tag->tag_id;
 
@@ -1361,25 +1316,15 @@ void destroy_tag_common(plc_tag_p tag) {
 
 LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
     plc_tag_p tag = NULL;
-    tag_registry_p inst = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
 
-    if(tag_id <= 0 || tag_id > TAG_ID_MASK) {
+    if(tag_id <= 0) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Called with zero or invalid tag!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* No tag in hand yet to borrow tag->instance from, so this is a per-call
-     * acquire/release, same as lookup_tag(). */
-    inst = tag_registry_acquire();
-    if(!inst) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Library not running, cannot destroy tag.");
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-
-    tag = remove_tag_lookup_by_id(inst, tag_id);
-    rc_dec(inst);
+    tag = remove_tag_lookup_by_id(tag_id);
 
     if(!tag) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Called with non-existent tag!");

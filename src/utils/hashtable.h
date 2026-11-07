@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,25 +33,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __UTIL_HASHTABLE_H__
-#    define __UTIL_HASHTABLE_H__ 1
+/* Open addressed hash table keyed by non-zero, well mixed int64_t.  See hashtable.c. */
 
-#    include <stdint.h>
-
-// struct hashtable_entry_t;
-//
+#include <stdint.h>
 
 
 typedef struct hashtable_t *hashtable_p;
 
-extern hashtable_p hashtable_create(int size);
+
+extern hashtable_p hashtable_create(int32_t initial_capacity);
 extern void *hashtable_get(hashtable_p table, int64_t key);
-extern int hashtable_put(hashtable_p table, int64_t key, void *arg);
-extern void *hashtable_get_index(hashtable_p table, int index);
-extern int hashtable_capacity(hashtable_p table);
-extern int hashtable_entries(hashtable_p table);
+extern int32_t hashtable_put(hashtable_p table, int64_t key, void *data);
 extern void *hashtable_remove(hashtable_p table, int64_t key);
-extern int hashtable_destroy(hashtable_p table);
-
-
-#endif
+extern int32_t hashtable_destroy(hashtable_p table);

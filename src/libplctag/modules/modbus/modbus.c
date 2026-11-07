@@ -536,11 +536,6 @@ void modbus_tag_destructor(void *tag_arg) {
         tag->byte_order = NULL;
     }
 
-    if(tag->instance) {
-        rc_dec(tag->instance);
-        tag->instance = NULL;
-    }
-
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, tag->tag_id, "Done.");
 }
 

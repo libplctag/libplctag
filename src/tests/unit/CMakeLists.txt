@@ -103,7 +103,7 @@ target_include_directories(test_tag_schedule PRIVATE
 
 target_link_libraries(test_tag_schedule PRIVATE plctag_static ${EXTRA_LINKER_LIBS})
 
-# test_tag_registry: the tag id -> tag slot table.
+# test_tag_registry: the tag registry (id lookup, reuse map, id assignment).
 add_executable(test_tag_registry test_tag_registry.c)
 
 target_include_directories(test_tag_registry PRIVATE
