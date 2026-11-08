@@ -115,16 +115,27 @@ int64_t tag_driver_next_time_unsafe(tag_driver_t *driver) {
 }
 
 
+/*
+ * Stops after a batch of queued requests as well.  No packet holds more, and a due tag behind
+ * them would only queue behind them, so walking a long backlog on every packet buys nothing.
+ * The build walk that follows stops at a full packet too.
+ */
 void tag_driver_tickle_due_unsafe(tag_driver_t *driver, int64_t now) {
     plc_tag_p due[TAG_DRIVER_TICKLE_BATCH];
     int32_t count = 0;
+    int32_t queued = 0;
 
-    for(int32_t i = 0; i < vector_length(driver->active) && count < TAG_DRIVER_TICKLE_BATCH; i++) {
+    for(int32_t i = 0; i < vector_length(driver->active) && count < TAG_DRIVER_TICKLE_BATCH && queued < TAG_DRIVER_TICKLE_BATCH;
+        i++) {
         plc_tag_p tag = vector_get(driver->active, i);
 
         if(tag->op_time > now) { break; }
 
-        if(!tag_op_busy(tag)) { due[count++] = tag; }
+        if(!tag_op_busy(tag)) {
+            due[count++] = tag;
+        } else {
+            queued++;
+        }
     }
 
     tickle_tags_unsafe(driver, due, count, now);

@@ -211,6 +211,14 @@ int main(int argc, char **argv) {
         usage(argv[0]);
     }
 
+    /* the period sets the expected read count per tag */
+    const char *period_attr = strstr(tag_string, "auto_sync_read_ms=");
+    int period_ms = period_attr ? atoi(period_attr + 18) : 0;
+    if(period_ms <= 0) {
+        fprintf(stderr, "Error: --tag must contain auto_sync_read_ms=<period> with period > 0.\n");
+        usage(argv[0]);
+    }
+
     /*--- Allocate per-tag arrays ---*/
     tag_stats_t *stats = calloc((size_t)num_tags, sizeof(*stats));
     if(!stats) {
@@ -363,6 +371,20 @@ int main(int argc, char **argv) {
 
     int fair = 1;
     if(stats_ok) { fair = (stats_assess_fairness(&summary, stderr) == 0); }
+
+    /* A tag that never reads is perfectly fair, so check the count too.  The floor is half
+       the expected count, loose enough for CI stalls; it catches a stopped tag, not a slow one. */
+    int64_t expected_reads = duration_ms / period_ms;
+    int64_t min_reads      = expected_reads / 2;
+    int short_tags         = 0;
+    for(int i = 0; i < num_tags; i++) {
+        if(read_counts[i] == 0 || read_counts[i] < min_reads) { short_tags++; }
+    }
+    fprintf(stderr, "Expected reads:    %" PRId64 " per tag (floor %" PRId64 ")\n", expected_reads, min_reads);
+    if(short_tags) {
+        fprintf(stderr, "FAIL: %d of %d tags read fewer than %" PRId64 " times.\n", short_tags, num_tags, min_reads);
+        fair = 0;
+    }
 
     free(read_counts);
     free(stats);

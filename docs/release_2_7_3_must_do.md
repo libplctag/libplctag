@@ -16,15 +16,15 @@ Consolidated 2026-11-08 from `ephemeral_docs/deferred_fixes.md` (DF),
 
 | # | Item | Source | Decision | Status |
 |---|---|---|---|---|
-| 1 | MicroLogix `L19:0` test writes 4 values to a 1-element tag | DF | Write one value | To do |
-| 2 | `test_auto_read` passes with zero reads | DF | Fail when reads fall short of the expected count | To do |
+| 1 | MicroLogix `L19:0` test writes 4 values to a 1-element tag | DF | Write one value | Done |
+| 2 | `test_auto_read` passes with zero reads | DF | Fail when reads fall short of the expected count | Done |
 | 3 | `PLCTAG_MAX_TAGS` default | ST §7 | 262144 | Done in code; record only |
 | 4 | Pad slot table entries to 64 bytes | ST §7 | Keep unpadded; revisit if cache effects show in testing | Decided |
-| 5 | Idle CPU phase in `test_many_tags` | SP 1.1 | Add it | To do |
+| 5 | Idle CPU phase in `test_many_tags` | SP 1.1 | Add it, off by default (`--idle-s`) | Done |
 | 6 | Connection count ramp on the L81, 1-8 connections | SP 1.2 | Short hardware test | To do |
-| 7 | CIP tag ramp, 200 to 200000 tags, zero delay | SP 1.3/1.4 | New ramp test | To do |
+| 7 | CIP tag ramp, 200 to 200000 tags, zero delay | SP 1.3/1.4 | `run_tag_ramp.py` + `test_many_tags --passes --read-s` | Built; 200000 is client-bound, see #16 |
 | 8 | Modbus tag ramp, 50 to 50000 tags | SP 2.3 | New ramp test, stop at 100% server CPU | To do |
-| 9 | Machine-total and per-thread CPU monitoring | SP 3.4 | Add if not invasive; macOS and Linux | To do |
+| 9 | Machine-total and per-thread CPU monitoring | SP 3.4 | Added to `run_perf_compare.py`; macOS path untested | Done (Linux) |
 | 10 | v2.7.2 vs HEAD: no regressions | SP 3.5 | Keep the pairwise comparison; no 2.7.0/2.7.1 table | Run on Linux |
 | 11 | Fairness gate thresholds | SP 3A | Functional on M1, final on Linux | To do |
 | 12 | Release regression gate | SP 4 | Covered by 5-11 | Follows from them |
@@ -32,7 +32,7 @@ Consolidated 2026-11-08 from `ephemeral_docs/deferred_fixes.md` (DF),
 | 14 | Re-run Linux fairness and Modbus scale matrices, deep idle blocked | PF | User runs | To run |
 | 15 | Final performance numbers | PF | Linux machine | To run |
 | 16 | Tag list insert and remove cost | PF | Measure; M1 finds where, Linux gives numbers | To do |
-| 17 | Small first packet of an async cycle | PF | May already be fixed; verify | To check |
+| 17 | Small first packet of an async cycle | PF | Deferred: only a tight poll loop shows it | Deferred 2026-11-08 |
 | 18 | Backoff unit tests on Windows and ARM in CI | DF | Not reviewed | Check the next CI run |
 
 Deferred or closed are listed at the end.
@@ -101,7 +101,8 @@ typedef struct {
 - **Where:** `src/tests/test_many_tags/test_many_tags.c`. Phases today: create, write, read,
   destroy (`phase_t`, line 76).
 - **Plan (SP 1.1 phase 4):** after the read phase and before destroy, leave every tag created
-  with no operations for a fixed time (10 s by default, an option to change it) and measure the
+  with no operations for a fixed time (`--idle-s=S`, default 0 = off, so the simulator suite
+  is not slowed; the ramps pass `--idle-s=10`) and measure the
   process CPU over that time with `getrusage(RUSAGE_SELF)` (macOS and Linux; Windows
   `GetProcessTimes`). Log CPU seconds and percent of one core.
 - **Why:** it catches work that grows with the tag count instead of with activity, for example
@@ -149,6 +150,39 @@ typedef struct {
   `ab_server` with the arrays. The script also sets `ulimit -n 1024`.
 - **Machines:** functional check on the M1 (does every step finish, are the logs right); the
   numbers come from the Linux machine.
+- **Built 2026-11-08:** `src/tests/scripts/run_tag_ramp.py --bin-dir=<Release bin_dist>`.
+  `test_many_tags` gained `--passes` and `--read-s` (repeat reads for at least R passes and S
+  seconds), logs every pass, then fastest/median/slowest pass, rates, client CPU%, and peak RSS
+  before create, after create (bytes per tag) and after reads. The runner samples `ab_server`
+  CPU, busiest thread and RSS, and the machine total, over the read passes, and ends with a table.
+- **First run 2026-11-08** (Linux, Release HEAD + this work, 1 connection, 1 thread, no
+  delay, at least 10 passes and 3 s per step):
+
+  | Tags | Median pass | Median tags/s | Client CPU | Server CPU | Client B/tag | Create |
+  |---|---|---|---|---|---|---|
+  | 200 | 1.2 ms | 167k | 22% | 7% | (page noise) | 2 ms |
+  | 2000 | 2.3 ms | 874k | 79% | 24% | 1100 | 15 ms |
+  | 20000 | 20.5 ms | 977k | 121% | 25% | 1003 | 147 ms |
+  | 200000 | 1870 ms | 107k | 103% | 3% | 997 | 1500 ms |
+
+  20000 to 200000 tags is 10 times the tags and 91 times the pass time, with the client CPU
+  bound and the server idle: something in the client is O(N) per tag.
+- **Profiled 2026-11-08:** not the search (`vector_find_index` under 0.5%). 27% `memmove` (sorted
+  vector insert and remove) and 32% two walks per packet, `tag_driver_tickle_due_unsafe` and
+  `tag_driver_expire_due_unsafe`. Both walked the whole due prefix, which after 200000 async
+  `plc_tag_read` calls is 200000 queued, not yet sent, requests, looking for non-request
+  entries. One packet takes about 165.
+- **Fixed 2026-11-08:** the tickle walk stops after 512 queued requests (no packet holds more;
+  a due tag behind them would queue behind them anyway), and the expire walk is skipped in
+  `SESSION_IDLE`, where the tickle walk already takes due DESTROY tags.
+
+  | Tags | Median pass before | After | Median tags/s after |
+  |---|---|---|---|
+  | 20000 | 20.5 ms | 16.8 ms | 1.19 M |
+  | 200000 | 1870 ms | 457 ms | 438 k |
+
+  `memmove` is now 44% of client CPU at 200000 tags and is what is left of the O(N) per tag
+  (item 16).
 
 ## 8. Modbus tag ramp, 50 to 50000 tags
 
@@ -174,6 +208,14 @@ typedef struct {
   - Record which ran out first: client, server or machine (machine near cores × 100%, or one
     process at its thread count × 100%).
 - The ramp tests in items 7 and 8 use the same sampling for server CPU.
+- **Done 2026-11-08:** `run_perf_compare.py` writes `machine_cpu_pct`, `client_max_thread_pct`,
+  `server_max_thread_pct` and `limit` (machine, server, client or blank) as the last CSV
+  columns, and prints them in the verdict table. Linux reads `/proc`: `ps -o time=` there has
+  1 s resolution, so the old server CPU% moved in 10% steps on a 10 s run; it now has 10 ms.
+  macOS uses `ps -M` and `ps -A`. Per-thread end samples are taken 0.5 s before the window
+  ends, since client and server connection threads exit right after it. Machine total is
+  not `ps -A -o %cpu`, which on Linux is a lifetime average.
+- **Still to do:** functional check of the macOS path on the M1.
 
 ## 10. v2.7.2 vs HEAD: no regressions
 
@@ -263,6 +305,24 @@ gives throughput, CPU per op and memory, item 11 gives fairness. Nothing extra t
 - **May already be fixed** by later changes. Check: async read, 250 tags, 1 × 1, count tags per
   request packet with the `write()` shim used before. If the first packet still carries only a
   few tags, it is still open; decide then.
+- **Checked 2026-11-08** (HEAD `ef836b68`, Release, Linux, deep idle not blocked; functional
+  only): async read, 250 tags, 1 × 1, `ab_server` 1 ms and 0.3 ms, 3 s. An `LD_PRELOAD` shim
+  counted the CIP services in each request packet; cycles are split at every 250 tags.
+
+  | Delay | Poll | Cycles | 2 packets | 3 packets | First packet < 20 tags | First packet median |
+  |---|---|---|---|---|---|---|
+  | 1 ms | 1 ms | 752 | 735 | 17 | 0 | 86 |
+  | 1 ms | 0 | 801 | 2 | 799 | 742 | 13 |
+  | 0.3 ms | 1 ms | 1114 | 1059 | 55 | 2 | 87 |
+  | 0.3 ms | 0 | 1906 | 10 | 1896 | 1729 | 14 |
+
+  At most about 165 reads fit in one packet, so 2 packets is the minimum for 250 tags.
+  With `--poll-ms=1` cycles already take 2. With `--poll-ms=0` (the application starts the next
+  cycle the moment the last one ends) the woken I/O thread still sends the 1-20 tags queued so
+  far, and the cycle takes 3 round trips. **Still open** for applications that queue reads in a
+  tight loop.
+- **Decision (2026-11-08):** defer. Only a caller that spins shows it, and it still gets more
+  ops/s than with the 1 ms poll.
 
 ## 18. Backoff unit tests on Windows and ARM
 

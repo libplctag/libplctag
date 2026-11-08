@@ -49,9 +49,21 @@
  *
  * Usage:
  *   test_many_tags --tag=BASE --name=PREFIX --tags=N [--groups=G] [--threads=T] [--arrays=K]
- *                  [--max-create-ms=M]
+ *                  [--max-create-ms=M] [--passes=R] [--read-s=S] [--idle-s=S] [--max-idle-cpu-pct=P]
  * BASE is a tag string without name and connection_group_id.  --max-create-ms fails the test
  * if creating all the tags takes longer.
+ *
+ * --passes (default 1) repeats the read phase R times, and --read-s (default 0) keeps repeating
+ * it until S seconds have passed too, so short passes add up to a window long enough to sample CPU.
+ * Every pass is logged, then the fastest, median and slowest pass, the read rates and the client
+ * CPU over all passes.  "# reads start"
+ * and "# reads end" lines bracket the passes so a runner can sample the server over them.
+ * Peak RSS is logged before create, after create (with bytes per tag) and after the reads.
+ *
+ * --idle-s (default 0, off) leaves every tag created with no operations for S seconds after the
+ * read phase and logs the process CPU over that time.  It catches work that grows with the tag
+ * count instead of with activity.  --max-idle-cpu-pct fails the test if that CPU, as percent of
+ * one core, is higher.
  */
 
 #include "compat_utils.h"
@@ -62,6 +74,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef POSIX_PLATFORM
+#    include <sys/resource.h>
+#endif
 
 #define REQUIRED_VERSION 2, 6, 0
 
@@ -93,6 +110,9 @@ static int32_t *tags = NULL;
 static uint32_t seed = 0;
 static compat_atomic_int32_t reported = {0};
 
+static int64_t now_us(void);
+static int32_t run_phase(phase_t phase, int64_t *elapsed_us);
+
 
 static int64_t now_ms(void) { return compat_time_ms(); }
 
@@ -101,6 +121,153 @@ static void report(int32_t i, const char *what, int32_t rc) {
     if(compat_atomic_inc_int32(&reported) <= MAX_REPORTED_FAILURES) {
         printf("FAIL tag %" PRId32 ": %s: %s\n", i, what, plc_tag_decode_error(rc));
     }
+}
+
+
+/* process CPU time, user + system */
+static double cpu_time_ms(void) {
+#ifdef POSIX_PLATFORM
+    struct rusage usage;
+    if(getrusage(RUSAGE_SELF, &usage) != 0) { return 0.0; }
+    return (double)usage.ru_utime.tv_sec * 1000.0 + (double)usage.ru_utime.tv_usec / 1000.0
+           + (double)usage.ru_stime.tv_sec * 1000.0 + (double)usage.ru_stime.tv_usec / 1000.0;
+#elif defined(WINDOWS_PLATFORM)
+    FILETIME creation, exitt, kernel, user;
+    ULARGE_INTEGER k, u;
+    if(!GetProcessTimes(GetCurrentProcess(), &creation, &exitt, &kernel, &user)) { return 0.0; }
+    k.LowPart = kernel.dwLowDateTime;
+    k.HighPart = kernel.dwHighDateTime;
+    u.LowPart = user.dwLowDateTime;
+    u.HighPart = user.dwHighDateTime;
+    return (double)(k.QuadPart + u.QuadPart) / 10000.0;
+#else
+    return 0.0;
+#endif
+}
+
+
+static int cmp_int64(const void *a, const void *b) {
+    int64_t x = *(const int64_t *)a, y = *(const int64_t *)b;
+    return (x > y) - (x < y);
+}
+
+
+/* Read every tag at least passes times and for at least read_s seconds.  Logs each pass, then
+   the summary.  Returns the failure count. */
+static int32_t run_reads(int32_t passes, int32_t read_s) {
+    int32_t cap = passes;
+    int64_t *pass_us = (int64_t *)calloc((size_t)cap, sizeof(int64_t));
+    int32_t failures = 0;
+    int32_t done = 0;
+
+    if(!pass_us) {
+        printf("FAIL: out of memory\n");
+        return 1;
+    }
+
+    printf("# reads start\n");
+    fflush(stdout);
+    double cpu_start = cpu_time_ms();
+    int64_t wall_start = now_us();
+
+    for(done = 0; failures == 0 && (done < passes || now_us() - wall_start < (int64_t)read_s * 1000000); done++) {
+        if(done == cap) {
+            int64_t *more = (int64_t *)realloc(pass_us, (size_t)cap * 2 * sizeof(int64_t));
+            if(!more) {
+                printf("FAIL: out of memory\n");
+                failures++;
+                break;
+            }
+            pass_us = more;
+            cap *= 2;
+        }
+        failures += run_phase(PHASE_READ, &pass_us[done]);
+        printf("read     pass %" PRId32 ": %" PRId32 " tags in %.3f ms, %.0f tags/s, %" PRId32 " failures\n", done + 1, num_tags,
+               (double)pass_us[done] / 1000.0, pass_us[done] > 0 ? (double)num_tags * 1e6 / (double)pass_us[done] : 0.0,
+               failures);
+    }
+
+    int64_t wall_us = now_us() - wall_start;
+    double cpu_ms = cpu_time_ms() - cpu_start;
+    printf("# reads end\n");
+    fflush(stdout);
+
+    qsort(pass_us, (size_t)done, sizeof(int64_t), cmp_int64);
+    double sum_us = 0.0;
+    for(int32_t p = 0; p < done; p++) { sum_us += (double)pass_us[p]; }
+    double median_us = (done % 2) ? (double)pass_us[done / 2] : ((double)pass_us[done / 2 - 1] + (double)pass_us[done / 2]) / 2.0;
+    double rate = (double)num_tags * 1e6;
+
+    printf("reads    %" PRId32 " passes: fastest %.3f ms, median %.3f ms, slowest %.3f ms, mean %.3f ms\n", done,
+           (double)pass_us[0] / 1000.0, median_us / 1000.0, (double)pass_us[done - 1] / 1000.0, sum_us / done / 1000.0);
+    printf("rate     fastest pass %.0f tags/s, median pass %.0f tags/s, overall %.0f tags/s\n",
+           pass_us[0] > 0 ? rate / (double)pass_us[0] : 0.0, median_us > 0 ? rate / median_us : 0.0,
+           wall_us > 0 ? rate * done / (double)wall_us : 0.0);
+    printf("CPU      client %.1f ms over %.1f ms of reads, %.1f%% of one core\n", cpu_ms, (double)wall_us / 1000.0,
+           wall_us > 0 ? cpu_ms * 100000.0 / (double)wall_us : 0.0);
+
+    free(pass_us);
+    return failures;
+}
+
+
+/* Leave every tag alone for idle_s seconds.  Returns 1 if CPU is over the limit, else 0. */
+static int32_t run_idle(int32_t idle_s, double max_idle_cpu_pct) {
+    double cpu_start = cpu_time_ms();
+    int64_t wall_start = now_ms();
+    compat_sleep_ms((uint32_t)idle_s * 1000, NULL);
+    int64_t wall_ms = now_ms() - wall_start;
+    double cpu_ms = cpu_time_ms() - cpu_start;
+    double pct = wall_ms > 0 ? cpu_ms * 100.0 / (double)wall_ms : 0.0;
+
+    printf("idle     %" PRId32 " tags for %" PRId64 " ms, CPU %.1f ms, %.2f%% of one core\n", num_tags, wall_ms, cpu_ms, pct);
+    if(max_idle_cpu_pct > 0.0 && pct > max_idle_cpu_pct) {
+        printf("FAIL: idle CPU %.2f%% is more than %g%%\n", pct, max_idle_cpu_pct);
+        return 1;
+    }
+    return 0;
+}
+
+
+static int64_t now_us(void) {
+#ifdef WINDOWS_PLATFORM
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (int64_t)((double)count.QuadPart * 1000000.0 / (double)freq.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + (int64_t)ts.tv_nsec / 1000;
+#endif
+}
+
+
+static int64_t peak_rss_kb(void) {
+#ifdef __linux__
+    /* VmHWM is this image only; ru_maxrss can carry the parent's high-water mark over exec. */
+    char line[128];
+    int64_t kb = 0;
+    FILE *f = fopen("/proc/self/status", "r");
+
+    if(f) {
+        while(fgets(line, sizeof(line), f)) {
+            if(sscanf(line, "VmHWM: %" SCNd64, &kb) == 1) { break; }
+        }
+        fclose(f);
+    }
+    return kb;
+#elif defined(POSIX_PLATFORM)
+    struct rusage usage;
+    if(getrusage(RUSAGE_SELF, &usage) != 0) { return 0; }
+#    ifdef __APPLE__
+    return (int64_t)usage.ru_maxrss / 1024; /* bytes on macOS */
+#    else
+    return (int64_t)usage.ru_maxrss;
+#    endif
+#else
+    return 0; /* shortcut: no Windows peak RSS (needs psapi), add it if the ramps run on Windows */
+#endif
 }
 
 
@@ -187,13 +354,13 @@ static void *worker_func(void *arg) {
 }
 
 
-/* Run one phase on every thread.  Returns the failure count and sets *elapsed_ms. */
-static int32_t run_phase(phase_t phase, int64_t *elapsed_ms) {
+/* Run one phase on every thread.  Returns the failure count and sets *elapsed_us. */
+static int32_t run_phase(phase_t phase, int64_t *elapsed_us) {
     static compat_thread_t threads[MAX_THREADS];
     static bool started[MAX_THREADS];
     static worker_t workers[MAX_THREADS];
     int32_t failures = 0;
-    int64_t start_ms = now_ms();
+    int64_t start_us = now_us();
 
     for(int32_t j = 0; j < num_threads; j++) {
         workers[j].first = j;
@@ -212,9 +379,12 @@ static int32_t run_phase(phase_t phase, int64_t *elapsed_ms) {
         failures += workers[j].failures;
     }
 
-    *elapsed_ms = now_ms() - start_ms;
+    *elapsed_us = now_us() - start_us;
 
-    printf("%-8s %" PRId32 " tags in %" PRId64 " ms, %" PRId32 " failures\n", phase_names[phase], num_tags, *elapsed_ms, failures);
+    if(phase != PHASE_READ) {
+        printf("%-8s %" PRId32 " tags in %" PRId64 " ms, %" PRId32 " failures\n", phase_names[phase], num_tags,
+               *elapsed_us / 1000, failures);
+    }
     fflush(stdout);
 
     return failures;
@@ -223,16 +393,25 @@ static int32_t run_phase(phase_t phase, int64_t *elapsed_ms) {
 
 static void usage(void) {
     printf("Usage: test_many_tags --tag=BASE --name=PREFIX --tags=N [--groups=G] [--threads=T] [--arrays=K]\n"
-           "                      [--max-create-ms=M]\n"
+           "                      [--max-create-ms=M] [--passes=R] [--read-s=S]\n"
+           "                      [--idle-s=S] [--max-idle-cpu-pct=P]\n"
            "  BASE is a tag string without name and connection_group_id.  Tag i is PREFIX<a>[<e>],\n"
-           "  a = (i mod K) + 1, e = i / K, on connection group (i mod G) + 1.\n");
+           "  a = (i mod K) + 1, e = i / K, on connection group (i mod G) + 1.\n"
+           "  --passes repeats the read phase R times and logs each pass and the summary (default 1).\n"
+           "  --read-s keeps repeating it until S seconds have passed as well (default 0).\n"
+           "  --idle-s leaves the tags idle S seconds after the read phase and logs process CPU (default 0, off).\n"
+           "  --max-idle-cpu-pct fails the test if idle CPU is more than P percent of one core.\n");
     exit(1);
 }
 
 
 int main(int argc, char **argv) {
     int64_t max_create_ms = 0;
-    int64_t elapsed_ms = 0;
+    int32_t idle_s = 0;
+    double max_idle_cpu_pct = 0.0;
+    int32_t passes = 1;
+    int32_t read_s = 0;
+    int64_t elapsed_us = 0;
     int32_t failures = 0;
 
     for(int32_t i = 1; i < argc; i++) {
@@ -250,6 +429,14 @@ int main(int argc, char **argv) {
             num_arrays = (int32_t)atoi(argv[i] + 9);
         } else if(strncmp(argv[i], "--max-create-ms=", 16) == 0) {
             max_create_ms = (int64_t)atoll(argv[i] + 16);
+        } else if(strncmp(argv[i], "--passes=", 9) == 0) {
+            passes = (int32_t)atoi(argv[i] + 9);
+        } else if(strncmp(argv[i], "--read-s=", 9) == 0) {
+            read_s = (int32_t)atoi(argv[i] + 9);
+        } else if(strncmp(argv[i], "--idle-s=", 9) == 0) {
+            idle_s = (int32_t)atoi(argv[i] + 9);
+        } else if(strncmp(argv[i], "--max-idle-cpu-pct=", 19) == 0) {
+            max_idle_cpu_pct = atof(argv[i] + 19);
         } else {
             printf("Unknown argument: %s\n", argv[i]);
             usage();
@@ -257,7 +444,7 @@ int main(int argc, char **argv) {
     }
 
     if(!base_tag || !name_prefix || num_tags <= 0 || num_tags > MAX_TAGS || num_groups <= 0 || num_groups > MAX_GROUPS
-       || num_threads <= 0 || num_threads > MAX_THREADS || num_arrays < 0) {
+       || num_threads <= 0 || num_threads > MAX_THREADS || num_arrays < 0 || idle_s < 0 || passes <= 0 || read_s < 0) {
         usage();
     }
 
@@ -288,16 +475,24 @@ int main(int argc, char **argv) {
     printf("%" PRId32 " tags, %" PRId32 " groups, %" PRId32 " threads, %" PRId32 " arrays of %" PRId32 " elements\n", num_tags,
            num_groups, num_threads, num_arrays, (num_tags + num_arrays - 1) / num_arrays);
 
-    failures += run_phase(PHASE_CREATE, &elapsed_ms);
-    if(max_create_ms > 0 && elapsed_ms > max_create_ms) {
-        printf("FAIL: create took %" PRId64 " ms, more than %" PRId64 " ms\n", elapsed_ms, max_create_ms);
+    int64_t rss_start_kb = peak_rss_kb();
+    failures += run_phase(PHASE_CREATE, &elapsed_us);
+    int64_t rss_created_kb = peak_rss_kb();
+    printf("memory   peak RSS %" PRId64 " KB before create, %" PRId64 " KB after create, %.0f bytes per tag\n", rss_start_kb,
+           rss_created_kb, (double)(rss_created_kb - rss_start_kb) * 1024.0 / num_tags);
+    if(max_create_ms > 0 && elapsed_us / 1000 > max_create_ms) {
+        printf("FAIL: create took %" PRId64 " ms, more than %" PRId64 " ms\n", elapsed_us / 1000, max_create_ms);
         failures++;
     }
 
-    if(failures == 0) { failures += run_phase(PHASE_WRITE, &elapsed_ms); }
-    if(failures == 0) { failures += run_phase(PHASE_READ, &elapsed_ms); }
+    if(failures == 0) { failures += run_phase(PHASE_WRITE, &elapsed_us); }
+    if(failures == 0) {
+        failures += run_reads(passes, read_s);
+        printf("memory   peak RSS %" PRId64 " KB after reads\n", peak_rss_kb());
+    }
+    if(failures == 0 && idle_s > 0) { failures += run_idle(idle_s, max_idle_cpu_pct); }
 
-    failures += run_phase(PHASE_DESTROY, &elapsed_ms);
+    failures += run_phase(PHASE_DESTROY, &elapsed_us);
 
     free(tags);
 

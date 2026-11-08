@@ -1871,8 +1871,13 @@ static THREAD_FUNC(session_handler) {
          * This keeps the overall memory usage lower.
          */
 
-        /* a due auto-destroy needs no connection, so it runs in every state. */
-        critical_block(conn->session_mutex) { tag_driver_expire_due_unsafe(&conn->driver, now); }
+        /*
+         * A due auto-destroy needs no connection, so it runs in every state.  In SESSION_IDLE the
+         * tickle in process_requests() takes due DESTROY tags, so this walk is skipped there.
+         */
+        if(conn->state != SESSION_IDLE) {
+            critical_block(conn->session_mutex) { tag_driver_expire_due_unsafe(&conn->driver, now); }
+        }
         tag_driver_notify(&conn->driver);
 
         switch(conn->state) {

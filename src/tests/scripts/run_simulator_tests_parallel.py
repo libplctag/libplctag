@@ -1375,7 +1375,7 @@ def build_manifest() -> Manifest:
                f"--word-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&elem_count=1&name=N7:0",
                f"--bit-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--debug=4"], F)
     sec.test("L data file Micrologix tag read/write",
-              [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0", "--write=0,1,2,3", "--debug=4"], F)
+              [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0", "--write=7", "--check", "--debug=4"], F)
     # L files are read and written only as whole words, so a bit tag is refused at create.
     sec.test("L bit data file Micrologix tag read",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--check=0", "--debug=4"],

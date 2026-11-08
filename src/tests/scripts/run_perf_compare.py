@@ -38,6 +38,11 @@ Usage:
   Mutex wait (Linux only; --a and --b must link the shared library, not plctag_static):
   run_perf_compare.py ... --mutex-shim=b_head/bin_dist/libmutex_wait_shim.so
   run_perf_compare.py --self-check
+
+CPU over each client's measured window: server process, machine total (all cores, so up to
+cores x 100 %), and the busiest client and server thread.  "limit" names what ran out first:
+machine, server or client (busiest thread at 90 % of a core or more).  Linux reads /proc,
+macOS uses ps.
 """
 
 import argparse
@@ -51,6 +56,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -222,10 +228,75 @@ def stop_server(proc, log):
     return found[-1] if found else None
 
 
+CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+CORES = os.cpu_count() or 1
+PS_TIME = re.compile(r"^(?:\d+-)?(?:\d+:)*\d+\.\d+$")
+
+
+def stat_seconds(text):
+    """utime + stime from a Linux /proc stat line.  The command name may hold spaces."""
+    fields = text.rpartition(")")[2].split()
+    return (int(fields[11]) + int(fields[12])) / CLK_TCK
+
+
 def cpu_seconds(pid):
-    """ps TIME is [[dd-]hh:]mm:ss.ss."""
-    return cpu_seconds_text(subprocess.run(["ps", "-o", "time=", "-p", str(pid)],
-                                           capture_output=True, text=True).stdout.strip())
+    """Linux /proc has 10 ms resolution; Linux ps TIME has 1 s.  macOS ps TIME is [[dd-]hh:]mm:ss.ss."""
+    try:
+        return stat_seconds(Path(f"/proc/{pid}/stat").read_text())
+    except OSError:
+        return cpu_seconds_text(subprocess.run(["ps", "-o", "time=", "-p", str(pid)],
+                                               capture_output=True, text=True).stdout.strip())
+
+
+def thread_seconds(pid):
+    """CPU seconds per thread of pid."""
+    task = Path(f"/proc/{pid}/task")
+    if task.is_dir():
+        out = {}
+        for t in task.iterdir():
+            try:
+                out[t.name] = stat_seconds((t / "stat").read_text())
+            except OSError:
+                pass  # the thread exited
+        return out
+    # macOS: one line per thread, the first two m:ss.ss fields are STIME and UTIME.
+    # shortcut: keyed by line order since ps -M shows no thread id; fine while threads are not
+    # created or destroyed during the window, which perf_benchmark does not do.
+    out = {}
+    lines = subprocess.run(["ps", "-M", "-p", str(pid)], capture_output=True, text=True).stdout.splitlines()[1:]
+    for i, line in enumerate(lines):
+        times = [w for w in line.split() if PS_TIME.match(w)][:2]
+        if len(times) == 2:
+            out[i] = sum(cpu_seconds_text(w) for w in times)
+    return out
+
+
+def machine_seconds():
+    """Busy CPU seconds summed over all cores since boot (Linux) or over all live processes (macOS)."""
+    try:
+        with open("/proc/stat") as f:
+            ticks = [int(x) for x in f.readline().split()[1:9]]
+        return (sum(ticks) - ticks[3] - ticks[4]) / CLK_TCK  # minus idle and iowait
+    except OSError:
+        out = subprocess.run(["ps", "-A", "-o", "time="], capture_output=True, text=True).stdout.split()
+        return sum(cpu_seconds_text(w) for w in out)
+
+
+def busiest_thread_pct(before, after, seconds):
+    if seconds <= 0:
+        return 0.0
+    return max((100.0 * (v - before.get(k, 0.0)) / seconds for k, v in after.items()), default=0.0)
+
+
+def limit(machine_pct, client_thread_pct, server_thread_pct):
+    """What ran out first: the whole machine, one server thread or one client thread."""
+    if machine_pct >= SERVER_BOUND_PCT * CORES:
+        return "machine"
+    if server_thread_pct >= SERVER_BOUND_PCT:
+        return "server"
+    if client_thread_pct >= SERVER_BOUND_PCT:
+        return "client"
+    return ""
 
 
 def cpu_seconds_text(text):
@@ -246,29 +317,48 @@ def run_one(binary, c, args, server):
     env = dict(os.environ, LD_PRELOAD=str(args.mutex_shim)) if args.mutex_shim else None
     # Server CPU over the client's measured window (its "# window" lines), so create and prime
     # are not counted.  A client without the markers falls back to its whole run.
-    sample = (lambda: (cpu_seconds(server.pid), time.monotonic())) if server else (lambda: (0.0, 0.0))
+    def sample(client=None):
+        return dict(t=time.monotonic(), srv=cpu_seconds(server.pid) if server else 0.0,
+                    srv_threads=thread_seconds(server.pid) if server else {},
+                    cli_threads=thread_seconds(client.pid) if client else {}, machine=machine_seconds())
     start = end = None
+    # Client threads, and the server threads serving them, exit right after "# window end", so
+    # the per-thread end sample is taken 0.5 s early.
+    thr_end = {}
+    early = lambda: thr_end.update(t=time.monotonic(), cli_threads=thread_seconds(proc.pid),
+                                   srv_threads=thread_seconds(server.pid) if server else {})
+    timer = threading.Timer(max(c.get("duration", args.duration) - 0.5, 0.1), early)
     whole = sample()
     with tempfile.TemporaryFile(mode="w+") as err:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True, env=env)
+        sample = lambda s=sample: s(proc)
         stdout = []
         for line in proc.stdout:
             if line.startswith("# window start"):
                 start = sample()
+                timer.start()
             elif line.startswith("# window end"):
                 end = sample()
             stdout.append(line)
         proc.wait()
+        timer.cancel()
         err.seek(0)
         stderr = err.read()
     if not start or not end:
         start, end = whole, sample()
-    server_pct = 100.0 * (end[0] - start[0]) / (end[1] - start[1]) if server else 0.0
+    dt = end["t"] - start["t"]
+    server_pct = 100.0 * (end["srv"] - start["srv"]) / dt if server and dt > 0 else 0.0
+    machine_pct = 100.0 * (end["machine"] - start["machine"]) / dt if dt > 0 else 0.0
+    thr = thr_end if thr_end else end
+    cli_thread = busiest_thread_pct(start["cli_threads"], thr["cli_threads"], thr["t"] - start["t"])
+    srv_thread = busiest_thread_pct(start["srv_threads"], thr["srv_threads"], thr["t"] - start["t"])
+    cpu = dict(machine_cpu_pct=machine_pct, client_max_thread_pct=cli_thread, server_max_thread_pct=srv_thread,
+               limit=limit(machine_pct, cli_thread, srv_thread))
     lines = [l.rstrip("\n") for l in stdout if l.startswith(c["mode"] + ",")]
     if proc.returncode != 0 or not lines:
         print(f"  FAILED rc={proc.returncode}: {' '.join(cmd)}\n{stderr[-2000:]}", file=sys.stderr)
         return None
-    return lines[-1].split(","), server_pct, server_rss_kb(server.pid) if server else 0
+    return lines[-1].split(","), server_pct, server_rss_kb(server.pid) if server else 0, cpu
 
 
 def server_rss_kb(pid):
@@ -276,6 +366,7 @@ def server_rss_kb(pid):
     return int(out) if out else 0
 
 
+CPU_COLUMNS = ("machine_cpu_pct", "client_max_thread_pct", "server_max_thread_pct", "limit")
 HARNESS_COLUMNS = ("mode,connection_groups,threads,tags,tags_per_thread,duration_ms,total_ops,ops_per_sec,"
                    "cpu_load_pct,fairness_cv,fairness_min_max_ratio,op,errors,p50_us,p95_us,p99_us,max_us,"
                    "cpu_us_per_op,rss_growth_kb,create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,"
@@ -303,6 +394,11 @@ def self_check():
     assert overall(["better", "same", "same"]) == "better"
     assert overall(["same", "same", "same"]) == "same"
     assert abs(cpu_seconds_text("1-02:03:04.5") - (86400 + 7384.5)) < 1e-9
+    assert stat_seconds("12 (a b) S " + " ".join(["0"] * 10) + f" {3 * CLK_TCK} {CLK_TCK} 0") == 4.0
+    assert busiest_thread_pct({"1": 1.0, "2": 0.0}, {"1": 1.5, "2": 0.9, "3": 0.2}, 1.0) == 90.0
+    assert limit(SERVER_BOUND_PCT * CORES, 0, 0) == "machine" and limit(10, 95, 99) == "server"
+    assert limit(10, 95, 10) == "client" and limit(10, 10, 10) == ""
+    assert PS_TIME.match("0:00.01") and not PS_TIME.match("31T")
     assert DELAY_LINE.findall("x Response delay: requested 300 us, applied mean 412 us over 9 responses.")[-1] == ("300", "412", "9")
     assert len(thread_sweep_matrix("logix", 0.3, (1, 2), (1, 10))) == 2 * 2 * (1 + 2) * 2
     assert config_key(thread_sweep_matrix("logix", 0.3, (1,), (1,))[0]).startswith("logix d0.3ms ")
@@ -401,7 +497,8 @@ def overall(words):
 def summarize(results):
     print(f"\n{'configuration':41} {'verdict':7}  {'ops/s A':>10} {'ops/s B':>10} {'change':>7} {'':6}"
           f"  {'us/op A':>8} {'us/op B':>8} {'change':>7} {'':6}  {'MB A':>6} {'MB B':>6} {'change':>7} {'':6}"
-          f"  p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B   cli% A/B    srv MB A/B   mutex us/op A/B")
+          f"  p95 A/B us      srv% A/B   win min/max A/B  tag CV% A/B   cli% A/B    srv MB A/B   mutex us/op A/B"
+          f"  mach% A/B   cli thr% A/B  srv thr% A/B  limit A/B")
     for key, runs in results.items():
         a = [r for r in runs if r["side"] == "A"]
         b = [r for r in runs if r["side"] == "B"]
@@ -429,12 +526,19 @@ def summarize(results):
         mb = lambda side, col: statistics.median(float(r[col]) for r in side) / 1024
         # -1 when the run had no --mutex-shim.
         mutex = lambda side: statistics.median(float(r["mutex_wait_us_per_op"]) for r in side)
+        # CSVs from before these columns have none of them.
+        cpu_col = lambda side, col: statistics.median(float(r.get(col) or 0) for r in side)
+        lim = lambda side: statistics.mode(r.get("limit") or "-" for r in side)
         print(f"{key:41} {overall(words):7}  " + "  ".join(cols) +
               f"  {p95(a):6.0f}/{p95(b):<6.0f}  {sp(a):4.0f}/{sp(b):<4.0f}"
               f"   {win(a):.3f}/{win(b):<.3f}      {tag_cv(a):.2f}/{tag_cv(b):<.2f}"
               f"    {cli_pct(a):4.0f}/{cli_pct(b):<4.0f}"
               f"  {mb(a, 'server_rss_kb'):5.1f}/{mb(b, 'server_rss_kb'):<5.1f}"
               f"  {mutex(a):6.2f}/{mutex(b):<6.2f}"
+              f"  {cpu_col(a, 'machine_cpu_pct'):4.0f}/{cpu_col(b, 'machine_cpu_pct'):<4.0f}"
+              f"   {cpu_col(a, 'client_max_thread_pct'):4.0f}/{cpu_col(b, 'client_max_thread_pct'):<4.0f}"
+              f"     {cpu_col(a, 'server_max_thread_pct'):4.0f}/{cpu_col(b, 'server_max_thread_pct'):<4.0f}"
+              f"     {lim(a)}/{lim(b)}"
               + (f"  {errs} errors" if errs else ""))
 
 
@@ -500,8 +604,9 @@ def main():
     with open(args.out, "w", newline="") as f:
         out = csv.writer(f)
         out.writerow(["# A=" + args.a, "B=" + args.b])
-        # server_rss_kb goes last so that older readers indexing by position still work.
-        out.writerow(["side", "round", "protocol", "delay_ms", "elems", "server_cpu_pct"] + HARNESS_COLUMNS + ["server_rss_kb"])
+        # new columns go last so that older readers indexing by position still work.
+        out.writerow(["side", "round", "protocol", "delay_ms", "elems", "server_cpu_pct"] + HARNESS_COLUMNS + ["server_rss_kb"]
+                     + list(CPU_COLUMNS))
         for (protocol, delay), group in itertools.groupby(configs, lambda c: (c["protocol"], c["delay"])):
             log = tempfile.TemporaryFile()
             server = None if hardware else start_server(protocol, delay, args.server_dir, log)
@@ -515,10 +620,11 @@ def main():
                             got = run_one(binary, c, args, server)
                             if got is None:
                                 continue
-                            cols, srv, srv_rss = got
-                            out.writerow([side, rnd, protocol, delay, c["elems"], f"{srv:.1f}"] + cols + [srv_rss])
+                            cols, srv, srv_rss, cpu = got
+                            out.writerow([side, rnd, protocol, delay, c["elems"], f"{srv:.1f}"] + cols + [srv_rss]
+                                         + [f"{v:.1f}" if isinstance(v, float) else v for v in cpu.values()])
                             f.flush()
-                            row = dict(zip(HARNESS_COLUMNS, cols), side=side, server_cpu_pct=srv, server_rss_kb=srv_rss)
+                            row = dict(zip(HARNESS_COLUMNS, cols), side=side, server_cpu_pct=srv, server_rss_kb=srv_rss, **cpu)
                             results.setdefault(key, []).append(row)
                         print(".", end="", flush=True)
                     print()
