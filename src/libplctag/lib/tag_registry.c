@@ -48,7 +48,7 @@
 /*
  * The tag registry: a static table of entries, one per possible slot, and the reuse map.
  *
- * A tag lives at tag_table[tag_id & (PLCTAG_MAX_TAGS - 1)].  Each entry has its own spinlock,
+ * A tag lives at tag_table[tag_id % PLCTAG_MAX_TAGS].  Each entry has its own spinlock,
  * so a lookup writes nothing but that one lock: threads contend only when they use the same
  * tag at the same time.  The table is BSS, so it is valid memory before startup, after
  * shutdown and across restarts; nothing is allocated or freed for it.
@@ -58,12 +58,12 @@
  * takes its own reference first or finds the entry empty.
  */
 
-/* a power of two.  Override for small targets. */
+/* any size up to TAG_ID_MASK.  Override for small targets. */
 #ifndef PLCTAG_MAX_TAGS
 #    define PLCTAG_MAX_TAGS (262144)
 #endif
 
-#define TAG_SLOT(tag_id) ((size_t)((uint32_t)(tag_id) & (uint32_t)(PLCTAG_MAX_TAGS - 1)))
+#define TAG_SLOT(tag_id) ((size_t)((uint32_t)(tag_id) % (uint32_t)PLCTAG_MAX_TAGS))
 
 typedef struct {
     lock_t lock;    /* guards tag_id and tag */

@@ -699,6 +699,55 @@ Judged on all three measures (`--from-csv`):
   v2.7.2 spins (84-180% client CPU in those cells against 32-127% for HEAD); HEAD blocks and pays
   the wake. macOS cannot block idle, so the M1 cannot test that directly.
 
+### v2.7.2 vs hashtable vs slot table, ControlLogix scale matrix, Linux, deep idle blocked (2026-11-07)
+
+Three versions: v2.7.2, b8b1cc32 (tag ids in a hashtable under `tag_lookup_mutex`) and the
+slot table (7b17e21d, the slot index as a modulus, 65536 slots). The slot table is a static array
+of `{lock, tag_id, tag}` entries indexed by tag id. A lookup takes only that entry's spinlock.
+`--scale-matrix=logix --rounds=3 --duration=5`, two pairs per delay, all sides `plctag_dyn`
+(Release) with the same `perf_benchmark.c`. Memory is client peak RSS.
+
+| Delay | Pair | Better | Same | WORSE | CPU/op (median) | Memory (median) | ops/s (median) |
+|---|---|---|---|---|---|---|---|
+| 0.3 ms | v2.7.2 → b8b1cc32 | 192 | 0 | 0 | −55% | −12% | +3% |
+| 0.3 ms | b8b1cc32 → slot | 67 | 120 | 5 | −33% async 1000 tags | 0 | 0 |
+| 1 ms | v2.7.2 → b8b1cc32 | 179 | 0 | 13 | −53% | −10% | +1.5% |
+| 1 ms | b8b1cc32 → slot | 60 | 125 | 7 | −41% async 1000 tags | 0 | 0 |
+
+- **Slot table CPU:** −33 to −41% per op at async 1000 tags, −15 to −18% at async 100 tags,
+  the same for sync. Under `perf record` (async read 1000 × 8, 1 ms), `lookup_tag` was 41.6% of
+  client CPU on b8b1cc32 and 6.4% on the first slot table version (6e4645b2).
+- **Slot table memory:** the same in all 384 cells. RSS does not show the fixed cost: 16 bytes
+  per slot of `.bss`, 1 MB at 65536 slots, 4 MB at the default 262144. On a target without
+  virtual memory that is all real RAM.
+- **Slot table WORSE cells:** only throughput, async 1000 tags. They are the benchmark, not the
+  library (next section).
+- **v2.7.2 → b8b1cc32 at 0.3 ms:** async 1000 tags +40% ops/s at −72% CPU per op and −47%
+  memory. Every WORSE cell at 1 ms is async 100 tags on 1-2 connections, the same benchmark
+  effect.
+
+### Async throughput and the 1 ms poll sleep (2026-11-07)
+
+Async `perf_benchmark` sleeps `--poll-ms` (1 ms by default) between status passes. That sleep
+beats against the server delay, so a client whose round trip changes by tens of µs can land on a
+worse phase and lose 5-20% throughput while it uses less CPU. Slot table against b8b1cc32, async
+1000 tags, 5 rounds:
+
+| Cell | Delay | 1 ms poll | 0 ms poll | 2 ms poll |
+|---|---|---|---|---|
+| read 1000 × 1 g1 | 1 ms | −7% | 0% | +4% |
+| read 1000 × 1 g1 | 0.3 ms | +7.5% | −1% | +5% |
+| write 1000 × 2 g4 | 0.3 ms | −20% | +24% | |
+| read 1000 × 4 g4 | 0.3 ms | −2% | +41% | |
+| write 1000 × 4 g4 | 0.3 ms | −5% | +43% | |
+
+- Request packets carry the same number of tags on both sides (about 142, counted with a
+  `write()` shim). The slower cells make fewer exchanges, not smaller ones.
+- The losing cells move when the delay changes, and the sign flips with the poll interval.
+- At 0 ms the app thread spins, so only throughput compares there, not CPU.
+- Read an async throughput loss that comes with lower CPU and a longer p95 as this effect until a
+  0 ms poll run says otherwise. The M1's ControlLogix async 5-15% losses above have that shape.
+
 ### Pending
 
 - ControlLogix async 5-15% slower on the M1 (above). Find out whether it is wake latency or
@@ -712,8 +761,11 @@ Judged on all three measures (`--from-csv`):
      v2.7.2 and HEAD: `to_srv`, `srv`, `to_cli`, `cli`. On macOS the shim loads with
      `DYLD_INSERT_LIBRARIES` instead of `LD_PRELOAD`. If HEAD's `to_srv` + `to_cli` is larger by
      about the ops/s loss, the loss is wake latency, which macOS cannot block.
-- Re-run the Linux scale and fairness matrices with deep idle blocked. The Linux results above
-  (before 2026-11-02, "Deep idle states blocked") allowed deep idle.
+- Re-run the Linux fairness matrix and the Modbus scale matrix with deep idle blocked. The
+  ControlLogix scale matrix is done (2026-11-07, above). Modbus only needs a run if the
+  ControlLogix versions had differed.
+- Re-check the M1 ControlLogix async losses with `--poll-ms=0` (see "Async throughput and the
+  1 ms poll sleep").
 - Hardware performance numbers.
 - Optional: replace the tag list vector with an intrusive red-black tree keyed on (op_time,
   insertion sequence), every tag in it, idle tags at now + 1 year. Scratchpad benchmark,
@@ -735,3 +787,5 @@ its `--summary` CSVs. Raw CSVs (`--out`) and `perf_env.txt` files stay out of th
 - modbus_server is single threaded and reached 78% of its core at 8 connections with no delay.
 - Fairness is not run in CI: CI hardware is overcommitted and stalls. It runs by hand before a
   release.
+- Async throughput in the matrices depends on the phase between the 1 ms poll sleep and the
+  server delay, ±20% in either direction (2026-11-07 above). CPU per op and memory do not.
