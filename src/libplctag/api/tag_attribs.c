@@ -388,9 +388,14 @@ static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value)
         return PLCTAG_ERR_NOT_ALLOWED;
     }
 
+    if(value > 0 && !tag_can_auto_destroy(tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "destroy_tag_after_idle_sec cannot be used with this kind of tag!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     tag->destroy_idle_sec = value;
 
-    /* the handler re-arms an idle tag from now, or takes it off for zero; a busy one re-arms when its op ends. */
+    /* the handler re-arms an idle tag from now, or makes it IDLE for zero; a busy one re-arms when its op ends. */
     if(tag_op_state(tag) == TAG_OP_DESTROY) { tag_op_set(tag, TAG_OP_IDLE); }
 
     if(!tag_op_busy(tag) && tag->vtable && tag->vtable->wake_plc) { tag->vtable->wake_plc(tag); }

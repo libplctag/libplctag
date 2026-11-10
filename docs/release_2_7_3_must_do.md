@@ -31,7 +31,7 @@ Consolidated 2026-11-08 from `ephemeral_docs/deferred_fixes.md` (DF),
 | 13 | Allocation counting by interposing | SP 5 | macOS and Linux | To do |
 | 14 | Re-run Linux fairness and Modbus scale matrices, deep idle blocked | PF | User runs | To run |
 | 15 | Final performance numbers | PF | Linux machine | To run |
-| 16 | Tag list insert and remove cost | PF | Measure; M1 finds where, Linux gives numbers | To do |
+| 16 | Tag list insert and remove cost | PF | Array, list and treap trialled | Treap leads; not committed |
 | 17 | Small first packet of an async cycle | PF | Deferred: only a tight poll loop shows it | Deferred 2026-11-08 |
 | 18 | Backoff unit tests on Windows and ARM in CI | DF | Not reviewed | Check the next CI run |
 
@@ -294,6 +294,115 @@ gives throughput, CPU per op and memory, item 11 gives fairness. Nothing extra t
 - The M1 can show where time goes (profiles, call counts). The Linux machine gives the numbers.
 - The red-black tree stays optional and depends on this measurement.
 
+### Result (2026-11-09): sorted doubly linked list
+
+The vector became a sorted doubly linked list through the tags (`tag_list_t`: head, tail,
+`due_tail`). Remove is O(1). An insert at or after the tail appends, and a due insert goes
+after `due_tail`, the last due tag inserted. Only a future time before the tail walks.
+
+Ramp (item 7), Linux, deep idle blocked, median of 10+ passes, two runs each:
+
+| Tags | Array ms | List ms | Change |
+|---|---|---|---|
+| 200 | 1.20 | 1.20 | same |
+| 2000 | 2.27 | 2.25 | same |
+| 20000 | 16.8 | 13.8 | -18% |
+| 200000 | 465 / 524 | 137 | -71% |
+
+- The list scales linearly: 20000 to 200000 tags is 10× the time.
+- 200000 tags: 1.46 M tags/s against 0.43 M. The client uses 133% CPU against 112%.
+- Memory: 16 more bytes per tag (two pointers).
+
+### Mixed auto-sync periods (2026-11-09): the list is worse than the array
+
+`test_auto_read --periods=50,100,250,500,1000,2000,5000`, tags spread evenly, 10 s, Linux,
+deep idle blocked. Each re-arm lands in the middle of the list, so the insert walks.
+
+| Tags | Array CPU | List CPU | Array result | List result |
+|---|---|---|---|---|
+| 7000 | 11% | 99.5% | pass | 50 ms tags read 49 of 200 |
+| 35000 | 98% | 99.9% | 50 ms tags read 69 of 200 | almost no reads |
+| 70000 | 99% | 100% | about 10 reads per tag | creates time out |
+
+- Profile at 7000 tags: 94% in `tag_schedule_insert` (the walk in `find_prev`).
+- The array saturates too, at 35000 tags: its middle insert is a memmove.
+- Status: needs an index for middle inserts before the list can replace the array.
+
+### Treap trial (2026-11-09)
+
+A treap on op_time with a random 64-bit heap priority (splitmix64), linked through the tags:
+left, right, parent and priority, 32 bytes per tag. Equal times keep insertion order (an
+equal key goes right). Same runs as above, two of each, Linux, deep idle blocked.
+
+Ramp, median pass:
+
+| Tags | Array ms | List ms | Treap ms |
+|---|---|---|---|
+| 200 | 1.20 | 1.20 | 1.20 |
+| 2000 | 2.27 | 2.25 | 2.30 |
+| 20000 | 16.8 | 13.7 | 14.7 |
+| 200000 | 459 | 137 | 152 |
+
+Mixed periods, client CPU and 50 ms tag reads of 200:
+
+| Tags | Array | List | Treap |
+|---|---|---|---|
+| 7000 | 11%, 200 | 99%, 63 | 6%, 200 |
+| 35000 | 98%, 69 | 100%, 0 | 26%, 200 |
+| 70000 | 99%, 10 | 100%, 0 | 52%, 199 |
+
+- The treap passes every mixed run, and its CPU grows linearly with the read rate.
+- On the ramp it is 11% slower than the list and 3× faster than the array.
+- Memory: 32 more bytes per tag than the array (1029 against 997).
+
+### Every tag on the treap (2026-11-09)
+
+New op state `TAG_OP_SYNC_WAIT`. A tag with no op is re-armed instead of taken off: SYNC_WAIT
+at its next auto-sync time, DESTROY at its idle destroy time, otherwise IDLE an hour out. Only
+destroy takes a tag off. The
+handler notifies only tags with events. One run, deep idle blocked:
+
+| Test | Treap before | Every tag on treap |
+|---|---|---|
+| Ramp 2000, median ms | 2.30 | 1.54 |
+| Ramp 20000, median ms | 14.7 | 18.0 |
+| Ramp 200000, median ms | 152 | 185 |
+| Mixed 7000, CPU | 6% | 6% |
+| Mixed 35000, CPU | 26% | 24% |
+| Mixed 70000, CPU | 52% | 49% |
+
+- The ramp cost is the re-arm: a finished read goes back in an hour out instead of coming off.
+- Then `TAG_OP_READ_RESPONSE` and `TAG_OP_WRITE_RESPONSE`: a packed tag stays on the treap in
+  place. Same runs: ramp 200000 184 ms, 20000 18.0 ms; mixed 70000 49% CPU, all reads on time.
+
+### Mixed periods at 200000 tags (2026-11-09)
+
+| Periods, ms | Asked reads/s | Client CPU | Result |
+|---|---|---|---|
+| 50 to 5000 (7 groups), 10 s | 1.08 M | 85% | saturated: 50 ms tags 87 of 200, 100 ms 76 of 100, the rest on time |
+| 250 to 10000 (6 groups), 30 s | 0.26 M | 35% | all on time, worst gap 3 ms late |
+
+- Saturated, the client delivered about 0.69 M reads/s, against 1.1 M on the ramp: each
+  auto-sync read also costs a tickle and a re-arm.
+- Overload falls on the shortest periods only; longer periods keep their schedule.
+
+### Reply matching without slots (2026-11-09)
+
+The tickle stops after one packet of queued requests (200), the notify list drains by index, and
+`tickle_tag()` takes the caller's time. Then the exchange slots went: a packed CIP tag keeps its
+request's index (`reply_index`) and stays in RESPONSE at the front of the list, so the reply walk
+reads each tag's sub-reply directly. Modbus keeps a count of requests in flight and matches a
+reply to the due RESPONSE tag with its transaction id. Two runs each, deep idle blocked:
+
+| Test | Before these changes | After |
+|---|---|---|
+| Ramp 200000, median ms | 182 | 186 |
+| Mixed 70000, client CPU | 49% | 44% |
+| Mixed 200000, 50 to 5000 ms, CPU | 85% | 82% |
+| … 50 ms tags, reads of 200 | 87 | 103 (passes) |
+| … delivered reads/s | 0.69 M | 0.80 M |
+| Mixed 200000, 250 to 10000 ms, CPU | 35% | 31% |
+
 ## 17. Small first packet of an async cycle
 
 - **Background (PF, 2026-11-03):** an async cycle took three round trips: the first
@@ -345,3 +454,15 @@ jobs (1089-1093). Whether those jobs pass has not been seen yet. Check the next 
 | Several network modules to one CPU | SP 3D | Covered by the hardware tests |
 | M1 ControlLogix async 5-15% loss, timing runs | PF | Answered by the Linux runs with deep idle blocked |
 | Re-check M1 losses with `--poll-ms=0` | PF | Dropped; the M1 is functional only |
+| Modbus lost reply fills the in-flight table | 2026-11-09 | Deferred; see below |
+
+### Modbus lost reply fills the in-flight table (deferred 2026-11-09)
+
+Each Modbus request on the wire holds an entry in `plc->in_flight` (16 at most) until its reply
+comes or its tag is aborted. A reply that never comes keeps the entry. Today only an abort frees
+it: a `plc_tag_read`/`plc_tag_write` timeout aborts its op, but an auto-sync op has no timeout.
+Enough lost replies fill the table and the PLC sends nothing more; a filled entry also keeps the
+inactivity disconnect from firing (`modbus.c`, "continuing to wait"). The same held with the old
+slots. A lost reply means the device or network is at fault. Options when it is taken up: a send
+time per entry and a reply deadline, or a reconnect once the oldest request is older than the
+inactivity timeout.

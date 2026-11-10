@@ -169,8 +169,10 @@ static int32_t run_timeline(void) {
     if(rc >= 0) { plc_tag_destroy(rc); }
 
     wait_until(5000);
-    printf("5 s: read B, D refuses auto-sync, D set to 0.\n");
+    printf("5 s: read B, set data on A, D refuses auto-sync, D set to 0.\n");
     read_tag(tags[TAG_B], "B");
+    /* setting data is not a read or write: A must neither go now nor live longer. */
+    expect_rc(plc_tag_set_int32(tags[TAG_A], 0, 1), PLCTAG_STATUS_OK, "A set data");
     expect_rc(plc_tag_set_int_attribute(tags[TAG_D], "auto_sync_read_ms", 200), PLCTAG_ERR_NOT_ALLOWED, "D auto_sync_read_ms");
     expect_rc(plc_tag_set_int_attribute(tags[TAG_D], ATTR_NAME, 9), PLCTAG_ERR_OUT_OF_BOUNDS, "D set 9");
     expect_rc(plc_tag_set_int_attribute(tags[TAG_D], ATTR_NAME, 0), PLCTAG_STATUS_OK, "D set 0");

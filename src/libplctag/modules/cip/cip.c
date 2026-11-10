@@ -571,11 +571,10 @@ static int write_request_framing(cip_conn_p conn, int payload_size, bool unroute
  * message into conn->staging, so a single request is one copy and a bundle is the Multiple
  * Service Packet header followed by the messages back to back.
  *
- * Nothing here reads the slots' tags: one may have been aborted since the exchange was built,
- * and its bytes go out anyway.  The reply to it is dropped.
+ * Nothing here reads the tags: one may have been aborted since the exchange was built, and its
+ * bytes go out anyway.  The reply to it is dropped.
  */
-int pack_exchange(cip_conn_p conn) {
-    int num_requests = (int)conn->slot_count;
+int pack_exchange(cip_conn_p conn, int32_t num_requests, const int32_t *sizes) {
     bool unrouted = conn->exchange_unrouted;
     int offset = cip_framing_size(conn, unrouted);
     uint8_t *payload = conn->data + offset;
@@ -597,20 +596,21 @@ int pack_exchange(cip_conn_p conn) {
     room = (size_t)conn->data_capacity - (size_t)offset - (size_t)route_path_size;
 
     if(num_requests == 1) {
-        if((size_t)conn->slots[0].size > room) {
+        if((size_t)sizes[0] > room) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
-                   "CIP message of %d bytes does not fit the %zu bytes left in the connection buffer!",
-                   (int)conn->slots[0].size, room);
+                   "CIP message of %d bytes does not fit the %zu bytes left in the connection buffer!", (int)sizes[0],
+                   room);
             return PLCTAG_ERR_TOO_LARGE;
         }
 
-        mem_copy(payload, conn->staging + conn->slots[0].offset, (int)conn->slots[0].size);
-        payload_size = (int)conn->slots[0].size;
+        mem_copy(payload, conn->staging, (int)sizes[0]);
+        payload_size = (int)sizes[0];
     } else {
         cip_multi_req_header *multi = (cip_multi_req_header *)payload;
         size_t header_size = sizeof(cip_multi_req_header) + (sizeof(uint16_le) * (size_t)num_requests);
         int current_offset = (int)(sizeof(uint16_le) + (sizeof(uint16_le) * (size_t)num_requests));
         uint8_t *next = payload + header_size;
+        uint8_t *request = conn->staging;
 
         if(header_size > room) {
             pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
@@ -629,7 +629,7 @@ int pack_exchange(cip_conn_p conn) {
         for(int i = 0; i < num_requests; i++) {
             size_t used = (size_t)(next - payload);
 
-            if(conn->slots[i].size < 0 || (size_t)conn->slots[i].size > room - used) {
+            if(sizes[i] < 0 || (size_t)sizes[i] > room - used) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                        "Bundled requests do not fit the connection buffer of %u bytes!", conn->data_capacity);
                 return PLCTAG_ERR_TOO_LARGE;
@@ -637,10 +637,11 @@ int pack_exchange(cip_conn_p conn) {
 
             multi->request_offsets[i] = h2le16((uint16_t)current_offset);
 
-            mem_copy(next, conn->staging + conn->slots[i].offset, (int)conn->slots[i].size);
+            mem_copy(next, request, (int)sizes[i]);
 
-            next += conn->slots[i].size;
-            current_offset += (int)conn->slots[i].size;
+            request += sizes[i];
+            next += sizes[i];
+            current_offset += (int)sizes[i];
         }
 
         payload_size = (int)(next - payload);

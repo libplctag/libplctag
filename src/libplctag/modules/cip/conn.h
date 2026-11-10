@@ -394,18 +394,11 @@ typedef struct cip_conn_t {
     tag_driver_t driver;
 
     /*
-     * The exchange being built or in flight.  The encoders write the requests back to back
-     * into staging, and slots records where each one is.  A slot whose tag is NULL was
-     * aborted or destroyed while the exchange was on the wire; its reply is dropped.
+     * The exchange being built.  The encoders write the requests back to back into staging.
+     * Each tag in the exchange is in a RESPONSE state with its request's index in reply_index,
+     * so the reply is matched by walking the front of the tag list.
      */
     uint8_t *staging;
-    struct {
-        struct cip_tag_t *tag;
-        int32_t offset;
-        int32_t size;
-        bool is_read;
-    } slots[MAX_REQUESTS];
-    int32_t slot_count;
     bool exchange_unrouted;
 
     /*
@@ -484,8 +477,8 @@ extern int cip_conn_max_cip_payload(cip_conn_p conn);
 extern int recv_eip_response(cip_conn_p conn, int timeout);
 extern int prepare_request(cip_conn_p conn);
 
-/* frame the exchange in conn->slots, and find one reply in what came back. */
-extern int pack_exchange(cip_conn_p conn);
+/* frame the requests in conn->staging (sizes in order), and find one reply in what came back. */
+extern int pack_exchange(cip_conn_p conn, int32_t num_requests, const int32_t *sizes);
 extern int find_reply(cip_conn_p conn, int32_t index, uint8_t **reply, int32_t *reply_size);
 
 /*
@@ -495,6 +488,8 @@ extern int find_reply(cip_conn_p conn, int32_t index, uint8_t **reply, int32_t *
  */
 extern int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag);
 extern void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag);
+/* drop the tag's reply, if one is out, and make it due now: one step under session_mutex. */
+extern void cip_conn_abort_tag(cip_conn_p conn, struct cip_tag_t *tag);
 
 /*
  * How much of the single reply packet a request expecting reply_size bytes will consume: its

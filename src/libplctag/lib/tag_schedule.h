@@ -35,22 +35,35 @@
 
 /*
  * A protocol handler's list of the tags that need its attention, sorted by when they next
- * need the wire.
+ * need the wire.  A treap through the tags themselves: a binary search tree on op_time that
+ * is also a max-heap on a random 64-bit priority, so its expected depth is O(log N) whatever
+ * order the times arrive in.  Insert and remove are O(log N); walking in order is O(1)
+ * amortized per tag.
  *
- * Each tag carries its own op_time and in_active_vector (TAG_BASE_STRUCT).  The list belongs to
- * the handler, and the caller holds whatever mutex guards it.  Equal op_times keep insertion
- * order, so tags due together go out first come, first served.
+ * Each tag carries its own op_time, links, priority and in_active_list (TAG_BASE_STRUCT).  The
+ * list belongs to the handler, and the caller holds whatever mutex guards it.  Equal op_times
+ * keep insertion order (an equal key goes right, and rotations keep the in-order sequence), so
+ * tags due together go out first come, first served.
  */
 
 #include <stdint.h>
 
 #include <libplctag/lib/tag.h>
-#include <utils/vector.h>
 
 
-extern void tag_schedule_insert(vector_p list, plc_tag_p tag, int64_t op_time);
-extern void tag_schedule_move(vector_p list, plc_tag_p tag, int64_t op_time);
-extern void tag_schedule_remove(vector_p list, plc_tag_p tag);
+typedef struct {
+    plc_tag_p root;
+    /* splitmix64 state for the priorities. */
+    uint64_t seed;
+} tag_list_t;
 
-/* The first of next, next + period_ms, next + 2 * period_ms, ... that is later than now. */
+
+extern void tag_schedule_insert(tag_list_t *list, plc_tag_p tag, int64_t op_time);
+extern void tag_schedule_move(tag_list_t *list, plc_tag_p tag, int64_t op_time);
+extern void tag_schedule_remove(tag_list_t *list, plc_tag_p tag);
+
+/* the earliest tag, NULL if none; the tag after this one in time order, NULL at the end. */
+extern plc_tag_p tag_schedule_first(tag_list_t *list);
+extern plc_tag_p tag_schedule_next(plc_tag_p tag);
+
 extern int64_t tag_schedule_next_period(int64_t next, int32_t period_ms, int64_t now);

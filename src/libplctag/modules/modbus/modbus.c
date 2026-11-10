@@ -79,6 +79,7 @@
 #define SOCKET_CONNECT_TIMEOUT (20)    /* connect timeout step in milliseconds */
 #define MODBUS_IDLE_WAIT_TIMEOUT (100) /* idle wait timeout in milliseconds */
 #define MAX_MODBUS_REQUESTS (16)       /* per the Modbus specification */
+#define MB_NO_REQUEST (0xFFFFFFFFu)    /* an empty entry in plc->in_flight */
 
 /* Microsecond timing for performance analysis */
 
@@ -149,15 +150,12 @@ struct modbus_plc_t {
     int max_requests_in_flight;
 
     /*
-     * Requests on the wire, matched to replies by transaction id.  A slot whose tag was aborted
-     * has tag NULL and stays used until its reply arrives or the socket closes.
+     * The transaction ids of the requests on the wire, MB_NO_REQUEST where empty, and how many
+     * there are.  Each one's tag is in a RESPONSE state with the id in tag->seq_id.  An abort
+     * empties its entry, so a late reply to it is not ours and is dropped.
      */
-    struct {
-        modbus_tag_p tag;
-        uint16_t tid;
-        bool used;
-    } slots[MAX_MODBUS_REQUESTS];
-    int32_t slots_used;
+    uint32_t in_flight[MAX_MODBUS_REQUESTS];
+    int32_t requests_in_flight;
     int32_t lock_retries; /* handler thread only; see service_tags() */
 
     /* comms timeout/disconnect - readable/writable by tags via atomics */
@@ -276,8 +274,12 @@ static int connect_plc(modbus_plc_p plc);
 static int64_t service_tags(modbus_plc_p plc);
 static void dispatch_reply_unsafe(modbus_plc_p plc);
 static bool send_next_unsafe(modbus_plc_p plc, int64_t now);
-static int32_t find_slot_unsafe(modbus_plc_p plc, modbus_tag_p tag);
 static void forget_tag_unsafe(modbus_plc_p plc, modbus_tag_p tag);
+static void requeue_aborted_unsafe(modbus_plc_p plc, modbus_tag_p tag);
+static modbus_tag_p find_waiting_tag_unsafe(modbus_plc_p plc, uint16_t tid);
+static void clear_in_flight(modbus_plc_p plc);
+static void put_in_flight(modbus_plc_p plc, uint16_t tid);
+static bool take_in_flight(modbus_plc_p plc, uint16_t tid);
 static void queue_tag(modbus_tag_p tag);
 static int receive_response(modbus_plc_p plc);
 static int send_request(modbus_plc_p plc);
@@ -445,6 +447,8 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "Unable to allocate Modbus tag!");
         return PLCTAG_ERR_NO_MEM;
     }
+
+    (*tag)->scheduled = true;
 
     /* point the data just after the tag struct. */
     (*tag)->data = (uint8_t *)((*tag) + 1);
@@ -662,6 +666,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc, bool *out_is_new) {
                 } else {
                     /* set up the maximum request depth. */
                     (*plc)->max_requests_in_flight = max_requests_in_flight;
+                    clear_in_flight(*plc);
 
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
@@ -814,7 +819,7 @@ void modbus_plc_destructor(void *plc_arg) {
         plc->server = NULL;
     }
 
-    if(plc->driver.active && vector_length(plc->driver.active) > 0) {
+    if(plc->driver.active.root) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "There are tags still remaining in the active tag list, memory leak possible!");
     }
     tag_driver_destroy(&plc->driver);
@@ -868,17 +873,14 @@ static int reset_plc(modbus_plc_p plc) {
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "MUTEX: Acquire. Resetting PLC.");
     critical_block(plc->mutex) {
-        /* nothing is in flight on a closed socket: the requests go again, in their old order. */
-        for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) {
-            modbus_tag_p tag = plc->slots[i].tag;
+        /* nothing is in flight on a closed socket: the requests go again, from where they are on the list. */
+        int64_t now = time_ms();
 
-            if(tag) { tag_driver_queue_unsafe(&plc->driver, (plc_tag_p)tag, tag->op_time); }
-
-            plc->slots[i].tag = NULL;
-            plc->slots[i].used = false;
+        for(plc_tag_p tag = tag_schedule_first(&plc->driver.active); tag && tag->op_time <= now; tag = tag_schedule_next(tag)) {
+            if(tag_op_is_response(tag)) { tag_op_resend(tag); }
         }
 
-        plc->slots_used = 0;
+        clear_in_flight(plc);
 
         if(plc->sock) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Closing socket due to error or disconnect.");
@@ -1065,10 +1067,10 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0,
                            "Socket wait timed out. Idle for %" PRId64 "ms. Pending requests: %" PRId32, idle_time,
-                           plc->slots_used);
+                           plc->requests_in_flight);
 
                     /* Only disconnect if truly idle AND no pending responses expected */
-                    if(idle_time >= inactivity_timeout_ms && plc->slots_used == 0) {
+                    if(idle_time >= inactivity_timeout_ms && plc->requests_in_flight == 0) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0,
                                "Inactivity timeout reached after %" PRId64 "ms idle (threshold=%dms). current_time=%" PRId64
                                ", last_packet_time=%" PRId64 ". Calling reset_plc() and going to PLC_IDLE_WAIT.",
@@ -1079,12 +1081,12 @@ THREAD_FUNC(modbus_plc_handler) {
                         /* close the socket, then wait for something to happen. */
                         state_after_close = PLC_IDLE_WAIT;
                         plc->state = PLC_CLOSE_SOCKET;
-                    } else if(plc->slots_used > 0) {
+                    } else if(plc->requests_in_flight > 0) {
                         /* Timeout while waiting for responses, just continue waiting */
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0,
                                "Socket timeout while waiting for %" PRId32 " pending response(s) (idle %" PRId64
                                "ms), continuing to wait.",
-                               plc->slots_used, idle_time);
+                               plc->requests_in_flight, idle_time);
                     } else {
                         /* Timeout was for auto-sync, continue immediately */
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, 0, "Auto-sync timeout, continuing.");
@@ -1439,11 +1441,11 @@ static int64_t service_tags(modbus_plc_p plc) {
 
         if(plc->state == PLC_READY) { skipped = send_next_unsafe(plc, now); }
 
-        /* a due tag with a free slot goes out on the next pass; with none, a reply frees one. */
+        /* a due tag goes out on the next pass if a request may be added; if not, a reply makes room. */
         next = tag_driver_next_time_unsafe(&plc->driver);
         if(next > now) {
             wait_ms = (next - now < wait_ms) ? next - now : wait_ms;
-        } else if(next && plc->slots_used < plc->max_requests_in_flight) {
+        } else if(next && plc->requests_in_flight < plc->max_requests_in_flight) {
             wait_ms = 1;
         }
     }
@@ -1469,46 +1471,41 @@ static int64_t service_tags(modbus_plc_p plc) {
  */
 static void dispatch_reply_unsafe(modbus_plc_p plc) {
     uint16_t tid = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
-    int32_t slot = -1;
     modbus_tag_p tag = NULL;
     int rc = PLCTAG_STATUS_OK;
     int32_t tries = 0;
 
-    for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) {
-        if(plc->slots[i].used && plc->slots[i].tid == tid) { slot = i; }
-    }
-
-    if(slot < 0) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, 0, "No request matches response TID %u -- discarding.", tid);
+    /* not a request still on the wire: its tag was aborted, or the id is not one we sent. */
+    if(!take_in_flight(plc, tid)) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Response TID %u is not in flight -- discarding.", tid);
         atomic_set_bool(&plc->flags.response_ready, false);
         plc->read_data_len = 0;
         return;
     }
 
-    while((tag = plc->slots[slot].tag) && mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+    /* found again after every wait: the tag may have been aborted or destroyed meanwhile. */
+    while((tag = find_waiting_tag_unsafe(plc, tid)) && mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
         mutex_unlock(plc->mutex);
         sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
         mutex_lock(plc->mutex);
     }
 
-    plc->slots[slot].used = false;
-    plc->slots[slot].tag = NULL;
-    plc->slots_used--;
-
-    /* aborted while the request was out. */
+    /* aborted or destroyed while the request was out, or not ours. */
     if(!tag) {
-        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "Discarding response TID %u to an aborted request.", tid);
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, 0, "No waiting tag for response TID %u -- discarding.", tid);
         atomic_set_bool(&plc->flags.response_ready, false);
         plc->read_data_len = 0;
         return;
     }
 
     rc = tag_op_is_read(tag) ? check_read_response(plc, tag) : check_write_response(plc, tag);
+    tag->seq_id = 0;
 
     atomic_set_bool(&plc->flags.response_ready, false);
     plc->read_data_len = 0;
 
     if(rc == PLCTAG_ERR_PARTIAL) {
+        tag_op_resend(tag);
         tag_driver_queue_unsafe(&plc->driver, (plc_tag_p)tag, time_ms());
     } else {
         tag_op_end((plc_tag_p)tag, rc);
@@ -1528,17 +1525,17 @@ static void dispatch_reply_unsafe(modbus_plc_p plc) {
 static bool send_next_unsafe(modbus_plc_p plc, int64_t now) {
     bool skipped = false;
 
-    if(atomic_get_bool(&plc->flags.request_ready) || plc->slots_used >= plc->max_requests_in_flight) { return false; }
+    if(atomic_get_bool(&plc->flags.request_ready) || plc->requests_in_flight >= plc->max_requests_in_flight) { return false; }
 
-    for(int32_t i = 0; i < vector_length(plc->driver.active); i++) {
-        modbus_tag_p tag = vector_get(plc->driver.active, i);
+    for(plc_tag_p next = tag_schedule_first(&plc->driver.active); next && next->op_time <= now;) {
+        modbus_tag_p tag = (modbus_tag_p)next;
         bool is_read = false;
         int rc = PLCTAG_STATUS_OK;
 
-        if(tag->op_time > now) { break; }
+        next = tag_schedule_next(next);
 
-        /* armed for an auto-sync deadline, or waiting for its tickle: no request to send. */
-        if(!tag_op_busy(tag)) { continue; }
+        /* on the wire, armed for a deadline, or waiting for its tickle: no request to send. */
+        if(!tag_op_is_request(tag)) { continue; }
 
         if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
             skipped = true;
@@ -1549,19 +1546,12 @@ static bool send_next_unsafe(modbus_plc_p plc, int64_t now) {
         rc = is_read ? create_read_request(plc, tag) : create_write_request(plc, tag);
 
         if(rc == PLCTAG_STATUS_OK) {
-            int32_t slot = 0;
-
-            while(plc->slots[slot].used) { slot++; }
-
-            plc->slots[slot].used = true;
-            plc->slots[slot].tag = tag;
-            plc->slots[slot].tid = tag->seq_id;
-            plc->slots_used++;
+            put_in_flight(plc, tag->seq_id);
 
             /* the request holds the data now; a later set_* dirties the tag again. */
             if(!is_read) { tag->tag_is_dirty = 0; }
 
-            tag_driver_forget_unsafe(&plc->driver, (plc_tag_p)tag);
+            tag_op_sent(tag);
         } else {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, tag->tag_id, "Error %s creating request!", plc_tag_decode_error(rc));
             tag_op_end((plc_tag_p)tag, rc);
@@ -1578,33 +1568,84 @@ static bool send_next_unsafe(modbus_plc_p plc, int64_t now) {
 }
 
 
-/* the slot holding the tag's request, -1 if none.  Called with plc->mutex held. */
-static int32_t find_slot_unsafe(modbus_plc_p plc, modbus_tag_p tag) {
-    for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) {
-        if(plc->slots[i].used && plc->slots[i].tag == tag) { return i; }
+/*
+ * The tag waiting for the reply with this transaction id.  The tags with requests out are in a
+ * RESPONSE state and due, so they are at the front of the list; the walk stops at the first
+ * tag not yet due.  Called with plc->mutex held.
+ */
+static modbus_tag_p find_waiting_tag_unsafe(modbus_plc_p plc, uint16_t tid) {
+    int64_t now = time_ms();
+
+    for(plc_tag_p tag = tag_schedule_first(&plc->driver.active); tag && tag->op_time <= now; tag = tag_schedule_next(tag)) {
+        if(tag_op_is_response(tag) && ((modbus_tag_p)tag)->seq_id == tid) { return (modbus_tag_p)tag; }
     }
 
-    return -1;
+    return NULL;
+}
+
+
+/* the in-flight table, each under plc->mutex. */
+static void clear_in_flight(modbus_plc_p plc) {
+    for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) { plc->in_flight[i] = MB_NO_REQUEST; }
+
+    plc->requests_in_flight = 0;
+}
+
+
+static void put_in_flight(modbus_plc_p plc, uint16_t tid) {
+    for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) {
+        if(plc->in_flight[i] == MB_NO_REQUEST) {
+            plc->in_flight[i] = tid;
+            plc->requests_in_flight++;
+            return;
+        }
+    }
+}
+
+
+/* empty the entry for this id; false if it was not in flight. */
+static bool take_in_flight(modbus_plc_p plc, uint16_t tid) {
+    for(int32_t i = 0; i < MAX_MODBUS_REQUESTS; i++) {
+        if(plc->in_flight[i] == tid) {
+            plc->in_flight[i] = MB_NO_REQUEST;
+            plc->requests_in_flight--;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 
 /*
- * Take the tag off the list and out of any request slot.  A request on the wire stays
- * counted until its reply arrives and is discarded, or the connection drops.
+ * Take the tag off the list, and its request, if one is on the wire, out of the in-flight
+ * table: a reply to it is dropped, and the room goes to the next request.  seq_id is 0 once a
+ * reply has been matched (dispatch_reply_unsafe()), so only a request still out is taken.
  */
 static void forget_tag_unsafe(modbus_plc_p plc, modbus_tag_p tag) {
-    int32_t slot = find_slot_unsafe(plc, tag);
-
     tag_driver_forget_unsafe(&plc->driver, (plc_tag_p)tag);
 
-    if(slot >= 0) { plc->slots[slot].tag = NULL; }
+    if(tag->seq_id) { take_in_flight(plc, tag->seq_id); }
+}
+
+
+/*
+ * An aborted tag: its request, if one is out, leaves the in-flight table so a reply to it is
+ * dropped, and the tag moves to due now in one step, so the handler re-arms it and never sees
+ * it off the list.  Called with plc->mutex held.
+ */
+static void requeue_aborted_unsafe(modbus_plc_p plc, modbus_tag_p tag) {
+    if(tag->seq_id) { take_in_flight(plc, tag->seq_id); }
+
+    tag->seq_id = 0;
+    tag_driver_queue_unsafe(&plc->driver, (plc_tag_p)tag, time_ms());
 }
 
 
 /* make the tag due now so the handler looks at it; one with a request out waits for its reply. */
 static void queue_tag(modbus_tag_p tag) {
     critical_block(tag->plc->mutex) {
-        if(find_slot_unsafe(tag->plc, tag) < 0) { tag_driver_queue_unsafe(&tag->plc->driver, (plc_tag_p)tag, time_ms()); }
+        if(!tag_op_is_response(tag)) { tag_driver_queue_unsafe(&tag->plc->driver, (plc_tag_p)tag, time_ms()); }
     }
 
     wake_plc_thread(tag->plc);
@@ -2444,14 +2485,14 @@ static int mb_abort(plc_tag_p p_tag) {
         return PLCTAG_STATUS_OK;
     }
 
-    /* the handler cannot be encoding or decoding for the tag while the fields below change. */
-    critical_block(tag->plc->mutex) { forget_tag_unsafe(tag->plc, tag); }
-
     /* the library queued the abort's events (tag_op_abort()) before calling this. */
-    tag->seq_id = 0;
     tag->request_num = 0;
     tag->status = (int8_t)PLCTAG_STATUS_OK;
     tag_op_set(tag, TAG_OP_IDLE);
+
+    /* under plc->mutex, so the handler is not encoding or decoding for the tag meanwhile. */
+    critical_block(tag->plc->mutex) { requeue_aborted_unsafe(tag->plc, tag); }
+    wake_plc_thread(tag->plc);
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, tag->tag_id, "Done.");
 
@@ -2473,7 +2514,8 @@ static int mb_queue(plc_tag_p p_tag) {
  * already on its list.
  */
 static int mb_submit(plc_tag_p p_tag) {
-    (void)p_tag;
+    /* a create that failed (an aborted create read) fails every op after it, as CIP does. */
+    if(p_tag->created && p_tag->create_result != PLCTAG_STATUS_OK) { return p_tag->create_result; }
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -2481,6 +2523,8 @@ static int mb_submit(plc_tag_p p_tag) {
 
 static int mb_tag_status(plc_tag_p p_tag) {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
+
+    if(tag->created && tag->create_result != PLCTAG_STATUS_OK) { return tag->create_result; }
 
     if(tag->status != PLCTAG_STATUS_OK) { return tag->status; }
 
@@ -2518,11 +2562,12 @@ static int mb_tag_data_written(plc_tag_p p_tag) {
     if(tag->auto_sync_write_ms <= 0) { return PLCTAG_STATUS_OK; }
 
     if(tag_op_is_read(tag)) {
-        critical_block(tag->plc->mutex) { forget_tag_unsafe(tag->plc, tag); }
         tag_op_abort((plc_tag_p)tag);
+        critical_block(tag->plc->mutex) { requeue_aborted_unsafe(tag->plc, tag); }
+        wake_plc_thread(tag->plc);
+    } else {
+        queue_tag(tag);
     }
-
-    queue_tag(tag);
 
     return PLCTAG_STATUS_OK;
 }

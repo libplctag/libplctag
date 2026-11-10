@@ -710,6 +710,13 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    if(tag->destroy_idle_sec > 0 && !tag_can_auto_destroy(tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "destroy_tag_after_idle_sec cannot be used with this kind of tag!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     tag->find_or_create_tag = (reuse == 1);
 
     /* See if we are allowed to resize fields */

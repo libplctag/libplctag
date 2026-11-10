@@ -242,16 +242,21 @@ void connection_tag_notify_watchers(conn_event_ring_t *watch, mutex_p conn_mutex
     /*
      * One tag at a time, each taken under the connection's mutex with a reference so it outlives
      * the delivery.  rc_inc() refuses a tag already being destroyed; its destructor is waiting on
-     * the mutex to remove itself, so it is skipped.
+     * the mutex to remove itself, so it is skipped.  So is a tag that has read the whole ring:
+     * only this thread moves ring_read_idx once the tag is watching.
      */
+    int32_t write_idx = conn_watch_read_idx(watch);
+
     for(int32_t index = 0;; index++) {
         connection_tag_p tag = NULL;
         bool more = false;
 
         critical_block(conn_mutex) {
             if(watch->watchers && index < vector_length(watch->watchers)) {
+                connection_tag_p watcher = vector_get(watch->watchers, index);
+
                 more = true;
-                tag = rc_inc(vector_get(watch->watchers, index));
+                if(watcher->ring_read_idx != write_idx) { tag = rc_inc(watcher); }
             }
         }
 

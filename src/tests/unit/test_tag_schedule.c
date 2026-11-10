@@ -45,7 +45,6 @@
 
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_schedule.h>
-#include <utils/vector.h>
 
 #define TAG_COUNT (5)
 
@@ -53,28 +52,66 @@
 static struct plc_tag_t tags[TAG_COUNT];
 
 
-static vector_p fresh_list(void) {
+static tag_list_t the_list;
+
+
+static tag_list_t *fresh_list(void) {
     for(size_t i = 0; i < TAG_COUNT; i++) {
         tags[i] = (struct plc_tag_t){0};
         tags[i].tag_id = (int32_t)i;
     }
 
-    return vector_create(TAG_COUNT, 1);
+    the_list = (tag_list_t){0};
+
+    return &the_list;
+}
+
+
+/* checks the treap: parent links, search order and heap order.  Returns the subtree size. */
+static int32_t check_subtree(plc_tag_p tag, plc_tag_p parent) {
+    if(!tag) { return 0; }
+
+    assert_true(tag->sched_parent == parent);
+    assert_true(tag->in_active_list);
+    if(tag->sched_left) {
+        assert_true(tag->sched_left->op_time <= tag->op_time);
+        assert_true(tag->sched_left->sched_priority <= tag->sched_priority);
+    }
+    if(tag->sched_right) {
+        assert_true(tag->sched_right->op_time >= tag->op_time);
+        assert_true(tag->sched_right->sched_priority <= tag->sched_priority);
+    }
+
+    return 1 + check_subtree(tag->sched_left, tag) + check_subtree(tag->sched_right, tag);
+}
+
+
+static int32_t length_of(tag_list_t *list) {
+    int32_t length = check_subtree(list->root, NULL);
+    int32_t walked = 0;
+
+    for(plc_tag_p tag = tag_schedule_first(list); tag; tag = tag_schedule_next(tag)) { walked++; }
+
+    assert_int_equal(walked, length);
+
+    return length;
 }
 
 
 /* the tag IDs in list order, as one number with a digit per tag: 0, 2, 1 -> 21 (leading 0 dropped). */
-static int64_t order_of(vector_p list) {
+static int64_t order_of(tag_list_t *list) {
     int64_t order = 0;
 
-    for(int32_t i = 0; i < vector_length(list); i++) { order = order * 10 + ((plc_tag_p)vector_get(list, i))->tag_id; }
+    (void)length_of(list);
+
+    for(plc_tag_p tag = tag_schedule_first(list); tag; tag = tag_schedule_next(tag)) { order = order * 10 + tag->tag_id; }
 
     return order;
 }
 
 
 static void test_insert_sorts_by_time_and_keeps_ties_in_order(void **state) {
-    vector_p list = fresh_list();
+    tag_list_t *list = fresh_list();
 
     (void)state;
 
@@ -85,15 +122,13 @@ static void test_insert_sorts_by_time_and_keeps_ties_in_order(void **state) {
     tag_schedule_insert(list, &tags[0], 100);
 
     assert_int_equal(order_of(list), 20134);
-    assert_true(tags[0].in_active_vector);
+    assert_true(tags[0].in_active_list);
     assert_int_equal(tags[3].op_time, 200);
-
-    vector_destroy(list);
 }
 
 
 static void test_insert_of_a_listed_tag_moves_it(void **state) {
-    vector_p list = fresh_list();
+    tag_list_t *list = fresh_list();
 
     (void)state;
 
@@ -101,15 +136,13 @@ static void test_insert_of_a_listed_tag_moves_it(void **state) {
     tag_schedule_insert(list, &tags[2], 200);
     tag_schedule_insert(list, &tags[1], 300);
 
-    assert_int_equal(vector_length(list), 2);
+    assert_int_equal(length_of(list), 2);
     assert_int_equal(order_of(list), 21);
-
-    vector_destroy(list);
 }
 
 
 static void test_move_both_directions(void **state) {
-    vector_p list = fresh_list();
+    tag_list_t *list = fresh_list();
 
     (void)state;
 
@@ -130,13 +163,11 @@ static void test_move_both_directions(void **state) {
     /* to its own time: it stays put */
     tag_schedule_move(list, &tags[2], 200);
     assert_int_equal(order_of(list), 41320);
-
-    vector_destroy(list);
 }
 
 
 static void test_remove(void **state) {
-    vector_p list = fresh_list();
+    tag_list_t *list = fresh_list();
 
     (void)state;
 
@@ -145,14 +176,12 @@ static void test_remove(void **state) {
 
     tag_schedule_remove(list, &tags[1]);
     assert_int_equal(order_of(list), 2);
-    assert_true(!tags[1].in_active_vector);
+    assert_true(!tags[1].in_active_list);
 
     /* removing a tag that is not on the list does nothing */
     tag_schedule_remove(list, &tags[1]);
     tag_schedule_remove(list, &tags[3]);
-    assert_int_equal(vector_length(list), 1);
-
-    vector_destroy(list);
+    assert_int_equal(length_of(list), 1);
 }
 
 
@@ -170,6 +199,58 @@ static void test_next_period(void **state) {
 }
 
 
+/*
+ * Random inserts, moves and removes against a reference: the walk must give time order, and
+ * insertion order among equal times.  Few distinct times, so ties are common.
+ */
+#define RANDOM_TAGS (64)
+#define RANDOM_OPS (20000)
+
+static void test_random_ops_match_reference(void **state) {
+    static struct plc_tag_t many[RANDOM_TAGS];
+    int64_t inserted_at[RANDOM_TAGS] = {0};
+    tag_list_t list = {0};
+    uint64_t rng = 12345;
+
+    (void)state;
+
+    for(int i = 0; i < RANDOM_TAGS; i++) {
+        many[i] = (struct plc_tag_t){0};
+        many[i].tag_id = i;
+    }
+
+    for(int64_t op = 1; op <= RANDOM_OPS; op++) {
+        int i = 0;
+
+        rng = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+        i = (int)((rng >> 33) % RANDOM_TAGS);
+
+        if((rng >> 20) % 4 == 0) {
+            tag_schedule_remove(&list, &many[i]);
+        } else {
+            tag_schedule_insert(&list, &many[i], (int64_t)((rng >> 40) % 16));
+            inserted_at[i] = op;
+        }
+
+        if(op % 97 == 0 || op == RANDOM_OPS) {
+            plc_tag_p prev = NULL;
+            int32_t listed = 0;
+
+            for(int k = 0; k < RANDOM_TAGS; k++) { listed += many[k].in_active_list ? 1 : 0; }
+            assert_int_equal(length_of(&list), listed);
+
+            for(plc_tag_p tag = tag_schedule_first(&list); tag; tag = tag_schedule_next(tag)) {
+                if(prev) {
+                    assert_true(prev->op_time <= tag->op_time);
+                    if(prev->op_time == tag->op_time) { assert_true(inserted_at[prev->tag_id] < inserted_at[tag->tag_id]); }
+                }
+                prev = tag;
+            }
+        }
+    }
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_insert_sorts_by_time_and_keeps_ties_in_order),
@@ -177,6 +258,7 @@ int main(void) {
         cmocka_unit_test(test_move_both_directions),
         cmocka_unit_test(test_remove),
         cmocka_unit_test(test_next_period),
+        cmocka_unit_test(test_random_ops_match_reference),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

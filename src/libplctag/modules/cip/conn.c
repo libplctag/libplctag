@@ -68,10 +68,10 @@
 static int session_list_init(cip_conn_list_t *list);
 static int32_t session_list_count(cip_conn_list_t *list);
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module);
-static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now);
-static int dispatch_replies_unsafe(cip_conn_p conn);
-static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int *bad_packet_rc);
-static void requeue_slots_unsafe(cip_conn_p conn);
+static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *sizes);
+static int dispatch_replies_unsafe(cip_conn_p conn, int32_t request_count);
+static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int64_t now, int32_t *remaining, int *bad_packet_rc);
+static void requeue_exchange_unsafe(cip_conn_p conn, int32_t request_count);
 static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc);
 static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc);
 static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *family, attr attribs, cip_conn_p *tag_conn,
@@ -1211,7 +1211,9 @@ static int receive_forward_open_response(cip_conn_p conn) {
 
 static int process_requests(cip_conn_p conn, bool *did_exchange) {
     int rc = PLCTAG_STATUS_OK;
-    int32_t slot_count = 0;
+    int32_t request_count = 0;
+    /* each request's size in staging, in order: what pack_exchange() frames. */
+    int32_t sizes[MAX_REQUESTS];
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Starting.");
 
@@ -1227,18 +1229,18 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
         int64_t now = time_ms();
 
         tag_driver_tickle_due_unsafe(&conn->driver, now);
-        slot_count = build_exchange_unsafe(conn, now);
-        conn->rebuild_pending = (slot_count > 0);
+        request_count = build_exchange_unsafe(conn, now, sizes);
+        conn->rebuild_pending = (request_count > 0);
     }
 
     /* the next fragment, or tags that did not fit this packet, are due now: the handler skips its wait. */
-    *did_exchange = (slot_count > 0);
+    *did_exchange = (request_count > 0);
 
-    if(slot_count > 0) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "%d requests to process.", (int)slot_count);
+    if(request_count > 0) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "%d requests to process.", (int)request_count);
 
         do {
-            rc = pack_exchange(conn);
+            rc = pack_exchange(conn, request_count, sizes);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Error while packing requests, %s!", plc_tag_decode_error(rc));
                 break;
@@ -1291,7 +1293,7 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
              * response.   If it is a singleton, then we pass the
              * status back to the tag.
              */
-            if(conn->slot_count > 1) {
+            if(request_count > 1) {
                 cip_multi_resp_header *multi_resp = NULL;
 
                 if(le2h16(((eip_encap *)(conn->data))->encap_command) == CIP_EIP_UNCONNECTED_SEND) {
@@ -1406,25 +1408,25 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
                 {
                     size_t offsets_start =
                         (size_t)((uint8_t *)multi_resp - conn->data) + offsetof(cip_multi_resp_header, request_offsets);
-                    size_t offsets_size = (size_t)conn->slot_count * sizeof(uint16_le);
+                    size_t offsets_size = (size_t)request_count * sizeof(uint16_le);
 
                     if(offsets_start > (size_t)conn->data_size || offsets_size > (size_t)conn->data_size - offsets_start) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                                "Response of %d bytes is too short to hold %d packed response offsets!", conn->data_size,
-                               conn->slot_count);
+                               request_count);
                         rc = PLCTAG_ERR_TOO_SMALL;
                         break;
                     }
                 }
 
                 /* we have multiple requests, sanity check the data. */
-                if(le2h16(multi_resp->request_count) == conn->slot_count) {
+                if(le2h16(multi_resp->request_count) == request_count) {
                     size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - conn->data);
 
                     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "offset_base=%zu", offset_base);
 
                     /* check all the offsets */
-                    for(int resp_index = 0; resp_index < conn->slot_count; resp_index++) {
+                    for(int resp_index = 0; resp_index < request_count; resp_index++) {
                         size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
 
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Response %d starts at byte offset %zu", resp_index,
@@ -1439,7 +1441,7 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
                     }
                 } else {
                     pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Expected %d packed responses back but got %zu!",
-                           conn->slot_count, (size_t)le2h16(multi_resp->request_count));
+                           request_count, (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
@@ -1448,16 +1450,14 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
         } while(0);
 
         critical_block(conn->session_mutex) {
-            if(rc == PLCTAG_STATUS_OK) { rc = dispatch_replies_unsafe(conn); }
+            if(rc == PLCTAG_STATUS_OK) { rc = dispatch_replies_unsafe(conn, request_count); }
 
             /* a failed exchange is not an answer; whatever is left goes again once the connection is back. */
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Got error %s when processing incoming response(s)!",
                        plc_tag_decode_error(rc));
-                requeue_slots_unsafe(conn);
+                requeue_exchange_unsafe(conn, request_count);
             }
-
-            conn->slot_count = 0;
         }
     }
 
@@ -1478,17 +1478,16 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
  * A tag whose mutex is busy keeps its place and is taken next time.  A tag that cannot be
  * encoded at all is finished with the error.
  */
-static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
+static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *sizes) {
     int32_t request_space = session_get_available_cip_payload_space(conn);
     int32_t reply_space = (int32_t)GET_MAX_PAYLOAD_SIZE(conn) - CIP_MSP_REPLY_OVERHEAD - CIP_MSP_REPLY_SLACK;
     int32_t used = 0;
-    int32_t index = 0;
+    plc_tag_p next = tag_schedule_first(&conn->driver.active);
     bool bundle = false;
+    int32_t count = 0;
 
-    conn->slot_count = 0;
-
-    while(index < vector_length(conn->driver.active) && conn->slot_count < MAX_REQUESTS) {
-        cip_tag_p tag = vector_get(conn->driver.active, index);
+    while(next && count < MAX_REQUESTS) {
+        cip_tag_p tag = (cip_tag_p)next;
         tag_op_plan_t plan = {0};
         bool is_read = tag_op_is_read(tag);
         tag_encode_func encode = is_read ? tag->vtable->encode_read : tag->vtable->encode_write;
@@ -1498,21 +1497,18 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
         /* the list is in time order, so nothing after this is due either. */
         if(tag->op_time > now) { break; }
 
-        /* armed for an auto-sync deadline, or waiting for its tickle: no request to send. */
-        if(!tag_op_busy(tag)) {
-            index++;
-            continue;
-        }
+        /* taken now: finishing or sending this tag takes it off the list or moves it later. */
+        next = tag_schedule_next((plc_tag_p)tag);
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
-            index++;
-            continue;
-        }
+        /* on the wire, armed for a deadline, or waiting for its tickle: no request to send. */
+        if(!tag_op_is_request(tag)) { continue; }
+
+        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
 
         /* a bundle charges its header once and an offset entry for every request in it. */
-        if(conn->slot_count > 0) {
+        if(count > 0) {
             capacity = request_space - used - (int32_t)sizeof(cip_multi_req_header)
-                       - (CIP_MSP_OFFSET_ENTRY_SIZE * (conn->slot_count + 1));
+                       - (CIP_MSP_OFFSET_ENTRY_SIZE * (count + 1));
         }
 
         if(!encode) {
@@ -1525,7 +1521,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
         }
 
         /* it may fit next time, at the front of a packet of its own. */
-        if(rc == PLCTAG_ERR_TOO_SMALL && conn->slot_count > 0) {
+        if(rc == PLCTAG_ERR_TOO_SMALL && count > 0) {
             mutex_unlock(tag->api_mutex);
             break;
         }
@@ -1539,36 +1535,34 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
             continue;
         }
 
-        if(conn->slot_count > 0
+        if(count > 0
            && (!bundle || !plan.packable || tag->unrouted != conn->exchange_unrouted
                || reply_space - reply_budget_cost(plan.reply_size) < 0)) {
             mutex_unlock(tag->api_mutex);
             break;
         }
 
-        if(conn->slot_count == 0) {
+        if(count == 0) {
             /* Multiple Service Packet only ever goes out on a connection. */
             bundle = (plan.packable && conn->use_connected_msg);
             conn->exchange_unrouted = tag->unrouted;
         }
 
-        conn->slots[conn->slot_count].tag = tag;
-        conn->slots[conn->slot_count].offset = used;
-        conn->slots[conn->slot_count].size = plan.req_size;
-        conn->slots[conn->slot_count].is_read = is_read;
-        conn->slot_count++;
+        tag->reply_index = count;
+        sizes[count] = plan.req_size;
+        count++;
 
         used += plan.req_size;
         reply_space -= reply_budget_cost(plan.reply_size);
 
-        /* off the list while it is on the wire; it keeps its op_time in case it has to go again. */
-        tag_driver_forget_unsafe(&conn->driver, (plc_tag_p)tag);
+        /* on the wire: it keeps its place and op_time in case it has to go again. */
+        tag_op_sent(tag);
         mutex_unlock(tag->api_mutex);
 
         if(!bundle) { break; }
     }
 
-    return conn->slot_count;
+    return count;
 }
 
 
@@ -1576,17 +1570,24 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now) {
  * Hand each reply in the exchange to its tag's decoder.  A decoder that needs another
  * exchange puts the tag back on the list, due now; otherwise the operation is over.
  *
+ * The tags in the exchange are the ones in a RESPONSE state with a reply_index, all due, so
+ * they are at the front of the list.  Walking from the front, each one's reply_index is its
+ * reply in the packet: no search.  The walk ends once every request sent is accounted for,
+ * or at the first tag not yet due -- a tag aborted or destroyed while the exchange was out
+ * has left, and its reply is dropped.
+ *
  * Decoding needs the tag's API mutex.  Each pass decodes every reply whose tag it can lock and
  * skips the rest, so one busy tag does not hold up the others.  Between passes this lets go
  * of session_mutex, so that whoever holds an API mutex can take session_mutex to abort the
  * tag: never blocking on one while holding the other is what keeps the two from deadlocking.
- * A slot's tag is cleared once decoded, or by an abort, so a pass sees only what is left.
  */
-static int dispatch_replies_unsafe(cip_conn_p conn) {
+static int dispatch_replies_unsafe(cip_conn_p conn, int32_t request_count) {
     int bad_packet_rc = PLCTAG_STATUS_OK;
+    int32_t remaining = request_count;
     int32_t tries = 0;
+    int64_t now = time_ms();
 
-    while(dispatch_replies_pass_unsafe(conn, &bad_packet_rc) > 0) {
+    while(dispatch_replies_pass_unsafe(conn, now, &remaining, &bad_packet_rc) > 0) {
         mutex_unlock(conn->session_mutex);
         sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
         mutex_lock(conn->session_mutex);
@@ -1596,42 +1597,56 @@ static int dispatch_replies_unsafe(cip_conn_p conn) {
 }
 
 
-/* One pass over the exchange.  Returns how many replies were skipped because the tag was busy. */
-static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int *bad_packet_rc) {
-    int32_t skipped = 0;
+/* the tag is waiting for a reply in the exchange on the wire. */
+static bool in_exchange(cip_tag_p tag) { return tag->reply_index >= 0 && tag_op_is_response(tag); }
 
-    for(int32_t i = 0; i < conn->slot_count; i++) {
-        cip_tag_p tag = conn->slots[i].tag;
-        bool is_read = conn->slots[i].is_read;
+
+/* One pass over the exchange.  Returns how many replies were skipped because the tag was busy. */
+static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int64_t now, int32_t *remaining, int *bad_packet_rc) {
+    int32_t skipped = 0;
+    int32_t seen = 0;
+    int32_t to_see = *remaining;
+    plc_tag_p next = tag_schedule_first(&conn->driver.active);
+
+    while(next && next->op_time <= now && seen < to_see) {
+        cip_tag_p tag = (cip_tag_p)next;
         tag_decode_func decode = NULL;
         uint8_t *reply = NULL;
         int32_t reply_size = 0;
+        int32_t index = 0;
         int rc = PLCTAG_STATUS_OK;
 
-        /* decoded on an earlier pass, or aborted or destroyed while the exchange was out. */
-        if(!tag) { continue; }
+        /* taken now: decoding moves the tag later in the list or re-queues it. */
+        next = tag_schedule_next(next);
+
+        if(!in_exchange(tag)) { continue; }
+
+        seen++;
 
         if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
             skipped++;
             continue;
         }
 
-        conn->slots[i].tag = NULL;
+        index = tag->reply_index;
+        tag->reply_index = -1;
+        (*remaining)--;
 
         /*
          * A reply that fails its own framing checks is the device's answer, and asking again
          * gets the same one, so it ends the operation.  The caller drops the connection.
          */
-        rc = find_reply(conn, i, &reply, &reply_size);
+        rc = find_reply(conn, index, &reply, &reply_size);
         if(rc != PLCTAG_STATUS_OK) {
             *bad_packet_rc = rc;
         } else {
-            decode = is_read ? tag->vtable->decode_read : tag->vtable->decode_write;
+            decode = tag_op_is_read(tag) ? tag->vtable->decode_read : tag->vtable->decode_write;
             rc = decode ? ((cip_tag_decode_func)decode)(tag, reply, reply_size) : PLCTAG_ERR_UNSUPPORTED;
         }
 
         if(rc == PLCTAG_STATUS_PENDING) {
             tag->status = (int8_t)PLCTAG_STATUS_PENDING;
+            tag_op_resend(tag);
             tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
         } else {
             finish_tag_unsafe(conn, tag, rc);
@@ -1644,15 +1659,20 @@ static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int *bad_packet_rc)
 }
 
 
-/* put what is left of a failed exchange back where it was on the list, in order. */
-static void requeue_slots_unsafe(cip_conn_p conn) {
-    for(int32_t i = 0; i < conn->slot_count; i++) {
-        cip_tag_p tag = conn->slots[i].tag;
+/* what is left of a failed exchange goes again: it never left its place on the list. */
+static void requeue_exchange_unsafe(cip_conn_p conn, int32_t request_count) {
+    int64_t now = time_ms();
+    int32_t seen = 0;
 
-        if(tag) {
-            tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, tag->op_time);
-            conn->slots[i].tag = NULL;
-        }
+    for(plc_tag_p next = tag_schedule_first(&conn->driver.active); next && next->op_time <= now && seen < request_count;
+        next = tag_schedule_next(next)) {
+        cip_tag_p tag = (cip_tag_p)next;
+
+        if(!in_exchange(tag)) { continue; }
+
+        seen++;
+        tag->reply_index = -1;
+        tag_op_resend(tag);
     }
 }
 
@@ -1679,22 +1699,21 @@ static void finish_tag_unsafe(cip_conn_p conn, cip_tag_p tag, int rc) {
  */
 static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
     int32_t failed = 0;
-    int32_t index = 0;
+    plc_tag_p next = tag_schedule_first(&conn->driver.active);
     int32_t tries = 0;
 
-    while(index < vector_length(conn->driver.active)) {
-        cip_tag_p tag = vector_get(conn->driver.active, index);
+    while(next) {
+        cip_tag_p tag = (cip_tag_p)next;
 
-        if(!tag_op_busy(tag)) {
-            index++;
-            continue;
-        }
+        next = tag_schedule_next((plc_tag_p)tag);
+
+        if(!tag_op_busy(tag)) { continue; }
 
         if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
             mutex_unlock(conn->session_mutex);
             sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
             mutex_lock(conn->session_mutex);
-            index = 0;
+            next = tag_schedule_first(&conn->driver.active);
             continue;
         }
 
@@ -1702,9 +1721,6 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
         failed++;
 
         mutex_unlock(tag->api_mutex);
-
-        /* finishing may have re-armed it further along the list or taken it off; start over. */
-        index = 0;
     }
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Failed %d waiting tags with %s.", (int)failed, plc_tag_decode_error(rc));
@@ -1730,15 +1746,29 @@ int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag) {
 }
 
 
+void cip_conn_abort_tag(cip_conn_p conn, struct cip_tag_t *tag) {
+    bool wake = true;
+
+    if(!conn || !tag) { return; }
+
+    critical_block(conn->session_mutex) {
+        tag->reply_index = -1;
+        tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
+        wake = !conn->rebuild_pending;
+    }
+
+    if(wake) { socket_wake(conn->sock); }
+}
+
+
 void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag) {
     if(!conn || !tag) { return; }
 
     critical_block(conn->session_mutex) {
         tag_driver_forget_unsafe(&conn->driver, (plc_tag_p)tag);
 
-        for(int32_t i = 0; i < conn->slot_count; i++) {
-            if(conn->slots[i].tag == tag) { conn->slots[i].tag = NULL; }
-        }
+        /* a reply to it, if one comes, is dropped. */
+        tag->reply_index = -1;
     }
 }
 static void session_set_connection_status(cip_conn_p conn, int32_t new_status) {

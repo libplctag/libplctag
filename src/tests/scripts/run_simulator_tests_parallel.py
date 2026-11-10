@@ -616,8 +616,15 @@ def build_manifest() -> Manifest:
     sec.test("AB/ControlLogix tag scheduling fairness",
               [exe("test_fairness"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]&auto_sync_read_ms=200",
                "--num-tags=200", "--test-duration-secs=10"], S)
+    # Mixed periods re-arm tags into the middle of the handler's tag list, not at either end.
+    sec.test("auto-sync reads at mixed periods (AB ControlLogix)",
+              [exe("test_auto_read"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray[0]",
+               "--num-tags=700", "--duration=10", "--periods=50,100,250,500,1000,2000,5000"], S)
     sec.test("auto-destroy idle tags (AB ControlLogix)",
               [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]"], T)
+    # No plc attribute: the tags are created while the connection still identifies the device.
+    sec.test("auto-destroy idle tags, PLC type probed (AB ControlLogix)",
+              [exe("test_auto_destroy"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&name=TestBigArray[0]"], T)
     sec.test("find_or_create_tag finds or creates a shared tag (AB ControlLogix)",
               [exe("test_find_or_create_tag"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&name=TestBigArray[0]",
                f"--missing-tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=No_Such_Tag"], T)
@@ -1049,6 +1056,9 @@ def build_manifest() -> Manifest:
     # shutdown got its DESTROYED event.
     sec.test("create racing shutdown leaves no tag behind",
               [exe("test_create_shutdown_race")], F, server=None, ports_needed=0)
+    # The system tags: version and debug, and what they refuse (auto-destroy, other names).
+    sec.test("system tags, and their refusals",
+              [exe("test_special")], F, server=None, ports_needed=0)
     sec.test("@connection tag ERR_WAIT on unreachable host (no server running)",
               [exe("test_connection_tag"),
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",
@@ -1684,6 +1694,12 @@ def build_manifest() -> Manifest:
                           startup_wait_s=1)
     mb_ops_base = f"--base=protocol=modbus-tcp&gateway={mbgw}&path=0"
     mb_inflight8 = f"{mb_ops_base}&max_requests_in_flight=8"
+    # An abort while the create read is queued fails the create for good, as on CIP.  The abort
+    # puts the tag back on its PLC's list due now; the create read must not go out after it.
+    sec.test("aborted create read fails the create for good (Modbus)",
+              [exe("test_write_before_read"), "--abort-create-read",
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=hr10&elem_count=1",
+               f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&name=hr20&elem_count=100"], F, server=mb_fault_server())
     mb_redial = "&connection_retry_max_delay_ms=200"
     sec.test("pipelined writes and reads, one request in flight (Modbus)",
               [exe("test_modbus_ops"), "--mode=pipelined", "--count=20", mb_ops_base], F, server=mb_fault_server())

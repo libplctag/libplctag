@@ -50,6 +50,7 @@
  */
 
 #include <libplctag/lib/tag.h>
+#include <libplctag/lib/tag_schedule.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <utils/vector.h>
@@ -60,7 +61,7 @@ typedef struct {
      * Tags with an op or a deadline, sorted by op_time (lib/tag_schedule.h).  Raw pointers: a
      * tag takes itself off before it is freed (tag_driver_forget_unsafe()).
      */
-    vector_p active;
+    tag_list_t active;
 
     /* Tags owing callbacks, each holding a reference.  Only the handler thread touches it. */
     vector_p notify;
@@ -81,11 +82,11 @@ extern int64_t tag_driver_next_time_unsafe(tag_driver_t *driver);
 /*
  * Run the library's housekeeping for the due tags with no op in flight: an abort request, an
  * auto-sync read or write whose time has come, and the tag kind's own tickler.  What it starts
- * stays on the list as an op; anything else is re-armed for its next deadline or taken off.
+ * stays on the list as an op; anything else is re-armed as SYNC_WAIT, DESTROY or IDLE.
  */
 extern void tag_driver_tickle_due_unsafe(tag_driver_t *driver, int64_t now);
 
-/* tickle only the due DESTROY tags: a handler runs this in every state, connected or not. */
+/* tickle only the due tags that need no connection (IDLE, DESTROY): a handler runs this in every state. */
 extern void tag_driver_expire_due_unsafe(tag_driver_t *driver, int64_t now);
 
 /*
@@ -95,8 +96,8 @@ extern void tag_driver_expire_due_unsafe(tag_driver_t *driver, int64_t now);
 extern void tag_driver_tickle_creating_unsafe(tag_driver_t *driver);
 
 /*
- * The tag's op has ended (tag_op_end()): put it back at its next auto-sync deadline, or take
- * it off, and run its callbacks at the next tag_driver_notify().  Called with the tag's API
+ * The tag's op has ended (tag_op_end()): put it back on the list as SYNC_WAIT, DESTROY or IDLE,
+ * and run its callbacks, if it has events, at the next tag_driver_notify().  Called with the tag's API
  * mutex held too.
  */
 extern void tag_driver_done_unsafe(tag_driver_t *driver, plc_tag_p tag, int64_t now);

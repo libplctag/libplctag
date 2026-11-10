@@ -40,67 +40,68 @@
 
 #include <libplctag/lib/tag_schedule.h>
 #include <libplctag/lib/tag.h>
-#include <utils/debug.h>
-#include <utils/vector.h>
 
 
-static int32_t insert_index(vector_p list, int64_t op_time);
+static uint64_t next_priority(tag_list_t *list);
+static void rotate_up(tag_list_t *list, plc_tag_p tag);
+static void unlink_tag(tag_list_t *list, plc_tag_p tag);
 
 
-/*
- * Insert a tag that is not on the list.  A tag already on it is moved instead, so concurrent
- * API and auto-sync paths cannot put it on twice.
- */
-void tag_schedule_insert(vector_p list, plc_tag_p tag, int64_t op_time) {
-    if(tag->in_active_vector) {
-        tag_schedule_move(list, tag, op_time);
-        return;
-    }
+void tag_schedule_insert(tag_list_t *list, plc_tag_p tag, int64_t op_time) {
+    plc_tag_p parent = NULL;
+    plc_tag_p *link = &list->root;
+
+    if(tag->in_active_list) { unlink_tag(list, tag); }
 
     tag->op_time = op_time;
-    tag->in_active_vector = true;
+    tag->in_active_list = true;
+    tag->sched_left = NULL;
+    tag->sched_right = NULL;
+    tag->sched_priority = next_priority(list);
 
-    if(vector_insert(list, insert_index(list, op_time), tag) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to insert the tag into the active list!");
-        tag->in_active_vector = false;
+    /* an equal time goes right, after the tags already there. */
+    while(*link) {
+        parent = *link;
+        link = (op_time < parent->op_time) ? &parent->sched_left : &parent->sched_right;
     }
+
+    *link = tag;
+    tag->sched_parent = parent;
+
+    while(tag->sched_parent && tag->sched_parent->sched_priority < tag->sched_priority) { rotate_up(list, tag); }
 }
 
 
-/* Reposition a tag already on the list, with one memmove rather than a remove and an insert. */
-void tag_schedule_move(vector_p list, plc_tag_p tag, int64_t op_time) {
-    int32_t current_index = vector_find_index(list, tag);
+void tag_schedule_move(tag_list_t *list, plc_tag_p tag, int64_t op_time) { tag_schedule_insert(list, tag, op_time); }
 
-    if(current_index < 0) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "The tag is not on the active list!");
-        tag->in_active_vector = false;
-        return;
-    }
 
-    /*
-     * insert_index() is the insert-before position, which is right in both directions: moving
-     * later, the tag lands just before it and the tags between shift down; moving earlier, it
-     * lands on it and they shift up.
-     */
-    vector_swap_element(list, current_index, insert_index(list, op_time));
+void tag_schedule_remove(tag_list_t *list, plc_tag_p tag) {
+    if(!tag->in_active_list) { return; }
 
-    tag->op_time = op_time;
+    unlink_tag(list, tag);
+    tag->in_active_list = false;
 }
 
 
-void tag_schedule_remove(vector_p list, plc_tag_p tag) {
-    int32_t index = 0;
+plc_tag_p tag_schedule_first(tag_list_t *list) {
+    plc_tag_p tag = list->root;
 
-    if(!tag->in_active_vector) { return; }
+    while(tag && tag->sched_left) { tag = tag->sched_left; }
 
-    index = vector_find_index(list, tag);
-    if(index >= 0) {
-        vector_remove(list, index);
-    } else {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "The tag was marked active but was not on the active list!");
+    return tag;
+}
+
+
+plc_tag_p tag_schedule_next(plc_tag_p tag) {
+    if(tag->sched_right) {
+        tag = tag->sched_right;
+        while(tag->sched_left) { tag = tag->sched_left; }
+        return tag;
     }
 
-    tag->in_active_vector = false;
+    while(tag->sched_parent && tag->sched_parent->sched_right == tag) { tag = tag->sched_parent; }
+
+    return tag->sched_parent;
 }
 
 
@@ -111,21 +112,66 @@ int64_t tag_schedule_next_period(int64_t next, int32_t period_ms, int64_t now) {
 }
 
 
-/* The first index whose op_time is later than op_time, so equal times stay in insertion order. */
-static int32_t insert_index(vector_p list, int64_t op_time) {
-    int32_t low = 0;
-    int32_t high = vector_length(list);
+/* splitmix64. */
+static uint64_t next_priority(tag_list_t *list) {
+    uint64_t z = (list->seed += 0x9e3779b97f4a7c15ULL);
 
-    while(low < high) {
-        int32_t mid = low + (high - low) / 2;
-        plc_tag_p mid_tag = vector_get(list, mid);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
 
-        if(mid_tag && mid_tag->op_time <= op_time) {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
+    return z ^ (z >> 31);
+}
+
+
+/* put the tag where its parent was, the parent becoming its child; in-order is unchanged. */
+static void rotate_up(tag_list_t *list, plc_tag_p tag) {
+    plc_tag_p parent = tag->sched_parent;
+    plc_tag_p grand = parent->sched_parent;
+
+    if(parent->sched_left == tag) {
+        parent->sched_left = tag->sched_right;
+        if(tag->sched_right) { tag->sched_right->sched_parent = parent; }
+        tag->sched_right = parent;
+    } else {
+        parent->sched_right = tag->sched_left;
+        if(tag->sched_left) { tag->sched_left->sched_parent = parent; }
+        tag->sched_left = parent;
     }
 
-    return low;
+    parent->sched_parent = tag;
+    tag->sched_parent = grand;
+
+    if(!grand) {
+        list->root = tag;
+    } else if(grand->sched_left == parent) {
+        grand->sched_left = tag;
+    } else {
+        grand->sched_right = tag;
+    }
+}
+
+
+/* rotate the tag down past its higher-priority child until it has at most one, then splice it out. */
+static void unlink_tag(tag_list_t *list, plc_tag_p tag) {
+    plc_tag_p child = NULL;
+
+    while(tag->sched_left && tag->sched_right) {
+        rotate_up(list, (tag->sched_left->sched_priority > tag->sched_right->sched_priority) ? tag->sched_left : tag->sched_right);
+    }
+
+    child = tag->sched_left ? tag->sched_left : tag->sched_right;
+
+    if(child) { child->sched_parent = tag->sched_parent; }
+
+    if(!tag->sched_parent) {
+        list->root = child;
+    } else if(tag->sched_parent->sched_left == tag) {
+        tag->sched_parent->sched_left = child;
+    } else {
+        tag->sched_parent->sched_right = child;
+    }
+
+    tag->sched_left = NULL;
+    tag->sched_right = NULL;
+    tag->sched_parent = NULL;
 }

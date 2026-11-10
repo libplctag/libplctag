@@ -172,6 +172,8 @@ struct cip_tag_t {
      * to identify the device and so pick its family.  NULL otherwise.
      */
     attr deferred_attribs;
+    /* this tag's request in the exchange on the wire, -1 when it has none.  Under session_mutex. */
+    int32_t reply_index;
     int32_t offset;
     bool allow_packing;
 

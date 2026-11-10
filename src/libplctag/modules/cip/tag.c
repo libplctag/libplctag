@@ -102,7 +102,8 @@ static void cip_tag_destroy(cip_tag_p tag) {
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Starting.");
 
-    /* abort anything in flight */
+    /* abort anything in flight; not activated, the abort takes the tag off the list for good. */
+    atomic_set_bool(&tag->activated, false);
     cip_tag_abort(tag);
 
     conn = tag->session;
@@ -305,11 +306,21 @@ int cip_tag_abort(cip_tag_p tag) {
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    if(tag->session) { cip_conn_forget_tag(tag->session, tag); }
-
     tag_op_set(tag, TAG_OP_IDLE);
     tag->offset = 0;
     tag->status = PLCTAG_ERR_ABORT;
+
+    /*
+     * Moved to due now in one step, so the handler re-arms it as IDLE, DESTROY or SYNC_WAIT and
+     * never sees it off the list.  A tag not activated (being created or destroyed) comes off.
+     */
+    if(tag->session) {
+        if(atomic_get_bool(&tag->activated)) {
+            cip_conn_abort_tag(tag->session, tag);
+        } else {
+            cip_conn_forget_tag(tag->session, tag);
+        }
+    }
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "Done.");
 
@@ -525,6 +536,8 @@ cip_tag_p cip_tag_alloc(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
      * and the family's own setup has something safe to dispatch through.
      */
     tag->vtable = default_vtable;
+    tag->scheduled = true;
+    tag->reply_index = -1;
     tag->protocol_type = protocol_type;
 
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);

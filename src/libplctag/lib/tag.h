@@ -237,10 +237,13 @@ typedef struct tag_byte_order_s tag_byte_order_t;
 
 
 typedef enum {
-    TAG_OP_IDLE = 0,
-    TAG_OP_READ_REQUEST, /* a read is in progress, queued or on the wire */
+    TAG_OP_IDLE = 0,     /* nothing due; looked at again at op_time, an hour out */
+    TAG_OP_READ_REQUEST, /* a read is queued, waiting to be packed */
     TAG_OP_WRITE_REQUEST,
-    TAG_OP_DESTROY /* idle, and destroyed at op_time unless a read or write comes first */
+    TAG_OP_DESTROY,  /* idle, and destroyed at op_time unless a read or write comes first */
+    TAG_OP_SYNC_WAIT, /* auto-sync, waiting for the next automatic read or write at op_time */
+    TAG_OP_READ_RESPONSE, /* a read is on the wire; the tag keeps its place and op_time */
+    TAG_OP_WRITE_RESPONSE
 } tag_op_state_t;
 
 
@@ -275,6 +278,12 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int64_t auto_sync_next_write;                                                       \
     /* When the protocol handler next needs to act on this tag; see tag_schedule.h. */   \
     int64_t op_time;                                                                    \
+    /* treap links and random heap priority on the handler's active list.  Under the     \
+       handler's own mutex. */                                                          \
+    plc_tag_p sched_left;                                                               \
+    plc_tag_p sched_right;                                                              \
+    plc_tag_p sched_parent;                                                             \
+    uint64_t sched_priority;                                                            \
     /* atomic so that plc_tag_read() can test it before taking the API mutex. */       \
     atomic_int64_t read_cache_expire;                                                   \
     atomic_int64_t read_cache_ms;                                                       \
@@ -312,7 +321,9 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     atomic_int32_t op_state;                                                            \
     tag_event_t events[TAG_EVENT_RING_SIZE];                                            \
     /* On its handler's active list.  Written under the handler's own mutex. */         \
-    bool in_active_vector;                                                              \
+    bool in_active_list;                                                                \
+    /* On a handler's list from activation to destroy: CIP and Modbus data tags. */      \
+    bool scheduled;                                                                     \
     /* CREATED has been queued. */                                                      \
     bool created;                                                                       \
     /* the status CREATED was queued with. */                                           \
@@ -381,14 +392,40 @@ extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
  * The op state is what the tag is doing now.  Events are what happened, queued in order on the
  * tag's ring and dispatched by plc_tag_generic_handle_event_callbacks().  The four transitions
  * below are the only places that queue op and creation events.  All of them, and every write of
- * op_state, happen with the tag's API mutex held.  op_state is atomic so that a handler holding
- * only its connection mutex can read it.
+ * op_state, happen with the tag's API mutex held, except tag_op_resend()'s compare-and-set.
+ * op_state is atomic so that a handler holding only its connection mutex can read it.
  */
 #define tag_op_state(tag) ((tag_op_state_t)atomic_get_int32(&(tag)->op_state))
 #define tag_op_set(tag, state) atomic_set_int32(&(tag)->op_state, (int32_t)(state))
-/* only a read or write is busy; DESTROY is idle with a deadline. */
-#define tag_op_busy(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST || tag_op_state(tag) == TAG_OP_WRITE_REQUEST)
-#define tag_op_is_read(tag) (tag_op_state(tag) == TAG_OP_READ_REQUEST)
+/* a read or write, queued or on the wire; DESTROY and SYNC_WAIT are idle with a deadline. */
+#define tag_op_busy(tag) tag_op_state_busy(tag_op_state(tag))
+#define tag_op_is_read(tag) tag_op_state_is_read(tag_op_state(tag))
+/* only a handler's list can time an auto-destroy; @connection and system tags are on none. */
+#define tag_can_auto_destroy(tag) ((tag)->scheduled)
+/* on the wire, waiting for its reply. */
+#define tag_op_is_response(tag) (tag_op_state(tag) == TAG_OP_READ_RESPONSE || tag_op_state(tag) == TAG_OP_WRITE_RESPONSE)
+/* queued, waiting to be packed. */
+#define tag_op_is_request(tag) tag_op_state_is_request(tag_op_state(tag))
+/* packed: REQUEST to RESPONSE.  Under the API mutex. */
+#define tag_op_sent(tag) tag_op_set((tag), tag_op_is_read(tag) ? TAG_OP_READ_RESPONSE : TAG_OP_WRITE_RESPONSE)
+/* to be sent again (fragment, failed exchange): RESPONSE to REQUEST, unless an abort ended the op. */
+#define tag_op_resend(tag)                                                                                      \
+    do {                                                                                                        \
+        atomic_compare_and_set_int32(&(tag)->op_state, TAG_OP_READ_RESPONSE, TAG_OP_READ_REQUEST);              \
+        atomic_compare_and_set_int32(&(tag)->op_state, TAG_OP_WRITE_RESPONSE, TAG_OP_WRITE_REQUEST);            \
+    } while(0)
+
+static inline bool tag_op_state_is_request(tag_op_state_t state) {
+    return state == TAG_OP_READ_REQUEST || state == TAG_OP_WRITE_REQUEST;
+}
+
+static inline bool tag_op_state_busy(tag_op_state_t state) {
+    return tag_op_state_is_request(state) || state == TAG_OP_READ_RESPONSE || state == TAG_OP_WRITE_RESPONSE;
+}
+
+static inline bool tag_op_state_is_read(tag_op_state_t state) {
+    return state == TAG_OP_READ_REQUEST || state == TAG_OP_READ_RESPONSE;
+}
 
 /* queue one event; dropped when the tag has no callback. */
 extern void tag_event_push(plc_tag_p tag, int event, int status);

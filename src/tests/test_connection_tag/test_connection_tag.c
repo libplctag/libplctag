@@ -392,6 +392,51 @@ static int poll_connection_states(int32_t tag, int64_t end_time) {
  * Argument parsing
  * ---------------------------------------------------------------------- */
 
+/*
+ * An @connection tag cannot auto-destroy: it has no reads or writes, and its events are not
+ * activity.  It can be shared with find_or_create_tag.  Returns the number of failures.
+ */
+static int check_attribute_rules(void) {
+    char attribs[1024];
+    int failed = 0;
+    int32_t a = 0;
+    int32_t b = 0;
+    int32_t rc = 0;
+
+    snprintf(attribs, sizeof(attribs), "%s&destroy_tag_after_idle_sec=10", tag_path);
+    rc = plc_tag_create(attribs, 0);
+    if(rc != PLCTAG_ERR_BAD_PARAM) {
+        fprintf(stderr, "FAIL: create with destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_BAD_PARAM.\n",
+                plc_tag_decode_error(rc));
+        failed++;
+    }
+    if(rc >= 0) { plc_tag_destroy(rc); }
+
+    snprintf(attribs, sizeof(attribs), "%s&find_or_create_tag=1", tag_path);
+    a = plc_tag_create(attribs, 0);
+    b = plc_tag_create(attribs, 0);
+    if(a < 0 || a != b) {
+        fprintf(stderr, "FAIL: find_or_create_tag gave handles %d and %d, expected one shared handle.\n", (int)a, (int)b);
+        failed++;
+    }
+
+    if(a >= 0) {
+        rc = plc_tag_set_int_attribute(a, "destroy_tag_after_idle_sec", 10);
+        if(rc != PLCTAG_ERR_NOT_ALLOWED) {
+            fprintf(stderr, "FAIL: setting destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_NOT_ALLOWED.\n",
+                    plc_tag_decode_error(rc));
+            failed++;
+        }
+        plc_tag_destroy(a);
+    }
+    if(b >= 0 && b != a) { plc_tag_destroy(b); }
+
+    fprintf(stderr, "Attribute rules: %s.\n", (failed ? "FAIL" : "ok"));
+
+    return failed;
+}
+
+
 static void parse_args(int argc, char **argv) {
     int i;
 
@@ -483,6 +528,11 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
     compat_set_interrupt_handler(interrupt_handler);
+
+    if(check_attribute_rules()) {
+        fprintf(stderr, "RESULT: FAIL\n");
+        return 1;
+    }
 
     build_expected_states();
 
