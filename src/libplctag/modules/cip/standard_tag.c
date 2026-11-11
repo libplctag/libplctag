@@ -683,7 +683,19 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
                     break;
                 }
 
-                tag->size = (int)payload_size + tag->offset;
+                {
+                    /* the size changes only once the buffer has grown; a failed realloc keeps both (U3). */
+                    uint8_t *new_data = (uint8_t *)mem_realloc(tag->data, (int)payload_size + tag->offset);
+
+                    if(!new_data) {
+                        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
+                        rc = PLCTAG_ERR_NO_MEM;
+                        break;
+                    }
+
+                    tag->data = new_data;
+                    tag->size = (int)payload_size + tag->offset;
+                }
 
                 /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
                 if(!tag_elements_are_variable(tag)) {
@@ -697,14 +709,7 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
                     tag->elem_size = 1;
                 }
 
-                pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.", tag->size);
-
-                tag->data = (uint8_t *)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
-                    pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
+                pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Increased tag buffer size to %d bytes.", tag->size);
             }
 
             pdebug(dbg, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);

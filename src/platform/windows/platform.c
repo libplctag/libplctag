@@ -85,124 +85,59 @@ typedef ptrdiff_t ssize_t;
  ******************************* Mutexes ***********************************
  **************************************************************************/
 
-struct mutex_t {
-    HANDLE h_mutex;
-    int initialized;
-};
+/*
+ * A CRITICAL_SECTION is recursive, like the POSIX mutex, and locks without a system call.
+ * CRITICAL_SECTION_NO_DEBUG_INFO keeps it from owning any allocation, so a module lock that is
+ * never destroyed leaks nothing when the library is unloaded.
+ */
+int mutex_init(mutex_p m) {
+    if(!m) { return PLCTAG_ERR_NULL_PTR; }
 
-
-int mutex_create(mutex_p *m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
-
-    if(*m) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Called with non-NULL pointer!"); }
-
-    *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
-    if(!*m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* set up the mutex */
-    (*m)->h_mutex = CreateMutex(NULL,  /* default security attributes  */
-                                FALSE, /* initially not owned          */
-                                NULL); /* unnamed mutex                */
-
-    if(!(*m)->h_mutex) {
-        mem_free(*m);
-        *m = NULL;
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error initializing mutex!");
+    if(!InitializeCriticalSectionEx(&(m->cs), 0, CRITICAL_SECTION_NO_DEBUG_INFO)) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error initializing mutex.");
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
-    (*m)->initialized = 1;
-
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done.");
+    m->initialized = true;
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_lock_impl(const char *func, int line, mutex_p m) {
-    DWORD dwWaitResult = 0;
+void mutex_lock_impl(const char *func, int line, mutex_p m) {
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", m, func, line);
-
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    dwWaitResult = ~WAIT_OBJECT_0;
-
-    /* FIXME - This will potentially hang forever! */
-    while(dwWaitResult != WAIT_OBJECT_0) { dwWaitResult = WaitForSingleObject(m->h_mutex, INFINITE); }
-
-    return PLCTAG_STATUS_OK;
+    EnterCriticalSection(&(m->cs));
 }
 
 
 int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
-    DWORD dwWaitResult = 0;
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", m, func, line);
-
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    dwWaitResult = WaitForSingleObject(m->h_mutex, 0);
-    if(dwWaitResult == WAIT_OBJECT_0) {
-        /* we got the lock */
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_MUTEX_LOCK;
-    }
+    return TryEnterCriticalSection(&(m->cs)) ? PLCTAG_STATUS_OK : PLCTAG_ERR_MUTEX_LOCK;
 }
 
 
 int mutex_unlock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    if(!ReleaseMutex(m->h_mutex)) {
-        /*pdebug("error unlocking mutex.");*/
+    /* leaving a critical section this thread does not hold is undefined, so check first. */
+    if((DWORD)(uintptr_t)m->cs.OwningThread != GetCurrentThreadId()) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to unlock mutex %p, called from %s:%d!", (void *)m, func, line);
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    // pdebug("Done.");
+    LeaveCriticalSection(&(m->cs));
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_destroy(mutex_p *m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "destroying mutex %p", m);
+void mutex_destroy(mutex_p m) {
+    if(!m || !m->initialized) { return; }
 
-    if(!m || !*m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    CloseHandle((*m)->h_mutex);
-
-    mem_free(*m);
-
-    *m = NULL;
-
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    DeleteCriticalSection(&(m->cs));
+    m->initialized = false;
 }
 
 

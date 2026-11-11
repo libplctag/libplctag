@@ -136,7 +136,7 @@ int cip_conn_find_or_create(cip_conn_p *tag_conn, attr attribs, int *is_new_conn
 const cip_family_t *cip_conn_family(cip_conn_p conn, int *identify_rc) {
     const cip_family_t *family = NULL;
 
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         family = conn->family;
         *identify_rc = conn->identify_rc;
     }
@@ -163,7 +163,7 @@ static uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn) {
 uint64_t session_get_new_seq_id(cip_conn_p conn) {
     uint16_t res = 0;
 
-    critical_block(conn->session_mutex) { res = (uint16_t)session_get_new_seq_id_unsafe(conn); }
+    critical_block(&conn->session_mutex) { res = (uint16_t)session_get_new_seq_id_unsafe(conn); }
 
     return res;
 }
@@ -209,7 +209,7 @@ int session_get_available_cip_payload_space(cip_conn_p conn) {
         return 0;
     }
 
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
         result = max_payload_size;
 
@@ -261,15 +261,14 @@ int cip_conn_max_cip_payload(cip_conn_p conn) {
 static int session_list_init(cip_conn_list_t *list) {
     int rc = PLCTAG_STATUS_OK;
 
-    if((rc = mutex_create(&(list->mutex))) != PLCTAG_STATUS_OK) {
+    /* never destroyed, so a destructor that runs after teardown still finds it: initialize it once. */
+    if(!list->mutex.initialized && (rc = mutex_init(&list->mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0, "Unable to create connection list mutex %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
     if((list->conns = vector_create(25, 5)) == NULL) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0, "Unable to create connection vector!");
-        mutex_destroy(&(list->mutex));
-        list->mutex = NULL;
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -320,7 +319,7 @@ static int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
 static int32_t session_list_count(cip_conn_list_t *list) {
     int32_t count = 0;
 
-    critical_block(list->mutex) { count = (int32_t)vector_length(list->conns); }
+    critical_block(&list->mutex) { count = (int32_t)vector_length(list->conns); }
 
     return count;
 }
@@ -332,7 +331,7 @@ static int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
 
     if(conn->on_list) {
-        critical_block(list->mutex) { rc = session_list_remove_unsafe(list, conn); }
+        critical_block(&list->mutex) { rc = session_list_remove_unsafe(list, conn); }
     } else {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Connection not on list, skipping removal.");
     }
@@ -643,7 +642,7 @@ static bool forward_open_step_size_down(cip_conn_p conn) {
 
     conn->fo_ladder_idx = next_idx;
 
-    critical_block(conn->session_mutex) { conn->max_payload_guess = forward_open_size_ladder[next_idx]; }
+    critical_block(&conn->session_mutex) { conn->max_payload_guess = forward_open_size_ladder[next_idx]; }
 
     /* the size decides the service: only the extended Forward Open can carry a large one. */
     if(forward_open_size_ladder[next_idx] <= CIP_FO_PLAIN_MAX_SIZE) { conn->only_use_old_forward_open = true; }
@@ -698,7 +697,7 @@ static int send_forward_open_request(cip_conn_p conn) {
     max_payload = (uint16_t)(conn->only_use_old_forward_open ? conn->family->fo_conn_size : conn->family->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         conn->max_payload_guess =
             ((conn->max_payload_guess == 0) || (conn->max_payload_guess > max_payload) ? max_payload :
                                                                                                conn->max_payload_guess);
@@ -1077,10 +1076,7 @@ static void session_destroy(void *conn_arg) {
 
     /* we are done with the mutex, finally destroy it. */
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Destroying session mutex.");
-    if(conn->session_mutex) {
-        mutex_destroy(&(conn->session_mutex));
-        conn->session_mutex = NULL;
-    }
+    mutex_destroy(&conn->session_mutex);
 
     if(!conn->data_buffer_is_static) { mem_free(conn->data); }
 
@@ -1124,7 +1120,7 @@ static int session_identify(cip_conn_p conn) {
     rc = cip_decode_identity_response(conn, &vendor_id, product_name, sizeof(product_name));
     if(rc == PLCTAG_STATUS_OK) { rc = cip_family_from_identity(vendor_id, product_name, conn->conn_path_size > 0, &family); }
 
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         if(rc != PLCTAG_STATUS_OK) {
             conn->identify_rc = rc;
         } else {
@@ -1201,7 +1197,7 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
     conn->data_size = 0;
     conn->data_offset = 0;
 
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         int64_t now = time_ms();
 
         tag_driver_tickle_due_unsafe(&conn->driver, now);
@@ -1425,7 +1421,7 @@ static int process_requests(cip_conn_p conn, bool *did_exchange) {
 
         } while(0);
 
-        critical_block(conn->session_mutex) {
+        critical_block(&conn->session_mutex) {
             if(rc == PLCTAG_STATUS_OK) { rc = dispatch_replies_unsafe(conn, request_count); }
 
             /* a failed exchange is not an answer; whatever is left goes again once the connection is back. */
@@ -1479,7 +1475,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
         /* on the wire, armed for a deadline, or waiting for its tickle: no request to send. */
         if(!tag_op_is_request(tag)) { continue; }
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
+        if(mutex_try_lock(&tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
 
         /* a bundle charges its header once and an offset entry for every request in it. */
         if(count > 0) {
@@ -1498,7 +1494,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
 
         /* it may fit next time, at the front of a packet of its own. */
         if(rc == PLCTAG_ERR_TOO_SMALL && count > 0) {
-            mutex_unlock(tag->api_mutex);
+            mutex_unlock(&tag->api_mutex);
             break;
         }
 
@@ -1507,14 +1503,14 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
 
         if(rc != PLCTAG_STATUS_OK) {
             finish_tag_unsafe(conn, tag, rc);
-            mutex_unlock(tag->api_mutex);
+            mutex_unlock(&tag->api_mutex);
             continue;
         }
 
         if(count > 0
            && (!bundle || !plan.packable || tag->unrouted != conn->exchange_unrouted
                || reply_space - reply_budget_cost(plan.reply_size) < 0)) {
-            mutex_unlock(tag->api_mutex);
+            mutex_unlock(&tag->api_mutex);
             break;
         }
 
@@ -1533,7 +1529,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
 
         /* on the wire: it keeps its place and op_time in case it has to go again. */
         tag_op_sent(tag);
-        mutex_unlock(tag->api_mutex);
+        mutex_unlock(&tag->api_mutex);
 
         if(!bundle) { break; }
     }
@@ -1564,9 +1560,9 @@ static int dispatch_replies_unsafe(cip_conn_p conn, int32_t request_count) {
     int64_t now = time_ms();
 
     while(dispatch_replies_pass_unsafe(conn, now, &remaining, &bad_packet_rc) > 0) {
-        mutex_unlock(conn->session_mutex);
+        mutex_unlock(&conn->session_mutex);
         sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
-        mutex_lock(conn->session_mutex);
+        mutex_lock(&conn->session_mutex);
     }
 
     return bad_packet_rc;
@@ -1599,7 +1595,7 @@ static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int64_t now, int32_
 
         seen++;
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
+        if(mutex_try_lock(&tag->api_mutex) != PLCTAG_STATUS_OK) {
             skipped++;
             continue;
         }
@@ -1628,7 +1624,7 @@ static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int64_t now, int32_
             finish_tag_unsafe(conn, tag, rc);
         }
 
-        mutex_unlock(tag->api_mutex);
+        mutex_unlock(&tag->api_mutex);
     }
 
     return skipped;
@@ -1685,10 +1681,10 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
 
         if(!tag_op_busy(tag)) { continue; }
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) {
-            mutex_unlock(conn->session_mutex);
+        if(mutex_try_lock(&tag->api_mutex) != PLCTAG_STATUS_OK) {
+            mutex_unlock(&conn->session_mutex);
             sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
-            mutex_lock(conn->session_mutex);
+            mutex_lock(&conn->session_mutex);
             next = tag_schedule_first(&conn->driver.active);
             continue;
         }
@@ -1696,7 +1692,7 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
         finish_tag_unsafe(conn, tag, rc);
         failed++;
 
-        mutex_unlock(tag->api_mutex);
+        mutex_unlock(&tag->api_mutex);
     }
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Failed %d waiting tags with %s.", (int)failed, plc_tag_decode_error(rc));
@@ -1711,7 +1707,7 @@ int cip_conn_queue_tag(cip_conn_p conn, struct cip_tag_t *tag) {
     if(!conn || !tag) { return PLCTAG_ERR_NULL_PTR; }
 
     /* the flag is read under the same lock the handler takes to build, so the tag is in its next look. */
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
         wake = !conn->rebuild_pending;
     }
@@ -1727,7 +1723,7 @@ void cip_conn_abort_tag(cip_conn_p conn, struct cip_tag_t *tag) {
 
     if(!conn || !tag) { return; }
 
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         tag->reply_index = -1;
         tag_driver_queue_unsafe(&conn->driver, (plc_tag_p)tag, time_ms());
         wake = !conn->rebuild_pending;
@@ -1740,7 +1736,7 @@ void cip_conn_abort_tag(cip_conn_p conn, struct cip_tag_t *tag) {
 void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag) {
     if(!conn || !tag) { return; }
 
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         tag_driver_forget_unsafe(&conn->driver, (plc_tag_p)tag);
 
         /* a reply to it, if one comes, is dropped. */
@@ -1748,7 +1744,7 @@ void cip_conn_forget_tag(cip_conn_p conn, struct cip_tag_t *tag) {
     }
 }
 static void session_set_connection_status(cip_conn_p conn, int32_t new_status) {
-    conn_watch_set_status(&conn->watch, conn->session_mutex, new_status);
+    conn_watch_set_status(&conn->watch, &conn->session_mutex, new_status);
 }
 
 
@@ -1770,7 +1766,7 @@ static void session_wait(cip_conn_p conn, int timeout_ms) {
      * A failed exchange can leave the flag set, and a tag queued since then did not wake us.
      * Clear it and go round once more instead of waiting, so the states see that tag.
      */
-    critical_block(conn->session_mutex) {
+    critical_block(&conn->session_mutex) {
         skip_wait = conn->rebuild_pending;
         conn->rebuild_pending = false;
     }
@@ -1879,7 +1875,7 @@ static THREAD_FUNC(session_handler) {
          * tickle in process_requests() takes due DESTROY tags, so this walk is skipped there.
          */
         if(conn->state != SESSION_IDLE) {
-            critical_block(conn->session_mutex) { tag_driver_expire_due_unsafe(&conn->driver, now); }
+            critical_block(&conn->session_mutex) { tag_driver_expire_due_unsafe(&conn->driver, now); }
         }
         tag_driver_notify(&conn->driver);
 
@@ -1974,7 +1970,7 @@ static THREAD_FUNC(session_handler) {
 
                 if((rc = session_identify(conn)) != PLCTAG_STATUS_OK) {
                     /* a refusal is the answer for the tags waiting to be set up. */
-                    critical_block(conn->session_mutex) { tag_driver_tickle_creating_unsafe(&conn->driver); }
+                    critical_block(&conn->session_mutex) { tag_driver_tickle_creating_unsafe(&conn->driver); }
                     tag_driver_notify(&conn->driver);
 
                     conn->state = SESSION_UNREGISTER;
@@ -2094,7 +2090,7 @@ static THREAD_FUNC(session_handler) {
                     if(conn->fo_plc_answered && forward_open_error_is_configuration(conn, rc)) {
                         conn->fo_refused_rc = rc;
 
-                        critical_block(conn->session_mutex) { fail_waiting_tags_unsafe(conn, rc); }
+                        critical_block(&conn->session_mutex) { fail_waiting_tags_unsafe(conn, rc); }
 
                         tag_driver_notify(&conn->driver);
                     }
@@ -2126,7 +2122,7 @@ static THREAD_FUNC(session_handler) {
                 }
 
                 /* if there is work to do, make sure we do not disconnect. */
-                critical_block(conn->session_mutex) {
+                critical_block(&conn->session_mutex) {
                     if(tag_driver_has_due_unsafe(&conn->driver, now)) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "There are tags due before sending.");
                         inactivity_timeout_ms = atomic_get_int32(&conn->connection_inactivity_timeout_ms);
@@ -2236,7 +2232,7 @@ static THREAD_FUNC(session_handler) {
                 if(conn->fo_refused_rc != PLCTAG_STATUS_OK) {
                     int32_t failed = 0;
 
-                    critical_block(conn->session_mutex) { failed = fail_waiting_tags_unsafe(conn, conn->fo_refused_rc); }
+                    critical_block(&conn->session_mutex) { failed = fail_waiting_tags_unsafe(conn, conn->fo_refused_rc); }
 
                     if(failed > 0) { tag_driver_notify(&conn->driver); }
                 }
@@ -2262,7 +2258,7 @@ static THREAD_FUNC(session_handler) {
 
                 /* if there is work to do, reconnect.. */
                 pdebug(DEBUG_MODULE_CIP, DEBUG_SPEW, 0, "Critical block.");
-                critical_block(conn->session_mutex) {
+                critical_block(&conn->session_mutex) {
                     if(tag_driver_has_due_unsafe(&conn->driver, now)) {
                         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "There are tags due, reopening connection to PLC.");
 
@@ -2295,7 +2291,7 @@ static THREAD_FUNC(session_handler) {
          * doing some linked states.
          */
         /* this pass's connection events, to the @connection tags watching. */
-        connection_tag_notify_watchers(&conn->watch, conn->session_mutex);
+        connection_tag_notify_watchers(&conn->watch, &conn->session_mutex);
 
         /*
          * Wake for the next tag deadline if it comes first, in the states that act on tags; a tag
@@ -2305,7 +2301,7 @@ static THREAD_FUNC(session_handler) {
         if(conn->state == SESSION_IDLE || conn->state == SESSION_WAIT_IDLE_RECONNECT) {
             bool due_unserved = false;
 
-            critical_block(conn->session_mutex) {
+            critical_block(&conn->session_mutex) {
                 int64_t next_tag_time = tag_driver_next_time_unsafe(&conn->driver);
 
                 due_unserved = (next_tag_time > 0 && next_tag_time <= now);
@@ -2580,7 +2576,7 @@ static int session_create(cip_conn_list_t *list, const cip_family_t *family, con
     conn->orig_connection_id = ++connection_id;
 
     /* create the conn mutex. */
-    if((rc = mutex_create(&(conn->session_mutex))) != PLCTAG_STATUS_OK) {
+    if((rc = mutex_init(&conn->session_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to create session mutex!");
         rc_dec(conn);
         return rc;
@@ -2661,7 +2657,7 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *fam
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Setting connection_retry_max_delay_ms to %" PRId32 "ms.",
            connection_retry_max_delay_ms);
 
-    critical_block(list->mutex) {
+    critical_block(&list->mutex) {
         /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
             session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_type);
@@ -2787,10 +2783,7 @@ static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_mo
         list->conns = NULL;
     }
 
-    if(list->mutex) {
-        mutex_destroy(&(list->mutex));
-        list->mutex = NULL;
-    }
+    /* list->mutex stays: a late destructor still locks it (session_list_remove()). */
 
     pdebug(debug_module, DEBUG_INFO, 0, "Done.");
 }

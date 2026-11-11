@@ -117,15 +117,9 @@ static void cip_tag_destroy(cip_tag_p tag) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "No connection pointer!");
     }
 
-    if(tag->ext_mutex) {
-        mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
-    }
+    mutex_destroy(&tag->ext_mutex);
 
-    if(tag->api_mutex) {
-        mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
-    }
+    mutex_destroy(&tag->api_mutex);
 
     if(tag->tag_cond_wait) {
         cond_destroy(&(tag->tag_cond_wait));

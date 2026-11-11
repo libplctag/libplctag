@@ -214,7 +214,7 @@ static void tickle_tags_unsafe(tag_driver_t *driver, plc_tag_p *tags, int32_t co
     for(int32_t i = 0; i < count; i++) {
         plc_tag_p tag = tags[i];
 
-        if(mutex_try_lock(tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
+        if(mutex_try_lock(&tag->api_mutex) != PLCTAG_STATUS_OK) { continue; }
 
         tickle_tag(tag, now);
 
@@ -224,7 +224,7 @@ static void tickle_tags_unsafe(tag_driver_t *driver, plc_tag_p *tags, int32_t co
 
         if(tag->event_count > 0 || tag->auto_destroyed) { notify_later_unsafe(driver, tag); }
 
-        mutex_unlock(tag->api_mutex);
+        mutex_unlock(&tag->api_mutex);
     }
 }
 

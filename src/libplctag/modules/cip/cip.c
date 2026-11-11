@@ -379,7 +379,7 @@ int cip_decode_forward_open_response(cip_conn_p conn) {
         conn->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
         conn->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
 
-        critical_block(conn->session_mutex) { conn->max_payload_size = conn->max_payload_guess; }
+        critical_block(&conn->session_mutex) { conn->max_payload_size = conn->max_payload_guess; }
 
         pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0,
                "ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x with packet size %u.",

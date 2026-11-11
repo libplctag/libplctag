@@ -193,9 +193,9 @@ static void system_tag_destroy(plc_tag_p ptag) {
 
     if(!tag) { return; }
 
-    if(ptag->ext_mutex) { mutex_destroy(&ptag->ext_mutex); }
+    mutex_destroy(&ptag->ext_mutex);
 
-    if(ptag->api_mutex) { mutex_destroy(&ptag->api_mutex); }
+    mutex_destroy(&ptag->api_mutex);
 
     if(ptag->tag_cond_wait) { cond_destroy(&ptag->tag_cond_wait); }
 

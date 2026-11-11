@@ -277,7 +277,7 @@ struct cip_tag_t;
  * a connection records it so it can remove itself.
  */
 typedef struct {
-    mutex_p mutex;
+    mutex_t mutex; /* initialized once, never destroyed: a late destructor still locks it */
     vector_p conns;
 } cip_conn_list_t;
 
@@ -425,7 +425,7 @@ typedef struct cip_conn_t {
     thread_p handler_thread;
     atomic_int32_t terminating;
     bool closing; /* handler thread only: its final Forward Close, which must not see terminating */
-    mutex_p session_mutex;
+    mutex_t session_mutex;
 
     /* connection status and event ring - what connection tags observe */
     conn_event_ring_t watch;

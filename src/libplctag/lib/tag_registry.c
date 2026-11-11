@@ -235,6 +235,9 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
     if(!reuse_str) {
         rc = publish_tag(tag);
     } else {
+        /* copied before the spinlock, so no other reusing create spins through an allocation (U4). */
+        char *reuse_key = str_dup(reuse_str);
+
         spin_block(&reuse_lock) {
             plc_tag_p other = (reuse ? hashtable_get(reuse, reuse_hash(reuse_str)) : NULL);
 
@@ -244,19 +247,21 @@ int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
                 break;
             }
 
+            /* ponytail: publish_tag() probes long only when the table is nearly full. */
             rc = publish_tag(tag);
 
             /*
              * ponytail: two strings with one 64-bit hash; the second is not shared.  Never seen yet.
              * A tag that cannot be entered is still a working tag, only not shared.
+             * ponytail: hashtable_put() can grow the table under the spinlock; measure before moving it.
              */
-            if(rc > 0 && !other && reuse && (tag->reuse_key = str_dup(reuse_str))) {
-                if(hashtable_put(reuse, reuse_hash(reuse_str), tag) != PLCTAG_STATUS_OK) {
-                    mem_free(tag->reuse_key);
-                    tag->reuse_key = NULL;
-                }
+            if(rc > 0 && !other && reuse && reuse_key && hashtable_put(reuse, reuse_hash(reuse_str), tag) == PLCTAG_STATUS_OK) {
+                tag->reuse_key = reuse_key;
+                reuse_key = NULL;
             }
         }
+
+        if(reuse_key) { mem_free(reuse_key); }
     }
 
     if(rc == PLCTAG_ERR_NOT_ALLOWED) {

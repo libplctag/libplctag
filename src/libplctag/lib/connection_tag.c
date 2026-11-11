@@ -264,7 +264,7 @@ void connection_tag_notify_watchers(conn_event_ring_t *watch, mutex_p conn_mutex
 
         if(!tag) { continue; }
 
-        critical_block(tag->api_mutex) { connection_tag_deliver(tag); }
+        critical_block(&tag->api_mutex) { connection_tag_deliver(tag); }
 
         plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
@@ -300,15 +300,9 @@ static void connection_tag_destructor(void *ptr) {
         tag->watch = NULL;
     }
 
-    if(tag->ext_mutex) {
-        mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
-    }
+    mutex_destroy(&tag->ext_mutex);
 
-    if(tag->api_mutex) {
-        mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
-    }
+    mutex_destroy(&tag->api_mutex);
 
     if(tag->tag_cond_wait) {
         cond_destroy(&(tag->tag_cond_wait));

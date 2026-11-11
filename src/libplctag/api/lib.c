@@ -221,7 +221,7 @@ void tag_op_abort(plc_tag_p tag) {
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
     if(!tag) { return; }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /*
          * Under the API mutex, not before: plc_tag_destroy() clears the callback under this same
          * mutex, and a handler thread holding its own reference can get here after that.
@@ -276,13 +276,13 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    rc = mutex_create(&(tag->ext_mutex));
+    rc = mutex_init(&tag->ext_mutex);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag external mutex!");
         return PLCTAG_ERR_CREATE;
     }
 
-    rc = mutex_create(&(tag->api_mutex));
+    rc = mutex_init(&tag->api_mutex);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to create tag API mutex!");
         return PLCTAG_ERR_CREATE;
@@ -320,7 +320,7 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
     /* wake the tag's handler so it can act on the flag. */
     if(tag->vtable && tag->vtable->wake_plc) { rc = tag->vtable->wake_plc(tag); }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         atomic_set_int64(&tag->read_cache_expire, 0);
 
         /* the handler may have done the abort already, and a new op may have started since. */
@@ -353,7 +353,7 @@ static int plc_tag_status_impl(plc_tag_p tag) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
 
         if(tag->vtable && tag->vtable->status) {
@@ -612,7 +612,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     if(reuse == 1 && (existing = tag_registry_find_reusable(attrib_str))) {
         bool failed = false;
 
-        critical_block(existing->api_mutex) { failed = (existing->created && existing->create_result != PLCTAG_STATUS_OK); }
+        critical_block(&existing->api_mutex) { failed = (existing->created && existing->create_result != PLCTAG_STATUS_OK); }
 
         /* a tag whose create failed stays failed, so this create makes a new one. */
         if(!failed) {
@@ -780,7 +780,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      * mb_activate/mb_read_start) race the handler thread's tickle_tag(), which changes
      * tag->op under api_mutex + plc->mutex (see modbus.c tickle_all_tags). */
     if(tag->vtable && tag->vtable->activate) {
-        critical_block(tag->api_mutex) { tag->vtable->activate(tag); }
+        critical_block(&tag->api_mutex) { tag->vtable->activate(tag); }
     }
 
     /* wake up tag's PLC here. */
@@ -788,14 +788,14 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* get the tag status. */
     if(tag->vtable && tag->vtable->status) {
-        critical_block(tag->api_mutex) { rc = tag->vtable->status(tag); }
+        critical_block(&tag->api_mutex) { rc = tag->vtable->status(tag); }
     }
 
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
         if(tag->vtable && tag->vtable->abort) {
-            critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+            critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
         }
 
         /*
@@ -812,7 +812,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
          * still hold a reference with events queued.  Dispatch runs under api_mutex and drops
          * events once callback is NULL, so this also waits out a callback already running.
          */
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             tag->callback = NULL;
             atomic_set_bool(&tag->has_callback, false);
             tag->userdata = NULL;
@@ -828,7 +828,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
     /* a tag with nothing left to do is created now; one still working queues CREATED when it ends. */
     if(rc == PLCTAG_STATUS_OK) {
-        critical_block(tag->api_mutex) { tag_created(tag, PLCTAG_STATUS_OK); }
+        critical_block(&tag->api_mutex) { tag_created(tag, PLCTAG_STATUS_OK); }
     }
 
     /*
@@ -844,7 +844,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
 
             /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
             if(tag->vtable && tag->vtable->abort) {
-                critical_block(tag->api_mutex) { tag->vtable->abort(tag); }
+                critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
             }
 
             /* as above: if shutdown took the tag, it raises DESTROYED for this id. */
@@ -854,7 +854,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             }
 
             /* as above: no callback after an error return. */
-            critical_block(tag->api_mutex) {
+            critical_block(&tag->api_mutex) {
                 tag->callback = NULL;
                 atomic_set_bool(&tag->has_callback, false);
                 tag->userdata = NULL;
@@ -867,7 +867,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         }
 
         /* the module queued CREATED when its create finished; this covers one that did not. */
-        critical_block(tag->api_mutex) { tag_created(tag, rc); }
+        critical_block(&tag->api_mutex) { tag_created(tag, rc); }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "tag set up elapsed time %" PRId64 "ms", (time_ms() - start_time));
     }
@@ -1048,7 +1048,7 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callbac
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->callback) {
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
@@ -1095,7 +1095,7 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->callback) {
             rc = PLCTAG_STATUS_OK;
             tag->callback = NULL;
@@ -1199,7 +1199,7 @@ LIB_EXPORT int plc_tag_lock(int32_t id) {
     /* FIXME - there has to be a better way that this! */
     /* we cannot nest the mutexes otherwise we will deadlock. */
     do {
-        critical_block(tag->api_mutex) { rc = mutex_try_lock(tag->ext_mutex); }
+        critical_block(&tag->api_mutex) { rc = mutex_try_lock(&tag->ext_mutex); }
 
         /* if the mutex is already locked then we get a mutex lock error. */
         if(rc == PLCTAG_ERR_MUTEX_LOCK) {
@@ -1241,7 +1241,7 @@ LIB_EXPORT int plc_tag_unlock(int32_t id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) { rc = mutex_unlock(tag->ext_mutex); }
+    critical_block(&tag->api_mutex) { rc = mutex_unlock(&tag->ext_mutex); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -1309,7 +1309,7 @@ void destroy_tag_common(plc_tag_p tag) {
      * for that callback to return.  A handler thread can still hold a reference and queue an
      * event after this; with no callback it is dropped.
      */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         tag_event_push(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
         plc_tag_generic_handle_event_callbacks(tag);
     }
@@ -1397,14 +1397,14 @@ static int32_t reuse_existing(plc_tag_p tag, int timeout) {
     int32_t rc = PLCTAG_STATUS_OK;
     bool created = false;
 
-    critical_block(tag->api_mutex) { created = tag->created; }
+    critical_block(&tag->api_mutex) { created = tag->created; }
 
     if(!created && timeout > 0 && create_status(tag, 0) == PLCTAG_STATUS_PENDING) {
         rc = wait_for_status(tag, timeout, create_status, 0);
     }
 
     /* the create's own result decides, not a read that may have ended since. */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->created) { rc = tag->create_result; }
     }
 
@@ -1430,7 +1430,7 @@ static int create_status(plc_tag_p tag, uint32_t seq) {
 
     (void)seq;
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->vtable && tag->vtable->status) { rc = tag->vtable->status(tag); }
     }
 
@@ -1446,7 +1446,7 @@ static int create_status(plc_tag_p tag, uint32_t seq) {
 static int op_status(plc_tag_p tag, uint32_t seq) {
     int rc = plc_tag_status_impl(tag);
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if((int32_t)(tag->op_end_seq - seq) >= 0) { rc = tag->op_end_status; }
     }
 
@@ -1467,7 +1467,7 @@ static int wait_for_op(plc_tag_p tag, int timeout, uint32_t seq) {
      * flight after the call returns, and the next one fails with PLCTAG_ERR_BUSY.  Checked and
      * aborted under one lock, so the op cannot end and another start in between.
      */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag->op_seq == seq && tag_op_busy(tag)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Operation still in flight after %s, aborting it.",
                    plc_tag_decode_error(rc));
@@ -1539,7 +1539,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         return PLCTAG_ERR_BUSY;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         /* a cached read is a read that finished at once. */
         if(atomic_get_int64(&tag->read_cache_expire) > time_ms()) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, id, "Returning cached data.");
@@ -1702,7 +1702,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
         return PLCTAG_ERR_BUSY;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(tag_op_busy(tag)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "Tag already has an operation in flight!");
             rc = PLCTAG_ERR_BUSY;
@@ -1797,7 +1797,7 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             return default_value;
         }
 
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             const attr_def_t *def = attr_find(tag, attrib_name);
 
             if(def) {
@@ -1863,7 +1863,7 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
             return PLCTAG_ERR_NOT_FOUND;
         }
 
-        critical_block(tag->api_mutex) {
+        critical_block(&tag->api_mutex) {
             const attr_def_t *def = attr_find(tag, attrib_name);
 
             if(def) {
@@ -1935,7 +1935,7 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         const attr_def_t *def = attr_find(tag, attrib_name);
 
         if(def) {
@@ -1994,7 +1994,7 @@ LIB_EXPORT int plc_tag_get_attribute_size(int32_t id, const char *attrib_name) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         const attr_def_t *def = attr_find(tag, attrib_name);
 
         if(!def) {
@@ -2033,7 +2033,7 @@ LIB_EXPORT int plc_tag_get_size(int32_t id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         result = tag->size;
         tag->status = PLCTAG_STATUS_OK;
     }
@@ -2066,7 +2066,7 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
     }
 
     /* the I/O thread uses the size while an op is in flight. */
-    critical_block(tag->api_mutex) { rc = tag_op_busy(tag) ? PLCTAG_ERR_BUSY : resize_tag_buffer_unsafe(tag, new_size); }
+    critical_block(&tag->api_mutex) { rc = tag_op_busy(tag) ? PLCTAG_ERR_BUSY : resize_tag_buffer_unsafe(tag, new_size); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2135,7 +2135,7 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) { res = plc_tag_get_bit_impl(tag, offset_bit); }
+    critical_block(&tag->api_mutex) { res = plc_tag_get_bit_impl(tag, offset_bit); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2214,7 +2214,7 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) { res = plc_tag_set_bit_impl(tag, offset_bit, val); }
+    critical_block(&tag->api_mutex) { res = plc_tag_set_bit_impl(tag, offset_bit, val); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2271,7 +2271,7 @@ static int tag_get_data_common(int32_t id, int offset, int width, bool is_float,
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
@@ -2335,7 +2335,7 @@ static int tag_set_data_common(int32_t id, int offset, int width, bool is_float,
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         if(!tag->data) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
@@ -2546,7 +2546,7 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
     }
 
     /* every tag field is read under api_mutex: the I/O thread replaces tag->data while decoding. */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         int string_length = 0;
 
         rc = check_string_access_unsafe(tag, true);
@@ -2634,7 +2634,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
     }
 
     /* we may be changing things, so take the mutex */
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         int old_string_size_in_buffer = 0;
         int new_string_size_in_buffer = 0;
 
@@ -2859,7 +2859,7 @@ LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset) 
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         rc = check_string_access_unsafe(tag, true);
         if(rc != PLCTAG_STATUS_OK) {
             tag->status = (int8_t)rc;
@@ -2891,7 +2891,7 @@ LIB_EXPORT int plc_tag_get_string_length(int32_t id, int string_start_offset) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         rc = check_string_access_unsafe(tag, true);
         if(rc != PLCTAG_STATUS_OK) {
             tag->status = (int8_t)rc;
@@ -2921,7 +2921,7 @@ LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offs
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         rc = check_string_access_unsafe(tag, true);
         if(rc != PLCTAG_STATUS_OK) {
             tag->status = (int8_t)rc;
@@ -2952,7 +2952,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         rc = check_raw_bytes_access_unsafe(tag, offset, buffer, buffer_size);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
@@ -2981,7 +2981,7 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
+    critical_block(&tag->api_mutex) {
         rc = check_raw_bytes_access_unsafe(tag, offset, buffer, buffer_size);
         if(rc != PLCTAG_STATUS_OK) { break; }
 

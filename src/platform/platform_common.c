@@ -53,7 +53,7 @@
 #include <utils/debug.h>
 
 
-void *mem_alloc(int size) {
+void *mem_alloc(int32_t size) {
     if(size <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Allocation size must be greater than zero bytes!");
         return NULL;
@@ -68,7 +68,7 @@ void mem_free(const void *mem) {
 }
 
 
-void *mem_realloc(void *orig, int size) {
+void *mem_realloc(void *orig, int32_t size) {
     if(size <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "New allocation size must be greater than zero bytes!");
         return NULL;
@@ -78,7 +78,7 @@ void *mem_realloc(void *orig, int size) {
 }
 
 
-void mem_set(void *dest, int c, int size) {
+void mem_set(void *dest, int c, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -94,7 +94,7 @@ void mem_set(void *dest, int c, int size) {
 }
 
 
-int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
+int mem_cmp(void *src1, int32_t src1_size, void *src2, int32_t src2_size) {
     if(!src1 || src1_size <= 0) {
         if(!src2 || src2_size <= 0) {
             /* both are NULL or zero length, but that is "equal" for our purposes. */
@@ -189,7 +189,7 @@ char *str_concat_impl(int num_args, ...) {
 }
 
 
-void mem_copy(void *dest, void *src, int size) {
+void mem_copy(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -212,7 +212,7 @@ void mem_copy(void *dest, void *src, int size) {
 }
 
 
-void mem_move(void *dest, void *src, int size) {
+void mem_move(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;

@@ -290,8 +290,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     uint8_t *data;                                                                      \
     tag_byte_order_t *byte_order;                                                       \
     cond_p tag_cond_wait;                                                               \
-    mutex_p api_mutex;                                                                  \
-    mutex_p ext_mutex;                                                                  \
+    mutex_t api_mutex;                                                                  \
+    mutex_t ext_mutex;                                                                  \
     tag_extended_callback_func callback;                                                \
     /* callback is set; written with it, read without the API mutex. */                \
     atomic_bool has_callback;                                                           \

@@ -86,7 +86,7 @@ plc_tag_p cip_connection_tag_create(attr attribs, const cip_connection_tag_ops_t
     if(conn) {
         args.conn = conn;
         args.watch = &conn->watch;
-        args.conn_mutex = conn->session_mutex;
+        args.conn_mutex = &conn->session_mutex;
     }
 
     pdebug(ops->debug_module, DEBUG_DETAIL, 0, "Done.");

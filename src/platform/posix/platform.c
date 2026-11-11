@@ -77,128 +77,67 @@
  ******************************* Mutexes ***********************************
  **************************************************************************/
 
-struct mutex_t {
-    pthread_mutex_t p_mutex;
-    int initialized;
-};
-
-int mutex_create(mutex_p *m) {
+int mutex_init(mutex_p m) {
     pthread_mutexattr_t mutex_attribs;
+    int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
-
-    if(*m) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Called with non-NULL pointer!"); }
-
-    *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
-
-    if(!*m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
+    if(!m) { return PLCTAG_ERR_NULL_PTR; }
 
     /* set up for recursive locking. */
     pthread_mutexattr_init(&mutex_attribs);
     pthread_mutexattr_settype(&mutex_attribs, PTHREAD_MUTEX_RECURSIVE);
 
-    if(pthread_mutex_init(&((*m)->p_mutex), &mutex_attribs)) {
-        pthread_mutexattr_destroy(&mutex_attribs);
-        mem_free(*m);
-        *m = NULL;
+    if(pthread_mutex_init(&(m->p_mutex), &mutex_attribs)) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error initializing mutex.");
-        return PLCTAG_ERR_MUTEX_INIT;
+        rc = PLCTAG_ERR_MUTEX_INIT;
+    } else {
+        m->initialized = true;
     }
-
-    (*m)->initialized = 1;
 
     pthread_mutexattr_destroy(&mutex_attribs);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done creating mutex %p.", *m);
-
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
-int mutex_lock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", m, func, line);
+void mutex_lock_impl(const char *func, int line, mutex_p m) {
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
+    /* a recursive mutex fails only on a bad mutex or too much recursion; both are bugs. */
     if(pthread_mutex_lock(&(m->p_mutex))) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "error locking mutex.");
-        return PLCTAG_ERR_MUTEX_LOCK;
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error locking mutex %p, called from %s:%d!", (void *)m, func, line);
     }
-
-    return PLCTAG_STATUS_OK;
 }
 
 
 int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    if(pthread_mutex_trylock(&(m->p_mutex))) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "error locking mutex.");
-        return PLCTAG_ERR_MUTEX_LOCK;
-    }
-
-    /*pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0,"Done.");*/
-
-    return PLCTAG_STATUS_OK;
+    return pthread_mutex_trylock(&(m->p_mutex)) ? PLCTAG_ERR_MUTEX_LOCK : PLCTAG_STATUS_OK;
 }
 
 
 int mutex_unlock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
+    /* a recursive mutex reports EPERM when this thread does not hold it. */
     if(pthread_mutex_unlock(&(m->p_mutex))) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "error unlocking mutex.");
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to unlock mutex %p, called from %s:%d!", (void *)m, func, line);
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
-
-    // pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_destroy(mutex_p *m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting to destroy mutex %p.", m);
+void mutex_destroy(mutex_p m) {
+    if(!m || !m->initialized) { return; }
 
-    if(!m || !*m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
+    if(pthread_mutex_destroy(&(m->p_mutex))) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error destroying mutex %p.", (void *)m);
     }
 
-    if(pthread_mutex_destroy(&((*m)->p_mutex))) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "error while attempting to destroy mutex.");
-        return PLCTAG_ERR_MUTEX_DESTROY;
-    }
-
-    mem_free(*m);
-
-    *m = NULL;
-
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    m->initialized = false;
 }
 
 
