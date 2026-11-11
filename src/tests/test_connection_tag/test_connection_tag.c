@@ -421,6 +421,28 @@ static int check_attribute_rules(void) {
     }
 
     if(a >= 0) {
+        uint8_t order[32];
+
+        /* an @connection tag has no byte order: its string and byte-order attributes must not crash (review C3). */
+        if(plc_tag_get_int_attribute(a, "str_is_counted", -7) != -7 || plc_tag_status(a) != PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "FAIL: str_is_counted on an @connection tag did not report PLCTAG_ERR_UNSUPPORTED.\n");
+            failed++;
+        }
+
+        rc = plc_tag_get_byte_array_attribute(a, "int32_byte_order", order, (int)sizeof(order));
+        if(rc != PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "FAIL: int32_byte_order on an @connection tag gave %s, expected PLCTAG_ERR_UNSUPPORTED.\n",
+                    plc_tag_decode_error(rc));
+            failed++;
+        }
+
+        rc = plc_tag_get_attribute_size(a, "int32_byte_order");
+        if(rc != PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "FAIL: the size of int32_byte_order on an @connection tag gave %s, expected PLCTAG_ERR_UNSUPPORTED.\n",
+                    plc_tag_decode_error(rc));
+            failed++;
+        }
+
         rc = plc_tag_set_int_attribute(a, "destroy_tag_after_idle_sec", 10);
         if(rc != PLCTAG_ERR_NOT_ALLOWED) {
             fprintf(stderr, "FAIL: setting destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_NOT_ALLOWED.\n",
