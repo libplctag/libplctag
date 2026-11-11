@@ -379,7 +379,7 @@ critical_block(tag->api_mutex) {
 - `spin_block` has the same shape and the same issue; `lock_acquire()` cannot fail today,
   but it should get the same form for consistency.
 
-### Option C (open): make the lock unable to fail
+### Option C (**Decided 2026-11-10**): make the lock unable to fail
 
 The `platform.h` mutex is a thin heap-allocated wrapper around the OS lock plus an
 `initialized` flag.  Drop the wrapper and embed the OS lock by value in its owner, which the
