@@ -172,6 +172,7 @@ REQUIRED_EXECUTABLES = [
     "test_raw_cip", "list_tags_logix", "get_identity", "test_connection_tag",
     "test_write_before_read", "thread_stress", "test_bit_write", "test_callback_destroy",
     "test_cip_ops", "test_timeout_next", "test_parallel_write", "test_auto_destroy", "test_find_or_create_tag",
+    "test_tag_listing_reread",
 ]
 
 
@@ -612,6 +613,9 @@ def build_logix_matrix() -> list[Test]:
                            f"--tag=protocol=ab_eip&gateway={gw}&path={path}&plc=generic&name=@identity&debug=3"]))
         tests.append(test(f"{target.label}: tag listing and UDT definitions",
                           [exe("list_tags_logix"), gw, path]))
+        # Review defect R1: a second @tags read on the same handle must describe the same listing.
+        tests.append(test(f"{target.label}: tag listing read twice on one handle",
+                          [exe("test_tag_listing_reread"), f"--tag={base}&name=@tags"]))
         # Raw CIP is what exercises the library's own EIP and CPF framing.  List Tag Instances
         # names no tag, so it runs everywhere; both messaging modes, because the framing is
         # the only thing that differs between them.

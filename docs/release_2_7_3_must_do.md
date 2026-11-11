@@ -31,7 +31,7 @@ Consolidated 2026-11-08 from `ephemeral_docs/deferred_fixes.md` (DF),
 | 13 | Allocation counting by interposing | SP 5 | macOS and Linux | To do |
 | 14 | Re-run Linux fairness and Modbus scale matrices, deep idle blocked | PF | User runs | To run |
 | 15 | Final performance numbers | PF | Linux machine | To run |
-| 16 | Tag list insert and remove cost | PF | Array, list and treap trialled | Treap leads; not committed |
+| 16 | Tag list insert and remove cost | PF | Array, list and treap trialled | Treap committed (c4753f13) |
 | 17 | Small first packet of an async cycle | PF | Deferred: only a tight poll loop shows it | Deferred 2026-11-08 |
 | 18 | Backoff unit tests on Windows and ARM in CI | DF | Not reviewed | Check the next CI run |
 

@@ -307,7 +307,7 @@ REQUIRED_EXECUTABLES = [
     "test_connection_tag_late_join", "test_fairness", "test_auto_sync", "test_callback",
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
-    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_ab_server_framing",
+    "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_shutdown_drain", "test_ab_server_framing",
     "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
@@ -666,6 +666,18 @@ def build_manifest() -> Manifest:
                f"--tag=protocol=ab_eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"], F)
     sec.test("library shutdown and restart",
               [exe("test_shutdown_restart"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray"], F)
+    # Every reply, Forward Close included, is delayed 100 ms (under the 150 ms Forward Close
+    # reply timeout).  60 connections closed one after another take about 6 s, past the 5 s
+    # teardown timeout; closed in parallel by their handlers, about one delay.
+    shutdown_drain_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--plc=ControlLogix", "--port={PORT}", "--path=1,0", "--delay-ms=100",
+                        "--tag=TestDINT:DINT[1]"],
+        startup_wait_s=1,
+    )
+    sec.test("shutdown drains 60 slow connections in parallel and leaves no threads",
+              [exe("test_shutdown_drain"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&elem_count=1&name=TestDINT",
+               "--conns=60", "--max-ms=3000"], T, server=shutdown_drain_server)
     sec.test("connection tag connection state transitions (ControlLogix)",
               [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&connection_inactivity_timeout_ms=5000&name=@connection"], T)
     # The status must be the connection's own and not only what callbacks were told, so an app
