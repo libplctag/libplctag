@@ -149,21 +149,20 @@ void destroy_modules(void) {
      * Teardown is deliberately NOT the reverse of lib_components[], so it is written out
      * rather than driven from that table.
      *
-     * The device modules do unwind in reverse.  refcount and the tag registry do not:
-     * refcount starts BEFORE the registry and must also stop BEFORE it, because draining
-     * the deferred destructors runs tag teardown that forgets reuse keys in the map that
-     * tag_registry_teardown() then frees.  That pair is not a stack, and pretending
-     * otherwise in a table would be wrong rather than tidy.
+     * The order does the waiting (review U7).  refcount_teardown() runs every deferred
+     * destructor first; that is the only wait, and it has no timeout.  Each connection
+     * destructor joins its handler, which has already stopped on lib_active and closed its
+     * own connection.  Only then do the modules free their lists and locks, which those
+     * destructors use.  The registry goes last: tag destructors forget reuse keys in its map.
      */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
+    refcount_teardown();
+
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
 
-    /* the connection handler threads belong to the connections; this waits for them. */
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down CIP connections.");
     cip_conn_teardown();
-
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
-    refcount_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down tag registry.");
     tag_registry_teardown();
