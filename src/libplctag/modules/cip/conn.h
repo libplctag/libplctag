@@ -162,9 +162,6 @@
 #define RETRY_WAIT_MAX_MS (SESSION_DEFAULT_TIMEOUT)
 
 
-/* how long teardown waits for connections and then handler threads to finish */
-#define SESSION_TEARDOWN_TIMEOUT_MS (5000)
-
 
 
 
@@ -282,9 +279,6 @@ struct cip_tag_t;
 typedef struct {
     mutex_p mutex;
     vector_p conns;
-
-    /* handler threads still running for this list, so teardown can wait them out */
-    atomic_int32_t handler_count;
 } cip_conn_list_t;
 
 
@@ -430,6 +424,7 @@ typedef struct cip_conn_t {
 
     thread_p handler_thread;
     atomic_int32_t terminating;
+    bool closing; /* handler thread only: its final Forward Close, which must not see terminating */
     mutex_p session_mutex;
 
     /* connection status and event ring - what connection tags observe */

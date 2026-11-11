@@ -1048,52 +1048,28 @@ static void session_destroy(void *conn_arg) {
     /* wake the handler in case it is waiting */
     if(conn->sock) { socket_wake(conn->sock); }
 
-    /* get rid of the handler thread. */
+    /* the handler closes the connection itself on its way out (session_handler). */
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Destroying session thread.");
     if(conn->handler_thread) {
-        /* this cannot be guarded by the mutex since the conn thread also locks it. */
         thread_join(conn->handler_thread);
-
-        /* FIXME - is this critical block needed? */
-        critical_block(conn->session_mutex) {
-            thread_destroy(&(conn->handler_thread));
-            conn->handler_thread = NULL;
-        }
+        thread_destroy(&(conn->handler_thread));
+        conn->handler_thread = NULL;
     }
 
     /* the handler counts packets until it exits. */
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Session sent %" PRId64 " packets.", conn->packet_count);
 
+    /* no thread and no reference is left, so nothing here needs the session mutex. */
 
-    /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
-    critical_block(conn->session_mutex) {
-        /* close off the connection if is one. This helps the PLC clean up. */
-        if(conn->targ_connection_id) {
-            /*
-             * we do not want the internal loop to immediately
-             * return, so set the flag like we are not terminating.
-             * There is still a timeout that applies.
-             */
-            atomic_set_int32(&conn->terminating, 0);
-            perform_forward_close(conn);
-            atomic_set_int32(&conn->terminating, 1);
-        }
+    /* every tag holds a reference to its connection, so no tag is left on the list. */
+    tag_driver_destroy(&conn->driver);
 
-        /* try to be nice and un-register the conn */
-        if(conn->session_handle) { session_unregister(conn); }
-
-        if(conn->sock) { session_close_socket(conn); }
-
-        /* every tag holds a reference to its connection, so no tag is left on the list. */
-        tag_driver_destroy(&conn->driver);
-
-        if(conn->staging) {
-            mem_free(conn->staging);
-            conn->staging = NULL;
-        }
-
-        conn_watch_destroy(&conn->watch);
+    if(conn->staging) {
+        mem_free(conn->staging);
+        conn->staging = NULL;
     }
+
+    conn_watch_destroy(&conn->watch);
 
     /* the handler has exited, so nothing can wake the socket any more. */
     pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Destroying session socket.");
@@ -1829,7 +1805,7 @@ static void session_wait(cip_conn_p conn, int timeout_ms) {
  * while a request is still being written is not a reply to it, so the protocol is out of step.
  */
 static int wait_for_socket(cip_conn_p conn, int event, int64_t timeout_time) {
-    while(!atomic_get_int32(&conn->terminating)) {
+    while(conn->closing || !atomic_get_int32(&conn->terminating)) {
         int64_t time_left = timeout_time - time_ms();
         int sock_events = SOCK_EVENT_NONE;
 
@@ -1883,9 +1859,6 @@ static THREAD_FUNC(session_handler) {
     backoff_init(&retry_backoff, RETRY_WAIT_INITIAL_MS, RETRY_WAIT_MAX_MS);
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting thread for session %p", conn);
-
-    /* Increment the count of active conn handlers */
-    atomic_add_int32(&(conn->owner_list->handler_count), 1);
 
     while(!atomic_get_int32(&conn->terminating) && atomic_get_bool(&lib_active)) {
         now = time_ms();
@@ -2365,8 +2338,14 @@ static THREAD_FUNC(session_handler) {
         }
     }
 
-    /* Decrement the count of active conn handlers */
-    atomic_add_int32(&(conn->owner_list->handler_count), -1);
+    /*
+     * Close the connection here, on the way out.  At shutdown every handler does this at the
+     * same time; in session_destroy() they ran one after another on the cleanup thread (P6).
+     * The socket waits ignore terminating while closing and keep their own timeouts.
+     */
+    conn->closing = true;
+    if(conn->targ_connection_id) { perform_forward_close(conn); }
+    session_close_socket(conn);
 
     THREAD_RETURN(0);
 }
@@ -2791,77 +2770,22 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *fam
  * freed pages to the OS immediately turns any use-after-free here into a
  * SIGSEGV rather than something harmless.
  */
+/*
+ * Runs after refcount_teardown() has run every destructor, so no connection is left to use the
+ * list.  Handlers stop on lib_active and close their own connections, so there is nothing to
+ * wait for.
+ */
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module) {
-    int64_t start_time = 0;
-    int active_count = 0;
-
     pdebug(debug_module, DEBUG_INFO, 0, "Starting.");
 
-    /* tell every connection to stop, and wake its handler so it notices now */
-    pdebug(debug_module, DEBUG_INFO, 0, "Marking all open connections for termination.");
-
-    if(list->conns && list->mutex) {
-        critical_block(list->mutex) {
-            int num_conns = vector_length(list->conns);
-
-            for(int i = 0; i < num_conns; i++) {
-                cip_conn_p conn = vector_get(list->conns, i);
-
-                if(conn) {
-                    atomic_set_int32(&conn->terminating, 1);
-                    if(conn->sock) { socket_wake(conn->sock); }
-                }
-            }
+    if(list->conns) {
+        if(vector_length(list->conns) > 0) {
+            pdebug(debug_module, DEBUG_WARN, 0, "%d connections are still referenced at teardown!", vector_length(list->conns));
         }
-    }
-
-    if(list->conns && list->mutex) {
-        int remaining_conns = 0;
-
-        pdebug(debug_module, DEBUG_DETAIL, 0, "Waiting for connections to terminate.");
-
-        start_time = time_ms();
-
-        while(1) {
-            critical_block(list->mutex) { remaining_conns = vector_length(list->conns); }
-
-            if(remaining_conns == 0) { break; }
-
-            if(time_ms() - start_time >= SESSION_TEARDOWN_TIMEOUT_MS) {
-                pdebug(debug_module, DEBUG_WARN, 0, "Timeout waiting for %d connections to terminate.", remaining_conns);
-                break;
-            }
-
-            sleep_ms(10);
-        }
-
-        if(remaining_conns == 0) { pdebug(debug_module, DEBUG_DETAIL, 0, "Connections all terminated."); }
 
         vector_destroy(list->conns);
         list->conns = NULL;
     }
-
-    pdebug(debug_module, DEBUG_DETAIL, 0, "Waiting for handler threads to complete.");
-
-    start_time = time_ms();
-
-    while((active_count = atomic_get_int32(&(list->handler_count))) > 0) {
-        int64_t elapsed = time_ms() - start_time;
-
-        if(elapsed >= SESSION_TEARDOWN_TIMEOUT_MS) {
-            pdebug(debug_module, DEBUG_WARN, 0, "Timeout waiting for %d handler threads to complete.", active_count);
-            break;
-        }
-
-        pdebug(debug_module, DEBUG_DETAIL, 0, "Waiting for %d handler threads to complete. Elapsed: %" PRId64 "ms",
-               active_count, elapsed);
-
-        sleep_ms(20);
-    }
-
-    if(active_count == 0) { pdebug(debug_module, DEBUG_INFO, 0, "All handler threads completed."); }
-
-    pdebug(debug_module, DEBUG_DETAIL, 0, "Destroying connection list mutex.");
 
     if(list->mutex) {
         mutex_destroy(&(list->mutex));
