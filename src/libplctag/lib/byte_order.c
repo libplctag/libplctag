@@ -91,14 +91,19 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             return PLCTAG_ERR_NO_MEM;
         }
 
+        tag_byte_order_t *old_byte_order = tag->byte_order;
+
         /* copy the defaults. */
-        *new_byte_order = *(tag->byte_order);
+        *new_byte_order = *old_byte_order;
 
         /* replace the old byte order. */
         tag->byte_order = new_byte_order;
 
         /* mark it as allocated so that we free it later. */
         tag->byte_order->is_allocated = 1;
+
+        /* a family's setup may already have given the tag an order of its own. */
+        if(old_byte_order->is_allocated) { mem_free(old_byte_order); }
 
         /* 16-bit ints. */
         byte_order_str = attr_get_str(attribs, "int16_byte_order", NULL);
