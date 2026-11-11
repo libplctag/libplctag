@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [release, prerelease]
 
+# Read-only by default; only create_release writes.
+permissions:
+  contents: read
+
 jobs:
   ubuntu_matrix:
     runs-on: ${{ matrix.runner }}
@@ -1562,94 +1566,6 @@ jobs:
           path: ${{ env.BUILD }}/release_packages/
           if-no-files-found: warn
 
-  debug_context:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Debug GitHub context
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          echo "Event name: ${{ github.event_name }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "Ref name: ${{ github.ref_name }}"
-          echo "Base ref: ${{ github.base_ref }}"
-          echo "Head ref: ${{ github.head_ref }}"
-          echo "PR Action: ${{ github.event.action }}"
-          echo "PR Number: ${{ github.event.number }}"
-          echo "PR Merged: ${{ github.event.pull_request.merged }}"
-          echo "PR Title (direct): $PR_TITLE"
-          echo "PR Body (direct): $PR_BODY"
-          echo "Repository: ${{ github.repository }}"
-          echo "SHA: ${{ github.sha }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Workflow: ${{ github.workflow }}"
-          echo "Job: ${{ github.job }}"
-          echo "Run ID: ${{ github.run_id }}"
-          echo "Run Number: ${{ github.run_number }}"
-          echo "---"
-          echo "Base ref condition: ${{ github.base_ref == 'release' }}"
-          echo "Event condition: ${{ github.event_name == 'pull_request' }}"
-          echo "Action condition: ${{ github.event.action == 'closed' }}"
-          echo "Merged condition: ${{ github.event.pull_request.merged == true }}"
-          echo "Push to release condition: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' }}"
-          echo "---"
-          echo "Current release condition: ${{ github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true }}"
-          echo "Alternative push condition: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' }}"
-          echo "Combined condition: ${{ (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release') }}"
-
-      - name: Test PR lookup logic
-        env:
-          GH_PR_TITLE: ${{ github.event.pull_request.title }}
-          GH_PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          echo "=== Testing PR lookup logic ==="
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "Using direct PR context"
-            PR_TITLE="$GH_PR_TITLE"
-            PR_BODY="$GH_PR_BODY"
-          else
-            echo "Using API lookup for push event"
-            echo "Finding merged PR for commit ${{ github.sha }}"
-
-            # Search for PRs that were merged with this commit
-            PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
-
-            echo "API response (first 500 chars):"
-            echo "$PR_DATA" | head -c 500
-            echo ""
-
-            echo "Debugging merge commit SHAs:"
-            echo "$PR_DATA" | jq -r '.[] | "PR #\(.number): merge_commit_sha=\(.merge_commit_sha // "null")"'
-            echo "Looking for SHA: ${{ github.sha }}"
-
-            # Find the PR that was merged with this SHA
-            PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
-
-            if [ -n "$PR_INFO" ] && [ "$PR_INFO" != "null" ]; then
-              PR_TITLE=$(echo "$PR_INFO" | base64 -d | jq -r '.title')
-              PR_BODY=$(echo "$PR_INFO" | base64 -d | jq -r '.body // ""')
-              echo "Found merged PR: $PR_TITLE"
-            else
-              echo "No merged PR found, using commit message"
-              PR_TITLE=$(git log -1 --pretty=format:"%s" ${{ github.sha }})
-              PR_BODY=$(git log -1 --pretty=format:"%b" ${{ github.sha }})
-              echo "Commit title: $PR_TITLE"
-            fi
-          fi
-
-          echo "=== Final Results ==="
-          echo "PR Title: $PR_TITLE"
-          echo "PR Body: $PR_BODY"
-
   create_release:
     needs:
       [
@@ -1665,7 +1581,9 @@ jobs:
       ]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    permissions:
+      contents: write
 
     env:
       VERSION: ""
@@ -1692,46 +1610,6 @@ jobs:
           VERSION="${MAJOR}.${MINOR}.${PATCH}"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "Detected version: ${VERSION}"
-
-      - name: Get PR details
-        id: get_pr_details
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Direct PR event - use the PR context
-            PR_TITLE="${{ github.event.pull_request.title }}"
-            PR_BODY="${{ github.event.pull_request.body }}"
-          else
-            # Push event - find the merged PR via API
-            echo "Finding merged PR for commit ${{ github.sha }}"
-
-            # Search for PRs that were merged with this commit
-            PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
-
-            # Find the PR that was merged with this SHA
-            PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
-
-            if [ -n "$PR_INFO" ] && [ "$PR_INFO" != "null" ]; then
-              PR_TITLE=$(echo "$PR_INFO" | base64 -d | jq -r '.title')
-              PR_BODY=$(echo "$PR_INFO" | base64 -d | jq -r '.body // ""')
-              echo "Found merged PR: $PR_TITLE"
-            else
-              # Fallback to commit message if no PR found
-              echo "No merged PR found, using commit message"
-              PR_TITLE=$(git log -1 --pretty=format:"%s" ${{ github.sha }})
-              PR_BODY=$(git log -1 --pretty=format:"%b" ${{ github.sha }})
-            fi
-          fi
-
-          # Set separate outputs for title and body
-          echo "pr_title<<EOF" >> $GITHUB_OUTPUT
-          echo "$PR_TITLE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          echo "pr_body<<EOF" >> $GITHUB_OUTPUT
-          echo "$PR_BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
         uses: actions/download-artifact@v5
@@ -1801,19 +1679,23 @@ jobs:
           ls -lh ./final_release_assets/
           echo "Total files: $(ls -1 ./final_release_assets/ | wc -l)"
 
+      # PR title and body are untrusted: they reach the shell only as variables, never as script text.
       - name: Create Release with GitHub CLI
-        run: |
-          # Save PR body to file to avoid shell escaping issues
-          cat > /tmp/release_body.md <<'EOF'
-          ${{ steps.get_pr_details.outputs.pr_body }}
-          EOF
-
-          # Create release using gh CLI with --clobber flag
-          # This will overwrite any existing release and assets
-          gh release create "v${{ env.VERSION }}" \
-            --title "${{ steps.get_pr_details.outputs.pr_title }}" \
-            --notes-file /tmp/release_body.md \
-            --latest \
-            ./final_release_assets/*
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          PR_JSON=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[0] // empty')
+          if [ -n "$PR_JSON" ]; then
+            TITLE=$(jq -r '.title' <<<"$PR_JSON")
+            jq -r '.body // ""' <<<"$PR_JSON" > "$RUNNER_TEMP/notes.md"
+          else
+            TITLE=$(git log -1 --pretty=%s "$SHA")
+            git log -1 --pretty=%b "$SHA" > "$RUNNER_TEMP/notes.md"
+          fi
+
+          gh release create "v${{ env.VERSION }}" \
+            --title "$TITLE" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest \
+            ./final_release_assets/*
