@@ -57,7 +57,7 @@
 #include "mutex.h"
 #include "plc.h"
 #include "tcp_server.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/byte_slice.h>
 #include "udp_server.h"
 #include "utils.h"

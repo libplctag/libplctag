@@ -53,7 +53,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <netinet/in.h>
 #include <platform.h>
 #include <stdbool.h>

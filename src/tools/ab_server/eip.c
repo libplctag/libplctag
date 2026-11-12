@@ -39,7 +39,7 @@
 #include "fault.h"
 #include "utils.h"
 #include "log.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/byte_slice.h>
 #include <utils/random_utils.h>
 #include <stdbool.h>

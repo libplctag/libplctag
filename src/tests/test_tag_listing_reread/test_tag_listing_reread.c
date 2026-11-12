@@ -45,7 +45,7 @@
  */
 
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

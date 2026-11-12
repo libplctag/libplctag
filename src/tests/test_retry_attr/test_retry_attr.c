@@ -45,7 +45,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/conn_timeouts.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -43,7 +43,7 @@
 
 #include "mini_mock.h"
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <libplctag/modules/cip/error_codes.h>
 #include <string.h>
 

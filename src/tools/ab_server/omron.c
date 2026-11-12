@@ -41,7 +41,7 @@
 #include "log.h"
 #include "mutex.h"
 #include "plc.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/byte_slice.h>
 #include <stdbool.h>
 #include <stddef.h>

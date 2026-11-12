@@ -41,7 +41,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/tag_registry.h>
 #include <platform.h>

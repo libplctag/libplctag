@@ -47,7 +47,7 @@
 #endif
 
 #include <stdlib.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include "thread.h"
 #include "log.h"
 

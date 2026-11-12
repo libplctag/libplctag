@@ -48,7 +48,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 
 #define REQUIRED_VERSION 2, 6, 0

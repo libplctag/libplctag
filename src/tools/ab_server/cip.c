@@ -39,7 +39,7 @@
 #include "plc.h"
 #include "utils.h"
 #include "log.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/byte_slice.h>
 #include <inttypes.h>
 #include <stdint.h>

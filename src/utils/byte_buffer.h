@@ -50,7 +50,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 
 

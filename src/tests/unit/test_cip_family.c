@@ -41,7 +41,7 @@
 
 #include "mini_mock.h"
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/family.h>

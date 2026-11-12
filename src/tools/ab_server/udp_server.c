@@ -38,7 +38,7 @@
 #include "socket.h"
 #include <utils/byte_slice.h>
 #include "thread.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

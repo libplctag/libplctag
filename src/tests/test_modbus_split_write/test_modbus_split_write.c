@@ -56,7 +56,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

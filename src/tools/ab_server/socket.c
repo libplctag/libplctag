@@ -58,7 +58,7 @@
 
 #include "socket.h"
 #include "err.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/byte_slice.h>
 #include <stdbool.h>
 #include "utils.h"
