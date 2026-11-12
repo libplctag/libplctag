@@ -47,7 +47,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -80,7 +80,7 @@
  */
 #define DEFAULT_SERVER_PORT (44900)
 
-#define TAG_ATTRIBS_FMT \
+#define TAG_ATTRIBS_FMT                                                     \
     "protocol=ab-eip&gateway=127.0.0.1:%d&path=18,127.0.0.1&plc=omron-njnx" \
     "&elem_count=1&name=TestDINTArray[0]"
 
@@ -91,19 +91,19 @@
  * parallel test runner: it collaterally SIGTERM'd every ab_server on the
  * host). */
 #ifdef WINDOWS_PLATFORM
-#    define SERVER_START \
+#    define SERVER_START                                                                                    \
         "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
         "'--plc=Omron','--port=%d','--tag=TestDINTArray:DINT[10]').Id\" > ab_server_%d.pid"
 #    define SERVER_STOP "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
 #else
-#    define SERVER_START \
+#    define SERVER_START                                                                                               \
         "%s --plc=Omron --port=%d --tag=TestDINTArray:DINT[10] > /tmp/omron_destroy_test_server.log 2>&1 & echo $! > " \
         "/tmp/ab_server_%d.pid"
 #    define SERVER_STOP "kill -TERM $(cat /tmp/ab_server_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_%d.pid"
 #endif
 
-#define log(...)                          \
-    compat_fprintf(stderr, __VA_ARGS__);  \
+#define log(...)                         \
+    compat_fprintf(stderr, __VA_ARGS__); \
     fflush(stderr)
 
 /* State shared between main and the destroy thread. */
@@ -143,12 +143,9 @@ static void start_server(const char *ab_server_path, int test_pid, int server_po
         }
 
         /* range-checked against 1..65535 in main() before we get here. */
-        if(compat_wait_for_listener("127.0.0.1", (uint16_t)server_port, 30000)) {
-            return;
-        }
+        if(compat_wait_for_listener("127.0.0.1", (uint16_t)server_port, 30000)) { return; }
 
-        log("Warning: ab_server did not start listening on port %d in time%s.\n", server_port,
-            attempt == 0 ? ", retrying" : "");
+        log("Warning: ab_server did not start listening on port %d in time%s.\n", server_port, attempt == 0 ? ", retrying" : "");
         stop_server(test_pid);
     }
 

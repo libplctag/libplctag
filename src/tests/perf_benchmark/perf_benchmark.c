@@ -111,7 +111,7 @@
 #include "compat_utils.h"
 #include "stats.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -182,8 +182,8 @@ static int64_t get_peak_rss_kb(void);
 static size_t hist_index(int64_t v);
 static int64_t hist_value(size_t idx);
 static void record(tag_stats_t *s, int64_t us, int64_t t);
-static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s,
-                         double *min_max, double *cv);
+static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s, double *min_max,
+                         double *cv);
 static int64_t percentile(const uint64_t *hist, uint64_t total, double p);
 static int32_t start_op(int32_t tag, bool is_write, int32_t timeout_ms);
 static void auto_callback(int32_t tag_id, int event, int status, void *userdata);
@@ -334,8 +334,8 @@ static void record(tag_stats_t *s, int64_t us, int64_t t) {
  * num_units rows of MAX_WINDOWS one-second counts, summed window_s at a time.  Leaves 1.0 and 0.0
  * with fewer than two units.
  */
-static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s,
-                         double *min_max, double *cv) {
+static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s, double *min_max,
+                         double *cv) {
     int *counts = NULL;
     stats_summary_t summary;
 
@@ -350,7 +350,9 @@ static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t
     for(int32_t w = 0; w + window_s <= num_windows || (w == 0 && num_windows > 0); w += window_s) {
         for(int32_t u = 0; u < num_units; u++) {
             int64_t n = 0;
-            for(int32_t k = w; k < w + window_s && k < num_windows; k++) { n += unit_windows[(size_t)u * MAX_WINDOWS + (size_t)k]; }
+            for(int32_t k = w; k < w + window_s && k < num_windows; k++) {
+                n += unit_windows[(size_t)u * MAX_WINDOWS + (size_t)k];
+            }
             counts[u] = (int)n;
         }
 
@@ -483,8 +485,8 @@ static void *thread_func(void *arg) {
                 record(&td->stats[idx], t - t0, t);
             } else if(!compat_atomic_load_int32(&done)) {
                 td->stats[idx].errors++;
-                fprintf(stderr, "Thread %" PRId32 ": error %s on tag idx %" PRId32 "\n", td->thread_id,
-                        plc_tag_decode_error(rc), idx);
+                fprintf(stderr, "Thread %" PRId32 ": error %s on tag idx %" PRId32 "\n", td->thread_id, plc_tag_decode_error(rc),
+                        idx);
             }
 
             idx = (idx + 1) % td->num_tags;
@@ -603,8 +605,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    if(mode < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || auto_ms <= 0
-       || num_bases == 0 || base_tag_paths[0][0] == '\0') {
+    if(mode < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || auto_ms <= 0 || num_bases == 0
+       || base_tag_paths[0][0] == '\0') {
         fprintf(stderr, "Error: --mode, --groups, --threads, --tags, and --tag are required and must be valid.\n");
         usage(argv[0]);
     }
@@ -634,8 +636,9 @@ int main(int argc, char **argv) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
     compat_set_interrupt_handler(handle_interrupt);
 
-    fprintf(stderr, "perf_benchmark: mode=%s op=%s groups=%" PRId32 " threads=%" PRId32 " tags=%" PRId32 " duration=%" PRId32
-                    "s tag=%s\n",
+    fprintf(stderr,
+            "perf_benchmark: mode=%s op=%s groups=%" PRId32 " threads=%" PRId32 " tags=%" PRId32 " duration=%" PRId32
+            "s tag=%s\n",
             mode_names[mode], is_write ? "write" : "read", num_groups, num_threads, num_tags, duration_s, base_tag_paths[0]);
 
     /* Touch the stats now so their pages count in the RSS baseline, not the growth. */
@@ -879,13 +882,17 @@ int main(int argc, char **argv) {
             /* auto: one tag per unit; sync/async: the thread's slice. */
             int32_t count = (mode == MODE_AUTO) ? 1 : tdata[u].num_tags;
             for(int32_t j = offset; j < offset + count; j++) {
-                for(int32_t w = 0; w < num_windows; w++) { unit_windows[(size_t)u * MAX_WINDOWS + (size_t)w] += stats[j].windows[w]; }
+                for(int32_t w = 0; w < num_windows; w++) {
+                    unit_windows[(size_t)u * MAX_WINDOWS + (size_t)w] += stats[j].windows[w];
+                }
             }
             offset += count;
         }
 
         for(int32_t i = 0; i < num_tags; i++) {
-            for(int32_t w = 0; w < num_windows; w++) { group_windows[(size_t)tag_group[i] * MAX_WINDOWS + (size_t)w] += stats[i].windows[w]; }
+            for(int32_t w = 0; w < num_windows; w++) {
+                group_windows[(size_t)tag_group[i] * MAX_WINDOWS + (size_t)w] += stats[i].windows[w];
+            }
         }
 
         worst_window(unit_windows, num_units, num_windows, window_s, &window_min_max, &window_cv);
@@ -921,11 +928,12 @@ int main(int argc, char **argv) {
     int64_t p99 = percentile(total_hist, hist_total, 0.99);
 
     printf("%s,%" PRId32 ",%" PRId32 ",%" PRId32 ",%.2f,%" PRId64 ",%" PRId64 ",%.1f,%.2f,%.2f,%.4f,%s,%" PRId64 ",%" PRId64
-           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%.2f,%.2f,%" PRId32 ",%.4f,%.2f,%" PRId64 "\n",
-           mode_names[mode], num_groups, num_threads, num_tags, tags_per_thread, duration_ms, total_ops, ops_per_sec, cpu_load_pct,
-           fairness_cv, fairness_min_max, is_write ? "write" : "read", total_errors, p50, p95, p99, max_us, cpu_us_per_op,
-           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_cv, tag_std_dev, window_s,
-           mutex_waits_per_op, mutex_wait_us_per_op, peak_rss_kb);
+           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%.2f,%.2f,%" PRId32
+           ",%.4f,%.2f,%" PRId64 "\n",
+           mode_names[mode], num_groups, num_threads, num_tags, tags_per_thread, duration_ms, total_ops, ops_per_sec,
+           cpu_load_pct, fairness_cv, fairness_min_max, is_write ? "write" : "read", total_errors, p50, p95, p99, max_us,
+           cpu_us_per_op, rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_cv, tag_std_dev,
+           window_s, mutex_waits_per_op, mutex_wait_us_per_op, peak_rss_kb);
     fflush(stdout);
 
     fprintf(stderr, "\n--- Results ---\n");
@@ -933,7 +941,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Total ops:      %" PRId64 "\n", total_ops);
     fprintf(stderr, "Total errors:   %" PRId64 "\n", total_errors);
     fprintf(stderr, "Ops/sec:        %.1f\n", ops_per_sec);
-    fprintf(stderr, "Latency us:     p50 %" PRId64 "  p95 %" PRId64 "  p99 %" PRId64 "  max %" PRId64 "\n", p50, p95, p99, max_us);
+    fprintf(stderr, "Latency us:     p50 %" PRId64 "  p95 %" PRId64 "  p99 %" PRId64 "  max %" PRId64 "\n", p50, p95, p99,
+            max_us);
     fprintf(stderr, "CPU load:       %.2f%%  (%.2f us/op)\n", cpu_load_pct, cpu_us_per_op);
     fprintf(stderr, "RSS growth:     %" PRId64 " KB  (peak %" PRId64 " KB)\n", rss_growth_kb, peak_rss_kb);
     if(have_mutex_wait) {
@@ -942,8 +951,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Create/prime:   %" PRId64 " / %" PRId64 " ms\n", create_ms, prime_ms);
     fprintf(stderr, "Fairness CV:    %.2f%%\n", fairness_cv);
     fprintf(stderr, "Fairness ratio: %.4f\n", fairness_min_max);
-    fprintf(stderr, "Worst window:   min/max %.4f  CV %.2f%%  (%" PRId32 " s windows of %" PRId32 " s)\n", window_min_max, window_cv,
-            window_s, num_windows);
+    fprintf(stderr, "Worst window:   min/max %.4f  CV %.2f%%  (%" PRId32 " s windows of %" PRId32 " s)\n", window_min_max,
+            window_cv, window_s, num_windows);
     fprintf(stderr, "Worst conn win: min/max %.4f  CV %.2f%%\n", conn_window_min_max, conn_window_cv);
     fprintf(stderr, "Tag ops:        CV %.2f%%  std dev %.2f  (worst connection)\n", tag_cv, tag_std_dev);
     if(have_summary) { stats_print_summary(stderr, &summary); }

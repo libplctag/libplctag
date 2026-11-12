@@ -36,7 +36,7 @@
 #include "compat_utils.h"
 #include <errno.h>
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -100,7 +100,8 @@ static const char *g_port = "44818";
 /* Capture the backgrounded server's PID into a port-specific pidfile so
  * stop_server() can kill exactly this instance -- pkill-by-name would also kill a
  * concurrently-running instance on a different port. */
-#    define SERVER_START "%s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] --debug > ab_server_%s.log 2>&1 & echo $! > ab_server_%s.pid"
+#    define SERVER_START \
+        "%s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] --debug > ab_server_%s.log 2>&1 & echo $! > ab_server_%s.pid"
 #    define SERVER_STOP "kill -TERM $(cat ab_server_%s.pid 2>/dev/null) 2>/dev/null; rm -f ab_server_%s.pid"
 #endif
 

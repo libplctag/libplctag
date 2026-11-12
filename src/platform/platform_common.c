@@ -49,7 +49,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/debug.h>
 
 

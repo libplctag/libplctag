@@ -59,7 +59,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -219,15 +219,15 @@ static void *server_thread(void *arg) {
         reply[42] = 0; /* general status: success. */
         reply[43] = 0; /* no extended status. */
 
-        put_u32(reply + 44, 0x0A0A0A0A);      /* originator to target connection ID. */
-        memcpy(reply + 48, request + 32, 4);  /* target to originator ID: echo what the client asked for. */
-        put_u16(reply + 52, 1);               /* connection serial number. */
-        put_u16(reply + 54, 0x00F6);          /* originator vendor ID. */
-        put_u32(reply + 56, 1);               /* originator serial number. */
-        put_u32(reply + 60, 1000000);         /* originator to target actual packet interval. */
-        put_u32(reply + 64, 1000000);         /* target to originator actual packet interval. */
-        reply[68] = 0;                        /* application reply data size. */
-        reply[69] = 0;                        /* reserved. */
+        put_u32(reply + 44, 0x0A0A0A0A);     /* originator to target connection ID. */
+        memcpy(reply + 48, request + 32, 4); /* target to originator ID: echo what the client asked for. */
+        put_u16(reply + 52, 1);              /* connection serial number. */
+        put_u16(reply + 54, 0x00F6);         /* originator vendor ID. */
+        put_u32(reply + 56, 1);              /* originator serial number. */
+        put_u32(reply + 60, 1000000);        /* originator to target actual packet interval. */
+        put_u32(reply + 64, 1000000);        /* target to originator actual packet interval. */
+        reply[68] = 0;                       /* application reply data size. */
+        reply[69] = 0;                       /* reserved. */
 
         if(write(conn_fd, reply, 70) != 70) {
             close(conn_fd);
@@ -246,7 +246,7 @@ static void *server_thread(void *arg) {
         }
 
         {
-            struct timespec hold = { 6, 0 }; /* outlive the client's 5 s create budget. */
+            struct timespec hold = {6, 0}; /* outlive the client's 5 s create budget. */
             nanosleep(&hold, NULL);
         }
 
@@ -437,8 +437,8 @@ static void test_peer_close_at_forward_open_terminates(void **state) {
     case_outcome_t out;
 
     assert_int_equal(run_case(true, &out), 0);
-    assert_int_equal(out.create_rc < 0, 1);                     /* an error, not a hold-to-timeout */
-    assert_int_equal(out.burn_ms < 500, 1);                     /* and no pinned core (the red witness) */
+    assert_int_equal(out.create_rc < 0, 1);                           /* an error, not a hold-to-timeout */
+    assert_int_equal(out.burn_ms < 500, 1);                           /* and no pinned core (the red witness) */
     assert_int_equal(out.server_result, SERVER_RESULT_CLIENT_CLOSED); /* clean hang-up */
 }
 

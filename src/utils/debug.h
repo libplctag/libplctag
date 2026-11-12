@@ -42,7 +42,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/atomic_utils.h>
 
 /* Generated debug constants - parsed from libplctag.h at build time */

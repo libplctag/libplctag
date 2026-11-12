@@ -32,13 +32,12 @@
  ***************************************************************************/
 
 #include <libplctag/lib/init.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <libplctag/lib/tag_registry.h>
-#include <libplctag/modules/cip/cip_tag_create.h>
-#include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/modbus/modbus.h>
-#include <libplctag/modules/system/system.h>
+#include <libplctag/protocols/ab/ab.h>
+#include <libplctag/protocols/mb/modbus.h>
+#include <libplctag/protocols/omron/omron.h>
+#include <libplctag/protocols/system/system.h>
 #include <utils/rc.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -52,40 +51,26 @@
  */
 
 
-static const struct {
+struct {
     const char *protocol;
+    const char *make;
+    const char *family;
+    const char *model;
     const tag_create_function tag_constructor;
 } tag_type_map[] = {
-    {.protocol = "system", .tag_constructor = system_tag_create},
+    /* System tags - DEPRECATED */
+    {.protocol = NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
 
-    /*
-     * CIP PLCs, Rockwell and OMRON alike.  Both arrive as ab-eip and are told apart by the
-     * plc attribute, which cip_tag_create() reads -- see modules/cip/cip_tag_create.c.
-     */
-    {.protocol = "ab-eip", .tag_constructor = cip_tag_create},
-    {.protocol = "ab_eip", .tag_constructor = cip_tag_create},
+    /* System tags */
+    {.protocol = "system", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = system_tag_create},
+
+    /* Allen-Bradley PLCs */
+    {.protocol = "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol = "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
 
     /* Modbus TCP */
-    {.protocol = "modbus-tcp", .tag_constructor = mb_tag_create},
-    {.protocol = "modbus_tcp", .tag_constructor = mb_tag_create}};
-
-
-/*
- * Startup order.  Each entry must succeed before the next is tried.
- *
- * The registry comes before the device modules because their tags live in it.
- *
- * Teardown is NOT the reverse of this list and so is not driven from it -- see
- * destroy_modules().
- */
-static const struct {
-    const char *name;
-    int (*init)(void);
-} lib_components[] = {
-    {"refcount", refcount_startup}, {"tag registry", tag_registry_init}, {"CIP", cip_conn_startup}, {"Modbus", mb_init},
-};
-
-#define LIB_COMPONENT_COUNT ((int)(sizeof(lib_components) / sizeof(lib_components[0])))
+    {.protocol = "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
+    {.protocol = "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}};
 
 /* Library state machine */
 #define LIB_STATE_UNINITIALIZED ((int32_t)0)
@@ -96,28 +81,64 @@ static const struct {
 static atomic_int32_t library_state = ATOMIC_INT_STATIC_INIT;
 
 
-/* the constructor for the tag's protocol attribute, or NULL if no protocol matches. */
+/*
+ * find_tag_create_func()
+ *
+ * Find an appropriate tag creation function.  This scans through the array
+ * above to find a matching tag creation type.  The first match is returned.
+ * A passed set of options will match when all non-null entries in the list
+ * match.  This means that matches must be ordered from most to least general.
+ *
+ * Note that the protocol is used if it exists otherwise, the make family and
+ * model will be used.
+ */
+
 tag_create_function find_tag_create_func(attr attributes) {
+    int i = 0;
     const char *protocol = attr_get_str(attributes, "protocol", NULL);
+    const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
+    const char *family = attr_get_str(attributes, "family", NULL);
+    const char *model = attr_get_str(attributes, "model", NULL);
+    int num_entries = (sizeof(tag_type_map) / sizeof(tag_type_map[0]));
 
-    /* make=system&family=library is the deprecated spelling of protocol=system. */
-    if(!str_length(protocol)) {
-        const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
-
-        if(str_cmp_i(make, "system") == 0 && str_cmp_i(attr_get_str(attributes, "family", NULL), "library") == 0) {
-            return system_tag_create;
+    /* if protocol is set, then use it to match. */
+    if(protocol && str_length(protocol) > 0) {
+        for(i = 0; i < num_entries; i++) {
+            if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s", protocol);
+                return tag_type_map[i].tag_constructor;
+            }
         }
-
-        return NULL;
+    } else {
+        /* match make/family/model */
+        for(i = 0; i < num_entries; i++) {
+            if(tag_type_map[i].make && make && str_cmp_i(tag_type_map[i].make, make) == 0) {
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s", make);
+                if(tag_type_map[i].family) {
+                    if(family && str_cmp_i(tag_type_map[i].family, family) == 0) {
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s", make, family);
+                        if(tag_type_map[i].model) {
+                            if(model && str_cmp_i(tag_type_map[i].model, model) == 0) {
+                                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s model=%s", make, family,
+                                       model);
+                                return tag_type_map[i].tag_constructor;
+                            }
+                        } else {
+                            /* matches until a NULL */
+                            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=%s model=NULL", make, family);
+                            return tag_type_map[i].tag_constructor;
+                        }
+                    }
+                } else {
+                    /* matched until a NULL, so we matched */
+                    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched make=%s family=NULL model=NULL", make);
+                    return tag_type_map[i].tag_constructor;
+                }
+            }
+        }
     }
 
-    for(size_t i = 0; i < (sizeof(tag_type_map) / sizeof(tag_type_map[0])); i++) {
-        if(str_cmp(tag_type_map[i].protocol, protocol) == 0) {
-            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Matched protocol=%s", protocol);
-            return tag_type_map[i].tag_constructor;
-        }
-    }
-
+    /* no match */
     return NULL;
 }
 
@@ -145,27 +166,24 @@ void destroy_modules(void) {
         return;
     }
 
-    /*
-     * Teardown is deliberately NOT the reverse of lib_components[], so it is written out
-     * rather than driven from that table.
-     *
-     * The order does the waiting (review U7).  refcount_teardown() runs every deferred
-     * destructor first; that is the only wait, and it has no timeout.  Each connection
-     * destructor joins its handler, which has already stopped on lib_active and closed its
-     * own connection.  Only then do the modules free their lists and locks, which those
-     * destructors use.  The registry goes last: tag destructors forget reuse keys in its map.
-     */
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
-    refcount_teardown();
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down AB module.");
+    ab_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Modbus module.");
     mb_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down CIP connections.");
-    cip_conn_teardown();
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down Omron module.");
+    omron_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down tag registry.");
-    tag_registry_teardown();
+    /* Drain deferred destructors (refcount cleanup) BEFORE tearing down the library
+     * module: those destructors run tag teardown that touches the tag table, lookup
+     * mutex and tickler condvar which lib_teardown() destroys, so the refcount cleanup
+     * thread must be stopped and its queue drained while those are still alive. */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down refcount infrastructure.");
+    refcount_teardown();
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Tearing down library module.");
+    lib_teardown();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Unregistering logger.");
     plc_tag_unregister_logger();
@@ -245,27 +263,55 @@ int initialize_modules(void) {
     /* initialize a random seed value. */
     srand((unsigned int)time_ms());
 
-    for(int i = 0; i < LIB_COMPONENT_COUNT; i++) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting %s.", lib_components[i].name);
-
-        rc = lib_components[i].init();
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start %s!", lib_components[i].name);
-
-            /* the registry was never published, so no tag is in it.  Harmless before it started. */
-            tag_registry_teardown();
-            atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
-            return rc;
-        }
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Starting refcount cleanup infrastructure.");
+    rc = refcount_startup();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to start refcount cleanup infrastructure!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
     }
 
-    /*
-     * Open the registry to creates now that every component has started.  This stays outside
-     * lib_components[] on purpose: only the registry has a gate, and a hook for one
-     * implementation would be an abstraction with a single user.  Must happen before
-     * library_state is set to RUNNING below.
-     */
-    tag_registry_publish();
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing library modules.");
+    rc = lib_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize library module!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing AB module.");
+    rc = ab_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize AB module!");
+        lib_instance_discard_pending();
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Modbus module.");
+    rc = mb_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Modbus module!");
+        lib_instance_discard_pending();
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, 0, "Initializing Omron module.");
+    rc = omron_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, 0, "Unable to initialize Omron module!");
+        lib_instance_discard_pending();
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    /* Publish the instance lib_init() built above -- making it visible to
+     * lib_instance_acquire() -- and start its tag tickler thread, now that every
+     * module has initialized successfully. Must happen before library_state is set
+     * to RUNNING below: see the comment on lib_instance_publish() in lib.c for why
+     * the tickler is started last. */
+    lib_instance_publish();
 
     /* hook the destructor */
 #if !defined(_WIN32) || defined(LIBPLCTAG_STATIC)
@@ -275,7 +321,7 @@ int initialize_modules(void) {
      * POSIX (shared or static) and the Windows STATIC library are linked into an
      * executable, so atexit() runs during the executable's normal CRT exit while
      * the process is still multithreaded — plc_tag_shutdown() can cleanly join
-     * the handler and refcount-cleanup threads. (Omitting it there leaves
+     * the tag-tickler and refcount-cleanup threads. (Omitting it there leaves
      * those threads running into CRT teardown and crashing, for programs that
      * don't call plc_tag_shutdown() themselves.)
      *

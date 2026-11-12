@@ -59,7 +59,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 

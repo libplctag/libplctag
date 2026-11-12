@@ -45,7 +45,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -58,16 +58,16 @@
 
 static int failures = 0;
 
-#define CHECK(cond, msg)                                          \
-    do {                                                          \
-        if(!(cond)) {                                             \
-            /* NOLINTNEXTLINE */                                  \
-            fprintf(stderr, "FAIL: %s\n", msg);                   \
-            failures++;                                           \
-        } else {                                                  \
-            /* NOLINTNEXTLINE */                                  \
-            fprintf(stderr, "PASS: %s\n", msg);                   \
-        }                                                         \
+#define CHECK(cond, msg)                        \
+    do {                                        \
+        if(!(cond)) {                           \
+            /* NOLINTNEXTLINE */                \
+            fprintf(stderr, "FAIL: %s\n", msg); \
+            failures++;                         \
+        } else {                                \
+            /* NOLINTNEXTLINE */                \
+            fprintf(stderr, "PASS: %s\n", msg); \
+        }                                       \
     } while(0)
 
 
@@ -99,9 +99,8 @@ static void parse_args(int argc, char **argv, args_t *args) {
 
     if(!args->real_tag || !args->lreal_tag || !args->lint_tag || !args->sint_tag || !args->byteorder_tag) {
         // NOLINTNEXTLINE
-        fprintf(stderr,
-                "Usage: test_lib_api_coverage --real-tag=... --lreal-tag=... --lint-tag=... "
-                "--sint-tag=... --byteorder-tag=...\n");
+        fprintf(stderr, "Usage: test_lib_api_coverage --real-tag=... --lreal-tag=... --lint-tag=... "
+                        "--sint-tag=... --byteorder-tag=...\n");
         exit(1);
     }
 }
@@ -380,8 +379,8 @@ int main(int argc, char **argv) {
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n",
-                REQUIRED_VERSION, version_major, version_minor, version_patch);
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION,
+                version_major, version_minor, version_patch);
         return 1;
     }
 

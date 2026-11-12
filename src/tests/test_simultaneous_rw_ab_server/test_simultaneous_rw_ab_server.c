@@ -1,5 +1,5 @@
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -18,13 +18,14 @@
  * pkill/taskkill by image name would also kill any other ab_server instance
  * running concurrently elsewhere in the test suite. */
 #ifdef _WIN32
-#    define SERVER_CMD_START \
+#    define SERVER_CMD_START                                                                                       \
         "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden 'ab_server' -ArgumentList " \
         "'--plc=ControlLogix','--path=1,0','--tag=TestTag:DINT[1]').Id\" > ab_server_%d.pid"
-#    define SERVER_CMD_STOP "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
+#    define SERVER_CMD_STOP \
+        "for /f %%p in (ab_server_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%d.pid >nul 2>&1"
 #else
 #    define SERVER_CMD_START "./ab_server --plc=ControlLogix --path=1,0 --tag=TestTag:DINT[1] & echo $! > /tmp/ab_server_%d.pid"
-#    define SERVER_CMD_STOP  "kill -TERM $(cat /tmp/ab_server_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_%d.pid"
+#    define SERVER_CMD_STOP "kill -TERM $(cat /tmp/ab_server_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_%d.pid"
 #endif
 
 #define REQUIRED_VERSION 2, 6, 4

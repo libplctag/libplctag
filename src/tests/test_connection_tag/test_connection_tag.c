@@ -91,7 +91,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -144,7 +144,7 @@ static bool poll_mode = false;
  * Runtime state shared between callback threads and the main thread
  * ---------------------------------------------------------------------- */
 
-static compat_atomic_int32_t running = {1};            /* 1 = keep looping */
+static compat_atomic_int32_t running = {1}; /* 1 = keep looping */
 static compat_atomic_int32_t need_reconnect = {0};
 static compat_atomic_int32_t read_started_count = {0};
 static compat_atomic_int32_t read_completed_count = {0};
@@ -243,8 +243,7 @@ static void handle_conn_status_event(tag_state_t *ts, int32_t conn_status) {
     if(compat_atomic_load_int32(&ts->completed) || compat_atomic_load_int32(&ts->failed)) {
         bool all_done = true;
         for(i = 0; i < num_tags; i++) {
-            if(!compat_atomic_load_int32(&tag_states[i].completed) &&
-               !compat_atomic_load_int32(&tag_states[i].failed)) {
+            if(!compat_atomic_load_int32(&tag_states[i].completed) && !compat_atomic_load_int32(&tag_states[i].failed)) {
                 all_done = false;
                 break;
             }
@@ -268,21 +267,15 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
     if(!ts) { return; }
 
     switch(event) {
-        case PLCTAG_EVENT_CREATED:
-            fprintf(stderr, "[tag %d] CREATED: %s\n", (int)tag_id, plc_tag_decode_error(status));
-            break;
+        case PLCTAG_EVENT_CREATED: fprintf(stderr, "[tag %d] CREATED: %s\n", (int)tag_id, plc_tag_decode_error(status)); break;
 
         case PLCTAG_EVENT_DESTROYED:
             fprintf(stderr, "[tag %d] DESTROYED: %s\n", (int)tag_id, plc_tag_decode_error(status));
             break;
 
-        case PLCTAG_EVENT_ABORTED:
-            fprintf(stderr, "[tag %d] ABORTED: %s\n", (int)tag_id, plc_tag_decode_error(status));
-            break;
+        case PLCTAG_EVENT_ABORTED: fprintf(stderr, "[tag %d] ABORTED: %s\n", (int)tag_id, plc_tag_decode_error(status)); break;
 
-        case PLCTAG_EVENT_READ_STARTED:
-            compat_atomic_inc_int32(&read_started_count);
-            break;
+        case PLCTAG_EVENT_READ_STARTED: compat_atomic_inc_int32(&read_started_count); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             rc = compat_atomic_inc_int32(&read_completed_count);
@@ -293,9 +286,7 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             }
             break;
 
-        case PLCTAG_EVENT_WRITE_STARTED:
-            compat_atomic_inc_int32(&write_started_count);
-            break;
+        case PLCTAG_EVENT_WRITE_STARTED: compat_atomic_inc_int32(&write_started_count); break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
             ws = compat_atomic_inc_int32(&write_completed_count);
@@ -336,9 +327,7 @@ static void tag_callback(int32_t tag_id, int event, int status, void *userdata) 
             handle_conn_status_event(ts, PLCTAG_CONN_STATUS_ERR_WAIT);
             break;
 
-        default:
-            fprintf(stderr, "[tag %d] unknown event %d: %s\n", (int)tag_id, event, plc_tag_decode_error(status));
-            break;
+        default: fprintf(stderr, "[tag %d] unknown event %d: %s\n", (int)tag_id, event, plc_tag_decode_error(status)); break;
     }
 }
 
@@ -542,8 +531,8 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Required library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION,
-                version_major, version_minor, version_patch);
+        fprintf(stderr, "Required library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
+                version_minor, version_patch);
         return 1;
     }
 
@@ -630,8 +619,8 @@ int main(int argc, char **argv) {
         tag_handles[i] = tag;
     }
 
-    fprintf(stderr, "Waiting up to %.1f seconds for %d tag(s), %d cycle(s).\n", (double)run_duration_ms / 1000.0,
-            num_tags, num_cycles);
+    fprintf(stderr, "Waiting up to %.1f seconds for %d tag(s), %d cycle(s).\n", (double)run_duration_ms / 1000.0, num_tags,
+            num_cycles);
 
     end_time = compat_time_ms() + run_duration_ms;
 
@@ -653,8 +642,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "ERROR [tag %d]: connection_status attribute not found.\n", (int)tag_handles[i]);
             total_failed++;
         } else {
-            fprintf(stderr, "[tag %d] connection_status attribute = %s (%d)\n", (int)tag_handles[i],
-                    conn_status_name(attr_val), attr_val);
+            fprintf(stderr, "[tag %d] connection_status attribute = %s (%d)\n", (int)tag_handles[i], conn_status_name(attr_val),
+                    attr_val);
         }
     }
 
@@ -667,8 +656,8 @@ int main(int argc, char **argv) {
             total_failed++;
         } else if(!compat_atomic_load_int32(&tag_states[i].completed)) {
             int idx = compat_atomic_load_int32(&tag_states[i].next_expected_idx);
-            fprintf(stderr, "FAIL [tag %d]: only %d of %d expected states received (next expected: %s).\n",
-                    (int)tag_handles[i], idx, num_expected_states, conn_status_name(expected_states[idx]));
+            fprintf(stderr, "FAIL [tag %d]: only %d of %d expected states received (next expected: %s).\n", (int)tag_handles[i],
+                    idx, num_expected_states, conn_status_name(expected_states[idx]));
             total_failed++;
         }
     }

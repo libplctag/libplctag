@@ -58,7 +58,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,9 +108,8 @@ static void parse_args(int argc, char **argv) {
             plc_tag_set_debug_level(atoi(&argv[i][8]));
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
-            fprintf(stderr,
-                    "Usage: test_connection_tag_late_join --data-tag=ATTRIBS --tag=ATTRIBS "
-                    "[--timeout=ms] [--debug=N]\n");
+            fprintf(stderr, "Usage: test_connection_tag_late_join --data-tag=ATTRIBS --tag=ATTRIBS "
+                            "[--timeout=ms] [--debug=N]\n");
             exit(1);
         }
     }
@@ -139,8 +138,8 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Required library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION,
-                version_major, version_minor, version_patch);
+        fprintf(stderr, "Required library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
+                version_minor, version_patch);
         return 1;
     }
 
@@ -175,8 +174,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Waiting up to %d ms for UP event on late-joining @connection tag.\n", timeout_ms);
     deadline = compat_time_ms() + (int64_t)timeout_ms;
 
-    while(!compat_atomic_load_int32(&got_up) && !compat_atomic_load_int32(&got_err_wait) &&
-          compat_time_ms() < deadline) {
+    while(!compat_atomic_load_int32(&got_up) && !compat_atomic_load_int32(&got_err_wait) && compat_time_ms() < deadline) {
         compat_sleep_ms(POLL_SLEEP_MS, NULL);
     }
 

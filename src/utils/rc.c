@@ -31,7 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
@@ -198,8 +198,8 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
     int count = old_count - 1;
     if(count == 0) {
         /* queue cleanup */
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.", func,
-               line_num, data, rc->function_name, rc->line_num);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.",
+               func, line_num, data, rc->function_name, rc->line_num);
 
         bool queued = false;
 
@@ -240,8 +240,8 @@ void refcount_cleanup(refcount_p rc) {
         return;
     }
 
-    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Deferred destruction of %p, allocated in function %s at line %d", (void *)(rc + 1),
-           rc->function_name, rc->line_num);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, 0, "Deferred destruction of %p, allocated in function %s at line %d",
+           (void *)(rc + 1), rc->function_name, rc->line_num);
 
     /* call the clean up function */
     if(rc->cleanup_func) { rc->cleanup_func((void *)(rc + 1)); }

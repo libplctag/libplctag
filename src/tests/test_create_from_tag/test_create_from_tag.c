@@ -72,7 +72,7 @@
  */
 
 #include "compat_utils.h"
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>

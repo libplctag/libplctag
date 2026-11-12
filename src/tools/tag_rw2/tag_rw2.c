@@ -35,7 +35,7 @@
 #include "compat_utils.h"
 #include <ctype.h>
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -557,7 +557,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     // FIXME
                     printf("Got hex %x\n", args->write_vals.u8[elem_index]);
                 }
-
             }
 
             break;
@@ -578,7 +577,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -599,7 +597,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -620,7 +617,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -641,7 +637,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -662,7 +657,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -683,7 +677,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -704,7 +697,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -725,7 +717,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -746,7 +737,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;
@@ -767,7 +757,6 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                     cleanup(args);
                     usage();
                 }
-
             }
 
             break;

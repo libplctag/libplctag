@@ -1,0 +1,35 @@
+
+
+
+set(AB_PROTOCOL_SOURCES
+                     "${CMAKE_CURRENT_SOURCE_DIR}/ab.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/ab_common.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/ab_common.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/cip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/cip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/defs.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/connection_tag.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/connection_tag.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip_special.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_cip_special.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_lgx_pccc.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_lgx_pccc.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_plc5_dhp.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_plc5_dhp.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_plc5_pccc.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_plc5_pccc.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_slc_dhp.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_slc_dhp.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_slc_pccc.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/eip_slc_pccc.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/error_codes.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/error_codes.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/pccc.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/pccc.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/session.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/session.h"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tag.h"
+                    PARENT_SCOPE
+)

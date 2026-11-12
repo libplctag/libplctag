@@ -62,7 +62,7 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -101,7 +101,7 @@
 /* only for running this by hand; the parallel runner allocates the port. */
 #define DEFAULT_SERVER_PORT (44901)
 
-#define TAG_ATTRIBS_FMT \
+#define TAG_ATTRIBS_FMT                                                     \
     "protocol=ab-eip&gateway=127.0.0.1:%d&path=18,127.0.0.1&plc=omron-njnx" \
     "&elem_count=%d&name=%s"
 
@@ -127,17 +127,17 @@
  * runner has running at the same time.
  */
 #ifdef WINDOWS_PLATFORM
-#    define SERVER_START \
-        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
+#    define SERVER_START                                                                                                                                               \
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList "                                                            \
         "'--plc=Omron','--port=%d','--tag=TestDINTArray:DINT[10]','--tag=TestBigArray:DINT[2000]','--udt=Point:x:DINT,y:REAL,z:INT','--tag=Pts:Point[200]','%s').Id\"" \
         " > ab_server_frag_%d.pid"
 #    define SERVER_STOP \
         "for /f %%p in (ab_server_frag_%d.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_frag_%d.pid >nul 2>&1"
 #else
-#    define SERVER_START \
+#    define SERVER_START                                                                       \
         "%s --plc=Omron --port=%d --tag=TestDINTArray:DINT[10] --tag=TestBigArray:DINT[2000] " \
-        "--udt=Point:x:DINT,y:REAL,z:INT --tag=Pts:Point[200] %s > " \
-        "/tmp/omron_frag_test_server_%d.log 2>&1 & echo $! > " \
+        "--udt=Point:x:DINT,y:REAL,z:INT --tag=Pts:Point[200] %s > "                           \
+        "/tmp/omron_frag_test_server_%d.log 2>&1 & echo $! > "                                 \
         "/tmp/ab_server_frag_%d.pid"
 #    define SERVER_STOP "kill -TERM $(cat /tmp/ab_server_frag_%d.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/ab_server_frag_%d.pid"
 #endif
@@ -269,7 +269,9 @@ static int32_t round_trip(const char *ab_server_path, int32_t test_pid, int32_t 
     if(!start_server(ab_server_path, test_pid, server_port, NO_FAULT)) { return PLCTAG_ERR_NO_RESOURCES; }
 
     rc = round_trip_one(server_port, BIG_TAG, BIG_TAG_ELEMENTS, BIG_TAG_ELEMENTS * 4);
-    if(rc == PLCTAG_STATUS_OK) { rc = round_trip_one(server_port, BIG_UDT_TAG, BIG_UDT_ELEMENTS, BIG_UDT_ELEMENTS * BIG_UDT_SIZE); }
+    if(rc == PLCTAG_STATUS_OK) {
+        rc = round_trip_one(server_port, BIG_UDT_TAG, BIG_UDT_ELEMENTS, BIG_UDT_ELEMENTS * BIG_UDT_SIZE);
+    }
 
     stop_server(test_pid);
 
@@ -338,13 +340,13 @@ int main(int argc, char **argv) {
      * No fault at all: the tag simply does not fit in one packet.  The PLC refuses the plain
      * read, and the client reads and writes it in Simple Data Segments instead.
      */
-    failures += check("a tag too large for one packet round-trips in segments",
-                      round_trip(ab_server_path, test_pid, server_port), PLCTAG_STATUS_OK);
+    failures += check("a tag too large for one packet round-trips in segments", round_trip(ab_server_path, test_pid, server_port),
+                      PLCTAG_STATUS_OK);
 
     /* the same tag, read in a size that fits, takes the plain read. */
-    failures += check("the same tag reads cleanly when it fits",
-                      read_against_fault(ab_server_path, test_pid, server_port, NO_FAULT, BIG_TAG, SMALL_TAG_ELEMENTS),
-                      PLCTAG_STATUS_OK);
+    failures +=
+        check("the same tag reads cleanly when it fits",
+              read_against_fault(ab_server_path, test_pid, server_port, NO_FAULT, BIG_TAG, SMALL_TAG_ELEMENTS), PLCTAG_STATUS_OK);
 
     plc_tag_shutdown();
 

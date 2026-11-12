@@ -57,7 +57,7 @@
 #include <time.h>
 #include <timeapi.h>
 
-#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
@@ -547,7 +547,7 @@ static void socket_clear_inherit(SOCKET fd);
 
 #ifndef WSA_FLAG_NO_HANDLE_INHERIT
 /* Defined by the Windows 7 SDK and later. */
-    #define WSA_FLAG_NO_HANDLE_INHERIT (0x80)
+#    define WSA_FLAG_NO_HANDLE_INHERIT (0x80)
 #endif
 
 
@@ -1314,8 +1314,8 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
                 return PLCTAG_ERR_READ;
             }
         } else if(rc == 0) {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0,
-                    "Connection closed by peer after select (recv returned 0) on socket %d", (int)s->fd);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Connection closed by peer after select (recv returned 0) on socket %d",
+                   (int)s->fd);
             /* EOF is not 'no data yet': an EOF'd socket always reports readable, so the caller's loop would spin. */
             return PLCTAG_ERR_READ;
         }
