@@ -47,10 +47,10 @@
  */
 void dump_fairness_stats(plc_s *plc) {
     tag_def_s *tag = NULL;
-    int tag_count = 0;
-    int total_requests = 0;
-    int min_requests = INT32_MAX;
-    int max_requests = 0;
+    int32_t tag_count = 0;
+    int32_t total_requests = 0;
+    int32_t min_requests = INT32_MAX;
+    int32_t max_requests = 0;
     double request_mean = 0.0;
     double request_variance = 0.0;
     double request_std_dev = 0.0;
@@ -88,7 +88,7 @@ void dump_fairness_stats(plc_s *plc) {
     /* First pass: dump individual tag stats and collect totals */
     tag = plc->tags;
     while(tag) {
-        int requests = atomic_load_int32(&tag->request_count);
+        int32_t requests = atomic_load_int32(&tag->request_count);
         int64_t total_latency = atomic_load_int64(&tag->total_latency_us);
         int64_t min_latency = atomic_load_int64(&tag->min_latency_us);
         int64_t max_latency = atomic_load_int64(&tag->max_latency_us);
@@ -112,10 +112,10 @@ void dump_fairness_stats(plc_s *plc) {
     /* Second pass: calculate request count variance and latency stats */
     tag = plc->tags;
     double total_avg_latency = 0.0;
-    int tags_with_requests = 0;
+    int32_t tags_with_requests = 0;
 
     while(tag) {
-        int requests = atomic_load_int32(&tag->request_count);
+        int32_t requests = atomic_load_int32(&tag->request_count);
         double diff = requests - request_mean;
         request_variance += diff * diff;
 
@@ -140,7 +140,7 @@ void dump_fairness_stats(plc_s *plc) {
         /* Third pass: calculate latency variance across tags */
         tag = plc->tags;
         while(tag) {
-            int requests = atomic_load_int32(&tag->request_count);
+            int32_t requests = atomic_load_int32(&tag->request_count);
             if(requests > 0) {
                 int64_t total_latency = atomic_load_int64(&tag->total_latency_us);
                 double avg_latency = (double)total_latency / requests;

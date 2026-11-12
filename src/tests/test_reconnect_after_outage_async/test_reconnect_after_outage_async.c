@@ -60,15 +60,30 @@
 #define FIRST_RUN_TIME (10000)
 #define DISCONNECT_TIME_MS (60000)
 #define SECOND_RUN_TIME (30000)
+
+/*
+ * How long the library may wait for a reply before giving up on the request.
+ *
+ * This is connection_inactivity_timeout_ms, which process_requests() uses as its request
+ * deadline.  Left at its default of 31000ms, a reply lost across the outage parks the
+ * connection for just longer than SECOND_RUN_TIME, and the test ends while still waiting --
+ * which is exactly how this test failed once.  Five seconds leaves the recovery six times
+ * inside the window.
+ */
+#define REQUEST_TIMEOUT_MS (5000)
 #define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
 
 #define STRINGIFY(x) #x
 #define TO_STRING(x) STRINGIFY(x)
 
 
-/* uses auto_sync_read_ms for automatic reads */
+/*
+ * uses auto_sync_read_ms for automatic reads.  The retry cap keeps the reconnect well inside
+ * the 30-second last phase; the default cap of 32 seconds can outlast it after a 60-second outage.
+ */
 #define AUTO_SYNC_TAG_ATTRIBS_FMT \
-    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=100"
+    "protocol=ab-eip&gateway=127.0.0.1:%s&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[0]&auto_sync_read_ms=100" \
+    "&connection_inactivity_timeout_ms=" TO_STRING(REQUEST_TIMEOUT_MS) "&connection_retry_max_delay_ms=5000"
 
 /* Default port; overridden by an optional second CLI argument so this test and
  * test_reconnect_after_outage_sync can run against independent ab_server instances
@@ -76,11 +91,11 @@
 static const char *g_port = "44818";
 
 #ifdef WINDOWS_PLATFORM
-/* Not parallel-safe: taskkill here is by image name, not PID, so two instances of
- * this test running at once would kill each other's server. run_simulator_tests.sh
- * only launches these in parallel on POSIX; Windows still runs them sequentially. */
-#    define SERVER_START "start /B %s --plc=ControlLogix --path=1,0 --port=%s --tag=TestBigArray:DINT[10] >nul 2>&1"
-#    define SERVER_STOP "taskkill /IM ab_server.exe /F"
+/* a pidfile per port, as on POSIX, so only this test's server is killed.  The log name is unused. */
+#    define SERVER_START \
+        "powershell -NoProfile -Command \"(Start-Process -PassThru -WindowStyle Hidden '%s' -ArgumentList " \
+        "'--plc=ControlLogix','--path=1,0','--port=%s','--tag=TestBigArray:DINT[10]').Id\" > ab_server_%.0s%s.pid"
+#    define SERVER_STOP "for /f %%p in (ab_server_%s.pid) do taskkill /PID %%p /F >nul 2>&1 & del /f ab_server_%s.pid >nul 2>&1"
 #else
 /* Capture the backgrounded server's PID into a port-specific pidfile so
  * stop_server() can kill exactly this instance -- pkill-by-name would also kill a
@@ -113,6 +128,7 @@ typedef struct {
     int errors_before_disconnect; /* error count before disconnect */
     int errors_after_reconnect;   /* error count after reconnect */
     int errors_during_disconnect; /* calculated: errors that occurred during disconnect */
+    int reads_during_disconnect;  /* successful reads while the server was down */
 } test_state_t;
 
 
@@ -139,7 +155,8 @@ int main(int argc, char **argv) {
 
     if(argc > 2) { g_port = argv[2]; }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+    /* a failure here has been seen only on Windows CI; the library log is the only evidence. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* make sure the library is a usable version */
     check_library_version();
@@ -197,11 +214,7 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
 void start_server(test_state_t *test_state) {
     char start_cmd[1024] = {0};
 
-#ifdef WINDOWS_PLATFORM
-    snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd, g_port);
-#else
     snprintf(start_cmd, sizeof(start_cmd), SERVER_START, test_state->ab_server_cmd, g_port, g_port, g_port);
-#endif
 
     if(system(start_cmd) != 0) {
         log("Error starting AB server! Make sure it's compiled.\n");
@@ -219,11 +232,7 @@ void start_server(test_state_t *test_state) {
 void stop_server(void) {
     char stop_cmd[256] = {0};
 
-#ifdef WINDOWS_PLATFORM
-    snprintf(stop_cmd, sizeof(stop_cmd), "%s", SERVER_STOP);
-#else
     snprintf(stop_cmd, sizeof(stop_cmd), SERVER_STOP, g_port, g_port);
-#endif
 
     if(system(stop_cmd) < 0) {
         log("Error stopping AB server!\n");
@@ -338,14 +347,19 @@ int calc_test_stats(test_state_t *test_state) {
     /*
      * determine if test passed - needs both:
      * 1. Successful reads after reconnect (showing auto_sync_read resumed)
-     * 2. Evidence of disconnection (either errors or pending reads)
+     * 2. Evidence of disconnection: errors, pending reads, or reads stalling while the server
+     *    was down.  The library notices a dropped connection while idle, so no read need be in
+     *    flight to fail; auto-sync reads then simply stop until the reconnect.
      */
     int pending_operations = test_state->read_start_count - test_state->read_success_count;
-    int disconnect_evidence = test_state->errors_during_disconnect > 0;
+    int expected_disconnect_reads = DISCONNECT_TIME_MS / test_state->read_timeout_ms;
+    int reads_stalled = test_state->reads_during_disconnect < expected_disconnect_reads / 10;
+    int disconnect_evidence = test_state->errors_during_disconnect > 0 || reads_stalled;
     int reconnect_success = test_state->read_success_after_reconnect > 0;
 
-    log("Disconnect evidence: %d errors, %d pending operations\n",
-        test_state->errors_after_reconnect - test_state->errors_before_disconnect, pending_operations);
+    log("Disconnect evidence: %d errors, %d pending operations, %d of %d reads while down\n",
+        test_state->errors_after_reconnect - test_state->errors_before_disconnect, pending_operations,
+        test_state->reads_during_disconnect, expected_disconnect_reads);
 
     test_state->test_passed = (reconnect_success && disconnect_evidence);
 
@@ -470,6 +484,7 @@ int run_auto_test(const char *ab_server_cmd) {
     auto_test_state.errors_before_disconnect = read_error_before_disconnect;
     auto_test_state.errors_after_reconnect = read_error_after_reconnect;
     auto_test_state.read_success_after_reconnect = after_reconnect_read_success_count;
+    auto_test_state.reads_during_disconnect = after_disconnect_read_success_count;
 
     log("[DEBUG] About to destroy tag (ID %d)\n", auto_test_state.tag);
     log("[STATUS] Test completed.\n");

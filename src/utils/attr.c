@@ -56,6 +56,9 @@ struct attr_t {
 };
 
 
+static attr_entry find_entry(attr a, const char *name);
+
+
 /*
  * find_entry
  *
@@ -63,7 +66,7 @@ struct attr_t {
  * passed name.
  */
 
-attr_entry find_entry(attr a, const char *name) {
+static attr_entry find_entry(attr a, const char *name) {
     attr_entry e;
 
     if(!a) { return NULL; }
@@ -88,6 +91,25 @@ attr_entry find_entry(attr a, const char *name) {
  * Create a new attr structure and return a pointer to it.
  */
 extern attr attr_create(void) { return (attr)mem_alloc(sizeof(struct attr_t)); }
+
+
+extern attr attr_copy(attr src) {
+    attr res = NULL;
+
+    if(!src) { return NULL; }
+
+    res = attr_create();
+    if(!res) { return NULL; }
+
+    for(attr_entry e = src->head; e; e = e->next) {
+        if(attr_set_str(res, e->name, e->val)) {
+            attr_destroy(res);
+            return NULL;
+        }
+    }
+
+    return res;
+}
 
 
 /*
@@ -329,4 +351,19 @@ extern void attr_destroy(attr a) {
     }
 
     mem_free(a);
+}
+
+
+bool attr_clamp_int32(int32_t *value, int32_t min_value, int32_t max_value) {
+    if(*value < min_value) {
+        *value = min_value;
+        return true;
+    }
+
+    if(*value > max_value) {
+        *value = max_value;
+        return true;
+    }
+
+    return false;
 }

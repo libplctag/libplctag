@@ -38,3 +38,4 @@
 
 /* PLC-5  */
 extern struct tag_vtable_t lgx_pccc_vtable;
+extern const cip_tag_codec_t lgx_pccc_codec;

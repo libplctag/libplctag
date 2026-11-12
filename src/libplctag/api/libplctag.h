@@ -288,6 +288,9 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
  * The callback will be set as early as possible in the creation process,
  * allowing early creation-time events to be sent to user code.
  *
+ * If this returns an error, the callback is never called again once it returns, so
+ * userdata may be freed at that point.
+ *
  * @param attrib_str Protocol-specific attribute string (must include "protocol=XXX").
  * @param tag_callback_func Callback function for tag events.
  * @param userdata User-supplied data pointer passed to callback.
@@ -322,9 +325,15 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
  * call this function before unloading the library or terminating. Most OSes cleanly
  * recover all system resources when a process terminates, so this may not be necessary.
  *
- * @warning THIS IS NOT THREAD SAFE! Do not call this if multiple threads are running
- *          against the library. Close all tags first with plc_tag_destroy() and ensure
- *          that nothing can call any library functions until this function returns.
+ * This function is safe to call at any time, including concurrently with other library
+ * calls and concurrently with itself.  Closing the library is atomic: exactly one caller
+ * performs the shutdown and any other returns immediately.  A library call racing it
+ * either completes normally or returns PLCTAG_ERR_NOT_FOUND.  It may block for a short
+ * time while in-flight operations are aborted and handler threads are joined.
+ *
+ * @note A plc_tag_create() racing this function either completes normally, in which case
+ *       its tag is destroyed here like any other, or fails with PLCTAG_ERR_NOT_ALLOWED.
+ *       No tag outlives shutdown either way.  See test_create_shutdown_race.
  *
  * @note Normally you do not need to call this function. This is only for certain
  *       wrappers or operating environments that prevent normal exit handlers from working.
@@ -382,11 +391,23 @@ typedef enum {
  * - PLCTAG_EVENT_DESTROYED: When a tag is being destroyed.
  * - PLCTAG_EVENT_CREATED: When a tag is created.
  *
- * @warning The callback is called outside the internal tag mutex, allowing it to call
- *          tag functions safely. However, it is called in the context of the internal
- *          tag helper thread, not the client library thread(s). YOU are responsible for
- *          ensuring all client application data structures accessed by the callback are
- *          thread-safe.
+ * @warning The callback is called INSIDE the tag's internal mutex.  The mutex is recursive,
+ *          so the callback may call tag functions on its own tag.  It may be called on a
+ *          library connection thread or on an application thread that is inside a library
+ *          call.  YOU are responsible for ensuring all client application data structures
+ *          accessed by the callback are thread-safe.
+ *
+ * @warning Because the tag's mutex is held, in the callback do not:
+ *          - call a function with a timeout (a synchronous read or write) on the same tag;
+ *            it cannot complete while the mutex is held, so it always times out.
+ *          - wait for another thread that may call a function on this tag, such as
+ *            plc_tag_destroy(); that is a deadlock.
+ *          - call functions on another tag whose callback may call functions on this tag;
+ *            two such callbacks running at once on different threads deadlock.
+ *          - take an application lock that is held by any thread calling a function on
+ *            this tag; the two lock orders are opposite, which deadlocks.  Copy what you
+ *            need and hand it off without blocking instead.
+ *          - call plc_tag_lock(); if another thread holds that lock, it deadlocks.
  *
  * @warning Do not perform blocking operations in the callback. This will degrade
  *          library performance or cause failures.
@@ -394,9 +415,17 @@ typedef enum {
  * @warning When the callback is called with PLCTAG_EVENT_DESTROYED, do not call
  *          any tag functions as they are not guaranteed to work and may hang or fail.
  *
- * @param tag_id The tag ID handle returned by plc_tag_create().
+ * @note The callback stops being called when it is removed, by either
+ *       plc_tag_unregister_callback() or plc_tag_destroy().  Both guarantee, on returning
+ *       PLCTAG_STATUS_OK, that the callback will not be called again and that any callback
+ *       already running on another thread has returned.  See those functions.
+ *
+ * @param tag_id The tag ID handle returned by plc_tag_create() or plc_tag_create_ex().
  * @param tag_callback_func Callback function pointer.
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_DUPLICATE if a callback is already registered.
+ *         A tag created with plc_tag_create_ex() already has the callback passed there, so
+ *         registering another without plc_tag_unregister_callback() first is the duplicate
+ *         case.  A tag created with plc_tag_create() has no callback and cannot hit it.
  */
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
@@ -411,6 +440,12 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * @param tag_callback_func Callback function pointer.
  * @param userdata User-supplied data pointer passed to callback.
  * @return PLCTAG_STATUS_OK on success, PLCTAG_ERR_DUPLICATE if a callback is already registered.
+ *
+ * @note The library holds the userdata pointer until the callback is removed.  It is safe
+ *       to free it once plc_tag_unregister_callback() or plc_tag_destroy() has returned
+ *       PLCTAG_STATUS_OK, or in the PLCTAG_EVENT_DESTROYED callback, and not before.
+ *       Freeing it in any other callback without unregistering first leaves the library
+ *       holding a dangling pointer.
  *
  * @see plc_tag_register_callback()
  */
@@ -429,6 +464,19 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id,
  *
  * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
  * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ *
+ * Callback lifetime:
+ *
+ * On returning PLCTAG_STATUS_OK, the callback will not be called again and the userdata
+ * pointer will not be used again.  A callback already running on another thread has
+ * returned before this function returns.  See plc_tag_destroy() for the same guarantee at
+ * tag teardown.
+ *
+ * Replacing a callback:
+ *
+ * Swap callbacks only while the tag is idle.  Events of an operation in flight are dropped
+ * while no callback is registered, and events queued but not yet delivered when a new
+ * callback is registered go to the new callback, with the new userdata.
  */
 
 LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
@@ -482,6 +530,12 @@ LIB_EXPORT int plc_tag_unregister_logger(void);
  *
  * This should be used to initially lock a tag when starting operations with it
  * followed by a call to plc_tag_unlock when you have everything you need from the tag.
+ *
+ * This only excludes other threads calling plc_tag_lock().  It does not stop the library
+ * from changing the tag data, so values read with several getter calls while a read is
+ * in flight, or while auto-sync is on, can come from different PLC scans.
+ *
+ * Do not call this from a tag callback; see plc_tag_register_callback().
  */
 
 
@@ -505,6 +559,11 @@ LIB_EXPORT int plc_tag_unlock(int32_t tag);
  * it is marked invalid.  Note that this does not abort anything that might
  * be still processing in the report PLC.
  *
+ * An abort applies to the tag, not to one operation.  If another thread starts a read
+ * or write at the same time, the abort may stop that new operation instead.  The tag is
+ * not guaranteed to be idle when this returns: the ABORTED callback, or another thread,
+ * may already have started a new operation.
+ *
  * The status will be PLCTAG_STATUS_OK unless there is an error such as
  * a null pointer.
  *
@@ -519,6 +578,26 @@ LIB_EXPORT int plc_tag_abort(int32_t tag);
  * This frees all resources associated with the tag.  Internally, it may result in closed
  * connections etc.   This calls through to a protocol-specific function.
  *
+ * Callback lifetime:
+ *
+ * On returning PLCTAG_STATUS_OK, any callback registered with plc_tag_register_callback()
+ * or plc_tag_register_callback_ex() will not be called again, and the userdata pointer
+ * will not be used again.  A callback already running on another thread has returned
+ * before this function returns.  Memory or a pinned object handle used by the callback can
+ * therefore be freed once this function has returned OK.
+ *
+ * The callback IS called during this function: PLCTAG_EVENT_DESTROYED is delivered on the
+ * calling thread before it returns.  Do not free anything the callback needs before
+ * calling this function.
+ *
+ * Called from inside this tag's callback, it returns first, and PLCTAG_EVENT_DESTROYED is
+ * delivered on the same thread once that callback returns.  Free the userdata in the
+ * PLCTAG_EVENT_DESTROYED callback, not right after this call.
+ *
+ * No other return value carries this guarantee.  PLCTAG_ERR_NOT_FOUND in particular is
+ * returned without touching the callback when the library is shutting down, and
+ * plc_tag_shutdown() may not have reached this tag yet.
+ *
  * This is a function provided by the underlying protocol implementation.
  */
 LIB_EXPORT int plc_tag_destroy(int32_t tag);
@@ -527,10 +606,20 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag);
 /*
  * plc_tag_read
  *
- * Start a read.  If the timeout value is zero, then wait until the read
+ * Start a read.  If the timeout value is not zero, then wait until the read
  * returns or the timeout occurs, whichever is first.  Return the status.
  * If the timeout value is zero, then plc_tag_read will normally return
  * PLCTAG_STATUS_PENDING.
+ *
+ * Do not use the tag data until the read ends.  A setter during the read is overwritten
+ * by the reply, and a getter during a read in several packets can see a mix of two scans.
+ *
+ * With read_cache_ms set, a read inside the cache period returns OK without
+ * going to the PLC.  The cache is best-effort:
+ *   - local changes made with setters are not sent, but a cache hit keeps them,
+ *     so a "read" can return data the PLC never had.  Write before reading.
+ *   - a read in flight while read_cache_ms is changed or the tag is aborted can
+ *     restart the cache period after that change.
  *
  * This is a function provided by the underlying protocol implementation.
  */
@@ -544,6 +633,10 @@ LIB_EXPORT int plc_tag_read(int32_t tag, int timeout);
  * an uncompleted IO operation.  It will be PLCTAG_STATUS_OK if everything is fine.  Other
  * errors will be returned as appropriate.
  *
+ * Getters and setters also set the status, so on a tag shared between threads, use the
+ * return value of plc_tag_read() or plc_tag_write(), or the callback's status, to learn
+ * how an operation ended.
+ *
  * This is a function provided by the underlying protocol implementation.
  */
 LIB_EXPORT int plc_tag_status(int32_t tag);
@@ -552,11 +645,16 @@ LIB_EXPORT int plc_tag_status(int32_t tag);
 /*
  * plc_tag_write
  *
- * Start a write.  If the timeout value is zero, then wait until the write
+ * Start a write.  If the timeout value is not zero, then wait until the write
  * returns or the timeout occurs, whichever is first.  Return the status.
  * If the timeout value is zero, then plc_tag_write will usually return
  * PLCTAG_STATUS_PENDING.  The write is considered done
  * when it has been written to the socket.
+ *
+ * The data is copied from the tag when the request is built, not when this is called.
+ * Do not change the tag data until the write ends: a change before then may be sent,
+ * may be lost without an error, or, for a write in several packets, may leave the PLC
+ * with a mix of old and new values.
  *
  * This is a function provided by the underlying protocol implementation.
  */
@@ -596,7 +694,7 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t tag, const char *attrib_
 LIB_EXPORT int plc_tag_get_attribute_size(int32_t tag, const char *attrib_name);
 
 LIB_EXPORT int plc_tag_get_size(int32_t tag);
-/* return the old size or negative for errors. */
+/* return the old size or negative for errors.  PLCTAG_ERR_BUSY while a read or write is in flight. */
 LIB_EXPORT int plc_tag_set_size(int32_t tag, int new_size);
 
 LIB_EXPORT int plc_tag_get_bit(int32_t tag, int offset_bit);

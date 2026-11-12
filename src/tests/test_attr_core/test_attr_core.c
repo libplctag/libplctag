@@ -320,6 +320,36 @@ int main(void) {
 
     plc_tag_destroy(tag);
 
+    printf("write_pad_alignment_bytes is set in the tag string and read back.\n");
+
+    {
+        char pad_tag_string[512] = {0};
+        int32_t pad_tag = 0;
+
+        /* ControlLogix does not pad by default. */
+        tag = open_tag(DEFAULT_TAG);
+        check_get(tag, "write_pad_alignment_bytes", 1);
+        check_set(tag, "write_pad_alignment_bytes", 2, PLCTAG_ERR_UNSUPPORTED);
+        plc_tag_destroy(tag);
+
+        compat_snprintf(pad_tag_string, sizeof(pad_tag_string), "%s&write_pad_alignment_bytes=2", DEFAULT_TAG);
+        tag = open_tag(pad_tag_string);
+        check_get(tag, "write_pad_alignment_bytes", 2);
+        plc_tag_destroy(tag);
+
+        /* only 1, 2 and 4 are valid. */
+        compat_snprintf(pad_tag_string, sizeof(pad_tag_string), "%s&write_pad_alignment_bytes=3", DEFAULT_TAG);
+        pad_tag = plc_tag_create(pad_tag_string, DATA_TIMEOUT);
+        if(pad_tag != PLCTAG_ERR_BAD_PARAM) {
+            printf("\tFAIL: write_pad_alignment_bytes=3 created with %s, expected PLCTAG_ERR_BAD_PARAM.\n",
+                   plc_tag_decode_error(pad_tag));
+            failures++;
+            if(pad_tag >= 0) { plc_tag_destroy(pad_tag); }
+        } else {
+            printf("\tOK: write_pad_alignment_bytes=3 is rejected.\n");
+        }
+    }
+
     printf("bit_num reflects the bit the tag was created with.\n");
 
     bit_tag = open_tag(DEFAULT_BIT_TAG);

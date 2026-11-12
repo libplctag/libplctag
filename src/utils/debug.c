@@ -149,7 +149,6 @@ int set_debug_level(int level) {
 int get_debug_level(void) { return atomic_get_int32(&global_debug_level); }
 
 
-
 void debug_module_set_level(debug_module_t module, int level) {
     if((unsigned)module < DEBUG_MODULE_COUNT) { atomic_set_int32(&debug_module_levels[module], level); }
 }
@@ -164,7 +163,6 @@ int debug_module_get_level(debug_module_t module) {
 void debug_set_all_modules(int level) {
     for(int i = 0; i < DEBUG_MODULE_COUNT; i++) { atomic_set_int32(&debug_module_levels[i], level); }
 }
-
 
 
 static uint32_t get_thread_id(void) {
@@ -192,7 +190,7 @@ static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO
  * Get current epoch time in microseconds.
  * Works on Linux, BSD, macOS, and Windows.
  */
-static int64_t time_us(void) {
+static int64_t wall_time_us(void) {
 #if defined(_WIN32) || defined(_WIN64)
     /* Windows implementation using GetSystemTimePreciseAsFileTime (Windows 8+) */
     FILETIME ft;
@@ -262,7 +260,8 @@ static void emit_log_line(int32_t tag_id, int debug_level, const char *output) {
 }
 
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ, ...) {
+extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, const char *templ,
+                        ...) {
     va_list va;
     struct tm t;
     time_t epoch;
@@ -276,7 +275,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     ensure_stderr_buffering();
 
     /* get the time parts */
-    epoch_us = time_us();
+    epoch_us = wall_time_us();
     epoch = (time_t)(epoch_us / 1000000);
     remainder_us = (int)(epoch_us % 1000000);
 
@@ -306,10 +305,35 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
 }
 
 
+/*
+ * True when this call site may log now. The thread that moves next_ms forward logs; the others
+ * count what they drop, and the next line logged from the site reports that count first.
+ */
+bool debug_limit_pass(debug_limit_t *limit, const char *func, int line_num, int debug_level, debug_module_t module,
+                      int32_t tag_id) {
+    int64_t now = time_ms();
+    int64_t next = atomic_get_int64(&limit->next_ms);
+    int32_t dropped = 0;
+
+    if(now < next || atomic_compare_and_set_int64(&limit->next_ms, next, now + DEBUG_LIMIT_MS) != next) {
+        atomic_add_int32(&limit->suppressed, 1);
+        return false;
+    }
+
+    dropped = atomic_set_int32(&limit->suppressed, 0);
+    if(dropped > 0) {
+        pdebug_impl(func, line_num, debug_level, module, tag_id, "Suppressed %" PRId32 " messages from here in the last %d ms.",
+                    dropped, DEBUG_LIMIT_MS);
+    }
+
+    return true;
+}
+
+
 #define COLUMNS (16)
 
-void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id,
-                            uint8_t *data, int count) {
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, debug_module_t module, int32_t tag_id, uint8_t *data,
+                            int count) {
     int max_row, row, column;
     char row_buf[(COLUMNS * 3) + 5 + 1];
 
@@ -395,5 +419,3 @@ void debug_flush(void) {
 
     if(!has_logger) { fflush(stderr); }
 }
-
-

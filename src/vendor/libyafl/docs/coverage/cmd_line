@@ -1,1 +1,0 @@
-genhtml coverage.info --output-directory docs/coverage --title 'yafl Code Coverage'

@@ -56,16 +56,12 @@
 
 static volatile log_level_t global_debug_level = LOG_LEVEL_NONE;
 #if defined(_MSC_VER)
-static volatile LONG thread_num_lock = 0; /* Used with InterlockedCompareExchange (requires 4 bytes) */
+static volatile LONG thread_num = 1;
 #else
-static volatile unsigned char thread_num_lock = 0; /* Used with __atomic_test_and_set/__atomic_clear */
-#endif
 static volatile uint32_t thread_num = 1;
+#endif
 
-/*
- * Keep the thread ID thread local.
- * Using volatile for lock to ensure it's visible across threads.
- */
+/* Keep the thread ID thread local. */
 
 static THREAD_LOCAL uint32_t this_thread_num = 0;
 
@@ -84,36 +80,10 @@ log_level_t log_get_level(void) { return global_debug_level; }
 
 static uint32_t get_thread_id(void) {
     if(!this_thread_num) {
-        /* Use spinlock to ensure only one thread initializes at a time */
 #if defined(_MSC_VER)
-        /* MSVC uses InterlockedCompareExchange */
-        int expected = 0;
-        int desired = 1;
-        int actual = 0;
-        while((actual = InterlockedCompareExchange((volatile LONG *)&thread_num_lock, desired, expected)) != expected) {
-            /* Busy wait - spinlock */
-        }
-
-        /* Check again inside the lock - another thread may have initialized while we waited */
-        if(!this_thread_num) {
-            /* Increment and return old value */
-            this_thread_num = (uint32_t)InterlockedIncrement((volatile LONG *)&thread_num) - 1;
-        }
-
-        /* Release the lock */
-        InterlockedExchange((volatile LONG *)&thread_num_lock, 0);
+        this_thread_num = (uint32_t)InterlockedIncrement(&thread_num) - 1;
 #else
-        /* POSIX: Use GCC __atomic builtins on unsigned char for proper semantics */
-        while(__atomic_test_and_set(&thread_num_lock, __ATOMIC_SEQ_CST)) { /* Busy wait - spinlock */ }
-
-        /* Check again inside the lock - another thread may have initialized while we waited */
-        if(!this_thread_num) {
-            /* Fetch and increment */
-            this_thread_num = __atomic_fetch_add(&thread_num, 1, __ATOMIC_SEQ_CST);
-        }
-
-        /* Release the lock */
-        __atomic_clear(&thread_num_lock, __ATOMIC_SEQ_CST);
+        this_thread_num = __atomic_fetch_add(&thread_num, 1, __ATOMIC_SEQ_CST);
 #endif
     }
 
@@ -132,7 +102,7 @@ static const char *log_level_name[LOG_LEVEL_END] = {"NONE", "ERROR", "WARN", "IN
  * @param templ format string for the log message
  * @param ... additional arguments for the format string
  */
-extern void log_impl(const char *func, int line_num, log_level_t debug_level, const char *templ, ...) {
+void log_impl(const char *func, int32_t line_num, log_level_t debug_level, const char *templ, ...) {
     va_list va;
     char prefix[1000]; /* MAGIC */
     char output[1000];
@@ -157,7 +127,7 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
     }
 #endif
 
-    int remainder_ms = (int)(epoch_ms % 1000);
+    int32_t remainder_ms = (int32_t)(epoch_ms % 1000);
     time_t epoch = (time_t)(epoch_ms / 1000);
     struct tm t;
 
@@ -173,7 +143,7 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
     const char *level_str = "UNKNOWN";
     if(debug_level >= 0 && debug_level < LOG_LEVEL_END) { level_str = log_level_name[debug_level]; }
 
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) %s %s:%d %s\n", t.tm_year + 1900,
              t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), level_str, func, line_num,
              templ);
@@ -181,7 +151,7 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
 
     /* Format and emit the final message */
     va_start(va, templ);
-    // NOLINTNEXTLINE
+    /* NOLINTNEXTLINE */
     (void)vsnprintf(output, sizeof(output), prefix, va);
     fputs(output, stderr);
     fflush(stderr);

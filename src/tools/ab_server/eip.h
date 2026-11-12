@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,16 +33,19 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
 #include "plc.h"
-#include "slice.h"
+#include <utils/byte_slice.h>
 
 /* EIP header size is 24 bytes. */
 #define EIP_HEADER_SIZE (24)
 
-/* EIP errors. */
-#define EIP_ERR_BAD_REQUEST ((uint32_t)1) /* FIXME */
+/* the two EIP commands that carry CIP; the rest are session management. */
+#define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
+#define EIP_CONNECTED_SEND ((uint16_t)0x0070)
 
 
-extern slice_s eip_dispatch_request(slice_s input, slice_s output, plc_s *context);
+/*
+ * Handle one whole encapsulation packet.  Returns the reply at the start of out, or an error
+ * slice: PLCTAG_ERR_CLOSE after UnregisterSession, or out too small for a header.
+ */
+extern byte_slice_t eip_dispatch_request(byte_slice_t packet, byte_slice_t out, plc_s *plc);

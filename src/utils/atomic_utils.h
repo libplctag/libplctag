@@ -43,24 +43,20 @@
  * If the returned value equals the expected value, the swap succeeded.
  */
 
-#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 201112L)
+#if defined(_MSC_VER)
 
-/* Non-C11 atomics path (Windows and older compilers) */
-
-#    ifdef _WIN32
-typedef volatile short atomic_bool;
-#    else
-typedef volatile bool atomic_bool;
-#    endif
+/*
+ * MSVC has no <stdatomic.h> without /experimental:c11atomics, so every operation is an
+ * Interlocked call (atomic_utils.c).  Every other supported compiler has C11 atomics.
+ */
+typedef volatile long atomic_bool;
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
 
 #    define ATOMIC_INT_STATIC_INIT (0)
-#    define ATOMIC_BOOL_STATIC_INIT (false)
+#    define ATOMIC_BOOL_STATIC_INIT (0)
 
 #else
-
-/* C11 atomics path */
 
 #    include <stdatomic.h>
 

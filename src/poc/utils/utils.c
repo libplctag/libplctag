@@ -151,3 +151,29 @@ void util_sleep_ms(int ms) {
 
 #endif
 
+
+#ifdef _WIN32
+
+int64_t util_mono_us(void) {
+    LARGE_INTEGER count;
+    LARGE_INTEGER freq;
+
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&freq);
+
+    return (count.QuadPart / freq.QuadPart) * 1000000 + ((count.QuadPart % freq.QuadPart) * 1000000) / freq.QuadPart;
+}
+
+
+#else
+
+int64_t util_mono_us(void) {
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    return ((int64_t)ts.tv_sec * 1000000) + ((int64_t)ts.tv_nsec / 1000);
+}
+
+#endif
+

@@ -34,6 +34,7 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
+#include <stdbool.h>
 
 /*
  * The global tag-handle registry: the map from the int32_t handle the application
@@ -44,45 +45,38 @@
 extern plc_tag_p lookup_tag(int32_t tag_id);
 
 /* Assign the tag a fresh id and publish it in the registry. */
-extern int add_tag_lookup(plc_tag_p tag);
+extern int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing);
 
-/* Remove a tag from the registry.  The caller still holds its own reference. */
-extern void remove_tag_lookup(plc_tag_p tag);
+extern plc_tag_p tag_registry_find_reusable(const char *reuse_str);
+
+extern void tag_registry_forget_reusable(plc_tag_p tag);
+
+/*
+ * Remove a tag from the registry.  The caller still holds its own reference.  Returns false if
+ * the tag was no longer there: whoever removed it owns raising its DESTROYED event.
+ */
+extern bool remove_tag_lookup(plc_tag_p tag);
 
 /* Remove a tag by id and return it, or NULL if no such tag is registered. */
-extern plc_tag_p remove_tag_lookup_by_id(tag_registry_p registry, int32_t tag_id);
+extern plc_tag_p remove_tag_lookup_by_id(int32_t tag_id);
 
-/* Tag ids are 28 bits, so a handle can never be mistaken for a pointer. */
-#define TAG_ID_MASK (0xFFFFFFF)
+/* Tag ids are 31 bits, so a valid id is always positive. */
+#define TAG_ID_MASK (0x7FFFFFFF)
 
 /*
- * Lifecycle, registered as a row in lib_components[] (lib/init.c).
- *
- * init() builds the registry but deliberately does NOT publish it: no tag may
- * find it until every device module has started, or a module that fails to
- * start would leave a live tickler behind.  initialize_modules() calls
- * publish() once they have all succeeded, or discard_pending() if one did not.
+ * Lifecycle.  init() is a row in lib_components[] (lib/init.c).  publish() opens the registry
+ * to creates once every device module has started, so a module that fails to start leaves no
+ * tag it cannot serve.  teardown() frees the reuse map, on shutdown or a failed start.
  */
 extern int tag_registry_init(void);
-extern void tag_registry_teardown(void);
 extern void tag_registry_publish(void);
-extern void tag_registry_discard_pending(void);
-
-/* Take a reference to the running registry, or NULL when it is not running. */
-extern tag_registry_p tag_registry_acquire(void);
+extern void tag_registry_teardown(void);
 
 /*
- * Atomically close the gate: exactly one caller ever sees the registry non-NULL
- * and clears it, so repeated or concurrent plc_tag_shutdown() calls are safe.
- * Returns the reference it took, or NULL if the registry was already closed.
+ * Atomically close the registry to creates: exactly one caller sees it open and closes it, so
+ * repeated or concurrent plc_tag_shutdown() calls are safe.  Returns true for that caller.
  */
-extern tag_registry_p tag_registry_close(void);
-
-/* Hand the closed registry to teardown, which drops the last reference. */
-extern void tag_registry_stage_shutdown(tag_registry_p registry);
+extern bool tag_registry_close(void);
 
 /* Destroy every tag still registered.  Only valid after tag_registry_close(). */
-extern void tag_registry_destroy_all_tags(tag_registry_p registry);
-
-/* Wake the tickler thread and wait for it to exit. */
-extern void tag_registry_stop_tickler(tag_registry_p registry);
+extern void tag_registry_destroy_all_tags(void);

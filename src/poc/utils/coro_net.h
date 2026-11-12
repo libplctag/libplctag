@@ -96,6 +96,11 @@ util_err_t coro_run(coro_net_t **coro_net, uint32_t tick_interval_ms);
 util_err_t coro_stop(coro_net_t *coro_net);
 
 /**
+ * @brief Set the time (util_mono_us()) at which a task waiting in coro_wait_until() runs again.
+ */
+void coro_set_wake(coro_task_handle_t task, int64_t deadline_us);
+
+/**
  * @brief a task to the event loop
  * 
  * All tasks are added to the event loop with an initial event of CORO_EVENT_ALWAYS.
@@ -185,6 +190,18 @@ socket_t coro_get_fd(coro_task_handle_t task);
         coro_set_task_event((task), (event)); \
         return; \
         case __LINE__:; \
+    } while(0)
+
+/**
+ * Yield until a time on util_mono_us(), without polling the task's socket.  The loop waits no
+ * longer than the earliest such deadline, to the microsecond on POSIX.
+ * Usage:
+ *   coro_wait_until(task, deadline_us);
+ */
+#define coro_wait_until(task, deadline_us) \
+    do { \
+        coro_set_wake((task), (deadline_us)); \
+        coro_yield((task), CORO_EVENT_NONE); \
     } while(0)
 
 /**

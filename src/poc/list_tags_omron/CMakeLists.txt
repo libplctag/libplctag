@@ -8,12 +8,12 @@ endif()
 
 set(LIST_TAGS_OMRON_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/list_tags_omron.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../utils/compat_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils/compat_utils.c
 )
 
 add_executable(list_tags_omron ${LIST_TAGS_OMRON_FILES})
 
-target_include_directories(list_tags_omron PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../utils)
+target_include_directories(list_tags_omron PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/utils)
 
 target_link_libraries(list_tags_omron PUBLIC plctag_static ${EXTRA_LINKER_LIBS})
 target_link_options(list_tags_omron PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})

@@ -190,6 +190,52 @@ int test_debug(void) {
 }
 
 
+/*
+ * A system tag has no handler, so it cannot auto-destroy, and only "version" and "debug"
+ * exist: the special names of the PLC protocols are refused.
+ */
+static int test_refusals(void) {
+    static const char *names[] = {"@connection", "@raw", "@tags", "@udt/1", "no_such_tag"};
+    int32_t tag = 0;
+    int rc = PLCTAG_STATUS_OK;
+    int failed = 0;
+
+    tag = plc_tag_create("protocol=system&name=version&destroy_tag_after_idle_sec=10", TAG_CREATE_TIMEOUT);
+    if(tag != PLCTAG_ERR_BAD_PARAM) {
+        fprintf(stderr, "Create with destroy_tag_after_idle_sec gave %d (%s), expected PLCTAG_ERR_BAD_PARAM!\n", (int)tag, plc_tag_decode_error(tag));
+        failed++;
+    }
+    if(tag >= 0) { plc_tag_destroy(tag); }
+
+    tag = plc_tag_create("protocol=system&name=version", TAG_CREATE_TIMEOUT);
+    if(tag < 0) {
+        fprintf(stderr, "Unable to create the version tag: %s!\n", plc_tag_decode_error(tag));
+        return tag;
+    }
+
+    rc = plc_tag_set_int_attribute(tag, "destroy_tag_after_idle_sec", 10);
+    if(rc != PLCTAG_ERR_NOT_ALLOWED) {
+        fprintf(stderr, "Setting destroy_tag_after_idle_sec gave %s, expected PLCTAG_ERR_NOT_ALLOWED!\n", plc_tag_decode_error(rc));
+        failed++;
+    }
+    plc_tag_destroy(tag);
+
+    for(size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        char attribs[128];
+
+        snprintf(attribs, sizeof(attribs), "protocol=system&name=%s", names[i]);
+        tag = plc_tag_create(attribs, TAG_CREATE_TIMEOUT);
+        if(tag != PLCTAG_ERR_BAD_PARAM) {
+            fprintf(stderr, "Create of system tag %s gave %d (%s), expected PLCTAG_ERR_BAD_PARAM!\n", names[i], (int)tag, plc_tag_decode_error(tag));
+            failed++;
+        }
+        if(tag >= 0) { plc_tag_destroy(tag); }
+    }
+
+    return failed ? PLCTAG_ERR_BAD_STATUS : PLCTAG_STATUS_OK;
+}
+
+
 int main(void) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -213,6 +259,15 @@ int main(void) {
         fprintf(stderr, "Error %s trying to test \"debug\" special tag!\n", plc_tag_decode_error(rc));
         return rc;
     }
+
+    rc = test_refusals();
+    if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error %s: system tags accepted what they must refuse!\n", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    fprintf(stderr, "System tag refusals ok.\n");
 
     return 0;
 }

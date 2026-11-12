@@ -42,7 +42,7 @@
 #define REQUIRED_VERSION 2, 4, 0
 
 #define TAG_STRING_SIZE (200)
-#define TAG_STRING_TEMPLATE "protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&name="
+#define TAG_STRING_TEMPLATE "protocol=ab-eip&gateway=%s&path=%s&plc=%s&name="
 #define TIMEOUT_MS 5000
 
 
@@ -111,6 +111,9 @@ static int current_udt = 0;
 
 
 static int debug_level = PLCTAG_DEBUG_NONE;
+
+/* an OMRON NJ/NX fills @tags and @udt/N in the same layouts, so omron-njnx works too. */
+static const char *plc_type = "ControlLogix";
 
 
 int main(int argc, char **argv) {
@@ -298,11 +301,11 @@ int main(int argc, char **argv) {
 
         /* print the tag string */
         if(!tag->parent) {
-            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\"\n",
-                   host, path, tag->elem_size, tag->elem_count, tag->name);
+            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=%s&elem_size=%u&elem_count=%u&name=%s\"\n",
+                   host, path, plc_type, tag->elem_size, tag->elem_count, tag->name);
         } else {
-            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s.%s\"\n",
-                   host, path, tag->elem_size, tag->elem_count, tag->parent->name, tag->name);
+            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=%s&elem_size=%u&elem_count=%u&name=%s.%s\"\n",
+                   host, path, plc_type, tag->elem_size, tag->elem_count, tag->parent->name, tag->name);
         }
     }
 
@@ -394,7 +397,8 @@ int main(int argc, char **argv) {
 
 void usage(void) {
     // NOLINTNEXTLINE
-    fprintf(stderr, "Usage: list_tags <PLC IP> <PLC path>\nExample: list_tags 10.1.2.3 1,0\n");
+    fprintf(stderr, "Usage: list_tags <PLC IP> <PLC path> [<PLC type>]\nExample: list_tags 10.1.2.3 1,0\n"
+                    "         list_tags 10.1.2.3 18,10.1.2.3 omron-njnx\n");
     exit(1);
 }
 
@@ -421,9 +425,11 @@ char *setup_tag_string(int argc, char **argv) {
 
     path = argv[2];
 
+    if(argc > 3 && argv[3] && strlen(argv[3]) > 0) { plc_type = argv[3]; }
+
     /* build the tag string. */
     // NOLINTNEXTLINE
-    snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway, path);
+    snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway, path, plc_type);
 
     /* FIXME - check size! */
     if(debug_level >= PLCTAG_DEBUG_INFO) {

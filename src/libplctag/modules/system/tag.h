@@ -45,7 +45,6 @@ struct system_tag_t {
     TAG_BASE_STRUCT;
 
     char name[MAX_SYSTEM_TAG_NAME];
-    uint8_t backing_data[MAX_SYSTEM_TAG_SIZE];
 };
 
 typedef struct system_tag_t *system_tag_p;

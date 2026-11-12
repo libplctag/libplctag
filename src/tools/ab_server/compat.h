@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,30 +33,18 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+#include <stdint.h>
 
 /*
  * This file contains various compatibility includes and definitions
  * to allow compilation across POSIX and Windows systems.
  */
-#if defined(APPLE) || defined(__APPLE__) || defined(DARWIN) || defined(__DARWIN__)
-#    define IS_MACOS (1)
-#    define IS_POSIX (1)
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-#    define IS_BSD (1)
-#    define IS_POSIX (1)
-#elif defined(__linux__)
-#    define IS_LINUX (1)
-#    define IS_POSIX (1)
-#elif defined(__unix__)
-#    define IS_POSIX (1)
-#elif defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64) || defined(__MINGW32__) || defined(__MINGW64__)
+#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64) || defined(__MINGW32__) || defined(__MINGW64__)
 #    define IS_WINDOWS (1)
 
 #    if defined(_MSC_VER)
 #        define IS_MSVC (1)
 #    endif
-
 #endif
 
 
@@ -89,12 +79,13 @@ typedef struct {
 #    define atomic_dec_int32(ptr) InterlockedExchangeAdd((volatile LONG *)&(ptr)->value, -1)
 #    define atomic_load_int64(ptr) InterlockedCompareExchange64((volatile LONG64 *)&(ptr)->value, 0, 0)
 #    define atomic_store_int64(ptr, val) InterlockedExchange64((volatile LONG64 *)&(ptr)->value, (LONG64)(val))
+#    define atomic_add_int64(ptr, val) InterlockedExchangeAdd64((volatile LONG64 *)&(ptr)->value, (LONG64)(val))
 #else
 typedef struct {
-    volatile int value;
+    volatile int32_t value;
 } atomic_int32_t;
 typedef struct {
-    volatile long long value;
+    volatile int64_t value;
 } atomic_int64_t;
 
 #    define atomic_load_int32(ptr) __atomic_load_n(&(ptr)->value, __ATOMIC_SEQ_CST)
@@ -104,6 +95,7 @@ typedef struct {
 #    define atomic_dec_int32(ptr) __atomic_fetch_sub(&(ptr)->value, 1, __ATOMIC_SEQ_CST)
 #    define atomic_load_int64(ptr) __atomic_load_n(&(ptr)->value, __ATOMIC_SEQ_CST)
 #    define atomic_store_int64(ptr, val) __atomic_store_n(&(ptr)->value, (val), __ATOMIC_SEQ_CST)
+#    define atomic_add_int64(ptr, val) __atomic_add_fetch(&(ptr)->value, (val), __ATOMIC_SEQ_CST)
 #endif
 
 /* Define ssize_t */

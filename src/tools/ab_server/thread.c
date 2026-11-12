@@ -46,9 +46,9 @@
 #    include <pthread.h>
 #endif
 
-#include "memory.h"
+#include <stdlib.h>
+#include <libplctag/api/libplctag.h>
 #include "thread.h"
-#include "utils.h"
 #include "log.h"
 
 
@@ -58,7 +58,6 @@ struct thread_t {
 #else
     pthread_t p_thread;
 #endif
-    int initialized;
 };
 
 
@@ -66,29 +65,25 @@ struct thread_t {
  * thread_create()
  *
  * Start up a new thread.  This allocates the thread_t structure and starts
- * the passed function.  The arg argument is passed to the function.
- *
- * TODO - use the stacksize!
+ * the passed function.  The arg argument is passed to the function.  POSIX threads get a
+ * fixed 1 MB stack: the TCP connection thread keeps two 64 KB buffers on it.
  */
 
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg) {
-    log_info("DETAIL: Starting.");
-
-    (void)stacksize; /* Note: We now set a fixed 1MB stack size on POSIX systems */
+int32_t thread_create(thread_p *t, thread_func_t func, void *arg) {
+    log_detail("Starting.");
 
     if(!t) {
-        log_info("WARN: null thread pointer.");
-        return THREAD_ERR_NULL_PTR;
+        log_warn("Null thread pointer.");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
-    *t = (thread_p)mem_alloc(sizeof(struct thread_t));
+    *t = (thread_p)calloc(1, sizeof(struct thread_t));
 
     if(!*t) {
-        log_error("ERROR: Failed to allocate memory for thread.");
-        return THREAD_ERR_NULL_PTR;
+        log_error("Failed to allocate memory for thread.");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* create a thread. */
 #if IS_WINDOWS
     (*t)->h_thread = CreateThread(NULL,  /* default security attributes */
                                   0,     /* use default stack size      */
@@ -98,70 +93,27 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
                                   NULL); /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
-        log_info("WARN: error creating thread.");
-        mem_free(*t);
-        *t = NULL;
-
-        return THREAD_ERR_THREAD_CREATE;
-    }
-
-    /* mark as initialized */
-    (*t)->initialized = 1; /* note this is never used and not even set in the posix version */
 #else
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    /* Set stack size to 1MB to rule out stack size issues */
     pthread_attr_setstacksize(&attr, 1024 * 1024);
 
-    int rc = pthread_create(&((*t)->p_thread), &attr, func, arg);
+    int32_t rc = pthread_create(&((*t)->p_thread), &attr, func, arg);
     pthread_attr_destroy(&attr);
 
     if(rc) {
-        log_error("ERROR: error creating thread.");
-        return THREAD_ERR_THREAD_CREATE;
-    }
 #endif
-
-    log_info("DETAIL: Done.");
-
-    return THREAD_STATUS_OK;
-}
-
-
-/*
- * platform_thread_stop()
- *
- * Stop the current thread.  Does not take arguments.  Note: the thread
- * ends completely and this function does not return!
- */
-void thread_stop(void) {
-#if IS_WINDOWS
-    ExitThread((DWORD)0);
-#else
-    pthread_exit((void *)0);
-#endif
-}
-
-
-/*
- * thread_kill()
- *
- * Kill another thread.
- */
-
-void thread_kill(thread_p t) {
-    if(t) {
-#if IS_WINDOWS
-        TerminateThread(t->h_thread, (DWORD)0);
-#else
-#    ifdef __ANDROID__
-        pthread_kill(t->p_thread, 0);
-#    else
-        pthread_cancel(t->p_thread);
-#    endif /* __ANDROID__ */
-#endif     /* IS_WINDOWS */
+        log_error("Error creating thread.");
+        free(*t);
+        *t = NULL;
+        return PLCTAG_ERR_THREAD_CREATE;
     }
+
+    log_detail("Done.");
+
+    return PLCTAG_STATUS_OK;
 }
+
 
 /*
  * thread_join()
@@ -169,48 +121,46 @@ void thread_kill(thread_p t) {
  * Wait for the argument thread to stop and then continue.
  */
 
-int thread_join(thread_p t) {
+int32_t thread_join(thread_p t) {
 #if !defined(IS_WINDOWS)
     void *unused;
 #endif
 
-    log_info("DETAIL: Starting.");
+    log_detail("Starting.");
 
     if(!t) {
-        log_info("WARN: null thread pointer.");
-        return THREAD_ERR_NULL_PTR;
+        log_warn("Null thread pointer.");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
 #if IS_WINDOWS
-    /* FIXME - check for uninitialized threads */
     if(WaitForSingleObject(t->h_thread, (DWORD)INFINITE)) {
 #else
     if(pthread_join(t->p_thread, &unused)) {
 #endif
-        log_error("ERROR: Error joining thread.");
-        return THREAD_ERR_THREAD_JOIN;
+        log_error("Error joining thread.");
+        return PLCTAG_ERR_THREAD_JOIN;
     }
 
-    log_info("DETAIL: Done.");
+    log_detail("Done.");
 
-    return THREAD_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
 /*
  * thread_detach
  *
- * Detach the thread.  You cannot call thread_join on a detached thread!
+ * Detach the calling thread.  You cannot call thread_join on a detached thread!
+ * Windows has no equivalent; thread_destroy closing the handle does the job there.
  */
 
-extern int thread_detach(void) {
-#if IS_WINDOWS
-    /* FIXME - it does not look like you can do this on Windows??? */
-#else
+int32_t thread_detach(void) {
+#if !defined(IS_WINDOWS)
     pthread_detach(pthread_self());
 #endif
 
-    return THREAD_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -220,23 +170,23 @@ extern int thread_detach(void) {
  * This gets rid of the resources of a thread struct.  The thread in
  * question must be dead first!
  */
-extern int thread_destroy(thread_p *t) {
-    log_info("DETAIL: Starting.");
+
+int32_t thread_destroy(thread_p *t) {
+    log_detail("Starting.");
 
     if(!t || !*t) {
-        log_info("WARN: null thread pointer.");
-        return THREAD_ERR_NULL_PTR;
+        log_warn("Null thread pointer.");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
 #if IS_WINDOWS
     CloseHandle((*t)->h_thread);
 #endif
 
-    mem_free(*t);
-
+    free(*t);
     *t = NULL;
 
-    log_info("DETAIL: Done.");
+    log_detail("Done.");
 
-    return THREAD_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }

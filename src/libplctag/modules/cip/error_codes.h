@@ -33,8 +33,10 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <utils/debug.h>
 
 extern const char *decode_cip_error_short(uint8_t *data, size_t data_size);
 extern const char *decode_cip_error_long(uint8_t *data, size_t data_size);
@@ -50,3 +52,33 @@ static inline size_t cip_error_data_size(uint8_t *data, uint8_t *buf_end) {
     /* comparing pointers directly is UB, so compare the integer values instead. */
     return ((intptr_t)data < (intptr_t)buf_end) ? (size_t)((intptr_t)buf_end - (intptr_t)data) : 0;
 }
+
+
+/*
+ * One extended status word out of a CIP error reply.
+ *
+ * status points at the general status byte, and status_bytes is how much of the buffer is
+ * actually there -- cip_error_data_size() above measures it.  The byte after the general
+ * status counts the 16-bit extended status words that follow, little endian.  word_idx 0
+ * is the first of them.
+ *
+ * Returns 0 when the reply carries no such word.  Most PLCs send none at all and older
+ * firmware sends fewer than newer firmware, so a missing word is the ordinary case and
+ * not an error -- the caller reads 0 as "the PLC did not say".
+ */
+static inline uint16_t cip_extended_status_word(uint8_t *status, size_t status_bytes, uint8_t word_idx) {
+    size_t offset = (size_t)2 + ((size_t)word_idx * 2);
+
+    if(status_bytes < 2 || word_idx >= status[1] || (offset + 2) > status_bytes) { return 0; }
+
+    return (uint16_t)((uint16_t)status[offset] | (uint16_t)((uint16_t)status[offset + 1] << 8));
+}
+
+
+/*
+ * Check a CIP reply header: the service must answer service, and the status must be OK, or
+ * partial when allow_partial.  Returns PLCTAG_STATUS_OK, or the error the status maps to,
+ * logged under debug_module.
+ */
+extern int cip_check_reply(uint8_t *reply, int32_t reply_size, uint8_t service, bool allow_partial, debug_module_t debug_module,
+                           int32_t tag_id);

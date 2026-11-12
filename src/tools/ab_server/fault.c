@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,7 +58,7 @@ const char *fault_kind_name(fault_kind_t kind) {
 bool fault_parse(const char *spec, plc_s *plc) {
     const char *colon = NULL;
     size_t name_len = 0;
-    long count = 1;
+    int64_t count = 1;
 
     if(!spec || !plc) { return false; }
 
@@ -71,11 +72,9 @@ bool fault_parse(const char *spec, plc_s *plc) {
     if(colon) {
         char *end = NULL;
 
-        /* where long is 32 bits strtol() saturates at LONG_MAX == INT32_MAX, so the range
-         * check below cannot see an overflow on its own. */
         errno = 0;
 
-        count = strtol(colon + 1, &end, 10);
+        count = strtoll(colon + 1, &end, 10);
 
         if(errno == ERANGE || end == colon + 1 || *end != '\0' || count < 1 || count > INT32_MAX) {
             log_error("Fault count in \"%s\" must be a positive number.", spec);
@@ -83,10 +82,10 @@ bool fault_parse(const char *spec, plc_s *plc) {
         }
     }
 
-    for(int kind = FAULT_NONE + 1; kind < FAULT_MAX; kind++) {
+    for(int32_t kind = FAULT_NONE + 1; kind < FAULT_MAX; kind++) {
         if(strlen(fault_names[kind]) == name_len && strncmp(spec, fault_names[kind], name_len) == 0) {
             atomic_store_int32(plc->fault_counts[kind], (int32_t)count);
-            log_info_always("Corrupting the next %ld response(s) with fault \"%s\".", count, fault_names[kind]);
+            log_info_always("Corrupting the next %" PRId64 " response(s) with fault \"%s\".", count, fault_names[kind]);
             return true;
         }
     }
@@ -108,7 +107,7 @@ bool fault_fires(plc_s *plc, fault_kind_t kind) {
      * of one must not both decide to fire.  atomic_dec_int32() returns the value from before
      * the decrement, so a value above zero means this caller won.
      *
-     * ponytail: like reject_fo_count this keeps counting down past zero once exhausted, which
+     * ponytail: like dup_conn_id_tries this keeps counting down past zero once exhausted, which
      * is harmless for a test tool at any plausible request rate.
      */
     remaining = atomic_dec_int32(plc->fault_counts[kind]);

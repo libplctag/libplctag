@@ -33,7 +33,9 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <platform.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <utils/debug.h>
 
@@ -69,7 +71,7 @@ static struct error_code_entry error_code_table
            "This occurs if a device sends a Forward Close on a connection and the device can't find this connection. This could occur if one of these devices has powered down or if the connection timed out on a bad connection. This could be caused by poor network traffic. Check the cabling, switches and connections."},
           {0x01, 0x0108, PLCTAG_ERR_BAD_PARAM, "Invalid Network Connection Parameter",
            "This error occurs when one of the parameters specified in the Forward Open message is not supported such as Connection Point, Connection type, Connection priority, redundant owner or exclusive owner. The Productivity Suite CPU does not return this error and will instead use errors 0x0120, 0x0121, 0x0122, 0x0123, 0x0124, 0x0125 or 0x0132 instead."},
-          {0x01, 0x0109, PLCTAG_ERR_BAD_PARAM, "Invalid Connection Size",
+          {0x01, 0x0109, PLCTAG_ERR_TOO_LARGE, "Invalid Connection Size",
            "This error occurs when the target device doesn't support the requested connection size. Check the documentation of the manufacturer's device to verify the correct Connection size required by the device. Note that most devices specify this value in terms of bytes. The Productivity Suite CPU does not return this error and will instead use errors 0x0126, 0x0127 and 0x0128."},
           {0x01, 0x0110, PLCTAG_ERR_NOT_FOUND, "Target for Connection Not Configured",
            "This error occurs when a message is received with a connection number that does not exist in the target device. This could occur if the target device has powered down or if the connection timed out. This could be caused by poor network traffic. Check the cabling, switches and connections."},
@@ -117,9 +119,9 @@ static struct error_code_entry error_code_table
            "The Originator to Target Network Connection Redundant_Owner flag specified in the Forward Open is not supported. Only Exclusive owner connections are supported in the Productivity Suite CPU."},
           {0x01, 0x0126, PLCTAG_ERR_BAD_PARAM, "Invalid Configuration Size",
            "This error is returned when the Configuration data sent in the Forward Open does not match the size specified or is not supported by the Adapter. The Target device may return an additional Unsigned Integer 16 value that specifies the maximum size allowed for this data. An array can be defined for this field in order to view the extended error code attributes."},
-          {0x01, 0x0127, PLCTAG_ERR_BAD_PARAM, "Invalid Originator to Target Size",
+          {0x01, 0x0127, PLCTAG_ERR_TOO_LARGE, "Invalid Originator to Target Size",
            "This error is returned when the Originator to Target (Output data) size specified in the Forward Open does not match what is in the Target. Consult the documentation of the Adapter device to verify the required size. Note that if the Run/Idle header is requested, it will add 4 additional bytes and must be accounted for in the Forward Open calculation. The Productivity Suite CPU always requires the Run/Idle header so if the option doesn't exist in the Scanner device, you must add an additional 4 bytes to the O -> T (Output) setup. Some devices may publish the size that they are looking for as an additional attribute (Unsigned Integer 16 value) of the Extended Error Code. An array can be defined for this field in order to view the extended error code attributes.\nNote: This error may also be generated when a Connection Point value that is invalid for IO Messaging (but valid for other cases such as Explicit Messaging) is specified, such as 0. Please verify if the Connection Point value is valid for IO Messaging in the target device."},
-          {0x01, 0x0128, PLCTAG_ERR_BAD_PARAM, "Invalid Target to Originator Size",
+          {0x01, 0x0128, PLCTAG_ERR_TOO_LARGE, "Invalid Target to Originator Size",
            "This error is returned when the Target to Originator (Input data) size specified in the Forward Open does not match what is in Target. Consult the documentation of the Adapter device to verify the required size. Note that if the Run/Idle header is requested, it will add 4 additional bytes and must be accounted for in the Forward Open calculation. The Productivity Suite CPU does not support a Run/Idle header for the T -> O (Input) data. Some devices may publish the size that they are looking for as an additional attribute (Unsigned Integer 16 value) of the Extended Error Code. An array can be defined for this field in order to view the extended error code attributes.\nNote: This error may also be generated when a Connection Point value that is invalid for IO Messaging (but valid for other cases such as Explicit Messaging) is specified, such as 0. Please verify if the Connection Point value is valid for IO Messaging in the target device."},
           {0x01, 0x0129, PLCTAG_ERR_BAD_PARAM, "Invalid Configuration Application Path",
            "This error will be returned by the Productivity Suite CPU if a Configuration Connection with a size other than 0 is sent to the CPU. The Configuration Connection size must always be zero if it this path is present in the Forward Open message coming from the Scanner device."},
@@ -328,4 +330,32 @@ int decode_cip_error_code(uint8_t *data, size_t data_size) {
     int index = lookup_error_code(data, data_size);
 
     return error_code_table[index].translated_code;
+}
+
+
+int cip_check_reply(uint8_t *reply, int32_t reply_size, uint8_t service, bool allow_partial, debug_module_t debug_module,
+                    int32_t tag_id) {
+    /* reply service, reserved, general status, status word count: the cip_header layout. */
+    uint8_t *status = reply + 2;
+    size_t status_size = 0;
+
+    if(reply_size < 4) {
+        pdebug(debug_module, DEBUG_WARN, tag_id, "CIP reply of %" PRId32 " bytes is too short for its header!", reply_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(reply[0] != (uint8_t)(service | CIP_SVC_REPLY)) {
+        pdebug(debug_module, DEBUG_WARN, tag_id, "CIP reply service 0x%02x is not the reply to 0x%02x!", reply[0], service);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    if(*status == CIP_STATUS_OK || (allow_partial && *status == CIP_STATUS_FRAG)) { return PLCTAG_STATUS_OK; }
+
+    status_size = cip_error_data_size(status, reply + reply_size);
+
+    pdebug(debug_module, DEBUG_WARN, tag_id, "CIP request failed with status: 0x%x %s", *status,
+           decode_cip_error_short(status, status_size));
+    pdebug(debug_module, DEBUG_INFO, tag_id, "%s", decode_cip_error_long(status, status_size));
+
+    return decode_cip_error_code(status, status_size);
 }

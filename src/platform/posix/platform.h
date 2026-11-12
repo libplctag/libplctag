@@ -34,6 +34,8 @@
 #ifndef __PLATFORM_H__
 #define __PLATFORM_H__
 
+#include <pthread.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <strings.h> /* strcasecmp()/strncasecmp() */
@@ -74,13 +76,13 @@
 
 
 /* memory functions/defs */
-extern void *mem_alloc(int size);
-extern void *mem_realloc(void *orig, int size);
+extern void *mem_alloc(int32_t size);
+extern void *mem_realloc(void *orig, int32_t size);
 extern void mem_free(const void *mem);
-extern void mem_set(void *dest, int c, int size);
-extern void mem_copy(void *dest, void *src, int size);
-extern void mem_move(void *dest, void *src, int size);
-extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
+extern void mem_set(void *dest, int c, int32_t size);
+extern void mem_copy(void *dest, void *src, int32_t size);
+extern void mem_move(void *dest, void *src, int32_t size);
+extern int mem_cmp(void *src1, int32_t src1_size, void *src2, int32_t src2_size);
 
 /*
  * Standard library calls whose names differ between platforms.  The portable
@@ -105,12 +107,25 @@ extern char **str_split(const char *str, const char *sep);
 extern char *str_concat_impl(int num_args, ...);
 
 /* mutex functions/defs */
-typedef struct mutex_t *mutex_p;
-extern int mutex_create(mutex_p *m);
-extern int mutex_destroy(mutex_p *m);
+/*
+ * Mutexes are recursive and embedded by value in their owner.  Locking cannot fail: a mutex that
+ * is not initialized means its owner is already gone, which no return code can make safe
+ * (review U5, Option C).  An owner initializes its mutex before any step that can fail, and
+ * mutex_destroy() on a zeroed, never-initialized mutex does nothing.
+ */
+typedef struct mutex_t {
+    pthread_mutex_t p_mutex;
+    bool initialized;
+} mutex_t;
+typedef mutex_t *mutex_p;
 
-extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
+extern int mutex_init(mutex_p m);
+extern void mutex_destroy(mutex_p m);
+
+extern void mutex_lock_impl(const char *func, int line_num, mutex_p m);
+/* PLCTAG_STATUS_OK when locked, PLCTAG_ERR_MUTEX_LOCK when another thread holds it. */
 extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
+/* PLCTAG_ERR_MUTEX_UNLOCK when the calling thread does not hold it; plc_tag_unlock() reports that. */
 extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -124,28 +139,26 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
 /* macros are evil */
 
+/* paste a per-line suffix onto a name, so nested blocks on different lines get distinct names. */
+#define PLCTAG_CAT2(a, b) a##b
+#define PLCTAG_CAT(a, b) PLCTAG_CAT2(a, b)
+#define LINE_ID(base) PLCTAG_CAT(base, __LINE__)
+
 /*
  * Use this one like this:
  *
- *     critical_block(my_mutex) {
+ *     critical_block(&obj->mutex) {
  *         locked_data++;
  *         foo(locked_data);
  *     }
  *
- * The macro locks and unlocks for you.  Derived from ideas/code on StackOverflow.com.
- *
- * Do not use break, return, goto or continue inside the synchronized block if
- * you intend to have them apply to a loop outside the synchronized block.
- *
- * You can use break, but it will drop out of the inner for loop and correctly
- * unlock the mutex.  It will NOT break out of any surrounding loop outside the
- * synchronized block.
+ * The macro locks and unlocks for you.  break and continue leave the block and unlock.  Never
+ * use return or goto inside it: they skip the unlock.  break does NOT leave a loop that
+ * surrounds the block.
  */
-#define critical_block(lock)                                                  \
-    for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__; \
-        __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))                \
-        for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock);               \
-            __sync_rc_nargle_##__LINE__ == PLCTAG_STATUS_OK && __sync_flag_nargle_##__LINE__; __sync_flag_nargle_##__LINE__ = 0)
+#define critical_block(lock)                                                                                       \
+    for(bool LINE_ID(cb_outer_) = (mutex_lock(lock), true); LINE_ID(cb_outer_); LINE_ID(cb_outer_) = false, mutex_unlock(lock)) \
+        for(bool LINE_ID(cb_inner_) = true; LINE_ID(cb_inner_); LINE_ID(cb_inner_) = false)
 
 /* thread functions/defs */
 typedef struct thread_t *thread_p;
@@ -163,11 +176,9 @@ extern int thread_destroy(thread_p *t);
 #define THREAD_LOCAL __thread
 
 /* atomic operations */
-#define spin_block(lock)                                                                \
-    for(int __sync_flag_nargle_lock_##__LINE__ = 1; __sync_flag_nargle_lock_##__LINE__; \
-        __sync_flag_nargle_lock_##__LINE__ = 0, lock_release(lock))                     \
-        for(int __sync_rc_nargle_lock_##__LINE__ = lock_acquire(lock);                  \
-            __sync_rc_nargle_lock_##__LINE__ && __sync_flag_nargle_lock_##__LINE__; __sync_flag_nargle_lock_##__LINE__ = 0)
+#define spin_block(lock)                                                                                 \
+    for(int LINE_ID(sb_outer_) = lock_acquire(lock); LINE_ID(sb_outer_); LINE_ID(sb_outer_) = 0, lock_release(lock)) \
+        for(bool LINE_ID(sb_inner_) = true; LINE_ID(sb_inner_); LINE_ID(sb_inner_) = false)
 
 typedef int lock_t;
 
@@ -216,18 +227,10 @@ extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *s);
 
-/* serial handling */
-/* FIXME - either implement this or remove it. */
-typedef struct serial_port_t *serial_port_p;
-#define PLC_SERIAL_PORT_NULL ((plc_serial_port)NULL)
-extern serial_port_p plc_lib_open_serial_port(const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type);
-extern int plc_lib_close_serial_port(serial_port_p serial_port);
-extern int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size);
-extern int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size);
-
 /* misc functions */
 extern int sleep_ms(int ms);
 extern int64_t time_ms(void);
+extern int64_t time_us(void);
 
 #define snprintf_platform snprintf
 

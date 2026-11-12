@@ -58,6 +58,7 @@
 #include <timeapi.h>
 
 #include <libplctag/api/libplctag.h>
+#include <utils/atomic_utils.h>
 #include <utils/debug.h>
 
 
@@ -84,124 +85,59 @@ typedef ptrdiff_t ssize_t;
  ******************************* Mutexes ***********************************
  **************************************************************************/
 
-struct mutex_t {
-    HANDLE h_mutex;
-    int initialized;
-};
+/*
+ * A CRITICAL_SECTION is recursive, like the POSIX mutex, and locks without a system call.
+ * CRITICAL_SECTION_NO_DEBUG_INFO keeps it from owning any allocation, so a module lock that is
+ * never destroyed leaks nothing when the library is unloaded.
+ */
+int mutex_init(mutex_p m) {
+    if(!m) { return PLCTAG_ERR_NULL_PTR; }
 
-
-int mutex_create(mutex_p *m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Starting.");
-
-    if(*m) { pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Called with non-NULL pointer!"); }
-
-    *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
-    if(!*m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* set up the mutex */
-    (*m)->h_mutex = CreateMutex(NULL,  /* default security attributes  */
-                                FALSE, /* initially not owned          */
-                                NULL); /* unnamed mutex                */
-
-    if(!(*m)->h_mutex) {
-        mem_free(*m);
-        *m = NULL;
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Error initializing mutex!");
+    if(!InitializeCriticalSectionEx(&(m->cs), 0, CRITICAL_SECTION_NO_DEBUG_INFO)) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, 0, "Error initializing mutex.");
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
-    (*m)->initialized = 1;
-
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done.");
+    m->initialized = true;
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_lock_impl(const char *func, int line, mutex_p m) {
-    DWORD dwWaitResult = 0;
+void mutex_lock_impl(const char *func, int line, mutex_p m) {
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "locking mutex %p, called from %s:%d.", m, func, line);
-
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    dwWaitResult = ~WAIT_OBJECT_0;
-
-    /* FIXME - This will potentially hang forever! */
-    while(dwWaitResult != WAIT_OBJECT_0) { dwWaitResult = WaitForSingleObject(m->h_mutex, INFINITE); }
-
-    return PLCTAG_STATUS_OK;
+    EnterCriticalSection(&(m->cs));
 }
 
 
 int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
-    DWORD dwWaitResult = 0;
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "trying to lock mutex %p, called from %s:%d.", m, func, line);
-
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    dwWaitResult = WaitForSingleObject(m->h_mutex, 0);
-    if(dwWaitResult == WAIT_OBJECT_0) {
-        /* we got the lock */
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_MUTEX_LOCK;
-    }
+    return TryEnterCriticalSection(&(m->cs)) ? PLCTAG_STATUS_OK : PLCTAG_ERR_MUTEX_LOCK;
 }
 
 
 int mutex_unlock_impl(const char *func, int line, mutex_p m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", m, func, line);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "unlocking mutex %p, called from %s:%d.", (void *)m, func, line);
 
-    if(!m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    if(!ReleaseMutex(m->h_mutex)) {
-        /*pdebug("error unlocking mutex.");*/
+    /* leaving a critical section this thread does not hold is undefined, so check first. */
+    if((DWORD)(uintptr_t)m->cs.OwningThread != GetCurrentThreadId()) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Unable to unlock mutex %p, called from %s:%d!", (void *)m, func, line);
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    // pdebug("Done.");
+    LeaveCriticalSection(&(m->cs));
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_destroy(mutex_p *m) {
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "destroying mutex %p", m);
+void mutex_destroy(mutex_p m) {
+    if(!m || !m->initialized) { return; }
 
-    if(!m || !*m) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    CloseHandle((*m)->h_mutex);
-
-    mem_free(*m);
-
-    *m = NULL;
-
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, 0, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    DeleteCriticalSection(&(m->cs));
+    m->initialized = false;
 }
 
 
@@ -598,6 +534,7 @@ struct sock_t {
     SOCKET wake_read_fd;
     SOCKET wake_write_fd;
     int port;
+    atomic_bool wake_pending; /* see socket_wake() */
 };
 
 
@@ -700,6 +637,7 @@ extern int socket_create(sock_p *s) {
     (*s)->fd = INVALID_SOCKET;
     (*s)->wake_read_fd = INVALID_SOCKET;
     (*s)->wake_write_fd = INVALID_SOCKET;
+    atomic_set_bool(&(*s)->wake_pending, false);
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Setting up wake pipe.");
     rc = sock_create_event_wakeup_channel((*s));
@@ -1061,6 +999,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             /* empty the socket. */
             while((bytes_read = (int)recv(sock->wake_read_fd, (char *)&buf[0], sizeof(buf), 0)) > 0) {}
 
+            /* cleared after the drain, so a byte written from here on stays for the next select. */
+            atomic_set_bool(&sock->wake_pending, false);
+
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, 0, "Socket woken up.");
 
             result |= (events & SOCK_EVENT_WAKE_UP);
@@ -1182,6 +1123,13 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 }
 
 
+/*
+ * A wake writes to the wake channel only when none is already pending, so a busy handler is
+ * not sent one byte per caller.  The flag is cleared just after the channel is drained, and the
+ * handler scans its work after every wait, so a wake that finds the flag set and skips its byte
+ * still has its work seen.  Cleared before the drain, the drain could swallow a byte written
+ * after the clear and leave the flag set with nothing in the channel.
+ */
 int socket_wake(sock_p sock) {
     int rc = PLCTAG_STATUS_OK;
     const char dummy_data[] = "Dummy data.";
@@ -1202,6 +1150,9 @@ int socket_wake(sock_p sock) {
         return PLCTAG_STATUS_OK;
     }
 
+    /* the handler has a wake it has not read yet. */
+    if(atomic_compare_and_set_bool(&sock->wake_pending, false, true)) { return PLCTAG_STATUS_OK; }
+
     rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
     if(rc < 0) {
         int err = WSAGetLastError();
@@ -1219,6 +1170,8 @@ int socket_wake(sock_p sock) {
             rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "socket write error rc=%d, errno=%d", rc, err);
+            /* no byte went out, so the next wake must try again. */
+            atomic_set_bool(&sock->wake_pending, false);
             return PLCTAG_ERR_WRITE;
         }
     }
@@ -1755,209 +1708,6 @@ static int sock_create_event_wakeup_channel(sock_p sock) {
 
 
 /***************************************************************************
- ****************************** Serial Port ********************************
- **************************************************************************/
-
-
-struct serial_port_t {
-    HANDLE hSerialPort;
-    COMMCONFIG oldDCBSerialParams;
-    COMMTIMEOUTS oldTimeouts;
-};
-
-
-serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int baud_rate, int data_bits, int stop_bits,
-                                       int parity_type) {
-    serial_port_p serial_port;
-    COMMCONFIG dcbSerialParams;
-    COMMTIMEOUTS timeouts;
-    HANDLE hSerialPort;
-    int BAUD, PARITY, DATABITS, STOPBITS;
-
-    // plc_err(lib, PLC_LOG_DEBUG, PLC_ERR_NONE, "Starting.");
-
-
-    /* create the configuration for the serial port. */
-
-    /* code largely from Programmer's Heaven.
-     */
-
-    switch(baud_rate) {
-        case 38400: BAUD = CBR_38400; break;
-        case 19200: BAUD = CBR_19200; break;
-        case 9600: BAUD = CBR_9600; break;
-        case 4800: BAUD = CBR_4800; break;
-        case 2400: BAUD = CBR_2400; break;
-        case 1200: BAUD = CBR_1200; break;
-        case 600: BAUD = CBR_600; break;
-        case 300: BAUD = CBR_300; break;
-        case 110: BAUD = CBR_110; break;
-        default:
-            /* unsupported baud rate */
-            // plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported baud rate: %d. Use standard baud rates
-            // (300,600,1200,2400...).",baud_rate);
-            return NULL;
-    }
-
-
-    /* data bits */
-    switch(data_bits) {
-        case 5: DATABITS = 5; break;
-
-        case 6: DATABITS = 6; break;
-
-        case 7: DATABITS = 7; break;
-
-        case 8: DATABITS = 8; break;
-
-        default:
-            /* unsupported number of data bits. */
-            // plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of data bits: %d. Use 5-8.",data_bits);
-            return NULL;
-    }
-
-
-    switch(stop_bits) {
-        case 1: STOPBITS = ONESTOPBIT; break;
-        case 2: STOPBITS = TWOSTOPBITS; break;
-        default:
-            /* unsupported number of stop bits. */
-            // plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of stop bits, %d, must be 1 or 2.",stop_bits);
-            return NULL;
-    }
-
-    switch(parity_type) {
-        case 0: PARITY = NOPARITY; break;
-        case 1: /* Odd parity */ PARITY = ODDPARITY; break;
-        case 2: /* Even parity */ PARITY = EVENPARITY; break;
-        default:
-            /* unsupported number of stop bits. */
-            // plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported parity type, must be none (0), odd (1) or even (2).");
-            return NULL;
-    }
-
-    /* allocate the structure */
-    serial_port = (serial_port_p)calloc(1, sizeof(struct serial_port_t));
-
-    if(!serial_port) {
-        // plc_err(lib, PLC_LOG_ERR, PLC_ERR_NO_MEM, "Unable to allocate serial port struct.");
-        return NULL;
-    }
-
-    /* open the serial port device */
-    hSerialPort = CreateFile(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-
-    /* did the open succeed? */
-    if(hSerialPort == INVALID_HANDLE_VALUE) {
-        free(serial_port);
-        // plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error opening serial device %s",path);
-        return NULL;
-    }
-
-    /* get existing serial port configuration and save it. */
-    if(!GetCommState(hSerialPort, &(serial_port->oldDCBSerialParams.dcb))) {
-        free(serial_port);
-        CloseHandle(hSerialPort);
-        // plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port configuration.",path);
-        return NULL;
-    }
-
-    /* copy the params. */
-    dcbSerialParams = serial_port->oldDCBSerialParams;
-
-    dcbSerialParams.dcb.BaudRate = BAUD;
-    dcbSerialParams.dcb.ByteSize = DATABITS;
-    dcbSerialParams.dcb.StopBits = STOPBITS;
-    dcbSerialParams.dcb.Parity = PARITY;
-
-    dcbSerialParams.dcb.fBinary = TRUE;
-    dcbSerialParams.dcb.fDtrControl = DTR_CONTROL_DISABLE;
-    dcbSerialParams.dcb.fRtsControl = RTS_CONTROL_DISABLE;
-    dcbSerialParams.dcb.fOutxCtsFlow = FALSE;
-    dcbSerialParams.dcb.fOutxDsrFlow = FALSE;
-    dcbSerialParams.dcb.fDsrSensitivity = FALSE;
-    dcbSerialParams.dcb.fAbortOnError = TRUE; /* TODO - should this be false? */
-
-    /* attempt to set the serial params */
-    if(!SetCommState(hSerialPort, &dcbSerialParams.dcb)) {
-        free(serial_port);
-        CloseHandle(hSerialPort);
-        // plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error setting serial port configuration.",path);
-        return NULL;
-    }
-
-    /* attempt to get the current serial port timeout set up */
-    if(!GetCommTimeouts(hSerialPort, &(serial_port->oldTimeouts))) {
-        SetCommState(hSerialPort, &(serial_port->oldDCBSerialParams.dcb));
-        free(serial_port);
-        CloseHandle(hSerialPort);
-        // plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
-        return NULL;
-    }
-
-    timeouts = serial_port->oldTimeouts;
-
-    /* set the timeouts for asynch operation */
-    timeouts.ReadIntervalTimeout = MAXDWORD;
-    timeouts.ReadTotalTimeoutMultiplier = 0;
-    timeouts.ReadTotalTimeoutConstant = 0;
-    timeouts.WriteTotalTimeoutMultiplier = 0;
-    timeouts.WriteTotalTimeoutConstant = 0;
-
-    /* attempt to set the current serial port timeout set up */
-    if(!SetCommTimeouts(hSerialPort, &timeouts)) {
-        SetCommState(hSerialPort, &(serial_port->oldDCBSerialParams.dcb));
-        free(serial_port);
-        CloseHandle(hSerialPort);
-        // plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
-        return NULL;
-    }
-
-    return serial_port;
-}
-
-
-int plc_lib_close_serial_port(serial_port_p serial_port) {
-    /* try to prevent this from being called twice */
-    if(!serial_port || !serial_port->hSerialPort) { return 1; }
-
-    /* reset the old options */
-    SetCommTimeouts(serial_port->hSerialPort, &(serial_port->oldTimeouts));
-    SetCommState(serial_port->hSerialPort, &(serial_port->oldDCBSerialParams.dcb));
-    CloseHandle(serial_port->hSerialPort);
-
-    /* make sure that we do not call this twice. */
-    serial_port->hSerialPort = 0;
-
-    /* free the serial port */
-    free(serial_port);
-
-    return 1;
-}
-
-
-int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size) {
-    DWORD numBytesRead = 0;
-    BOOL rc;
-
-    rc = ReadFile(serial_port->hSerialPort, (LPVOID)data, (DWORD)size, &numBytesRead, NULL);
-
-    if(rc != TRUE) { return -1; }
-
-    return (int)numBytesRead;
-}
-
-
-int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size) {
-    DWORD numBytesWritten = 0;
-
-    WriteFile(serial_port->hSerialPort, (LPVOID)data, (DWORD)size, &numBytesWritten, NULL);
-
-    return (int)numBytesWritten;
-}
-
-
-/***************************************************************************
  ***************************** Miscellaneous *******************************
  **************************************************************************/
 
@@ -1971,23 +1721,34 @@ int sleep_ms(int ms) {
 /*
  * time_ms
  *
- * Return current system time in millisecond units.  This is NOT an
- * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
+ * Milliseconds on a monotonic clock, for deadlines and elapsed time only: a change to the
+ * system clock must not move them.  Not a date.  The performance counter, not
+ * GetTickCount64(): that one moves in 10-16ms steps, and deadlines are as close as 1ms.
+ *
+ * The counter includes time the system spends suspended, so a deadline that passes during a
+ * suspend has expired on resume, as on POSIX (see the posix time_ms).
  */
-
 int64_t time_ms(void) {
-    FILETIME ft;
-    int64_t res;
+    LARGE_INTEGER count;
+    LARGE_INTEGER freq;
 
-    GetSystemTimeAsFileTime(&ft);
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&freq);
 
-    /* calculate time as 100ns increments since Jan 1, 1601. */
-    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
+    /* split so the multiply cannot overflow. */
+    return (count.QuadPart / freq.QuadPart) * 1000 + ((count.QuadPart % freq.QuadPart) * 1000) / freq.QuadPart;
+}
 
-    /* get time in ms.   Magic offset is for Jan 1, 1970 Unix epoch baseline. */
-    res = (res - 116444736000000000) / 10000;
 
-    return res;
+/* Microseconds on the same clock as time_ms(), for waits shorter than a millisecond. */
+int64_t time_us(void) {
+    LARGE_INTEGER count;
+    LARGE_INTEGER freq;
+
+    QueryPerformanceCounter(&count);
+    QueryPerformanceFrequency(&freq);
+
+    return (count.QuadPart / freq.QuadPart) * 1000000 + ((count.QuadPart % freq.QuadPart) * 1000000) / freq.QuadPart;
 }
 
 

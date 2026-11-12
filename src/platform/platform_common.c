@@ -53,7 +53,7 @@
 #include <utils/debug.h>
 
 
-void *mem_alloc(int size) {
+void *mem_alloc(int32_t size) {
     if(size <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Allocation size must be greater than zero bytes!");
         return NULL;
@@ -68,7 +68,7 @@ void mem_free(const void *mem) {
 }
 
 
-void *mem_realloc(void *orig, int size) {
+void *mem_realloc(void *orig, int32_t size) {
     if(size <= 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "New allocation size must be greater than zero bytes!");
         return NULL;
@@ -78,7 +78,7 @@ void *mem_realloc(void *orig, int size) {
 }
 
 
-void mem_set(void *dest, int c, int size) {
+void mem_set(void *dest, int c, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -94,7 +94,7 @@ void mem_set(void *dest, int c, int size) {
 }
 
 
-int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
+int mem_cmp(void *src1, int32_t src1_size, void *src2, int32_t src2_size) {
     if(!src1 || src1_size <= 0) {
         if(!src2 || src2_size <= 0) {
             /* both are NULL or zero length, but that is "equal" for our purposes. */
@@ -189,7 +189,7 @@ char *str_concat_impl(int num_args, ...) {
 }
 
 
-void mem_copy(void *dest, void *src, int size) {
+void mem_copy(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -212,7 +212,7 @@ void mem_copy(void *dest, void *src, int size) {
 }
 
 
-void mem_move(void *dest, void *src, int size) {
+void mem_move(void *dest, void *src, int32_t size) {
     if(!dest) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Destination pointer is NULL!");
         return;
@@ -386,31 +386,19 @@ char *str_dup(const char *str) {
  */
 int str_to_int(const char *str, int *val) {
     char *endptr;
-    long int tmp_val;
+    long long tmp_val;
 
     /*
-     * strtol() only ever sets errno, it never clears it, so a stale ERANGE left
-     * behind by any earlier library or system call would be read back below as
-     * this conversion's own failure. Clear it first so the check means something.
+     * No errno: an overflow of long long saturates, and that is out of int range too, so the
+     * range check below catches it.  Writing errno here also trips TSan on macOS, which does
+     * not reset its view of a dead thread's errno when a new thread reuses that memory.
      */
-    errno = 0;
-
-    tmp_val = strtol(str, &endptr, 0);
-
-    if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "strtol returned %ld with errno %d", tmp_val, errno);
-        return -1;
-    }
+    tmp_val = strtoll(str, &endptr, 0);
 
     if(endptr == str) { return -1; }
 
-    /*
-     * long is wider than int on most 64-bit platforms, so strtol() happily returns values
-     * that do not survive the cast.  Without this check "4294967296" converts to zero on
-     * LP64 and the caller has no way to tell that from a real zero.  Reject instead.
-     */
-    if(tmp_val > (long int)INT_MAX || tmp_val < (long int)INT_MIN) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %ld does not fit in an int!", tmp_val);
+    if(tmp_val > (long long)INT_MAX || tmp_val < (long long)INT_MIN) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, 0, "Value %lld does not fit in an int!", tmp_val);
         return -1;
     }
 
@@ -429,7 +417,7 @@ int str_to_float(const char *str, float *val) {
     char *endptr;
     double tmp_val;
 
-    /* clear errno for the same reason as in str_to_int(). */
+    /* strtod() only ever sets errno, it never clears it, so a stale ERANGE would read as this failure. */
     errno = 0;
 
     tmp_val = strtod(str, &endptr);

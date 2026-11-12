@@ -35,28 +35,75 @@
  * Performance Benchmark for libplctag
  *
  * Runs a single test configuration and outputs one CSV line to stdout.
- * Designed to be driven by run_perf_benchmark.sh which iterates over the
- * full parameter matrix.
+ * Uses only the public API so the same source builds against older
+ * library releases for A/B comparison.
  *
  * Usage:
- *   perf_benchmark --mode=sync|async --groups=N --threads=M --tags=T
- *                  --tag=BASE_TAG_PATH [--duration=S]
+ *   perf_benchmark --mode=sync|async|auto --groups=N --threads=M --tags=T
+ *                  --tag=BASE_TAG_PATH [--op=read|write] [--auto-ms=P] [--poll-ms=M]
+ *                  [--duration=S] [--interleave] [--group-by=thread|tag]
  *
  * BASE_TAG_PATH is the full tag attribute string without connection_group_id,
  * which the benchmark appends automatically per tag.  Example:
  *   protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray[0]
+ * --tag may be repeated.  Connection group g (1-based) then uses base
+ * (g - 1) mod <number of bases>, so each connection can read its own server
+ * tag, or connections can be split over several gateways.
  *
  * Tags is the primary axis.  Threads and groups must be <= tags (groups
  * also capped at 100).  Each thread owns an exclusive slice of the tags
  * array -- no tag is shared across threads, so no locking is needed.
- * Tags are distributed across connection groups round-robin.
+ * --interleave creates the tags round-robin across the threads' slices
+ * (thread 0's first, thread 1's first, ...), so tags used by different
+ * threads get adjacent IDs, as when threads create their tags concurrently.
+ * Sync/async: each thread's tags share one connection group, and threads are
+ * assigned to groups round-robin, so --groups=1 shares one connection and
+ * --groups=threads gives each thread its own.  --group-by=tag instead spreads
+ * the tags round-robin over the groups whatever thread owns them, so one
+ * thread can use several connections.  Auto: tags are always assigned to
+ * groups round-robin.
  *
- * Sync:  thread calls plc_tag_read(tag, timeout) in a blocking loop.
- * Async: thread calls plc_tag_read(tag, 0) then polls plc_tag_status().
+ * Sync:  thread calls plc_tag_read/write(tag, timeout) in a blocking loop.
+ *        Latency is the duration of each call.
+ * Async: thread starts an operation on all its tags, then polls
+ *        plc_tag_status().  Latency is start to observed completion.
+ * Auto:  tags are created with auto_sync_read_ms=P and no threads run.
+ *        Completed reads are counted from PLCTAG_EVENT_READ_COMPLETED.
+ *        "Latency" is the interval between completions on a tag, i.e.
+ *        the achieved period.  --op=write is not supported.
  *
- * Output (stdout): one CSV line:
+ * Output (stdout): "# window start" and "# window end" around the measured run, so a
+ * harness can sample the server's CPU over the same window, then one CSV line:
  *   mode,connection_groups,threads,tags,tags_per_thread,duration_ms,
- *   total_reads,reads_per_sec,cpu_load_pct,fairness_cv,fairness_min_max_ratio
+ *   total_ops,ops_per_sec,cpu_load_pct,fairness_cv,fairness_min_max_ratio,
+ *   op,errors,p50_us,p95_us,p99_us,max_us,cpu_us_per_op,rss_growth_kb,
+ *   create_ms,prime_ms,window_min_max,window_cv,conn_window_min_max,tag_cv,tag_std_dev,window_s,
+ *   mutex_waits_per_op,mutex_wait_us_per_op,peak_rss_kb
+ *
+ * Tags are created with timeout 0 and then waited for together, so create_ms
+ * is the time for all of them.
+ *
+ * Fairness is across threads for sync/async and across tags for auto.
+ * Completions are also counted per tag in 1 s windows from the start of the
+ * run.  window_min_max and window_cv are the worst full window across the same
+ * units, so a unit that starves for a while and then catches up still shows.
+ * A window is window_s seconds: at least PASS_WINDOWS passes over a unit's tags
+ * (pass time = tags x duration / total ops), rounded up to whole seconds, so a
+ * window never splits a slow pass.  With fewer than two such windows the run
+ * is too short and the window columns equal the whole run.
+ * conn_window_min_max is the worst full window across connection groups (1.0
+ * with one group).  tag_cv (%) and tag_std_dev are from the whole-run completed
+ * ops of the tags of one connection group, for the group with the largest CV.
+ * The tags of different threads move at their threads' pace, so these include
+ * the thread gap; CV is relative, so it does not grow with the cycle count.
+ * rss_growth_kb is peak RSS at the end minus peak RSS before tag creation.
+ * peak_rss_kb is peak RSS at the end.
+ * mutex_waits_per_op and mutex_wait_us_per_op count pthread_mutex_lock()
+ * calls that had to block, and their total wait, during the measured window.
+ * They need mutex_wait_shim LD_PRELOADed into a build linked against the
+ * shared library (Linux only); without it both are -1.
+ * Latency percentiles come from a log-linear histogram with 16 buckets per
+ * power of two, so they are accurate to about 3%.
  *
  * Diagnostics go to stderr.
  */
@@ -65,10 +112,12 @@
 #include "stats.h"
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
-#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef POSIX_PLATFORM
 #    include <sys/resource.h>
@@ -82,17 +131,110 @@
 #define REQUIRED_VERSION 2, 6, 0
 
 #define TAG_CREATE_TIMEOUT_MS (10000)
-#define TAG_READ_TIMEOUT_MS (5000)
+#define TAG_CREATE_MS_PER_TAG (2) /* added to the create deadline per tag: creates are async */
+#define PASS_WINDOWS (4)          /* a fairness window spans at least this many passes */
+#define TAG_OP_TIMEOUT_MS (5000)
 #define DEFAULT_DURATION_S (10)
+#define DEFAULT_AUTO_MS (1)
 
-#define MAX_TAGS (1100)
+#define MAX_TAGS (100000)
 #define MAX_THREADS (1100)
+#define MAX_GROUPS (128)
 
-/* Tag path template.  connection_group_id is appended to the caller-supplied base path. */
-#define TAG_PATH_FMT "%s&connection_group_id=%d"
+/* ponytail: windows past MAX_WINDOWS (2 min) are not counted.  Raise it with the duration. */
+#define WINDOW_US (1000000)
+#define MAX_WINDOWS (120)
+
+/* Tag path template.  connection_group_id (and auto_sync_read_ms) are appended to the base path. */
+#define TAG_PATH_FMT "%s&connection_group_id=%" PRId32
+#define TAG_PATH_AUTO_FMT "%s&connection_group_id=%" PRId32 "&auto_sync_read_ms=%" PRId32
+
+/* Log-linear histogram: values below HIST_SUB are exact, then HIST_SUB buckets per power of two. */
+#define HIST_SUB_BITS (4)
+#define HIST_SUB (1 << HIST_SUB_BITS)
+#define HIST_BUCKETS (40 * HIST_SUB)
+
+typedef enum { MODE_SYNC, MODE_ASYNC, MODE_AUTO } bench_mode_t;
+
+/* Per-tag results.  Each tag is touched by one thread (or, in auto mode, by its callback) only. */
+typedef struct {
+    int64_t ops;
+    int64_t errors;
+    int64_t last_us; /* auto mode: time of the previous completion */
+    int64_t max_us;
+    uint32_t hist[HIST_BUCKETS];
+    int32_t windows[MAX_WINDOWS]; /* completions per WINDOW_US from run_start_us */
+} tag_stats_t;
+
+typedef struct {
+    int32_t thread_id;
+    int32_t *tags;      /* this thread's exclusive slice of tags */
+    tag_stats_t *stats; /* matching slice of per-tag stats */
+    int32_t num_tags;
+    bench_mode_t mode;
+    bool is_write;
+} thread_data_t;
 
 
-/*--- CPU time helper (cross-platform) ---*/
+static int64_t now_us(void);
+static double get_cpu_time_ms(void);
+static int64_t get_peak_rss_kb(void);
+static size_t hist_index(int64_t v);
+static int64_t hist_value(size_t idx);
+static void record(tag_stats_t *s, int64_t us, int64_t t);
+static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s,
+                         double *min_max, double *cv);
+static int64_t percentile(const uint64_t *hist, uint64_t total, double p);
+static int32_t start_op(int32_t tag, bool is_write, int32_t timeout_ms);
+static void auto_callback(int32_t tag_id, int event, int status, void *userdata);
+static void *thread_func(void *arg);
+static void handle_interrupt(void);
+static void usage(const char *prog);
+static bool get_mutex_wait(int64_t *blocked, int64_t *waited_ns);
+
+#ifdef __linux__
+/* defined by mutex_wait_shim when it is LD_PRELOADed, NULL otherwise. */
+extern void perf_mutex_wait_stats(int64_t *blocked, int64_t *waited_ns) __attribute__((weak));
+#endif
+
+
+static compat_atomic_int32_t go = {0};   /* set to 1 to start measuring */
+static compat_atomic_int32_t done = {0}; /* set to 1 to stop */
+static int32_t poll_ms = 1;              /* async: sleep between status passes; 0 just yields */
+static bool interleave = false;          /* create tags round-robin across thread slices */
+static bool group_by_tag = false;        /* sync/async: groups round-robin over tags, not threads */
+static int64_t run_start_us = 0;         /* written before go is set, read after */
+static compat_atomic_int32_t terminate = {0};
+
+
+/*--- Clocks and process statistics (cross-platform) ---*/
+
+
+static bool get_mutex_wait(int64_t *blocked, int64_t *waited_ns) {
+#ifdef __linux__
+    if(perf_mutex_wait_stats) {
+        perf_mutex_wait_stats(blocked, waited_ns);
+        return true;
+    }
+#endif
+    *blocked = 0;
+    *waited_ns = 0;
+    return false;
+}
+
+static int64_t now_us(void) {
+#ifdef WINDOWS_PLATFORM
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (int64_t)((double)count.QuadPart * 1000000.0 / (double)freq.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + (int64_t)ts.tv_nsec / 1000;
+#endif
+}
+
 
 static double get_cpu_time_ms(void) {
 #ifdef POSIX_PLATFORM
@@ -115,101 +257,237 @@ static double get_cpu_time_ms(void) {
 }
 
 
-/*--- Global synchronisation flags ---*/
+static int64_t get_peak_rss_kb(void) {
+#ifdef __linux__
+    /* ru_maxrss keeps the high-water mark of the process that exec'd us (on vfork,
+       the parent's), so a Python runner's RSS hides ours.  VmHWM is this image only. */
+    char line[128];
+    int64_t kb = 0;
+    FILE *f = fopen("/proc/self/status", "r");
 
-static compat_atomic_int32_t go = {0};   /* set to 1 to start all threads */
-static compat_atomic_int32_t done = {0}; /* set to 1 to stop all threads  */
-static compat_atomic_int32_t terminate = {0};
-
-static void handle_interrupt(void) {
-    compat_atomic_store_int32(&terminate, 1);
-    compat_atomic_store_int32(&done, 1);
+    if(f) {
+        while(fgets(line, sizeof(line), f)) {
+            if(sscanf(line, "VmHWM: %" SCNd64, &kb) == 1) { break; }
+        }
+        fclose(f);
+    }
+    return kb;
+#elif defined(POSIX_PLATFORM)
+    struct rusage usage;
+    if(getrusage(RUSAGE_SELF, &usage) != 0) { return 0; }
+#    ifdef __APPLE__
+    return (int64_t)usage.ru_maxrss / 1024; /* bytes on macOS */
+#    else
+    return (int64_t)usage.ru_maxrss; /* KB on Linux and BSD */
+#    endif
+#elif defined(WINDOWS_PLATFORM)
+    PROCESS_MEMORY_COUNTERS pmc;
+    if(!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) { return 0; }
+    return (int64_t)(pmc.PeakWorkingSetSize / 1024);
+#else
+    return 0;
+#endif
 }
 
 
-/*--- Per-thread data ---*/
+/*--- Histogram ---*/
 
-typedef struct {
-    int thread_id;
-    int32_t *tags; /* pointer to this thread's exclusive slice of tags */
-    int num_tags;  /* number of tags in this thread's slice */
-    int is_async;
-    int64_t read_count;  /* successful reads */
-    int64_t error_count; /* failed reads */
-} thread_data_t;
+static size_t hist_index(int64_t v) {
+    int32_t e = 0;
+    size_t idx;
+
+    if(v < HIST_SUB) { return v < 0 ? 0 : (size_t)v; }
+
+    while((v >> (e + 1)) != 0) { e++; }
+
+    idx = (size_t)(e - HIST_SUB_BITS + 1) * HIST_SUB + (size_t)((v >> (e - HIST_SUB_BITS)) & (HIST_SUB - 1));
+
+    return idx < HIST_BUCKETS ? idx : HIST_BUCKETS - 1;
+}
 
 
-/*--- Thread function ---*/
+/* Midpoint of a bucket. */
+static int64_t hist_value(size_t idx) {
+    int32_t shift;
+
+    if(idx < HIST_SUB) { return (int64_t)idx; }
+
+    shift = (int32_t)(idx / HIST_SUB) - 1;
+
+    return ((int64_t)(HIST_SUB + (idx % HIST_SUB)) << shift) + ((int64_t)1 << shift) / 2;
+}
+
+
+/* t is the completion time, for the window counts. */
+static void record(tag_stats_t *s, int64_t us, int64_t t) {
+    int64_t w = (t - run_start_us) / WINDOW_US;
+
+    s->ops++;
+    s->hist[hist_index(us)]++;
+    if(us > s->max_us) { s->max_us = us; }
+    if(w >= 0 && w < MAX_WINDOWS) { s->windows[w]++; }
+}
+
+
+/*
+ * Worst full window across units: the lowest min/max ratio and the highest CV.  unit_windows is
+ * num_units rows of MAX_WINDOWS one-second counts, summed window_s at a time.  Leaves 1.0 and 0.0
+ * with fewer than two units.
+ */
+static void worst_window(const int64_t *unit_windows, int32_t num_units, int32_t num_windows, int32_t window_s,
+                         double *min_max, double *cv) {
+    int *counts = NULL;
+    stats_summary_t summary;
+
+    *min_max = 1.0;
+    *cv = 0.0;
+
+    if(num_units < 2) { return; }
+
+    counts = (int *)malloc((size_t)num_units * sizeof(int));
+    if(!counts) { return; }
+
+    for(int32_t w = 0; w + window_s <= num_windows || (w == 0 && num_windows > 0); w += window_s) {
+        for(int32_t u = 0; u < num_units; u++) {
+            int64_t n = 0;
+            for(int32_t k = w; k < w + window_s && k < num_windows; k++) { n += unit_windows[(size_t)u * MAX_WINDOWS + (size_t)k]; }
+            counts[u] = (int)n;
+        }
+
+        if(stats_calculate(counts, (int)num_units, &summary) != 0) { continue; }
+
+        if(summary.min_max_ratio < *min_max) { *min_max = summary.min_max_ratio; }
+        if(summary.cv > *cv) { *cv = summary.cv; }
+    }
+
+    free(counts);
+}
+
+
+static int64_t percentile(const uint64_t *hist, uint64_t total, double p) {
+    uint64_t rank = (uint64_t)((double)total * p + 0.999999);
+    uint64_t seen = 0;
+
+    if(total == 0) { return 0; }
+    if(rank < 1) { rank = 1; }
+
+    for(size_t i = 0; i < HIST_BUCKETS; i++) {
+        seen += hist[i];
+        if(seen >= rank) { return hist_value(i); }
+    }
+
+    return hist_value(HIST_BUCKETS - 1);
+}
+
+
+/*--- Operations ---*/
+
+static int32_t start_op(int32_t tag, bool is_write, int32_t timeout_ms) {
+    return (int32_t)(is_write ? plc_tag_write(tag, timeout_ms) : plc_tag_read(tag, timeout_ms));
+}
+
+
+static void auto_callback(int32_t tag_id, int event, int status, void *userdata) {
+    tag_stats_t *s = (tag_stats_t *)userdata;
+    int64_t t;
+
+    (void)tag_id;
+
+    if(event != PLCTAG_EVENT_READ_COMPLETED) { return; }
+
+    t = now_us();
+
+    if(!compat_atomic_load_int32(&go) || compat_atomic_load_int32(&done)) {
+        s->last_us = t;
+        return;
+    }
+
+    if(status != PLCTAG_STATUS_OK) {
+        s->errors++;
+    } else if(s->last_us > 0) {
+        record(s, t - s->last_us, t);
+    } else {
+        s->ops++; /* first completion has no interval */
+    }
+
+    s->last_us = t;
+}
+
 
 static void *thread_func(void *arg) {
     thread_data_t *td = (thread_data_t *)arg;
-    /* Each thread starts at the first tag in its own exclusive slice. */
-    int tag_idx = 0;
-
-    td->read_count = 0;
-    td->error_count = 0;
 
     /* Spin until signalled to start. */
     while(!compat_atomic_load_int32(&go) && !compat_atomic_load_int32(&done)) { compat_thread_yield(); }
 
-    if(td->is_async) {
-        /* Async: fire reads on all tags, then poll all for completion.
-         * Batching all reads before polling allows the library to have all
-         * requests in-flight simultaneously rather than serializing them.
-         * No locking needed -- this thread exclusively owns its tags. */
-        int *read_rc = (int *)calloc((size_t)td->num_tags, sizeof(int));
-        if(!read_rc) { return NULL; }
+    if(td->mode == MODE_ASYNC) {
+        /* Start an operation on all tags, then poll all for completion, so
+         * the library has all requests in flight at once. */
+        int64_t *started = (int64_t *)calloc((size_t)td->num_tags, sizeof(int64_t));
+        if(!started) { return NULL; }
 
         while(!compat_atomic_load_int32(&done)) {
-            /* Phase 1: Start reads on all tags. */
-            for(int i = 0; i < td->num_tags; i++) {
-                read_rc[i] = plc_tag_read(td->tags[i], 0);
-                if(read_rc[i] != PLCTAG_STATUS_OK && read_rc[i] != PLCTAG_STATUS_PENDING) { td->error_count++; }
+            int32_t pending = 0;
+
+            for(int32_t i = 0; i < td->num_tags; i++) {
+                int32_t rc = start_op(td->tags[i], td->is_write, 0);
+                if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_STATUS_PENDING) {
+                    started[i] = now_us();
+                    pending++;
+                } else {
+                    started[i] = 0;
+                    td->stats[i].errors++;
+                }
             }
 
-            /* Phase 2: Poll until all successfully-started reads are done. */
-            int pending;
-            do {
-                pending = 0;
-                for(int i = 0; i < td->num_tags; i++) {
-                    if(read_rc[i] == PLCTAG_STATUS_OK || read_rc[i] == PLCTAG_STATUS_PENDING) {
-                        if(plc_tag_status(td->tags[i]) == PLCTAG_STATUS_PENDING) { pending = 1; }
-                    }
-                }
-                if(pending) { compat_thread_yield(); }
-            } while(pending && !compat_atomic_load_int32(&done));
+            while(pending > 0 && !compat_atomic_load_int32(&done)) {
+                for(int32_t i = 0; i < td->num_tags; i++) {
+                    int32_t status;
 
-            /* Phase 3: Tally completed reads. */
-            for(int i = 0; i < td->num_tags; i++) {
-                if(read_rc[i] == PLCTAG_STATUS_OK || read_rc[i] == PLCTAG_STATUS_PENDING) {
-                    int status = plc_tag_status(td->tags[i]);
+                    if(started[i] == 0) { continue; }
+
+                    status = (int32_t)plc_tag_status(td->tags[i]);
+                    if(status == PLCTAG_STATUS_PENDING) { continue; }
+
                     if(status == PLCTAG_STATUS_OK) {
-                        td->read_count++;
-                    } else if(!compat_atomic_load_int32(&done)) {
-                        td->error_count++;
+                        int64_t t = now_us();
+                        record(&td->stats[i], t - started[i], t);
+                    } else {
+                        td->stats[i].errors++;
+                    }
+
+                    started[i] = 0;
+                    pending--;
+                }
+
+                if(pending > 0) {
+                    if(poll_ms > 0) {
+                        compat_sleep_ms((uint32_t)poll_ms, NULL);
+                    } else {
+                        compat_thread_yield();
                     }
                 }
             }
         }
 
-        free(read_rc);
+        free(started);
     } else {
-        /* Sync: blocking read.
-         * No locking needed -- this thread exclusively owns its tags. */
+        int32_t idx = 0;
+
         while(!compat_atomic_load_int32(&done)) {
-            int32_t tag = td->tags[tag_idx];
-            int rc = plc_tag_read(tag, TAG_READ_TIMEOUT_MS);
+            int64_t t0 = now_us();
+            int32_t rc = start_op(td->tags[idx], td->is_write, TAG_OP_TIMEOUT_MS);
 
             if(rc == PLCTAG_STATUS_OK) {
-                td->read_count++;
-            } else {
-                td->error_count++;
-                if(!compat_atomic_load_int32(&done)) {
-                    fprintf(stderr, "Thread %d: read error %s on tag idx %d\n", td->thread_id, plc_tag_decode_error(rc), tag_idx);
-                }
+                int64_t t = now_us();
+                record(&td->stats[idx], t - t0, t);
+            } else if(!compat_atomic_load_int32(&done)) {
+                td->stats[idx].errors++;
+                fprintf(stderr, "Thread %" PRId32 ": error %s on tag idx %" PRId32 "\n", td->thread_id,
+                        plc_tag_decode_error(rc), idx);
             }
 
-            tag_idx = (tag_idx + 1) % td->num_tags;
+            idx = (idx + 1) % td->num_tags;
         }
     }
 
@@ -217,82 +495,137 @@ static void *thread_func(void *arg) {
 }
 
 
-/*--- Usage ---*/
+static void handle_interrupt(void) {
+    compat_atomic_store_int32(&terminate, 1);
+    compat_atomic_store_int32(&done, 1);
+}
+
 
 static void usage(const char *prog) {
     fprintf(stderr,
             "Usage:\n"
-            "  %s --mode=sync|async --groups=N --threads=M --tags=T\n"
-            "     --tag=BASE_TAG_PATH [--duration=S]\n"
+            "  %s --mode=sync|async|auto --groups=N --threads=M --tags=T\n"
+            "     --tag=BASE_TAG_PATH [--op=read|write] [--auto-ms=P] [--duration=S]\n"
             "\n"
-            "  --mode        sync or async\n"
-            "  --groups      number of connection groups (1-100)\n"
-            "  --threads     number of reader threads (1-1000)\n"
-            "  --tags        number of tags to create (1-1000)\n"
-            "  --tag         base tag attribute string (connection_group_id is appended)\n"
+            "  --mode        sync, async, or auto (auto_sync_read_ms, no threads)\n"
+            "  --groups      number of connection groups (1-128)\n"
+            "  --threads     number of threads (1-1000, ignored for auto)\n"
+            "  --tags        number of tags to create (1-10000)\n"
+            "  --tag         base tag attribute string (connection_group_id is appended).  May be\n"
+            "                repeated: group g uses base (g - 1) mod <number of bases>\n"
+            "  --op          read or write (default: read; auto supports read only)\n"
+            "  --auto-ms     auto_sync_read_ms for auto mode (default: %d)\n"
+            "  --poll-ms     async: sleep this long between status passes (default: 1; 0 yields in a loop)\n"
             "  --duration    test duration in seconds (default: %d)\n"
+            "  --interleave  sync/async: create tags round-robin across threads (tags must divide evenly)\n"
+            "  --group-by    sync/async: thread (default; a thread's tags share a group) or tag\n"
+            "                (tags round-robin over the groups)\n"
             "\n"
             "Example:\n"
             "  %s --mode=sync --groups=1 --threads=1 --tags=10 --duration=10\n"
             "     --tag=\"protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray[0]\"\n",
-            prog, DEFAULT_DURATION_S, prog);
+            prog, DEFAULT_AUTO_MS, DEFAULT_DURATION_S, prog);
     exit(1);
 }
 
 
-/*--- Main ---*/
-
 int main(int argc, char **argv) {
-    int is_async = -1;
-    int num_groups = -1;
-    int num_threads = -1;
-    int num_tags = -1;
-    int duration_s = DEFAULT_DURATION_S;
-    const char *base_tag_path = NULL;
+    static const char *mode_names[] = {"sync", "async", "auto"};
+    int32_t mode = -1;
+    bool is_write = false;
+    int32_t num_groups = -1;
+    int32_t num_threads = -1;
+    int32_t num_tags = -1;
+    int32_t duration_s = DEFAULT_DURATION_S;
+    int32_t auto_ms = DEFAULT_AUTO_MS;
+    static const char *base_tag_paths[MAX_GROUPS];
+    int32_t num_bases = 0;
 
-    int32_t tag_handles[MAX_TAGS];
-    compat_thread_t threads[MAX_THREADS];
-    thread_data_t tdata[MAX_THREADS];
+    static int32_t tag_handles[MAX_TAGS];
+    static compat_thread_t threads[MAX_THREADS];
+    static thread_data_t tdata[MAX_THREADS];
+    static uint64_t total_hist[HIST_BUCKETS];
+    static int32_t tag_group[MAX_TAGS];
+    tag_stats_t *stats = NULL;
+    int *per_unit_ops = NULL;
+    int32_t num_units = 0;
+    int32_t threads_started = 0;
+    int32_t rc = 0;
 
     /*--- Parse arguments ---*/
-    for(int i = 1; i < argc; i++) {
+    for(int32_t i = 1; i < argc; i++) {
         if(strncmp(argv[i], "--mode=", 7) == 0) {
             const char *m = argv[i] + 7;
-            if(strcmp(m, "sync") == 0) {
-                is_async = 0;
-            } else if(strcmp(m, "async") == 0) {
-                is_async = 1;
-            } else {
+            for(int32_t k = 0; k < 3; k++) {
+                if(strcmp(m, mode_names[k]) == 0) { mode = k; }
+            }
+            if(mode < 0) {
                 fprintf(stderr, "Unknown mode: %s\n", m);
                 usage(argv[0]);
             }
+        } else if(strncmp(argv[i], "--op=", 5) == 0) {
+            const char *o = argv[i] + 5;
+            if(strcmp(o, "read") == 0) {
+                is_write = false;
+            } else if(strcmp(o, "write") == 0) {
+                is_write = true;
+            } else {
+                fprintf(stderr, "Unknown op: %s\n", o);
+                usage(argv[0]);
+            }
         } else if(strncmp(argv[i], "--groups=", 9) == 0) {
-            num_groups = atoi(argv[i] + 9);
+            num_groups = (int32_t)atoi(argv[i] + 9);
         } else if(strncmp(argv[i], "--threads=", 10) == 0) {
-            num_threads = atoi(argv[i] + 10);
+            num_threads = (int32_t)atoi(argv[i] + 10);
         } else if(strncmp(argv[i], "--tags=", 7) == 0) {
-            num_tags = atoi(argv[i] + 7);
+            num_tags = (int32_t)atoi(argv[i] + 7);
         } else if(strncmp(argv[i], "--duration=", 11) == 0) {
-            duration_s = atoi(argv[i] + 11);
+            duration_s = (int32_t)atoi(argv[i] + 11);
+        } else if(strncmp(argv[i], "--poll-ms=", 10) == 0) {
+            poll_ms = (int32_t)atoi(argv[i] + 10);
+        } else if(strcmp(argv[i], "--interleave") == 0) {
+            interleave = true;
+        } else if(strcmp(argv[i], "--group-by=tag") == 0) {
+            group_by_tag = true;
+        } else if(strcmp(argv[i], "--group-by=thread") == 0) {
+            group_by_tag = false;
+        } else if(strncmp(argv[i], "--auto-ms=", 10) == 0) {
+            auto_ms = (int32_t)atoi(argv[i] + 10);
         } else if(strncmp(argv[i], "--tag=", 6) == 0) {
-            base_tag_path = argv[i] + 6;
+            if(num_bases >= MAX_GROUPS) {
+                fprintf(stderr, "Error: at most %d --tag arguments.\n", MAX_GROUPS);
+                usage(argv[0]);
+            }
+            base_tag_paths[num_bases++] = argv[i] + 6;
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             usage(argv[0]);
         }
     }
 
-    if(is_async < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || base_tag_path == NULL || base_tag_path[0] == '\0') {
+    if(mode < 0 || num_groups <= 0 || num_threads <= 0 || num_tags <= 0 || duration_s <= 0 || auto_ms <= 0
+       || num_bases == 0 || base_tag_paths[0][0] == '\0') {
         fprintf(stderr, "Error: --mode, --groups, --threads, --tags, and --tag are required and must be valid.\n");
         usage(argv[0]);
     }
 
-    if(num_tags > MAX_TAGS || num_threads > MAX_THREADS) {
-        fprintf(stderr, "Error: max tags=%d, max threads=%d\n", MAX_TAGS, MAX_THREADS);
+    if(mode == MODE_AUTO && is_write) {
+        fprintf(stderr, "Error: --mode=auto supports --op=read only.\n");
+        usage(argv[0]);
+    }
+
+    if(interleave && (mode == MODE_AUTO || num_tags % num_threads != 0)) {
+        fprintf(stderr, "Error: --interleave needs sync/async and tags divisible by threads.\n");
+        usage(argv[0]);
+    }
+
+    if(num_tags > MAX_TAGS || num_threads > MAX_THREADS || num_groups > MAX_GROUPS) {
+        fprintf(stderr, "Error: max tags=%d, max threads=%d, max groups=%d\n", MAX_TAGS, MAX_THREADS, MAX_GROUPS);
         return 1;
     }
 
-    /*--- Library version check ---*/
+    if(mode == MODE_AUTO) { num_threads = 1; /* only used for the tags_per_thread column */ }
+
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required library version %d.%d.%d not available!\n", REQUIRED_VERSION);
         return 1;
@@ -301,152 +634,331 @@ int main(int argc, char **argv) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
     compat_set_interrupt_handler(handle_interrupt);
 
-    const char *mode_str = is_async ? "async" : "sync";
-    fprintf(stderr, "perf_benchmark: mode=%s groups=%d threads=%d tags=%d duration=%ds tag=%s\n", mode_str, num_groups,
-            num_threads, num_tags, duration_s, base_tag_path);
+    fprintf(stderr, "perf_benchmark: mode=%s op=%s groups=%" PRId32 " threads=%" PRId32 " tags=%" PRId32 " duration=%" PRId32
+                    "s tag=%s\n",
+            mode_names[mode], is_write ? "write" : "read", num_groups, num_threads, num_tags, duration_s, base_tag_paths[0]);
 
-    /*--- Create tags ---*/
-    fprintf(stderr, "Creating %d tags...\n", num_tags);
-    for(int i = 0; i < num_tags; i++) {
-        char path[512];
-        int group_id = (i % num_groups) + 1;
-
-        snprintf(path, sizeof(path), TAG_PATH_FMT, base_tag_path, group_id);
-
-        tag_handles[i] = plc_tag_create(path, TAG_CREATE_TIMEOUT_MS);
-        if(tag_handles[i] < 0) {
-            fprintf(stderr, "ERROR: Failed to create tag %d (group %d): %s\n", i, group_id, plc_tag_decode_error(tag_handles[i]));
-            /* Clean up already-created tags. */
-            for(int j = 0; j < i; j++) { plc_tag_destroy(tag_handles[j]); }
-            return 1;
-        }
-
-        if((i + 1) % 100 == 0) { fprintf(stderr, "  created %d tags...\n", i + 1); }
-    }
-    fprintf(stderr, "All %d tags created.\n", num_tags);
-
-    /* Do one sync read per tag to prime the connections. */
-    fprintf(stderr, "Priming tags...\n");
-    for(int i = 0; i < num_tags; i++) {
-        int rc = plc_tag_read(tag_handles[i], TAG_READ_TIMEOUT_MS);
-        if(rc != PLCTAG_STATUS_OK) { fprintf(stderr, "WARNING: prime read failed on tag %d: %s\n", i, plc_tag_decode_error(rc)); }
-    }
-
-    /*--- Assign an exclusive slice of tags to each thread ---*/
-    {
-        int base = num_tags / num_threads;
-        int remainder = num_tags % num_threads;
-        int offset = 0;
-        for(int i = 0; i < num_threads; i++) {
-            int count = base + (i < remainder ? 1 : 0);
-            tdata[i].thread_id = i;
-            tdata[i].tags = &tag_handles[offset];
-            tdata[i].num_tags = count;
-            tdata[i].is_async = is_async;
-            tdata[i].read_count = 0;
-            tdata[i].error_count = 0;
-            offset += count;
-        }
-    }
-
-    /*--- Create threads (they spin-wait on go flag) ---*/
-    fprintf(stderr, "Creating %d threads...\n", num_threads);
-    for(int i = 0; i < num_threads; i++) {
-        if(compat_thread_create(&threads[i], thread_func, &tdata[i]) != 0) {
-            fprintf(stderr, "ERROR: Failed to create thread %d\n", i);
-            compat_atomic_store_int32(&done, 1);
-            for(int j = 0; j < i; j++) { compat_thread_join(threads[j], NULL); }
-            for(int j = 0; j < num_tags; j++) { plc_tag_destroy(tag_handles[j]); }
-            return 1;
-        }
-    }
-
-    /* Brief pause for threads to reach their spin-wait. */
-    compat_sleep_ms(50, NULL);
-
-    /*--- Run the benchmark ---*/
-    double cpu_start = get_cpu_time_ms();
-    int64_t wall_start = compat_time_ms();
-
-    compat_atomic_store_int32(&go, 1); /* release all threads */
-
-    /* Sleep for the test duration. */
-    for(int s = 0; s < duration_s && !compat_atomic_load_int32(&terminate); s++) { compat_sleep_ms(1000, NULL); }
-
-    compat_atomic_store_int32(&done, 1); /* signal threads to stop */
-
-    /* Join all threads. */
-    for(int i = 0; i < num_threads; i++) { compat_thread_join(threads[i], NULL); }
-
-    int64_t wall_end = compat_time_ms();
-    double cpu_end = get_cpu_time_ms();
-
-    int64_t duration_ms = wall_end - wall_start;
-    double cpu_time_ms = cpu_end - cpu_start;
-    double cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
-
-    /*--- Aggregate results ---*/
-    int64_t total_reads = 0;
-    int64_t total_errors = 0;
-
-    int *per_thread_reads = (int *)calloc((size_t)num_threads, sizeof(int));
-    if(!per_thread_reads) {
-        fprintf(stderr, "ERROR: calloc failed\n");
-        for(int j = 0; j < num_tags; j++) { plc_tag_destroy(tag_handles[j]); }
+    /* Touch the stats now so their pages count in the RSS baseline, not the growth. */
+    stats = (tag_stats_t *)malloc((size_t)num_tags * sizeof(tag_stats_t));
+    num_units = (mode == MODE_AUTO) ? num_tags : num_threads;
+    per_unit_ops = (int *)calloc((size_t)num_units, sizeof(int));
+    if(!stats || !per_unit_ops) {
+        fprintf(stderr, "ERROR: out of memory\n");
+        free(stats);
+        free(per_unit_ops);
         return 1;
     }
+    memset(stats, 0, (size_t)num_tags * sizeof(tag_stats_t));
 
-    for(int i = 0; i < num_threads; i++) {
-        total_reads += tdata[i].read_count;
-        total_errors += tdata[i].error_count;
-        per_thread_reads[i] = (int)tdata[i].read_count;
+    int64_t rss_base_kb = get_peak_rss_kb();
+
+    /*--- Create tags ---*/
+    fprintf(stderr, "Creating %" PRId32 " tags...\n", num_tags);
+    int64_t create_start = now_us();
+    for(int32_t k = 0; k < num_tags; k++) {
+        char path[512];
+        /* k is the creation order, i the position in tag_handles. */
+        int32_t i = interleave ? (k % num_threads) * (num_tags / num_threads) + k / num_threads : k;
+        int32_t group_id = (i % num_groups) + 1;
+
+        if(mode != MODE_AUTO && !group_by_tag) {
+            /* Same contiguous slicing as the thread setup below. */
+            int32_t base = num_tags / num_threads;
+            int32_t remainder = num_tags % num_threads;
+            int32_t split = remainder * (base + 1);
+            int32_t owner = (i < split) ? i / (base + 1) : remainder + (i - split) / base;
+
+            group_id = (owner % num_groups) + 1;
+        }
+
+        tag_group[i] = group_id - 1;
+
+        if(mode == MODE_AUTO) {
+            snprintf(path, sizeof(path), TAG_PATH_AUTO_FMT, base_tag_paths[(group_id - 1) % num_bases], group_id, auto_ms);
+        } else {
+            snprintf(path, sizeof(path), TAG_PATH_FMT, base_tag_paths[(group_id - 1) % num_bases], group_id);
+        }
+
+        tag_handles[i] = plc_tag_create(path, 0);
+        if(tag_handles[i] < 0) {
+            fprintf(stderr, "ERROR: Failed to create tag %" PRId32 " (group %" PRId32 "): %s\n", i, group_id,
+                    plc_tag_decode_error(tag_handles[i]));
+            rc = 1;
+            break;
+        }
     }
 
-    double reads_per_sec = (duration_ms > 0) ? (double)total_reads / ((double)duration_ms / 1000.0) : 0.0;
-    double tags_per_thread = (double)num_tags / (double)num_threads;
+    /* Wait for all the creates together. */
+    int64_t create_deadline = now_us() + ((int64_t)TAG_CREATE_TIMEOUT_MS + (int64_t)num_tags * TAG_CREATE_MS_PER_TAG) * 1000;
+    for(int32_t i = 0; rc == 0 && i < num_tags;) {
+        int32_t status = (int32_t)plc_tag_status(tag_handles[i]);
 
-    /*--- Fairness ---*/
-    double fairness_cv = 0.0;
-    double fairness_min_max = 0.0;
+        if(status == PLCTAG_STATUS_OK) {
+            i++;
+        } else if(status != PLCTAG_STATUS_PENDING) {
+            fprintf(stderr, "ERROR: Failed to create tag %" PRId32 ": %s\n", i, plc_tag_decode_error(status));
+            rc = 1;
+        } else if(now_us() > create_deadline) {
+            fprintf(stderr, "ERROR: Timed out creating tag %" PRId32 ".\n", i);
+            rc = 1;
+        } else {
+            compat_sleep_ms(1, NULL);
+        }
+    }
 
-    if(num_threads > 1) {
-        stats_summary_t summary;
-        if(stats_calculate(per_thread_reads, num_threads, &summary) == 0) {
-            fairness_cv = summary.cv;
-            fairness_min_max = summary.min_max_ratio;
+    if(rc != 0) {
+        for(int32_t j = 0; j < num_tags; j++) {
+            if(tag_handles[j] > 0) { plc_tag_destroy(tag_handles[j]); }
+        }
+        free(stats);
+        free(per_unit_ops);
+        return 1;
+    }
+    int64_t create_ms = (now_us() - create_start) / 1000;
+    fprintf(stderr, "All %" PRId32 " tags created in %" PRId64 " ms.\n", num_tags, create_ms);
+
+    /* One read per tag, all started together, primes the connections and, for writes, the buffer contents. */
+    int64_t prime_start = now_us();
+    for(int32_t i = 0; i < num_tags; i++) { plc_tag_read(tag_handles[i], 0); }
+    int64_t prime_deadline = now_us() + ((int64_t)TAG_OP_TIMEOUT_MS + (int64_t)num_tags * TAG_CREATE_MS_PER_TAG) * 1000;
+    for(int32_t i = 0; i < num_tags;) {
+        int32_t prc = (int32_t)plc_tag_status(tag_handles[i]);
+
+        if(prc == PLCTAG_STATUS_PENDING && now_us() <= prime_deadline) {
+            compat_sleep_ms(1, NULL);
+            continue;
+        }
+        if(prc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "WARNING: prime read failed on tag %" PRId32 ": %s\n", i, plc_tag_decode_error(prc));
+        }
+        i++;
+    }
+    int64_t prime_ms = (now_us() - prime_start) / 1000;
+
+    if(mode == MODE_AUTO) {
+        for(int32_t i = 0; i < num_tags; i++) {
+            int32_t crc = (int32_t)plc_tag_register_callback_ex(tag_handles[i], auto_callback, &stats[i]);
+            if(crc != PLCTAG_STATUS_OK) {
+                fprintf(stderr, "ERROR: callback registration failed on tag %" PRId32 ": %s\n", i, plc_tag_decode_error(crc));
+                rc = 1;
+                goto cleanup;
+            }
         }
     } else {
-        fairness_cv = 0.0;
-        fairness_min_max = 1.0;
+        int32_t base = num_tags / num_threads;
+        int32_t remainder = num_tags % num_threads;
+        int32_t offset = 0;
+
+        for(int32_t i = 0; i < num_threads; i++) {
+            int32_t count = base + (i < remainder ? 1 : 0);
+            tdata[i].thread_id = i;
+            tdata[i].tags = &tag_handles[offset];
+            tdata[i].stats = &stats[offset];
+            tdata[i].num_tags = count;
+            tdata[i].mode = (bench_mode_t)mode;
+            tdata[i].is_write = is_write;
+            offset += count;
+        }
+
+        for(int32_t i = 0; i < num_threads; i++) {
+            if(compat_thread_create(&threads[i], thread_func, &tdata[i]) != 0) {
+                fprintf(stderr, "ERROR: Failed to create thread %" PRId32 "\n", i);
+                compat_atomic_store_int32(&done, 1);
+                rc = 1;
+                goto cleanup;
+            }
+            threads_started++;
+        }
+
+        /* Brief pause for threads to reach their spin-wait. */
+        compat_sleep_ms(50, NULL);
     }
 
-    /*--- Print CSV line to stdout ---*/
-    printf("%s,%d,%d,%d,%.2f,%" PRId64 ",%" PRId64 ",%.1f,%.2f,%.2f,%.4f\n", mode_str, num_groups, num_threads, num_tags,
-           tags_per_thread, duration_ms, total_reads, reads_per_sec, cpu_load_pct, fairness_cv, fairness_min_max);
+    /*--- Run the benchmark ---*/
+    int64_t mutex_blocked_start = 0;
+    int64_t mutex_wait_ns_start = 0;
+    bool have_mutex_wait = get_mutex_wait(&mutex_blocked_start, &mutex_wait_ns_start);
+    double cpu_start = get_cpu_time_ms();
+    int64_t wall_start = now_us();
+
+    run_start_us = wall_start;
+    compat_atomic_store_int32(&go, 1);
+    printf("# window start\n");
     fflush(stdout);
 
-    /*--- Summary to stderr ---*/
-    fprintf(stderr, "\n--- Results ---\n");
-    fprintf(stderr, "Duration:       %" PRId64 " ms\n", duration_ms);
-    fprintf(stderr, "Total reads:    %" PRId64 "\n", total_reads);
-    fprintf(stderr, "Total errors:   %" PRId64 "\n", total_errors);
-    fprintf(stderr, "Reads/sec:      %.1f\n", reads_per_sec);
-    fprintf(stderr, "CPU load:       %.2f%%\n", cpu_load_pct);
-    fprintf(stderr, "Fairness CV:    %.2f%%\n", fairness_cv);
-    fprintf(stderr, "Fairness ratio: %.4f\n", fairness_min_max);
+    for(int32_t s = 0; s < duration_s && !compat_atomic_load_int32(&terminate); s++) { compat_sleep_ms(1000, NULL); }
 
-    if(num_threads > 1) {
-        stats_summary_t summary;
-        if(stats_calculate(per_thread_reads, num_threads, &summary) == 0) { stats_print_summary(stderr, &summary); }
+    compat_atomic_store_int32(&done, 1);
+    printf("# window end\n");
+    fflush(stdout);
+
+    for(int32_t i = 0; i < threads_started; i++) { compat_thread_join(threads[i], NULL); }
+    threads_started = 0;
+
+    int64_t duration_ms = (now_us() - wall_start) / 1000;
+    double cpu_time_ms = get_cpu_time_ms() - cpu_start;
+    int64_t peak_rss_kb = get_peak_rss_kb();
+    int64_t rss_growth_kb = peak_rss_kb - rss_base_kb;
+    int64_t mutex_blocked = 0;
+    int64_t mutex_wait_ns = 0;
+    get_mutex_wait(&mutex_blocked, &mutex_wait_ns);
+    mutex_blocked -= mutex_blocked_start;
+    mutex_wait_ns -= mutex_wait_ns_start;
+
+    /*--- Aggregate results ---*/
+    int64_t total_ops = 0;
+    int64_t total_errors = 0;
+    int64_t max_us = 0;
+    uint64_t hist_total = 0;
+
+    for(int32_t i = 0; i < num_tags; i++) {
+        total_ops += stats[i].ops;
+        total_errors += stats[i].errors;
+        if(stats[i].max_us > max_us) { max_us = stats[i].max_us; }
+        for(size_t b = 0; b < HIST_BUCKETS; b++) {
+            total_hist[b] += stats[i].hist[b];
+            hist_total += stats[i].hist[b];
+        }
     }
 
-    /*--- Cleanup ---*/
-    free(per_thread_reads);
+    if(mode == MODE_AUTO) {
+        for(int32_t i = 0; i < num_tags; i++) { per_unit_ops[i] = (int)stats[i].ops; }
+    } else {
+        for(int32_t i = 0; i < num_threads; i++) {
+            int64_t n = 0;
+            for(int32_t j = 0; j < tdata[i].num_tags; j++) { n += tdata[i].stats[j].ops; }
+            per_unit_ops[i] = (int)n;
+        }
+    }
+
+    double ops_per_sec = (duration_ms > 0) ? (double)total_ops / ((double)duration_ms / 1000.0) : 0.0;
+    double cpu_load_pct = (duration_ms > 0) ? (cpu_time_ms / (double)duration_ms) * 100.0 : 0.0;
+    double cpu_us_per_op = (total_ops > 0) ? cpu_time_ms * 1000.0 / (double)total_ops : 0.0;
+    double tags_per_thread = (double)num_tags / (double)num_threads;
+    double mutex_waits_per_op = -1.0;
+    double mutex_wait_us_per_op = -1.0;
+
+    if(have_mutex_wait) {
+        mutex_waits_per_op = (total_ops > 0) ? (double)mutex_blocked / (double)total_ops : 0.0;
+        mutex_wait_us_per_op = (total_ops > 0) ? (double)mutex_wait_ns / 1000.0 / (double)total_ops : 0.0;
+    }
+
+    double fairness_cv = 0.0;
+    double fairness_min_max = 1.0;
+    stats_summary_t summary;
+    bool have_summary = (num_units > 1 && stats_calculate(per_unit_ops, (int)num_units, &summary) == 0);
+
+    if(have_summary) {
+        fairness_cv = summary.cv;
+        fairness_min_max = summary.min_max_ratio;
+    }
+
+    /*--- Per-window fairness ---*/
+    int32_t num_windows = (int32_t)((duration_ms * 1000) / WINDOW_US);
+    double pass_s = (total_ops > 0) ? (double)num_tags * ((double)duration_ms / 1000.0) / (double)total_ops : 0.0;
+    int32_t window_s = (int32_t)(PASS_WINDOWS * pass_s + 0.999999);
+    double window_min_max = 1.0;
+    double window_cv = 0.0;
+    double conn_window_min_max = 1.0;
+    double conn_window_cv = 0.0;
+    double tag_cv = 0.0;
+    double tag_std_dev = 0.0;
+    int64_t *unit_windows = (int64_t *)calloc((size_t)num_units * MAX_WINDOWS, sizeof(int64_t));
+    int64_t *group_windows = (int64_t *)calloc((size_t)num_groups * MAX_WINDOWS, sizeof(int64_t));
+
+    if(num_windows > MAX_WINDOWS) { num_windows = MAX_WINDOWS; }
+    if(window_s < 1) { window_s = 1; }
+    if(num_windows / window_s < 2) {
+        fprintf(stderr, "WARNING: a fairness window is %" PRId32 " s, so the run has fewer than two; run longer.\n", window_s);
+    }
+
+    if(unit_windows && group_windows) {
+        int32_t offset = 0;
+
+        for(int32_t u = 0; u < num_units; u++) {
+            /* auto: one tag per unit; sync/async: the thread's slice. */
+            int32_t count = (mode == MODE_AUTO) ? 1 : tdata[u].num_tags;
+            for(int32_t j = offset; j < offset + count; j++) {
+                for(int32_t w = 0; w < num_windows; w++) { unit_windows[(size_t)u * MAX_WINDOWS + (size_t)w] += stats[j].windows[w]; }
+            }
+            offset += count;
+        }
+
+        for(int32_t i = 0; i < num_tags; i++) {
+            for(int32_t w = 0; w < num_windows; w++) { group_windows[(size_t)tag_group[i] * MAX_WINDOWS + (size_t)w] += stats[i].windows[w]; }
+        }
+
+        worst_window(unit_windows, num_units, num_windows, window_s, &window_min_max, &window_cv);
+        worst_window(group_windows, num_groups, num_windows, window_s, &conn_window_min_max, &conn_window_cv);
+    }
+
+    free(unit_windows);
+    free(group_windows);
+
+    /* per connection group: the spread of whole-run ops across its tags. */
+    int *group_ops = (int *)malloc((size_t)num_tags * sizeof(int));
+
+    for(int32_t g = 0; group_ops && g < num_groups; g++) {
+        stats_summary_t group_summary;
+        int count = 0;
+
+        for(int32_t i = 0; i < num_tags; i++) {
+            if(tag_group[i] == g) { group_ops[count++] = (int)stats[i].ops; }
+        }
+
+        if(count < 2 || stats_calculate(group_ops, count, &group_summary) != 0) { continue; }
+
+        if(group_summary.cv > tag_cv) {
+            tag_cv = group_summary.cv;
+            tag_std_dev = group_summary.std_dev;
+        }
+    }
+
+    free(group_ops);
+
+    int64_t p50 = percentile(total_hist, hist_total, 0.50);
+    int64_t p95 = percentile(total_hist, hist_total, 0.95);
+    int64_t p99 = percentile(total_hist, hist_total, 0.99);
+
+    printf("%s,%" PRId32 ",%" PRId32 ",%" PRId32 ",%.2f,%" PRId64 ",%" PRId64 ",%.1f,%.2f,%.2f,%.4f,%s,%" PRId64 ",%" PRId64
+           ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%.2f,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.4f,%.2f,%.4f,%.2f,%.2f,%" PRId32 ",%.4f,%.2f,%" PRId64 "\n",
+           mode_names[mode], num_groups, num_threads, num_tags, tags_per_thread, duration_ms, total_ops, ops_per_sec, cpu_load_pct,
+           fairness_cv, fairness_min_max, is_write ? "write" : "read", total_errors, p50, p95, p99, max_us, cpu_us_per_op,
+           rss_growth_kb, create_ms, prime_ms, window_min_max, window_cv, conn_window_min_max, tag_cv, tag_std_dev, window_s,
+           mutex_waits_per_op, mutex_wait_us_per_op, peak_rss_kb);
+    fflush(stdout);
+
+    fprintf(stderr, "\n--- Results ---\n");
+    fprintf(stderr, "Duration:       %" PRId64 " ms\n", duration_ms);
+    fprintf(stderr, "Total ops:      %" PRId64 "\n", total_ops);
+    fprintf(stderr, "Total errors:   %" PRId64 "\n", total_errors);
+    fprintf(stderr, "Ops/sec:        %.1f\n", ops_per_sec);
+    fprintf(stderr, "Latency us:     p50 %" PRId64 "  p95 %" PRId64 "  p99 %" PRId64 "  max %" PRId64 "\n", p50, p95, p99, max_us);
+    fprintf(stderr, "CPU load:       %.2f%%  (%.2f us/op)\n", cpu_load_pct, cpu_us_per_op);
+    fprintf(stderr, "RSS growth:     %" PRId64 " KB  (peak %" PRId64 " KB)\n", rss_growth_kb, peak_rss_kb);
+    if(have_mutex_wait) {
+        fprintf(stderr, "Mutex waits:    %.4f per op  (%.2f us/op waiting)\n", mutex_waits_per_op, mutex_wait_us_per_op);
+    }
+    fprintf(stderr, "Create/prime:   %" PRId64 " / %" PRId64 " ms\n", create_ms, prime_ms);
+    fprintf(stderr, "Fairness CV:    %.2f%%\n", fairness_cv);
+    fprintf(stderr, "Fairness ratio: %.4f\n", fairness_min_max);
+    fprintf(stderr, "Worst window:   min/max %.4f  CV %.2f%%  (%" PRId32 " s windows of %" PRId32 " s)\n", window_min_max, window_cv,
+            window_s, num_windows);
+    fprintf(stderr, "Worst conn win: min/max %.4f  CV %.2f%%\n", conn_window_min_max, conn_window_cv);
+    fprintf(stderr, "Tag ops:        CV %.2f%%  std dev %.2f  (worst connection)\n", tag_cv, tag_std_dev);
+    if(have_summary) { stats_print_summary(stderr, &summary); }
+
+cleanup:
+    for(int32_t i = 0; i < threads_started; i++) { compat_thread_join(threads[i], NULL); }
 
     fprintf(stderr, "Destroying tags...\n");
-    for(int i = 0; i < num_tags; i++) { plc_tag_destroy(tag_handles[i]); }
+    for(int32_t i = 0; i < num_tags; i++) { plc_tag_destroy(tag_handles[i]); }
+
+    /* Callbacks are gone once their tags are destroyed. */
+    free(stats);
+    free(per_unit_ops);
 
     fprintf(stderr, "Done.\n");
 
-    return (compat_atomic_load_int32(&terminate)) ? 1 : 0;
+    return (rc != 0 || compat_atomic_load_int32(&terminate)) ? 1 : 0;
 }

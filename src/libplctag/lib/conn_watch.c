@@ -33,13 +33,16 @@
 
 /* Shared connection-event ring.  See conn_watch.h for the concurrency contract. */
 
+#include <libplctag/api/libplctag.h>
 #include <libplctag/lib/conn_watch.h>
 #include <libplctag/lib/tag.h>
+#include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
+#include <utils/vector.h>
 
 
-void conn_watch_init(conn_watch_t *watch, int32_t initial_status) {
+void conn_watch_init(conn_event_ring_t *watch, int32_t initial_status) {
     mem_set(watch, 0, (int)sizeof(*watch));
 
     atomic_init_int32(&watch->status, initial_status);
@@ -56,7 +59,7 @@ void conn_watch_init(conn_watch_t *watch, int32_t initial_status) {
 }
 
 
-void conn_watch_publish(conn_watch_t *watch, int32_t event_type, int32_t status) {
+void conn_watch_publish(conn_event_ring_t *watch, int32_t event_type, int32_t status) {
     int32_t write_idx = atomic_get_int32(&watch->ring_write_idx);
 
     /* drop a repeat of the last entry */
@@ -70,12 +73,10 @@ void conn_watch_publish(conn_watch_t *watch, int32_t event_type, int32_t status)
 
     /* the atomic store is the release point; readers cannot see the slot before it */
     atomic_set_int32(&watch->ring_write_idx, write_idx);
-
-    plc_tag_tickler_wake();
 }
 
 
-bool conn_watch_next(conn_watch_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status) {
+bool conn_watch_next(conn_event_ring_t *watch, int32_t *read_idx, int32_t *event_type, int32_t *status) {
     /* the atomic load is the acquire point, pairing with the store in conn_watch_publish() */
     int32_t write_idx = atomic_get_int32(&watch->ring_write_idx);
 
@@ -89,4 +90,50 @@ bool conn_watch_next(conn_watch_t *watch, int32_t *read_idx, int32_t *event_type
 }
 
 
-int32_t conn_watch_read_idx(conn_watch_t *watch) { return atomic_get_int32(&watch->ring_write_idx); }
+int32_t conn_watch_read_idx(conn_event_ring_t *watch) { return atomic_get_int32(&watch->ring_write_idx); }
+
+
+void conn_watch_set_status(conn_event_ring_t *watch, mutex_p mutex, int32_t new_status) {
+    critical_block(mutex) {
+        int32_t old_status = atomic_get_int32(&watch->status);
+
+        atomic_set_int32(&watch->status, new_status);
+
+        if(old_status != new_status) { conn_watch_publish(watch, new_status + PLCTAG_EVENT_CONN_STATUS_OFFSET, PLCTAG_STATUS_OK); }
+    }
+}
+
+
+int32_t conn_watch_add_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag) {
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    critical_block(mutex) {
+        if(!watch->watchers) { watch->watchers = vector_create(4, 4); }
+
+        if(!watch->watchers) {
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        rc = vector_set(watch->watchers, vector_length(watch->watchers), tag);
+    }
+
+    return rc;
+}
+
+
+void conn_watch_remove_watcher(conn_event_ring_t *watch, mutex_p mutex, plc_tag_p tag) {
+    critical_block(mutex) {
+        int32_t index = (watch->watchers ? vector_find_index(watch->watchers, tag) : -1);
+
+        if(index >= 0) { vector_remove(watch->watchers, index); }
+    }
+}
+
+
+void conn_watch_destroy(conn_event_ring_t *watch) {
+    if(watch->watchers) {
+        vector_destroy(watch->watchers);
+        watch->watchers = NULL;
+    }
+}

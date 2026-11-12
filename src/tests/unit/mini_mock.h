@@ -35,7 +35,8 @@
 
 /*
  * Minimal stand-in for the handful of CMocka macros the unit tests use:
- * will_return()/mock_type() value queuing, assert_int_equal(), and a
+ * will_return()/mock_type() value queuing, assert_int_equal(), assert_true(),
+ * assert_null(), assert_non_null(), and a
  * bare-bones test-array runner. Replaces the CMocka dependency, which had
  * to be downloaded at configure time via FetchContent and repeatedly failed
  * to do so on CI.
@@ -157,6 +158,36 @@ static inline int32_t mini_mock_run_group_tests(const struct CMUnitTest tests[],
                     mini_mock_a, #b, mini_mock_b);                                                                            \
             abort();                                                                                                          \
         }                                                                                                                     \
+    } while(0)
+
+#define assert_true(cond)                                                                           \
+    do {                                                                                            \
+        if(!(cond)) {                                                                               \
+            fprintf(stderr, "%s:%d: assert_true failed: %s\n", __FILE__, __LINE__, #cond);          \
+            abort();                                                                                \
+        }                                                                                           \
+    } while(0)
+
+/*
+ * Both test the pointer directly rather than casting it to void *.  ISO C does not define
+ * converting a function pointer to an object pointer, and -Wpedantic says so, but !ptr is
+ * well defined for either kind -- which matters because these are used on the dispatch
+ * table's function pointers.
+ */
+#define assert_null(ptr)                                                                            \
+    do {                                                                                            \
+        if((ptr)) {                                                                                 \
+            fprintf(stderr, "%s:%d: assert_null failed: %s\n", __FILE__, __LINE__, #ptr);           \
+            abort();                                                                                \
+        }                                                                                           \
+    } while(0)
+
+#define assert_non_null(ptr)                                                                        \
+    do {                                                                                            \
+        if(!(ptr)) {                                                                                \
+            fprintf(stderr, "%s:%d: assert_non_null failed: %s\n", __FILE__, __LINE__, #ptr);       \
+            abort();                                                                                \
+        }                                                                                           \
     } while(0)
 
 #define cmocka_unit_test(f) {#f, (f)}

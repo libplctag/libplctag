@@ -31,18 +31,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/modules/ab/tag.h>
-
-
-struct tag_vtable_t slc_vtable = {.abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
-                                  .read = (tag_vtable_func)pccc_tag_read_start,
-                                  .status = (tag_vtable_func)pccc_tag_status,
-                                  .tickler = (tag_vtable_func)pccc_tag_tickler,
-                                  .write = (tag_vtable_func)pccc_tag_write_start,
-                                  .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
-
-                                  /* data accessors */
-                                  .attribs = ab_attribs};
+#include <libplctag/api/libplctag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/modules/ab/ab_common.h>
+#include <libplctag/modules/ab/pccc.h>
+#include <libplctag/modules/cip/tag.h>
 
 
 /* default string types used for PLC-5 PLCs. */
@@ -60,7 +53,7 @@ tag_byte_order_t slc_tag_byte_order = {.is_allocated = 0,
                                        .str_is_zero_terminated = 0,
                                        .str_is_byte_swapped = 1,
 
-                                       .str_pad_to_multiple_bytes = 2,
+                                       .write_pad_alignment_bytes = 2,
                                        .str_count_word_bytes = 2,
                                        .str_max_capacity = 82,
                                        .str_total_length = 84,

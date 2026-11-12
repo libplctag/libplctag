@@ -55,10 +55,17 @@
 
 #define NUM_TAGS (10)
 
+/*
+ * Idle tags with no threads, so the registry holds tags in more than one 64-slot word of its
+ * used-slot bitmap when shutdown sweeps it.
+ */
+#define NUM_IDLE_TAGS (100)
+
 static compat_atomic_int32_t read_start_count = {0};
 static compat_atomic_int32_t read_complete_count = {0};
 static compat_atomic_int32_t write_start_count = {0};
 static compat_atomic_int32_t write_complete_count = {0};
+static compat_atomic_int32_t destroyed_count = {0};
 
 
 static void *reader_function(void *tag_arg);
@@ -131,6 +138,22 @@ int main(int argc, char **argv) {
         fprintf(stderr, ".");
     }
 
+    /* the idle tags are created asynchronously: shutdown must destroy them whether or not they finished. */
+    for(int i = 0; i < NUM_IDLE_TAGS; i++) {
+        int32_t tag_id = PLCTAG_ERR_CREATE;
+
+        // NOLINTNEXTLINE
+        snprintf(tag_attr_str, sizeof(tag_attr_str), tag_attribs, i % NUM_TAGS);
+        tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, 0);
+
+        if(tag_id <= 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Error %s trying to create idle tag %d!\n", plc_tag_decode_error(tag_id), i);
+            plc_tag_shutdown();
+            return 1;
+        }
+    }
+
     fprintf(stderr, "\nWaiting for threads to stabilize %dms.\n", RUN_PERIOD / 2);
 
     /* let everything run for a while */
@@ -143,6 +166,14 @@ int main(int argc, char **argv) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
 
     plc_tag_shutdown();
+
+    /* the sweep must find every tag still open, exactly once. */
+    if(compat_atomic_load_int32(&destroyed_count) != NUM_TAGS + NUM_IDLE_TAGS) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: shutdown destroyed %" PRId32 " tags, expected %d!\n", compat_atomic_load_int32(&destroyed_count),
+                NUM_TAGS + NUM_IDLE_TAGS);
+        rc = 1;
+    }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for threads to quit.\n");
@@ -273,6 +304,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
             break;
 
         case PLCTAG_EVENT_DESTROYED:
+            compat_atomic_inc_int32(&destroyed_count);
             // NOLINTNEXTLINE
             fprintf(stderr, "Tag %" PRId32 " was destroyed.\n", tag_id);
             break;

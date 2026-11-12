@@ -34,9 +34,6 @@
  ***************************************************************************/
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -76,7 +73,7 @@ log_level_t log_set_level(log_level_t level);
  * @param templ format string for the log message
  * @param ... additional arguments for the format string
  */
-void log_impl(const char *func, int line_num, log_level_t lvl, const char *templ, ...);
+void log_impl(const char *func, int32_t line_num, log_level_t lvl, const char *templ, ...);
 
 /* helper macros */
 
@@ -113,6 +110,3 @@ void log_impl(const char *func, int line_num, log_level_t lvl, const char *templ
     } while(0)
 
 
-#ifdef __cplusplus
-}
-#endif

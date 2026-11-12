@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,9 +33,9 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
-
 #include "plc.h"
-#include "slice.h"
+#include <utils/byte_slice.h>
+#include <stdint.h>
 
-extern slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *context);
+/* Execute PCCC: the payload after the CIP path; the reply, CIP header included, goes in out. */
+extern byte_slice_t pccc_dispatch_request(uint8_t service, byte_slice_t payload, byte_slice_t out, plc_s *plc);
