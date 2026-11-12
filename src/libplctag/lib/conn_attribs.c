@@ -37,7 +37,9 @@
 #include <libplctag/lib/conn_attribs.h>
 #include <libplctag/lib/conn_timeouts.h>
 #include <inttypes.h>
+#include <platform.h>
 #include <stdint.h>
+#include <string.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
@@ -116,4 +118,38 @@ int32_t conn_set_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t value, int
     atomic_set_int32(delay_ms, clamped_value);
 
     return rc;
+}
+
+
+int32_t conn_split_gateway(const char *gateway, int default_port, char *host_buf, size_t host_buf_size, int *port,
+                           debug_module_t debug_module) {
+    const char *colon = NULL;
+    size_t host_len = 0;
+
+    if(!gateway || !gateway[0]) {
+        pdebug(debug_module, DEBUG_WARN, 0, "Gateway string is malformed or empty!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    colon = strchr(gateway, ':');
+    host_len = (colon ? (size_t)(colon - gateway) : strlen(gateway));
+
+    if(host_len == 0 || host_len >= host_buf_size) {
+        pdebug(debug_module, DEBUG_WARN, 0, "Gateway \"%s\" has an empty or too long host!", gateway);
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    memcpy(host_buf, gateway, host_len);
+    host_buf[host_len] = '\0';
+
+    *port = default_port;
+
+    if(colon && (str_to_int(colon + 1, port) != PLCTAG_STATUS_OK || *port < 1 || *port > 65535)) {
+        pdebug(debug_module, DEBUG_WARN, 0, "Unable to extract a port number from gateway \"%s\"!", gateway);
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    pdebug(debug_module, DEBUG_DETAIL, 0, "Using host \"%s\" and port %d.", host_buf, *port);
+
+    return PLCTAG_STATUS_OK;
 }

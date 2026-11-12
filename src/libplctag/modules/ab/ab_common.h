@@ -37,7 +37,6 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/standard_tag.h>
-#include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/tag.h>
 #include <utils/attr.h>
@@ -47,8 +46,8 @@
 
 
 
-/* Runtime attributes shared by every AB tag type. */
-extern const attr_def_t ab_attribs[];
+/* the attribute table of PCCC data-file tags: elem_type is the file type. */
+extern const attr_def_t pccc_tag_attribs[];
 
 /* the Rockwell families; see cip/family.h.  The DH+ forms are reached through .dhp. */
 extern const cip_family_t ab_family_plc5;
@@ -71,6 +70,7 @@ extern tag_byte_order_t logix_tag_listing_byte_order;
 /* what Rockwell can do, and the vtable built around it, for the shared standard-tag engine. */
 extern const cip_standard_tag_ops_t cip_standard_tag_ops_ab;
 extern struct tag_vtable_t cip_standard_tag_vtable_ab;
+extern const cip_tag_codec_t cip_standard_tag_codec_ab;
 
 /*
  * The AB module's own connection lifecycle.  Everything else about a connection --

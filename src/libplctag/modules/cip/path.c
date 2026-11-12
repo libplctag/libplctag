@@ -936,7 +936,9 @@ int skip_whitespace(const char *name, int *name_index) {
 
 
 /*
- * A bit segment is simply an integer from 0 to 63 (inclusive). */
+ * A bit segment is an integer from 0 to 255.  Whether it fits the element is known only once
+ * the PLC has said how wide the element is, so the first read checks that.
+ */
 int parse_bit_segment(cip_name_t *ctx, const char *name, int *name_index) {
     const char *p, *q;
     long val;
@@ -956,7 +958,7 @@ int parse_bit_segment(cip_name_t *ctx, const char *name, int *name_index) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if((val < 0) || (val >= 65536)) {
+    if((val < 0) || (val > 255)) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, ctx->tag_id, "Bit identifier must be between 0 and 255, inclusive, was %d!",
                (int)val);
         return PLCTAG_ERR_BAD_PARAM;

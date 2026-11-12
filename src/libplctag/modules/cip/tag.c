@@ -43,6 +43,7 @@
 #include <inttypes.h>
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/conn.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/path.h>
 #include <libplctag/modules/cip/services.h>
 #include <libplctag/lib/conn_attribs.h>
@@ -106,13 +107,13 @@ static void cip_tag_destroy(cip_tag_p tag) {
     atomic_set_bool(&tag->activated, false);
     cip_tag_abort(tag);
 
-    conn = tag->session;
+    conn = cip_tag_conn(tag);
 
     /* a tag should always have a connection.  Release it. */
     if(conn) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, tag->tag_id, "rc_dec: Releasing connection reference of tag %" PRId32 ".",
                tag->tag_id);
-        tag->session = rc_dec(conn);
+        tag->conn = rc_dec(conn);
     } else {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, tag->tag_id, "No connection pointer!");
     }
@@ -131,10 +132,7 @@ static void cip_tag_destroy(cip_tag_p tag) {
         tag->byte_order = NULL;
     }
 
-    if(tag->data) {
-        mem_free(tag->data);
-        tag->data = NULL;
-    }
+    byte_buffer_free(&tag->buf);
 
     if(tag->deferred_attribs) {
         attr_destroy(tag->deferred_attribs);
@@ -171,7 +169,7 @@ int cip_encode_tag_name(cip_tag_p tag, const char *name) {
 
 
 int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_order_t *byte_order, tag_vtable_p vtable,
-                          debug_module_t debug_module) {
+                          const cip_tag_codec_t *codec, debug_module_t debug_module) {
     pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     tag->debug_module = debug_module;
@@ -186,6 +184,7 @@ int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_ord
     pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Setting vtable to %p.", vtable);
 
     tag->vtable = vtable;
+    tag->codec = codec;
 
     pdebug(debug_module, DEBUG_DETAIL, tag->tag_id, "Done.");
 
@@ -255,7 +254,9 @@ void cip_tag_fail_create(cip_tag_p tag, plctag_error_code_t rc) {
 }
 
 
-int cip_data_tag_abort(cip_tag_p tag) {
+int cip_data_tag_abort(plc_tag_p raw_tag) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
     /* the create's error must survive, so there is nothing left to abort. */
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return PLCTAG_STATUS_OK; }
 
@@ -268,7 +269,8 @@ int cip_data_tag_abort(cip_tag_p tag) {
 }
 
 
-int cip_tag_status(cip_tag_p tag) {
+int cip_tag_status(plc_tag_p raw_tag) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
     int rc = PLCTAG_STATUS_OK;
 
     if(tag->create_read_status < PLCTAG_STATUS_OK) { return tag->create_read_status; }
@@ -308,11 +310,11 @@ int cip_tag_abort(cip_tag_p tag) {
      * Moved to due now in one step, so the handler re-arms it as IDLE, DESTROY or SYNC_WAIT and
      * never sees it off the list.  A tag not activated (being created or destroyed) comes off.
      */
-    if(tag->session) {
+    if(cip_tag_conn(tag)) {
         if(atomic_get_bool(&tag->activated)) {
-            cip_conn_abort_tag(tag->session, tag);
+            cip_conn_abort_tag(cip_tag_conn(tag), tag);
         } else {
-            cip_conn_forget_tag(tag->session, tag);
+            cip_conn_forget_tag(cip_tag_conn(tag), tag);
         }
     }
 
@@ -328,9 +330,9 @@ int cip_tag_activate(plc_tag_p tag_arg) {
     atomic_set_bool(&tag->activated, true);
 
     /* the handler starts what the create started while the tag was being built, and arms auto-sync. */
-    if(!tag->session) { return PLCTAG_STATUS_OK; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_STATUS_OK; }
 
-    return cip_conn_queue_tag(tag->session, tag);
+    return cip_conn_queue_tag(cip_tag_conn(tag), tag);
 }
 
 
@@ -342,9 +344,9 @@ int cip_tag_activate(plc_tag_p tag_arg) {
 int cip_tag_wake_plc(plc_tag_p tag_arg) {
     cip_tag_p tag = (cip_tag_p)tag_arg;
 
-    if(!atomic_get_bool(&tag->activated) || !tag->session) { return PLCTAG_STATUS_OK; }
+    if(!atomic_get_bool(&tag->activated) || !cip_tag_conn(tag)) { return PLCTAG_STATUS_OK; }
 
-    return cip_conn_queue_tag(tag->session, tag);
+    return cip_conn_queue_tag(cip_tag_conn(tag), tag);
 }
 
 
@@ -374,21 +376,21 @@ int32_t cip_tag_get_elem_count(plc_tag_p raw_tag, int32_t *result) {
 int32_t cip_tag_get_connection_status(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    return conn_get_status(tag->session ? &tag->session->watch.status : NULL, result);
+    return conn_get_status(cip_tag_conn(tag) ? &cip_tag_conn(tag)->watch.status : NULL, result);
 }
 
 
 int32_t cip_tag_get_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    return conn_get_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, result);
+    return conn_get_inactivity_timeout_ms(cip_tag_conn(tag) ? &cip_tag_conn(tag)->connection_inactivity_timeout_ms : NULL, result);
 }
 
 
 int32_t cip_tag_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t value) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    return conn_set_inactivity_timeout_ms(tag->session ? &tag->session->connection_inactivity_timeout_ms : NULL, value,
+    return conn_set_inactivity_timeout_ms(cip_tag_conn(tag) ? &cip_tag_conn(tag)->connection_inactivity_timeout_ms : NULL, value,
                                           tag->tag_id, DEBUG_MODULE_CIP);
 }
 
@@ -396,7 +398,7 @@ int32_t cip_tag_set_connection_inactivity_timeout_ms(plc_tag_p raw_tag, int32_t 
 int32_t cip_tag_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    return conn_get_retry_max_delay_ms(tag->session ? &tag->session->connection_retry_max_delay_ms : NULL, RETRY_WAIT_MAX_MS,
+    return conn_get_retry_max_delay_ms(cip_tag_conn(tag) ? &cip_tag_conn(tag)->connection_retry_max_delay_ms : NULL, RETRY_WAIT_MAX_MS,
                                        result);
 }
 
@@ -404,7 +406,7 @@ int32_t cip_tag_get_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t *re
 int32_t cip_tag_set_connection_retry_max_delay_ms(plc_tag_p raw_tag, int32_t value) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    return conn_set_retry_max_delay_ms(tag->session ? &tag->session->connection_retry_max_delay_ms : NULL, value, tag->tag_id,
+    return conn_set_retry_max_delay_ms(cip_tag_conn(tag) ? &cip_tag_conn(tag)->connection_retry_max_delay_ms : NULL, value, tag->tag_id,
                                        DEBUG_MODULE_CIP);
 }
 
@@ -430,27 +432,27 @@ int32_t cip_tag_get_allow_packing(plc_tag_p raw_tag, int32_t *result) {
 int32_t cip_tag_get_gateway(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_ERR_NOT_FOUND; }
 
-    return attr_copy_string(tag->session->host, buffer, buffer_length);
+    return attr_copy_string(cip_tag_conn(tag)->host, buffer, buffer_length);
 }
 
 
 int32_t cip_tag_get_gateway_size(plc_tag_p raw_tag) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_ERR_NOT_FOUND; }
 
-    return attr_string_size(tag->session->host);
+    return attr_string_size(cip_tag_conn(tag)->host);
 }
 
 
 int32_t cip_tag_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_ERR_NOT_FOUND; }
 
-    *result = (int32_t)tag->session->port;
+    *result = (int32_t)cip_tag_conn(tag)->port;
 
     return PLCTAG_STATUS_OK;
 }
@@ -459,34 +461,96 @@ int32_t cip_tag_get_gateway_port(plc_tag_p raw_tag, int32_t *result) {
 int32_t cip_tag_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_ERR_NOT_FOUND; }
 
-    if((int32_t)tag->session->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
+    if((int32_t)cip_tag_conn(tag)->conn_path_size > buffer_length) { return PLCTAG_ERR_TOO_SMALL; }
 
-    mem_copy((void *)buffer, (void *)tag->session->conn_path, (int)tag->session->conn_path_size);
+    mem_copy((void *)buffer, (void *)cip_tag_conn(tag)->conn_path, (int)cip_tag_conn(tag)->conn_path_size);
 
-    return (int32_t)tag->session->conn_path_size;
+    return (int32_t)cip_tag_conn(tag)->conn_path_size;
 }
 
 
 int32_t cip_tag_get_path_size(plc_tag_p raw_tag) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_ERR_NOT_FOUND; }
 
-    return (int32_t)tag->session->conn_path_size;
+    return (int32_t)cip_tag_conn(tag)->conn_path_size;
 }
 
 
 int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result) {
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    if(!tag->session) { return PLCTAG_ERR_NOT_FOUND; }
+    if(!cip_tag_conn(tag)) { return PLCTAG_ERR_NOT_FOUND; }
 
-    *result = (int32_t)tag->session->only_use_old_forward_open;
+    *result = (int32_t)cip_tag_conn(tag)->only_use_old_forward_open;
 
     return PLCTAG_STATUS_OK;
 }
+
+
+int32_t cip_tag_get_raw_tag_type_bytes_size(plc_tag_p raw_tag) { return ((cip_tag_p)raw_tag)->encoded_type_info_size; }
+
+
+int32_t cip_tag_get_raw_tag_type_bytes_length(plc_tag_p raw_tag, int32_t *result) {
+    *result = cip_tag_get_raw_tag_type_bytes_size(raw_tag);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int32_t cip_tag_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+    int32_t size = tag->encoded_type_info_size;
+
+    if(size > buffer_length) {
+        pdebug(tag->debug_module, DEBUG_WARN, tag->tag_id, "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.",
+               (int)size, (int)buffer_length);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    mem_copy(buffer, tag->encoded_type_info, (int)size);
+
+    /* the caller gets the number of bytes copied. */
+    return size;
+}
+
+
+/* the family's canonical name, from the connection; NULL until a probed connection knows it. */
+static const char *tag_plc_name(plc_tag_p raw_tag) {
+    cip_conn_p conn = cip_tag_conn((cip_tag_p)raw_tag);
+    int identify_rc = PLCTAG_STATUS_OK;
+    const cip_family_t *family = conn ? cip_conn_family(conn, &identify_rc) : NULL;
+
+    return family ? family->canonical_name : NULL;
+}
+
+
+int32_t cip_tag_get_plc(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length) {
+    return attr_copy_string(tag_plc_name(raw_tag), buffer, buffer_length);
+}
+
+
+int32_t cip_tag_get_plc_size(plc_tag_p raw_tag) { return attr_string_size(tag_plc_name(raw_tag)); }
+
+
+static int32_t get_elem_type(plc_tag_p raw_tag, int32_t *result) {
+    *result = (int32_t)((cip_tag_p)raw_tag)->elem_type;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+const attr_def_t cip_tag_attribs[] = {
+    {.name = "elem_type",
+     .type = ATTR_TYPE_INT,
+     .description = "The PLC's type code for a single element of this tag.",
+     .get_int = get_elem_type},
+    CIP_TAG_COMMON_ATTRIBS,
+    {.name = NULL},
+};
 
 
 int cip_tag_read_start(plc_tag_p tag_arg) {
@@ -514,7 +578,7 @@ int cip_tag_write_start(plc_tag_p tag_arg) {
 
 
 cip_tag_p cip_tag_alloc(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                        void *userdata, tag_protocol_t protocol_type, tag_vtable_p default_vtable,
+                        void *userdata, tag_vtable_p default_vtable,
                         debug_module_t debug_module) {
     cip_tag_p tag = NULL;
     int rc = PLCTAG_STATUS_OK;
@@ -532,7 +596,6 @@ cip_tag_p cip_tag_alloc(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     tag->vtable = default_vtable;
     tag->scheduled = true;
     tag->reply_index = -1;
-    tag->protocol_type = protocol_type;
 
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
@@ -581,9 +644,6 @@ int cip_tag_size_from_plc(cip_tag_p tag, debug_module_t debug_module) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    tag->size = 0;
-    tag->data = NULL;
-
     return PLCTAG_STATUS_OK;
 }
 
@@ -610,11 +670,8 @@ int cip_tag_size_from_attributes(cip_tag_p tag, attr attribs, debug_module_t deb
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    tag->size = (tag->elem_count) * (tag->elem_size);
-
     /* this may be changed in the future if this is a tag list request. */
-    tag->data = (uint8_t *)mem_alloc(tag->size);
-    if(tag->data == NULL) {
+    if(byte_buffer_set_len(&tag->buf, (tag->elem_count) * (tag->elem_size)) != PLCTAG_STATUS_OK) {
         pdebug(debug_module, DEBUG_WARN, tag->tag_id, "Unable to allocate tag data!");
         return PLCTAG_ERR_NO_MEM;
     }

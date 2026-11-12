@@ -63,6 +63,7 @@
 
 
 /* helper functions. */
+static int set_callback(int32_t tag_id, tag_extended_callback_func extended, tag_callback_func plain, void *userdata);
 static int plc_tag_abort_impl(plc_tag_p tag);
 static int plc_tag_status_impl(plc_tag_p tag);
 static int wait_for_status(plc_tag_p tag, int timeout, int (*status)(plc_tag_p tag, uint32_t seq), uint32_t seq);
@@ -246,7 +247,11 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Dispatching event %d with status %s.", (int)event.event,
                    plc_tag_decode_error(event.status));
 
-            tag->callback(tag->tag_id, (int)event.event, (int)event.status, tag->userdata);
+            if(tag->callback_is_plain) {
+                tag->plain_callback(tag->tag_id, (int)event.event, (int)event.status);
+            } else {
+                tag->callback(tag->tag_id, (int)event.event, (int)event.status, tag->userdata);
+            }
 
             /* DESTROYED is last; userdata may already be freed. */
             if(event.event == PLCTAG_EVENT_DESTROYED) {
@@ -296,6 +301,7 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs,
 
     /* do this early so that events can be raised early. */
     tag->callback = tag_callback_func;
+    tag->callback_is_plain = false;
     atomic_set_bool(&tag->has_callback, (tag_callback_func != NULL));
     tag->userdata = userdata;
 
@@ -526,14 +532,11 @@ LIB_EXPORT int32_t plc_tag_create_from_tag(int32_t src_tag_id, const char *attri
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    switch(src_tag->protocol_type) {
-        case TAG_PROTOCOL_SYSTEM:
-        case TAG_PROTOCOL_UNKNOWN:
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag protocol type %d does not support connection sharing.",
-                   src_tag->protocol_type);
-            rc_dec(src_tag);
-            return PLCTAG_ERR_NOT_ALLOWED;
-        default: break;
+    /* set at create and held until destroy, so it is safe to read here. */
+    if(!src_tag->conn) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, src_tag_id, "Source tag has no connection to share.");
+        rc_dec(src_tag);
+        return PLCTAG_ERR_NOT_ALLOWED;
     }
 
     rc = plc_tag_create_impl(attrib_str, tag_callback_func, userdata, timeout, src_tag);
@@ -551,7 +554,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
     int read_cache_ms = 0;
-    tag_create_function tag_constructor;
+    tag_create_function tag_constructor = NULL;
     int debug_level = -1;
     int reuse = -1;
     plc_tag_p existing = NULL;
@@ -631,17 +634,21 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
      *
-     * A cloned tag names no protocol attribute, so it is made by whatever made its source.
+     * A cloned tag names no protocol attribute, so its source's connection makes it.
      */
-    tag_constructor = (src_tag ? src_tag->create_func : find_tag_create_func(attribs));
+    if(src_tag) {
+        rc = src_tag->conn->create_tag(src_tag->conn, attribs, tag_callback_func, userdata, &tag);
+    } else {
+        tag_constructor = find_tag_create_func(attribs);
 
-    if(!tag_constructor) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, no tag constructor found for tag type!");
-        attr_destroy(attribs);
-        return src_tag ? PLCTAG_ERR_NOT_ALLOWED : PLCTAG_ERR_BAD_PARAM;
+        if(!tag_constructor) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Tag creation failed, no tag constructor found for tag type!");
+            attr_destroy(attribs);
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        rc = tag_constructor(attribs, tag_callback_func, userdata, &tag);
     }
-
-    rc = tag_constructor(attribs, tag_callback_func, userdata, src_tag, &tag);
 
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Warning, %s error found while creating tag!", plc_tag_decode_error(rc));
@@ -661,8 +668,6 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         attr_destroy(attribs);
         return PLCTAG_ERR_CREATE;
     }
-
-    tag->create_func = tag_constructor;
 
     /* set up the read cache config. */
     read_cache_ms = attr_get_int(attribs, "read_cache_ms", 0);
@@ -967,27 +972,17 @@ LIB_EXPORT void plc_tag_shutdown(void) {
  */
 
 
-/* there needs to be a better way to make the cast clean than this! */
-#ifndef _MSC_VER
-#    pragma GCC diagnostic push
-#    pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Starting.");
 
-    rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func)callback_func, NULL);
+    rc = set_callback(tag_id, NULL, callback_func, NULL);
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag_id, "Done.");
 
     return rc;
 }
-
-#ifndef _MSC_VER
-#    pragma GCC diagnostic pop
-#endif
 
 /*
  * plc_tag_register_callback_ex
@@ -1038,6 +1033,12 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callb
  */
 
 LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func callback_func, void *userdata) {
+    return set_callback(tag_id, callback_func, NULL, userdata);
+}
+
+
+/* register either form; at most one of extended and plain is set. */
+static int set_callback(int32_t tag_id, tag_extended_callback_func extended, tag_callback_func plain, void *userdata) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);
 
@@ -1052,15 +1053,17 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callbac
         if(tag->callback) {
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
-            if(callback_func) {
-                tag->callback = callback_func;
-                tag->userdata = userdata;
-            } else {
-                tag->callback = NULL;
+            if(plain) {
+                tag->plain_callback = plain;
+                tag->callback_is_plain = true;
                 tag->userdata = NULL;
+            } else {
+                tag->callback = extended;
+                tag->callback_is_plain = false;
+                tag->userdata = extended ? userdata : NULL;
             }
 
-            atomic_set_bool(&tag->has_callback, (callback_func != NULL));
+            atomic_set_bool(&tag->has_callback, (extended || plain));
         }
     }
 
@@ -2034,7 +2037,7 @@ LIB_EXPORT int plc_tag_get_size(int32_t id) {
     }
 
     critical_block(&tag->api_mutex) {
-        result = tag->size;
+        result = byte_buffer_len(tag->buf);
         tag->status = PLCTAG_STATUS_OK;
     }
 
@@ -2088,7 +2091,7 @@ static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     do {
-        if(!tag->data) {
+        if(!byte_buffer_data(tag->buf)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
             res = PLCTAG_ERR_NO_DATA;
@@ -2102,12 +2105,12 @@ static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
             real_offset = offset_bit;
         }
 
-        /* note: do not log tag->data[real_offset / 8] until the offset has been checked below. */
+        /* note: do not log byte_buffer_data(tag->buf)[real_offset / 8] until the offset has been checked below. */
         pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "selecting bit %d with offset %d in byte %d.", real_offset,
                (real_offset % 8), (real_offset / 8));
 
-        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
-            res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
+        if((real_offset >= 0) && ((real_offset / 8) < byte_buffer_len(tag->buf))) {
+            res = !!(((1 << (real_offset % 8)) & 0xFF) & (byte_buffer_data(tag->buf)[real_offset / 8]));
             tag->status = PLCTAG_STATUS_OK;
             break;
         } else {
@@ -2161,7 +2164,7 @@ static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     do {
-        if(!tag->data) {
+        if(!byte_buffer_data(tag->buf)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
             res = PLCTAG_ERR_NO_DATA;
@@ -2175,17 +2178,17 @@ static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
             real_offset = offset_bit;
         }
 
-        /* note: do not log tag->data[real_offset / 8] until the offset has been checked below. */
+        /* note: do not log byte_buffer_data(tag->buf)[real_offset / 8] until the offset has been checked below. */
         pdebug(DEBUG_MODULE_LIB, DEBUG_SPEW, tag->tag_id, "Setting bit %d with offset %d in byte %d.", real_offset,
                (real_offset % 8), (real_offset / 8));
 
-        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
+        if((real_offset >= 0) && ((real_offset / 8) < byte_buffer_len(tag->buf))) {
             if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
             if(val) {
-                tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
+                byte_buffer_data(tag->buf)[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
             } else {
-                tag->data[real_offset / 8] &= (uint8_t)(~(1 << (real_offset % 8)));
+                byte_buffer_data(tag->buf)[real_offset / 8] &= (uint8_t)(~(1 << (real_offset % 8)));
             }
 
             tag->status = PLCTAG_STATUS_OK;
@@ -2272,7 +2275,7 @@ static int tag_get_data_common(int32_t id, int offset, int width, bool is_float,
     }
 
     critical_block(&tag->api_mutex) {
-        if(!tag->data) {
+        if(!byte_buffer_data(tag->buf)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
             rc = PLCTAG_ERR_NO_DATA;
@@ -2310,7 +2313,7 @@ static int tag_get_data_common(int32_t id, int offset, int width, bool is_float,
         for(int i = 0; i < width; i++) {
             int src = order ? (offset + order[i]) : offset;
 
-            *out += ((uint64_t)(tag->data[src])) << (i * 8);
+            *out += ((uint64_t)(byte_buffer_data(tag->buf)[src])) << (i * 8);
         }
 
         tag->status = PLCTAG_STATUS_OK;
@@ -2336,7 +2339,7 @@ static int tag_set_data_common(int32_t id, int offset, int width, bool is_float,
     }
 
     critical_block(&tag->api_mutex) {
-        if(!tag->data) {
+        if(!byte_buffer_data(tag->buf)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
             rc = PLCTAG_ERR_NO_DATA;
@@ -2369,7 +2372,7 @@ static int tag_set_data_common(int32_t id, int offset, int width, bool is_float,
         for(int i = 0; i < width; i++) {
             int dest = order ? (offset + order[i]) : offset;
 
-            tag->data[dest] = (uint8_t)((val >> (i * 8)) & 0xFF);
+            byte_buffer_data(tag->buf)[dest] = (uint8_t)((val >> (i * 8)) & 0xFF);
         }
 
         tag->status = PLCTAG_STATUS_OK;
@@ -2545,7 +2548,7 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* every tag field is read under api_mutex: the I/O thread replaces tag->data while decoding. */
+    /* every tag field is read under api_mutex: the I/O thread replaces byte_buffer_data(tag->buf) while decoding. */
     critical_block(&tag->api_mutex) {
         int string_length = 0;
 
@@ -2585,14 +2588,14 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
         }
 
         /* check the amount of space. */
-        if(string_start_offset + (int)tag->byte_order->str_count_word_bytes + max_len <= tag->size) {
-            for(int i = 0; i < max_len && i < tag->size; i++) {
+        if(string_start_offset + (int)tag->byte_order->str_count_word_bytes + max_len <= byte_buffer_len(tag->buf)) {
+            for(int i = 0; i < max_len && i < byte_buffer_len(tag->buf); i++) {
                 size_t char_index =
                     (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                     + (size_t)(unsigned int)string_start_offset + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
 
-                if(char_index < (size_t)tag->size) {
-                    buffer[i] = (char)tag->data[char_index];
+                if(char_index < (size_t)byte_buffer_len(tag->buf)) {
+                    buffer[i] = (char)byte_buffer_data(tag->buf)[char_index];
                 } else {
                     pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id, "Out of bounds index, %zu, generated!", char_index);
                     rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -2702,8 +2705,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         /* zero out the string data in the buffer. */
         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Zeroing out the string data in the buffer.");
         for(unsigned int i = (unsigned int)string_start_offset;
-            i < (unsigned int)(string_start_offset + new_string_size_in_buffer) && i < (unsigned int)tag->size; i++) {
-            tag->data[i] = 0;
+            i < (unsigned int)(string_start_offset + new_string_size_in_buffer) && i < (unsigned int)byte_buffer_len(tag->buf); i++) {
+            byte_buffer_data(tag->buf)[i] = 0;
         }
 
         /* if the string is counted, set the length */
@@ -2711,7 +2714,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         if(tag->byte_order->str_is_counted) {
             int last_count_word_index = string_start_offset + (int)(unsigned int)tag->byte_order->str_count_word_bytes;
 
-            if(last_count_word_index > (int)(tag->size)) {
+            if(last_count_word_index > (int)(byte_buffer_len(tag->buf))) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
                        "Unable to write valid count word as count word would go past the end of the tag buffer!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -2731,7 +2734,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
                         break;
                     }
 
-                    tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
+                    byte_buffer_data(tag->buf)[string_start_offset] = (uint8_t)(unsigned int)string_length;
                     break;
 
                 case 2:
@@ -2742,9 +2745,9 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
                         break;
                     }
 
-                    tag->data[string_start_offset + tag->byte_order->int16_order[0]] =
+                    byte_buffer_data(tag->buf)[string_start_offset + tag->byte_order->int16_order[0]] =
                         (uint8_t)((((unsigned int)string_length) >> 0) & 0xFF);
-                    tag->data[string_start_offset + tag->byte_order->int16_order[1]] =
+                    byte_buffer_data(tag->buf)[string_start_offset + tag->byte_order->int16_order[1]] =
                         (uint8_t)((((unsigned int)string_length) >> 8) & 0xFF);
                     break;
 
@@ -2756,13 +2759,13 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
                         break;
                     }
 
-                    tag->data[string_start_offset + tag->byte_order->int32_order[0]] =
+                    byte_buffer_data(tag->buf)[string_start_offset + tag->byte_order->int32_order[0]] =
                         (uint8_t)((((unsigned int)string_length) >> 0) & 0xFF);
-                    tag->data[string_start_offset + tag->byte_order->int32_order[1]] =
+                    byte_buffer_data(tag->buf)[string_start_offset + tag->byte_order->int32_order[1]] =
                         (uint8_t)((((unsigned int)string_length) >> 8) & 0xFF);
-                    tag->data[string_start_offset + tag->byte_order->int32_order[2]] =
+                    byte_buffer_data(tag->buf)[string_start_offset + tag->byte_order->int32_order[2]] =
                         (uint8_t)((((unsigned int)string_length) >> 16) & 0xFF);
-                    tag->data[string_start_offset + tag->byte_order->int32_order[3]] =
+                    byte_buffer_data(tag->buf)[string_start_offset + tag->byte_order->int32_order[3]] =
                         (uint8_t)((((unsigned int)string_length) >> 24) & 0xFF);
                     break;
 
@@ -2794,12 +2797,12 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
                 char_index = string_data_start_offset + i;
             }
 
-            if(char_index < (size_t)(uint32_t)tag->size) {
-                tag->data[char_index] = (uint8_t)string_val[i];
+            if(char_index < (size_t)(uint32_t)byte_buffer_len(tag->buf)) {
+                byte_buffer_data(tag->buf)[char_index] = (uint8_t)string_val[i];
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
                        "Out of bounds index, %zu, generated during string copy!  Tag size is %" PRId32 ".", char_index,
-                       tag->size);
+                       byte_buffer_len(tag->buf));
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
 
                 /* note: only breaks out of the for loop, we need another break. */
@@ -2817,19 +2820,19 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         if(tag->byte_order->str_is_zero_terminated) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "Setting the nul termination byte.");
 
-            if(string_data_start_offset + string_length < (unsigned int)tag->size) {
-                tag->data[string_data_start_offset + string_length] = (uint8_t)0;
+            if(string_data_start_offset + string_length < (unsigned int)byte_buffer_len(tag->buf)) {
+                byte_buffer_data(tag->buf)[string_data_start_offset + string_length] = (uint8_t)0;
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag_id,
                        "Index of nul termination byte, %u, is outside of the tag data of %u bytes!",
-                       string_data_start_offset + string_length, tag->size);
+                       string_data_start_offset + string_length, byte_buffer_len(tag->buf));
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
                 break;
             }
         }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, "String data in buffer:");
-        pdebug_dump_bytes(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, tag->data + string_start_offset, new_string_size_in_buffer);
+        pdebug_dump_bytes(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag_id, byte_buffer_data(tag->buf) + string_start_offset, new_string_size_in_buffer);
 
         /* if this is an auto-write tag, mark dirty and notify the protocol layer */
         if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
@@ -2958,7 +2961,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 
         if(tag->auto_sync_write_ms > 0) { tag_set_dirty(tag); }
 
-        for(int i = 0; i < buffer_size; i++) { tag->data[offset + i] = buffer[i]; }
+        for(int i = 0; i < buffer_size; i++) { byte_buffer_data(tag->buf)[offset + i] = buffer[i]; }
 
         tag->status = PLCTAG_STATUS_OK;
     }
@@ -2985,7 +2988,7 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
         rc = check_raw_bytes_access_unsafe(tag, offset, buffer, buffer_size);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        for(int i = 0; i < buffer_size; i++) { buffer[i] = tag->data[offset + i]; }
+        for(int i = 0; i < buffer_size; i++) { buffer[i] = byte_buffer_data(tag->buf)[offset + i]; }
 
         tag->status = PLCTAG_STATUS_OK;
     }
@@ -2999,7 +3002,7 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
 
 /*
  * The checks every string function makes before touching the buffer.  Call with api_mutex
- * held: the I/O thread replaces tag->data while decoding.
+ * held: the I/O thread replaces byte_buffer_data(tag->buf) while decoding.
  */
 static int check_string_access_unsafe(plc_tag_p tag, bool needs_data) {
     if(!tag->byte_order || !tag->byte_order->str_is_defined) {
@@ -3007,7 +3010,7 @@ static int check_string_access_unsafe(plc_tag_p tag, bool needs_data) {
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    if(needs_data && !tag->data) {
+    if(needs_data && !byte_buffer_data(tag->buf)) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag has no data!");
         return PLCTAG_ERR_NO_DATA;
     }
@@ -3028,7 +3031,7 @@ static int check_string_access_unsafe(plc_tag_p tag, bool needs_data) {
 static int check_raw_bytes_access_unsafe(plc_tag_p tag, int offset, const uint8_t *buffer, int buffer_size) {
     int rc = PLCTAG_STATUS_OK;
 
-    if(!tag->data) {
+    if(!byte_buffer_data(tag->buf)) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Tag has no data!");
         rc = PLCTAG_ERR_NO_DATA;
         tag->status = (int8_t)rc;

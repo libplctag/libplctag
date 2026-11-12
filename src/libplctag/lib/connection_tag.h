@@ -53,9 +53,8 @@
 
 
 typedef struct {
-    TAG_BASE_STRUCT;
+    TAG_BASE_STRUCT; /* conn: NULL if creation failed */
 
-    void *conn;               /* the connection object, held by refcount; NULL if creation failed */
     conn_event_ring_t *watch; /* &conn->watch */
     mutex_p conn_mutex;       /* the connection's own mutex, which guards watch->watchers */
     int32_t last_conn_state;  /* last state delivered to the callback */
@@ -69,10 +68,9 @@ typedef connection_tag_t *connection_tag_p;
 
 /* what the protocol hands over about the connection it found or created */
 typedef struct {
-    tag_protocol_t protocol_type;
     debug_module_t debug_module;
 
-    void *conn;               /* rc-held connection object, or NULL if it could not be obtained */
+    conn_base_t *conn;        /* rc-held connection object, or NULL if it could not be obtained */
     conn_event_ring_t *watch; /* &conn->watch; unused when conn is NULL */
     mutex_p conn_mutex;       /* the connection's own mutex; unused when conn is NULL */
     bool conn_is_new;         /* true when this call created the connection rather than joining one */

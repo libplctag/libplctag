@@ -37,8 +37,8 @@
  * The @identity tag body, shared by the CIP families.
  *
  * One Get_Attributes_All against the Identity object, sent however the connection sends
- * everything else.  Nothing in that is family-specific.  Each family still owns its vtable,
- * for its attribute table and the debug module ID callers filter on.
+ * everything else.  Nothing in that is family-specific.  The family names only the debug
+ * module ID callers filter on.
  */
 
 #include <libplctag/lib/tag.h>
@@ -46,8 +46,5 @@
 #include <utils/debug.h>
 
 
-extern int cip_identity_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
-extern int cip_identity_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-
 /* sets the type, byte order and vtable of a tag named @identity. */
-extern int cip_identity_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module);
+extern int cip_identity_tag_setup(cip_tag_p tag, debug_module_t debug_module);

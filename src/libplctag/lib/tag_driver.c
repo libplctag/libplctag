@@ -382,3 +382,10 @@ static void notify_later_unsafe(tag_driver_t *driver, plc_tag_p tag) {
 
     if(held) { vector_set(driver->notify, vector_length(driver->notify), held); }
 }
+
+
+void tag_driver_yield_lock(mutex_p conn_mutex, int32_t *tries) {
+    mutex_unlock(conn_mutex);
+    sleep_ms(++(*tries) < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
+    mutex_lock(conn_mutex);
+}

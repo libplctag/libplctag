@@ -72,17 +72,6 @@ static bool tag_elements_are_variable(cip_tag_p tag);
 static bool name_has_index(cip_tag_p tag);
 static int32_t segment_read_budget(cip_tag_p tag);
 static int32_t encode_segment_path(cip_tag_p tag, uint8_t *dest, int32_t byte_offset, int32_t size);
-static debug_module_t tag_debug_module(cip_tag_p tag);
-
-
-/*
- * Which debug module this tag's log lines belong to.
- *
- * The module IDs are public (PLCTAG_MODULE_* in libplctag.h) and callers filter on them,
- * so merging the two files must not merge their logging: an OMRON tag still logs under
- * OMRON_STANDARD_TAG and a Rockwell tag still logs under AB_EIP_CIP.
- */
-static debug_module_t tag_debug_module(cip_tag_p tag) { return tag->debug_module; }
 
 
 int32_t cip_encode_offset_u32(uint8_t *dest, int32_t capacity, int32_t byte_offset) {
@@ -193,7 +182,7 @@ bool cip_standard_tag_uses_segments(cip_tag_p tag) {
  */
 static int32_t segment_read_budget(cip_tag_p tag) {
     int32_t split = (tag->elem_size > 0 && tag->elem_size < CIP_MAX_ATOMIC_SIZE) ? tag->elem_size : CIP_MAX_ATOMIC_SIZE;
-    int32_t budget = session_get_available_cip_payload_space(tag->session) - (int32_t)sizeof(cip_header)
+    int32_t budget = session_get_available_cip_payload_space(cip_tag_conn(tag)) - (int32_t)sizeof(cip_header)
                      - CIP_SEGMENT_TYPE_INFO_SIZE - 8; /* MAGIC fudge factor, as for writes */
 
     if(!tag->use_connected_msg) { budget -= CIP_EIP_UC_SEND_OVERHEAD; }
@@ -203,7 +192,7 @@ static int32_t segment_read_budget(cip_tag_p tag) {
 
 
 bool cip_standard_tag_reads_in_segments(cip_tag_p tag) {
-    return cip_standard_tag_uses_segments(tag) && tag->size > segment_read_budget(tag);
+    return cip_standard_tag_uses_segments(tag) && byte_buffer_len(tag->buf) > segment_read_budget(tag);
 }
 
 
@@ -242,7 +231,7 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
     uint8_t *data = dest;
     int32_t offset_size = 0;
     int32_t fixed_size = 1 + (int32_t)tag->encoded_name_size + (int32_t)sizeof(uint16_le);
-    debug_module_t dbg = tag_debug_module(tag);
+    debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
@@ -268,7 +257,7 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
     if(cip_standard_tag_reads_in_segments(tag)) {
         int32_t chunk = segment_read_budget(tag);
 
-        if(chunk > tag->size - tag->offset) { chunk = tag->size - tag->offset; }
+        if(chunk > byte_buffer_len(tag->buf) - tag->offset) { chunk = byte_buffer_len(tag->buf) - tag->offset; }
 
         if(fixed_size + CIP_DATA_SEGMENT_SIZE > capacity) {
             pdebug(dbg, DEBUG_DETAIL | DEBUG_RATE_LIMIT, tag->tag_id, "Segmented read request does not fit in %d bytes!", capacity);
@@ -312,7 +301,7 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
 
     /*
      * What this read will cost in the shared reply packet, so it can be budgeted when bundled.
-     * tag->size is what the previous read returned, which is the best estimate of what this one
+     * byte_buffer_len(tag->buf) is what the previous read returned, which is the best estimate of what this one
      * will; a later fragment brings only what is left past tag->offset, so the small tail of a
      * large tag can share a packet.
      *
@@ -323,10 +312,10 @@ int cip_standard_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity,
      * fragmented service (OMRON) an overflow cannot be split, so a create read is not packed.
      */
     plan->req_size = (int32_t)(data - dest);
-    plan->reply_size = tag->size - tag->offset;
+    plan->reply_size = byte_buffer_len(tag->buf) - tag->offset;
     plan->packable = (tag->allow_packing != 0);
 
-    if(tag->create_read_status == PLCTAG_STATUS_PENDING && tag->size == 0) {
+    if(tag->create_read_status == PLCTAG_STATUS_PENDING && byte_buffer_len(tag->buf) == 0) {
         plan->reply_size = CREATE_READ_GUESS_ELEM_SIZE * tag->elem_count;
         plan->packable = (plan->packable && tag->std_ops->read_service == CIP_SVC_READ_FRAG && tag->fragment_retry_count == 0);
     }
@@ -352,7 +341,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
     int32_t pad_size = 0;
     int32_t needed = 0;
     int write_pad_alignment_bytes = 1;
-    debug_module_t dbg = tag_debug_module(tag);
+    debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
@@ -365,7 +354,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
         return rc;
     }
 
-    if(tag->write_data_per_packet < tag->size) { multiple_requests = true; }
+    if(tag->write_data_per_packet < byte_buffer_len(tag->buf)) { multiple_requests = true; }
 
     segmented = multiple_requests && cip_standard_tag_uses_segments(tag);
 
@@ -382,7 +371,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
     }
 
     /* how much data goes in this piece? */
-    write_size = tag->size - tag->offset;
+    write_size = byte_buffer_len(tag->buf) - tag->offset;
 
     if(write_size > tag->write_data_per_packet) { write_size = tag->write_data_per_packet; }
 
@@ -445,7 +434,7 @@ int cip_standard_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity
         data += sizeof(uint32_le);
     }
 
-    mem_copy(data, tag->data + tag->offset, write_size);
+    mem_copy(data, byte_buffer_data(tag->buf) + tag->offset, write_size);
     data += write_size;
 
     for(int32_t i = 0; i < pad_size; i++) {
@@ -474,7 +463,7 @@ static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
     uint8_t *data = dest;
     int rc = PLCTAG_STATUS_OK;
     int32_t needed = 1 + (int32_t)tag->encoded_name_size + 2 + (2 * (int32_t)tag->elem_size);
-    debug_module_t dbg = tag_debug_module(tag);
+    debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
@@ -485,7 +474,7 @@ static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
         return rc;
     }
 
-    if(tag->write_data_per_packet < (tag->size * 2) + 2) { /* 2 masks plus a count word. */
+    if(tag->write_data_per_packet < (byte_buffer_len(tag->buf) * 2) + 2) { /* 2 masks plus a count word. */
         pdebug(dbg, DEBUG_ERROR, tag->tag_id, "Insufficient space to write bit masks!");
         return PLCTAG_ERR_TOO_SMALL;
     }
@@ -521,7 +510,7 @@ static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
         if((tag->bit / 8) == i) {
             uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
 
-            *data = (tag->data[tag->bit / 8] & mask) ? mask : (uint8_t)0;
+            *data = (byte_buffer_data(tag->buf)[tag->bit / 8] & mask) ? mask : (uint8_t)0;
         } else {
             *data = (uint8_t)0;
         }
@@ -536,7 +525,7 @@ static int encode_write_bit(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_
         if((tag->bit / 8) == i) {
             uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
 
-            *data = (tag->data[tag->bit / 8] & mask) ? (uint8_t)0xFF : (uint8_t)(~mask);
+            *data = (byte_buffer_data(tag->buf)[tag->bit / 8] & mask) ? (uint8_t)0xFF : (uint8_t)(~mask);
         } else {
             *data = (uint8_t)0xFF;
         }
@@ -563,7 +552,7 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
     uint8_t *data_end;
     int partial_data = 0;
     bool segmented = cip_standard_tag_reads_in_segments(tag);
-    debug_module_t dbg = tag_debug_module(tag);
+    debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
 
@@ -583,29 +572,13 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
 
         /* check the status */
         /* the only read reply this family can legitimately receive is to the service it sent. */
-        if(cip_resp->reply_service != (tag->std_ops->read_service | CIP_SVC_REPLY)) {
-            pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d", cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
         /*
          * A partial status is only a status on a family that has the fragmented services.
          * Everywhere else it is an error like any other -- the PLC is saying the transfer
          * does not fit, and there is no second request that could finish it.
          */
-        if(cip_resp->status != CIP_STATUS_OK
-           && !(cip_resp->status == CIP_STATUS_FRAG && tag_can_split_transfer(tag))) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(dbg, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s", cip_resp->status,
-                   decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(dbg, DEBUG_INFO, tag->tag_id, decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-
-            break;
-        }
+        rc = cip_check_reply(reply, reply_size, tag->std_ops->read_service, tag_can_split_transfer(tag), dbg, tag->tag_id);
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /* check to see if this is a partial response. */
         partial_data = (cip_resp->status == CIP_STATUS_FRAG && tag_can_split_transfer(tag));
@@ -674,7 +647,7 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
 
-            if(payload_size + tag->offset > tag->size) {
+            if(payload_size + tag->offset > byte_buffer_len(tag->buf)) {
                 /* a PLC can keep returning fragments forever.  Do not grow without bound. */
                 if((payload_size + tag->offset) > (ptrdiff_t)CIP_MAX_TAG_DATA_SIZE) {
                     pdebug(dbg, DEBUG_WARN, tag->tag_id, "Tag data size of %d bytes is larger than the maximum of %d bytes!",
@@ -683,23 +656,16 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
                     break;
                 }
 
-                {
-                    /* the size changes only once the buffer has grown; a failed realloc keeps both (U3). */
-                    uint8_t *new_data = (uint8_t *)mem_realloc(tag->data, (int)payload_size + tag->offset);
-
-                    if(!new_data) {
-                        pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                        rc = PLCTAG_ERR_NO_MEM;
-                        break;
-                    }
-
-                    tag->data = new_data;
-                    tag->size = (int)payload_size + tag->offset;
+                /* a failed resize keeps the buffer and its length (U3). */
+                rc = byte_buffer_set_len(&tag->buf, (int32_t)payload_size + tag->offset);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
+                    break;
                 }
 
                 /* only a fixed stride can be recovered by division; see tag_elements_are_variable(). */
                 if(!tag_elements_are_variable(tag)) {
-                    tag->elem_size = tag->size / tag->elem_count;
+                    tag->elem_size = byte_buffer_len(tag->buf) / tag->elem_count;
                 } else if(tag->elem_size <= 0) {
                     /*
                      * There is no stride, so the element size is one byte -- the same answer the
@@ -709,18 +675,18 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
                     tag->elem_size = 1;
                 }
 
-                pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Increased tag buffer size to %d bytes.", tag->size);
+                pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Increased tag buffer size to %d bytes.", byte_buffer_len(tag->buf));
             }
 
             pdebug(dbg, DEBUG_INFO, tag->tag_id, "Got %d bytes of data", (int)payload_size);
 
-            mem_copy(tag->data + tag->offset, data, (int)(payload_size));
+            mem_copy(byte_buffer_data(tag->buf) + tag->offset, data, (int)(payload_size));
 
             /* bump the byte offset */
             tag->offset += (int)(payload_size);
 
             /* a segmented transfer is partial until every byte has come back. */
-            if(segmented && tag->offset < tag->size) { partial_data = 1; }
+            if(segmented && tag->offset < byte_buffer_len(tag->buf)) { partial_data = 1; }
         } else {
             pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Response returned no data and no error.");
 
@@ -752,6 +718,12 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
             tag->fragment_retry_count = 0;
 
             pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Read complete.");
+
+            /* the name could not say how wide the element is; the reply does (P5). */
+            if(tag->is_bit && tag->bit >= tag->elem_size * 8) {
+                pdebug(dbg, DEBUG_WARN, tag->tag_id, "Bit %d is past the end of a %d byte element!", tag->bit, tag->elem_size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
         }
     }
 
@@ -772,7 +744,7 @@ int cip_standard_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_si
 int cip_standard_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     cip_header *cip_resp;
     int rc = PLCTAG_STATUS_OK;
-    debug_module_t dbg = tag_debug_module(tag);
+    debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
 
@@ -805,14 +777,14 @@ int cip_standard_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_s
     if(rc == PLCTAG_STATUS_OK) {
         /* the PLC took the piece the encoder sized, or the whole bit write. */
         if(cip_resp->reply_service == (CIP_SVC_RMW | CIP_SVC_REPLY)) {
-            tag->offset = tag->size;
-        } else if(tag->size - tag->offset > tag->write_data_per_packet) {
+            tag->offset = byte_buffer_len(tag->buf);
+        } else if(byte_buffer_len(tag->buf) - tag->offset > tag->write_data_per_packet) {
             tag->offset += tag->write_data_per_packet;
         } else {
-            tag->offset = tag->size;
+            tag->offset = byte_buffer_len(tag->buf);
         }
 
-        if(tag->offset < tag->size) {
+        if(tag->offset < byte_buffer_len(tag->buf)) {
             pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Write not complete, the next piece is needed.");
             rc = PLCTAG_STATUS_PENDING;
         } else {
@@ -835,12 +807,12 @@ int calculate_write_data_per_packet(cip_tag_p tag) {
     int overhead = 0;
     int data_per_packet = 0;
     int available_payload = 0;
-    debug_module_t dbg = tag_debug_module(tag);
+    debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
     /* if we are here, then we have all the type data etc. */
-    available_payload = session_get_available_cip_payload_space(tag->session);
+    available_payload = session_get_available_cip_payload_space(cip_tag_conn(tag));
 
     /* the CIP Write Tag request itself, which every family sends the same way. */
     overhead = 1                             /* service request, one byte */
@@ -899,7 +871,7 @@ int calculate_write_data_per_packet(cip_tag_p tag) {
     int element_size = 0;
 
     /*
-     * elem_size is derived from the PLC's response as tag->size / tag->elem_count, so a PLC
+     * elem_size is derived from the PLC's response as byte_buffer_len(tag->buf) / tag->elem_count, so a PLC
      * that returns fewer bytes than the tag has elements drives it to zero.  It is the
      * divisor below, so check it here.
      */

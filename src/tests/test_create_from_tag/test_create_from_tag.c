@@ -484,7 +484,7 @@ static int test_two_clones_from_same_src(void) {
     return PLCTAG_STATUS_OK;
 }
 
-/* Test 13: system tag (TAG_PROTOCOL_SYSTEM) as source -> ERR_NOT_ALLOWED.
+/* Test 13: system tag as source -> ERR_NOT_ALLOWED.
  * Does not require a PLC — system tags work without a network connection. */
 static int test_system_tag_source(void) {
     int32_t system_tag = plc_tag_create("protocol=system&name=version", 0);

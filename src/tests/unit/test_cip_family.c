@@ -46,19 +46,19 @@
 #include <libplctag/modules/cip/cip_tag_create.h>
 #include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/path.h>
-#include <libplctag/modules/cip/plc_type.h>
+#include <string.h>
 #include <utils/attr.h>
 
 
-/* one spelling per family, and the PLC type it must come back as. */
+/* one spelling per family, and the canonical name it must come back as. */
 static const struct {
     const char *plc;
-    cip_plc_type_t plc_type;
+    const char *canonical_name;
     bool has_dhp;
 } spellings[] = {
-    {"plc5", CIP_PLC_PLC5, true},          {"slc500", CIP_PLC_SLC, true},         {"micrologix", CIP_PLC_MLGX, true},
-    {"lgxpccc", CIP_PLC_LGX_PCCC, false},  {"controllogix", CIP_PLC_LGX, false},  {"micro800", CIP_PLC_MICRO800, false},
-    {"omron-njnx", CIP_PLC_OMRON_NJNX, false}, {"generic", CIP_PLC_GENERIC, false},
+    {"plc5", "plc5", true},          {"slc500", "slc500", true},             {"micrologix", "micrologix", true},
+    {"lgxpccc", "logix-pccc", false}, {"controllogix", "ControlLogix", false}, {"micro800", "micro800", false},
+    {"omron-njnx", "omron-njnx", false}, {"generic", "generic", false},
 };
 
 #define NUM_SPELLINGS (sizeof(spellings) / sizeof(spellings[0]))
@@ -86,7 +86,7 @@ static void test_every_spelling_picks_its_family(void **state) {
         const cip_family_t *family = family_named(spellings[i].plc);
 
         assert_non_null(family);
-        assert_int_equal(family->plc_type, spellings[i].plc_type);
+        assert_true(strcmp(family->canonical_name, spellings[i].canonical_name) == 0);
         assert_true(!family->via_dhp);
     }
 
@@ -134,7 +134,7 @@ static void test_only_dhp_capable_families_have_a_dhp_form(void **state) {
         assert_non_null(family->dhp);
         assert_true(family->dhp->via_dhp);
         assert_null(family->dhp->dhp);
-        assert_int_equal(family->dhp->plc_type, family->plc_type);
+        assert_true(strcmp(family->dhp->canonical_name, family->canonical_name) == 0);
         assert_true(family->dhp->setup_tag == family->setup_tag);
         assert_int_equal((int)family->dhp->use_connected_msg, 1);
     }
@@ -292,12 +292,13 @@ static void test_the_path_rules(void **state) {
 }
 
 
-static cip_plc_type_t identified_as(uint16_t vendor_id, const char *product_name, bool has_path) {
+/* the family's canonical name, or "refused". */
+static const char *identified_as(uint16_t vendor_id, const char *product_name, bool has_path) {
     const cip_family_t *family = NULL;
 
-    if(cip_family_from_identity(vendor_id, product_name, has_path, &family) != PLCTAG_STATUS_OK) { return CIP_PLC_NONE; }
+    if(cip_family_from_identity(vendor_id, product_name, has_path, &family) != PLCTAG_STATUS_OK) { return "refused"; }
 
-    return family->plc_type;
+    return family->canonical_name;
 }
 
 
@@ -305,24 +306,24 @@ static cip_plc_type_t identified_as(uint16_t vendor_id, const char *product_name
 static void test_identity_picks_the_family(void **state) {
     (void)state;
 
-    assert_int_equal(identified_as(1, "1756-L81E/B", false), CIP_PLC_LGX);
-    assert_int_equal(identified_as(1, "1756-L55/A 1756-M22/A LOGIX5555", true), CIP_PLC_LGX);
-    assert_int_equal(identified_as(1, "1756-L61/B LOGIX5561", true), CIP_PLC_LGX);
-    assert_int_equal(identified_as(1, "PLC-5/30 C/K - 1785-ENET 2.17 ", false), CIP_PLC_PLC5);
-    assert_int_equal(identified_as(1, "1763-L16BWA B/12.00", false), CIP_PLC_MLGX);
-    assert_int_equal(identified_as(1, "1769-L23E-QBFC1 LOGIX5323E-QBFC1", false), CIP_PLC_LGX);
-    assert_int_equal(identified_as(1, "1769-L30ER/A LOGIX5330ER", false), CIP_PLC_LGX);
-    assert_int_equal(identified_as(1, "5069-L310ER/A", false), CIP_PLC_LGX);
-    assert_int_equal(identified_as(1, "2080-LC50-48QWBS", false), CIP_PLC_MICRO800);
+    assert_true(strcmp(identified_as(1, "1756-L81E/B", false), "ControlLogix") == 0);
+    assert_true(strcmp(identified_as(1, "1756-L55/A 1756-M22/A LOGIX5555", true), "ControlLogix") == 0);
+    assert_true(strcmp(identified_as(1, "1756-L61/B LOGIX5561", true), "ControlLogix") == 0);
+    assert_true(strcmp(identified_as(1, "PLC-5/30 C/K - 1785-ENET 2.17 ", false), "plc5") == 0);
+    assert_true(strcmp(identified_as(1, "1763-L16BWA B/12.00", false), "micrologix") == 0);
+    assert_true(strcmp(identified_as(1, "1769-L23E-QBFC1 LOGIX5323E-QBFC1", false), "ControlLogix") == 0);
+    assert_true(strcmp(identified_as(1, "1769-L30ER/A LOGIX5330ER", false), "ControlLogix") == 0);
+    assert_true(strcmp(identified_as(1, "5069-L310ER/A", false), "ControlLogix") == 0);
+    assert_true(strcmp(identified_as(1, "2080-LC50-48QWBS", false), "micro800") == 0);
 
     /* a chassis module is not a CPU, with or without a path that stops at it. */
-    assert_int_equal(identified_as(1, "1756-ENBT/A", false), CIP_PLC_NONE);
-    assert_int_equal(identified_as(1, "1756-ENBT/A", true), CIP_PLC_NONE);
+    assert_true(strcmp(identified_as(1, "1756-ENBT/A", false), "refused") == 0);
+    assert_true(strcmp(identified_as(1, "1756-ENBT/A", true), "refused") == 0);
 
     /* anything else is generic CIP, which serves only special tags. */
-    assert_int_equal(identified_as(1, "1734-AENT/B", false), CIP_PLC_GENERIC);
-    assert_int_equal(identified_as(99, "1756-L81E/B", false), CIP_PLC_GENERIC);
-    assert_int_equal(identified_as(47, "NX102-9000", false), CIP_PLC_GENERIC);
+    assert_true(strcmp(identified_as(1, "1734-AENT/B", false), "generic") == 0);
+    assert_true(strcmp(identified_as(99, "1756-L81E/B", false), "generic") == 0);
+    assert_true(strcmp(identified_as(47, "NX102-9000", false), "generic") == 0);
 }
 
 

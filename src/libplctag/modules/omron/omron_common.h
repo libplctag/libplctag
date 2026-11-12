@@ -50,12 +50,10 @@
 /* the NJ/NX family; see cip/family.h. */
 extern const cip_family_t omron_family_njnx;
 
-/* Runtime attributes shared by every Omron tag type. */
-extern const attr_def_t omron_attribs[];
-
 /* the string and integer layout of an OMRON NJ/NX tag. */
 extern tag_byte_order_t omron_njnx_tag_byte_order;
 
 /* what OMRON can do, and the vtable built around it, for the shared standard-tag engine. */
 extern const cip_standard_tag_ops_t cip_standard_tag_ops_omron;
 extern struct tag_vtable_t cip_standard_tag_vtable_omron;
+extern const cip_tag_codec_t cip_standard_tag_codec_omron;

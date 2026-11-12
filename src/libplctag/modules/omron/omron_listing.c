@@ -113,42 +113,34 @@ static int udt_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, t
 static int udt_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 static int decode_udt_header(cip_tag_p tag, omron_vto_t *vto);
 static int decode_udt_member(cip_tag_p tag, omron_vto_t *vto);
-static int check_reply(cip_tag_p tag, uint8_t service, uint8_t *reply, int32_t reply_size);
 static int parse_vto(uint8_t *data, int32_t data_size, omron_vto_t *vto);
 static int append_bytes(cip_tag_p tag, uint8_t *src, int32_t len);
 static void reset_read(cip_tag_p tag);
 
 static struct tag_vtable_t listing_tag_vtable = {
-    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .abort = cip_data_tag_abort,
     .read = listing_tag_read_start,
-    .status = (tag_vtable_func)cip_tag_status,
-    .tickler = NULL,
-    .write = NULL,
+    .status = cip_tag_status,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,
-    .encode_read = (tag_encode_func)listing_tag_encode_read,
-    .decode_read = (tag_decode_func)listing_tag_decode_read,
-    .encode_write = NULL,
-    .decode_write = NULL,
-    .attribs = omron_attribs,
+    .attribs = cip_tag_attribs,
 };
 
+static const cip_tag_codec_t listing_tag_codec = {.encode_read = listing_tag_encode_read,
+                                                  .decode_read = listing_tag_decode_read};
+
 static struct tag_vtable_t udt_tag_vtable = {
-    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .abort = cip_data_tag_abort,
     .read = udt_tag_read_start,
-    .status = (tag_vtable_func)cip_tag_status,
-    .tickler = NULL,
-    .write = NULL,
+    .status = cip_tag_status,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,
-    .encode_read = (tag_encode_func)udt_tag_encode_read,
-    .decode_read = (tag_decode_func)udt_tag_decode_read,
-    .encode_write = NULL,
-    .decode_write = NULL,
-    .attribs = omron_attribs,
+    .attribs = cip_tag_attribs,
 };
+
+static const cip_tag_codec_t udt_tag_codec = {.encode_read = udt_tag_encode_read, .decode_read = udt_tag_decode_read};
 
 
 /* @tags names are counted by a 2-byte word and @udt/N names are zero terminated, as on Logix. */
@@ -190,7 +182,7 @@ static tag_byte_order_t udt_byte_order = {.is_allocated = 0,
 int omron_setup_listing_tag(cip_tag_p tag) {
     tag->next_id = 1;
 
-    return cip_setup_special_tag(tag, CIP_TYPE_TAG_ENTRY, &listing_byte_order, &listing_tag_vtable,
+    return cip_setup_special_tag(tag, CIP_TYPE_TAG_ENTRY, &listing_byte_order, &listing_tag_vtable, &listing_tag_codec,
                                  DEBUG_MODULE_OMRON_COMMON);
 }
 
@@ -205,7 +197,7 @@ int omron_setup_udt_tag(cip_tag_p tag, const char *name) {
 
     tag->udt_id = (uint16_t)udt_id;
 
-    return cip_setup_special_tag(tag, CIP_TYPE_TAG_UDT, &udt_byte_order, &udt_tag_vtable,
+    return cip_setup_special_tag(tag, CIP_TYPE_TAG_UDT, &udt_byte_order, &udt_tag_vtable, &udt_tag_codec,
                                  DEBUG_MODULE_OMRON_COMMON);
 }
 
@@ -232,7 +224,7 @@ static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacit
     uint8_t *data = dest;
 
     if(tag->udt_get_fields == OMRON_LIST_TYPES) {
-        uint8_t *entry = tag->data + tag->offset;
+        uint8_t *entry = byte_buffer_data(tag->buf) + tag->offset;
         int32_t name_len = (int32_t)entry[LIST_ENTRY_NAME_LEN_OFFSET] | ((int32_t)entry[LIST_ENTRY_NAME_LEN_OFFSET + 1] << 8);
         int32_t padded_len = name_len + (name_len & 1);
 
@@ -280,7 +272,7 @@ static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacit
 
 static int listing_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     uint8_t service = (tag->udt_get_fields == OMRON_LIST_TYPES) ? CIP_GET_ATTRIBUTES_ALL : OMRON_SVC_GET_INSTANCE_LIST;
-    int rc = check_reply(tag, service, reply, reply_size);
+    int rc = cip_check_reply(reply, reply_size, service, false, DEBUG_MODULE_OMRON_COMMON, tag->tag_id);
 
     if(rc == PLCTAG_STATUS_OK) {
         uint8_t *data = reply + sizeof(cip_header);
@@ -358,7 +350,7 @@ static int decode_instance_list(cip_tag_p tag, uint8_t *data, int32_t data_size)
     tag->udt_get_fields = OMRON_LIST_TYPES;
     tag->offset = 0;
 
-    return (tag->size > 0) ? PLCTAG_STATUS_PENDING : PLCTAG_STATUS_OK;
+    return (byte_buffer_len(tag->buf) > 0) ? PLCTAG_STATUS_PENDING : PLCTAG_STATUS_OK;
 }
 
 
@@ -369,7 +361,7 @@ static int decode_instance_list(cip_tag_p tag, uint8_t *data, int32_t data_size)
  * 8-11, which is where aphyt finds it on hardware.
  */
 static int decode_variable_attributes(cip_tag_p tag, uint8_t *data, int32_t data_size) {
-    uint8_t *entry = tag->data + tag->offset;
+    uint8_t *entry = byte_buffer_data(tag->buf) + tag->offset;
     int32_t name_len = (int32_t)entry[LIST_ENTRY_NAME_LEN_OFFSET] | ((int32_t)entry[LIST_ENTRY_NAME_LEN_OFFSET + 1] << 8);
     bool is_array = false;
     int32_t dims = 0;
@@ -406,7 +398,7 @@ static int decode_variable_attributes(cip_tag_p tag, uint8_t *data, int32_t data
 
     tag->offset += LIST_ENTRY_SIZE + name_len;
 
-    if(tag->offset < tag->size) { return PLCTAG_STATUS_PENDING; }
+    if(tag->offset < byte_buffer_len(tag->buf)) { return PLCTAG_STATUS_PENDING; }
 
     pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_DETAIL, tag->tag_id, "Listed %d variables.", tag->elem_count);
 
@@ -457,7 +449,7 @@ static int udt_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, t
 
 static int udt_tag_decode_read(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     omron_vto_t vto;
-    int rc = check_reply(tag, CIP_GET_ATTRIBUTES_ALL, reply, reply_size);
+    int rc = cip_check_reply(reply, reply_size, CIP_GET_ATTRIBUTES_ALL, false, DEBUG_MODULE_OMRON_COMMON, tag->tag_id);
 
     if(rc == PLCTAG_STATUS_OK) {
         rc = parse_vto(reply + sizeof(cip_header), reply_size - (int32_t)sizeof(cip_header), &vto);
@@ -480,7 +472,7 @@ static int decode_udt_header(cip_tag_p tag, omron_vto_t *vto) {
     int rc = PLCTAG_STATUS_OK;
 
     /* the create read starts on the one-byte buffer every special tag is given. */
-    tag->size = 0;
+    byte_buffer_set_len(&tag->buf, 0);
 
     if(vto->type != OMRON_TYPE_STRUCT) {
         pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Variable Type Object %u is type 0x%02x, not a structure!",
@@ -498,7 +490,8 @@ static int decode_udt_header(cip_tag_p tag, omron_vto_t *vto) {
 
     /* the header, room for each member's description, then the name. */
     rc = append_bytes(tag, header, UDT_HEADER_SIZE);
-    for(int32_t i = 0; rc == PLCTAG_STATUS_OK && i < vto->num_members * UDT_MEMBER_SIZE; i++) { rc = append_bytes(tag, &zero, 1); }
+    /* the member area, zeroed, in one append: num_members comes from the PLC (R3). */
+    if(rc == PLCTAG_STATUS_OK) { rc = append_bytes(tag, NULL, vto->num_members * UDT_MEMBER_SIZE); }
     if(rc == PLCTAG_STATUS_OK) { rc = append_bytes(tag, vto->name, vto->name_len); }
     if(rc == PLCTAG_STATUS_OK) { rc = append_bytes(tag, &zero, 1); }
     if(rc != PLCTAG_STATUS_OK) { return rc; }
@@ -516,8 +509,8 @@ static int decode_udt_header(cip_tag_p tag, omron_vto_t *vto) {
  * an atomic member at a multiple of its own size, anything else at an even offset.
  */
 static int decode_udt_member(cip_tag_p tag, omron_vto_t *vto) {
-    uint16_t num_members = (uint16_t)(tag->data[10] | (tag->data[11] << 8));
-    uint8_t *desc = tag->data + UDT_HEADER_SIZE + ((int32_t)(tag->udt_get_fields - 1) * UDT_MEMBER_SIZE);
+    uint16_t num_members = (uint16_t)(byte_buffer_data(tag->buf)[10] | (byte_buffer_data(tag->buf)[11] << 8));
+    uint8_t *desc = byte_buffer_data(tag->buf) + UDT_HEADER_SIZE + ((int32_t)(tag->udt_get_fields - 1) * UDT_MEMBER_SIZE);
     uint8_t elem_type = (vto->type == OMRON_TYPE_ARRAY) ? vto->array_type : vto->type;
     uint32_t count = (vto->type == OMRON_TYPE_ARRAY) ? vto->elem_count : 0;
     uint16_t logix_type = elem_type;
@@ -558,38 +551,16 @@ static int decode_udt_member(cip_tag_p tag, omron_vto_t *vto) {
 
     /* the member description size, in the Logix formula's 32-bit words: bytes = 4 * words - 23. */
     {
-        uint32_t words = ((uint32_t)(tag->size - UDT_HEADER_SIZE) + 23 + 3) / 4;
+        uint32_t words = ((uint32_t)(byte_buffer_len(tag->buf) - UDT_HEADER_SIZE) + 23 + 3) / 4;
 
-        for(int32_t i = 0; i < 4; i++) { tag->data[2 + i] = (uint8_t)(words >> (8 * i)); }
+        for(int32_t i = 0; i < 4; i++) { byte_buffer_data(tag->buf)[2 + i] = (uint8_t)(words >> (8 * i)); }
     }
 
     tag->elem_count = 1;
-    tag->elem_size = tag->size;
+    tag->elem_size = byte_buffer_len(tag->buf);
     tag->udt_get_fields = 0;
     tag->offset = 0;
     tag->next_id = 0;
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static int check_reply(cip_tag_p tag, uint8_t service, uint8_t *reply, int32_t reply_size) {
-    cip_header *resp = (cip_header *)reply;
-
-    if(reply_size < (int32_t)sizeof(cip_header)) { return PLCTAG_ERR_TOO_SMALL; }
-
-    if(resp->reply_service != (service | CIP_SVC_REPLY)) {
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Unexpected reply service 0x%02x!", resp->reply_service);
-        return PLCTAG_ERR_BAD_DATA;
-    }
-
-    if(resp->status != CIP_STATUS_OK) {
-        size_t status_size = cip_error_data_size(&resp->status, reply + reply_size);
-
-        pdebug(DEBUG_MODULE_OMRON_COMMON, DEBUG_WARN, tag->tag_id, "Request failed with status 0x%x %s.", resp->status,
-               decode_cip_error_short(&resp->status, status_size));
-        return decode_cip_error_code(&resp->status, status_size);
-    }
 
     return PLCTAG_STATUS_OK;
 }
@@ -638,17 +609,18 @@ static int parse_vto(uint8_t *data, int32_t data_size, omron_vto_t *vto) {
 }
 
 
+/* A NULL src appends len zeros. */
 static int append_bytes(cip_tag_p tag, uint8_t *src, int32_t len) {
-    uint8_t *new_data = NULL;
+    int32_t old_len = byte_buffer_len(tag->buf);
+    int rc = PLCTAG_STATUS_OK;
 
-    if(tag->size + len > CIP_MAX_TAG_DATA_SIZE) { return PLCTAG_ERR_TOO_LARGE; }
+    if(old_len + len > CIP_MAX_TAG_DATA_SIZE) { return PLCTAG_ERR_TOO_LARGE; }
 
-    new_data = (uint8_t *)mem_realloc(tag->data, tag->size + len);
-    if(!new_data) { return PLCTAG_ERR_NO_MEM; }
+    /* new bytes start zeroed. */
+    rc = byte_buffer_set_len(&tag->buf, old_len + len);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
 
-    mem_copy(new_data + tag->size, src, len);
-    tag->data = new_data;
-    tag->size += len;
+    if(src) { mem_copy(byte_buffer_data(tag->buf) + old_len, src, len); }
 
     return PLCTAG_STATUS_OK;
 }
@@ -659,6 +631,6 @@ static void reset_read(cip_tag_p tag) {
     tag->udt_get_fields = 0;
     tag->next_id = 1;
     tag->offset = 0;
-    tag->size = 0;
+    byte_buffer_set_len(&tag->buf, 0);
     tag->elem_count = 0;
 }

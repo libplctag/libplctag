@@ -291,7 +291,7 @@ static const attr_def_t *attr_table_find(const attr_def_t *table, const char *na
 
 
 static int32_t core_get_size(plc_tag_p tag, int32_t *result) {
-    *result = tag->size;
+    *result = byte_buffer_len(tag->buf);
 
     return PLCTAG_STATUS_OK;
 }

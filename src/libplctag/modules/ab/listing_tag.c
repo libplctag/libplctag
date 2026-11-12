@@ -72,22 +72,17 @@ static int listing_tag_encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacit
 
 /* define the vtable for listing tag type. */
 static struct tag_vtable_t listing_tag_vtable = {
-    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .abort = cip_data_tag_abort,
     .read = cip_tag_read_start,
-    .status = (tag_vtable_func)cip_tag_status,
-    .tickler = NULL,
-    .write = NULL,
+    .status = cip_tag_status,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,
-    .encode_read = (tag_encode_func)listing_tag_encode_read,
-    .decode_read = (tag_decode_func)listing_tag_check_read_status_connected,
-    .encode_write = NULL,
-    .decode_write = NULL,
-
-    /* attribute accessors */
-    .attribs = ab_attribs,
+    .attribs = cip_tag_attribs,
 };
+
+static const cip_tag_codec_t listing_tag_codec = {.encode_read = listing_tag_encode_read,
+                                                  .decode_read = listing_tag_check_read_status_connected};
 
 static tag_byte_order_t listing_tag_logix_byte_order = {.is_allocated = 0,
 
@@ -205,6 +200,7 @@ int setup_tag_listing_tag(cip_tag_p tag, const char *name) {
 
         tag->create_read_status = PLCTAG_STATUS_PENDING;
         tag->vtable = &listing_tag_vtable;
+        tag->codec = &listing_tag_codec;
 
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done. Found tag listing tag name %s.", name);
     } else {
@@ -250,26 +246,17 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if(cip_resp->reply_service != (AB_CIP_SVC_LIST_TAGS | CIP_SVC_REPLY)) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response reply service unexpected: %d",
-                   cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(cip_resp->status != CIP_STATUS_OK && cip_resp->status != CIP_STATUS_FRAG) {
-            size_t status_size = cip_error_data_size((uint8_t *)&cip_resp->status, data_end);
-
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP read failed with status: 0x%x %s",
-                   cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status, status_size));
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id,
-                   decode_cip_error_long((uint8_t *)&cip_resp->status, status_size));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status, status_size);
-            break;
-        }
+        rc = cip_check_reply(reply, reply_size, AB_CIP_SVC_LIST_TAGS, true, DEBUG_MODULE_AB_EIP_CIP_SPECIAL, tag->tag_id);
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /* check to see if this is a partial response. */
         partial_data = (cip_resp->status == CIP_STATUS_FRAG);
+
+        /* the first reply of a read starts the listing over; nothing of the last read carries on (R1). */
+        if(tag->offset == 0) {
+            byte_buffer_set_len(&tag->buf, 0);
+            tag->elem_count = 0;
+        }
 
         /*
          * check to see if there is any data to process.  If this is a packed
@@ -294,32 +281,24 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Received %d bytes of tag list data.  Partial: %s",
                    (int)payload_size, partial_data ? "yes" : "no");
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "new size: %d", new_size);
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "current tag size: %d", tag->size);
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "current tag size: %d", byte_buffer_len(tag->buf));
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "current offset: %d", tag->offset);
 
             /* copy the data into the tag and realloc if we need more space. */
 
-            if(new_size > tag->size) {
-                uint8_t *new_buffer = NULL;
-
-                /* tag->elem_count = */ tag->size = new_size;
-
+            if(new_size > byte_buffer_len(tag->buf)) {
                 pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Increasing tag buffer size to %d bytes.",
                        new_size);
 
-                new_buffer = (uint8_t *)mem_realloc(tag->data, new_size);
-                if(!new_buffer) {
+                rc = byte_buffer_set_len(&tag->buf, new_size);
+                if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
                     break;
                 }
-
-                tag->data = new_buffer;
-                /* tag->elem_count = */ tag->size = new_size;
             }
 
             /* copy the data into the tag's data buffer. */
-            mem_copy(tag->data + tag->offset, data, (int)payload_size);
+            mem_copy(byte_buffer_data(tag->buf) + tag->offset, data, (int)payload_size);
 
             tag->offset += (int)payload_size;
 
@@ -385,7 +364,7 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
              */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Create probe answered.");
 
-            tag->size = 0;
+            byte_buffer_set_len(&tag->buf, 0);
             tag->elem_count = 1;
             tag->offset = 0;
             tag->next_id = 0;
@@ -406,8 +385,6 @@ int listing_tag_check_read_status_connected(cip_tag_p tag, uint8_t *reply, int32
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Done reading tag list data!");
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "total symbols: %d", tag->elem_count);
-
-            // tag->elem_count = tag->offset;
 
             tag->offset = 0;
             tag->next_id = 0;

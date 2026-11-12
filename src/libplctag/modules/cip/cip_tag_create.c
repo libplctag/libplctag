@@ -159,27 +159,6 @@ const cip_family_t *cip_family_from_attributes(attr attribs) {
 
 
 /*
- * @connection, for either family.  The ops are the one place the families differ: each keeps
- * its own debug module ID -- public API that callers filter on -- and its own protocol.
- *
- * AB adopts a connection from an OMRON tag as well as its own, since both hang the same
- * cip_conn_p off the same field.  Both pass a find-or-create failure up unchanged.
- */
-static plc_tag_p create_connection_tag(attr attribs, bool is_omron,
-                                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                      void *userdata, plc_tag_p src_tag) {
-    static const cip_connection_tag_ops_t ab_ops = {.connection_protocol = TAG_PROTOCOL_AB_CONNECTION,
-                                                    .debug_module = DEBUG_MODULE_AB_CONNECTION,
-                                                    .source_protocols = {TAG_PROTOCOL_AB, TAG_PROTOCOL_OMRON}};
-    static const cip_connection_tag_ops_t omron_ops = {.connection_protocol = TAG_PROTOCOL_OMRON_CONNECTION,
-                                                       .debug_module = DEBUG_MODULE_OMRON_CONNECTION,
-                                                       .source_protocols = {TAG_PROTOCOL_OMRON, TAG_PROTOCOL_UNKNOWN}};
-
-    return cip_connection_tag_create(attribs, is_omron ? &omron_ops : &ab_ops, tag_callback_func, userdata, src_tag);
-}
-
-
-/*
  * Whether the tag string names a PLC that sits in a chassis behind a communication module,
  * so a tag without a path would reach the module rather than the CPU.
  *
@@ -235,8 +214,7 @@ static struct tag_vtable_t deferred_vtable = {
  *
  * Two steps because they need different things: the tag needs only the connection, the setup
  * needs the connection's family.  With no family yet -- a probed connection still identifying
- * the device -- the setup waits for the tickler, on a copy of the attributes.  The family sets
- * the tag's protocol, so the allocation's is only a placeholder.
+ * the device -- the setup waits for the tickler, on a copy of the attributes.
  */
 static int create_tag(const cip_family_t *family, cip_conn_p conn, attr attribs,
                       void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
@@ -245,7 +223,7 @@ static int create_tag(const cip_family_t *family, cip_conn_p conn, attr attribs,
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
 
-    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, TAG_PROTOCOL_AB, &unimplemented_vtable, DEBUG_MODULE_CIP);
+    tag = cip_tag_alloc(attribs, tag_callback_func, userdata, &unimplemented_vtable, DEBUG_MODULE_CIP);
     if(!tag) {
         /* nothing owns the connection yet, so this is the one failure that has to say so. */
         pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_dec: Releasing connection reference.");
@@ -257,7 +235,7 @@ static int create_tag(const cip_family_t *family, cip_conn_p conn, attr attribs,
      * The tag owns the connection from here, so every failure below releases it along with
      * the tag.  The tag is handed back even on failure, so the caller can release it.
      */
-    tag->session = conn;
+    tag->conn = &conn->base;
     *tag_out = (plc_tag_p)tag;
 
     if(family) { return setup_tag(family, tag, attribs); }
@@ -301,7 +279,7 @@ static int deferred_tickler(plc_tag_p raw_tag) {
 
     if(tag->create_read_status != PLCTAG_STATUS_PENDING || !attribs) { return PLCTAG_STATUS_OK; }
 
-    family = cip_conn_family(tag->session, &identify_rc);
+    family = cip_conn_family(cip_tag_conn(tag), &identify_rc);
     if(!family) {
         if(identify_rc != PLCTAG_STATUS_OK) { cip_tag_fail_create(tag, (plctag_error_code_t)identify_rc); }
         return PLCTAG_STATUS_OK;
@@ -326,8 +304,7 @@ static int setup_tag(const cip_family_t *family, cip_tag_p tag, attr attribs) {
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, tag->tag_id, "Setting up %s tag.", family->name);
 
-    tag->plc_type = family->plc_type;
-    tag->use_connected_msg = tag->session->use_connected_msg;
+    tag->use_connected_msg = cip_tag_conn(tag)->use_connected_msg;
     /* the create read checks the tag against the PLC; ending it queues CREATED. */
     tag->create_read_status = PLCTAG_STATUS_PENDING;
 
@@ -357,14 +334,55 @@ static int setup_tag(const cip_family_t *family, cip_tag_p tag, attr attribs) {
 
 
 /*
- * Which family and which connection, settled before a tag exists, then the family's own
- * constructor on that connection.
- *
- * A clone takes its family from the connection it inherits.  Its own attributes cannot be
- * asked: a clone need not repeat the path that made the original DH+.
+ * A tag on a connection that already exists: the connection's create_tag, and so the one a
+ * clone is made through.  The family comes from the connection.  The clone's own attributes
+ * cannot be asked: a clone need not repeat the path that made the original DH+.
+ */
+int cip_conn_create_tag(conn_base_t *base, attr attribs,
+                        void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
+                        plc_tag_p *tag_out) {
+    cip_conn_p conn = (cip_conn_p)base;
+    const cip_family_t *family = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
+
+    if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
+        *tag_out = cip_connection_tag_create(attribs, conn, tag_callback_func, userdata);
+
+        /* the connection tag types still report through the tag. */
+        return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
+    }
+
+    family = cip_conn_family(conn, &rc);
+
+    /* a probed connection's refusal is the answer, so a tag created after it fails at once. */
+    if(!family && rc != PLCTAG_STATUS_OK) { return rc; }
+
+    /* the connection decides use_connected_msg, so a clone cannot ask for the other setting. */
+    if(family && attr_get_str(attribs, "use_connected_msg", NULL)
+       && (cip_family_use_connected_msg(family, attribs) ? 1 : 0) != conn->use_connected_msg) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* the reference the new tag will own.  The caller keeps its own. */
+    conn = rc_inc(conn);
+    if(!conn) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to acquire connection reference.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    return create_tag(family, conn, attribs, tag_callback_func, userdata, tag_out);
+}
+
+
+/*
+ * A tag from an attribute string: settle the connection, then the family that connection holds
+ * sets the tag up.
  */
 int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                   void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
+                   void *userdata, plc_tag_p *tag_out) {
     const cip_family_t *family = NULL;
     cip_conn_p conn = NULL;
     const char *path = attr_get_str(attribs, "path", NULL);
@@ -372,72 +390,36 @@ int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int e
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
 
+    /* a connection that cannot be had still makes the tag, which reports why. */
     if(str_cmp(attr_get_str(attribs, "name", ""), "@connection") == 0) {
-        bool is_omron = (src_tag ? (src_tag->protocol_type == TAG_PROTOCOL_OMRON
-                                    || src_tag->protocol_type == TAG_PROTOCOL_OMRON_CONNECTION)
-                                 : (cip_family_from_attributes(attribs) == &omron_family_njnx));
-
-        *tag_out = create_connection_tag(attribs, is_omron, tag_callback_func, userdata, src_tag);
+        *tag_out = cip_connection_tag_create(attribs, NULL, tag_callback_func, userdata);
 
         /* the connection tag types still report through the tag. */
         return *tag_out ? (int)(*tag_out)->status : PLCTAG_ERR_CREATE;
     }
 
-    if(src_tag) {
-        switch(src_tag->protocol_type) {
-            case TAG_PROTOCOL_AB:
-            case TAG_PROTOCOL_OMRON: conn = ((cip_tag_p)src_tag)->session; break;
+    /* the connection settles the family; these two need only what the tag string named. */
 
-            case TAG_PROTOCOL_AB_CONNECTION:
-            case TAG_PROTOCOL_OMRON_CONNECTION: conn = (cip_conn_p)((connection_tag_p)src_tag)->conn; break;
-
-            default: break;
-        }
-
-        if(!conn) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to acquire source connection reference.");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-
-        family = cip_conn_family(conn, &rc);
-
-        /* the connection decides use_connected_msg, so a clone cannot ask for the other setting. */
-        if(family && attr_get_str(attribs, "use_connected_msg", NULL)
-           && (cip_family_use_connected_msg(family, attribs) ? 1 : 0) != conn->use_connected_msg) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "use_connected_msg conflicts with the source tag's connection!");
-            return PLCTAG_ERR_BAD_PARAM;
-        }
-
-        /* the reference the new tag will own.  The source keeps its own. */
-        conn = rc_inc(conn);
-        if(!conn) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to acquire source connection reference.");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        /* the connection settles the family; these two need only what the tag string named. */
-
-        /*
-         * str_length() rather than a NULL test: "path=" is a present but empty attribute and
-         * would otherwise fail further in with a worse message.
-         */
-        if(str_length(path) == 0 && plc_needs_path(attribs)) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to the CPU's slot is required for a ControlLogix PLC!");
-            return PLCTAG_ERR_BAD_PARAM;
-        }
-
-        if(str_length(path) && cip_family_from_attributes(attribs) == &ab_family_micro800) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path is not supported for Micro800 PLCs.");
-        }
-
-        rc = cip_conn_find_or_create(&conn, attribs, NULL);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to create connection, error %s!", plc_tag_decode_error(rc));
-            return rc;
-        }
-
-        family = cip_conn_family(conn, &rc);
+    /*
+     * str_length() rather than a NULL test: "path=" is a present but empty attribute and
+     * would otherwise fail further in with a worse message.
+     */
+    if(str_length(path) == 0 && plc_needs_path(attribs)) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path to the CPU's slot is required for a ControlLogix PLC!");
+        return PLCTAG_ERR_BAD_PARAM;
     }
+
+    if(str_length(path) && cip_family_from_attributes(attribs) == &ab_family_micro800) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "A path is not supported for Micro800 PLCs.");
+    }
+
+    rc = cip_conn_find_or_create(&conn, attribs, NULL);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Unable to create connection, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    family = cip_conn_family(conn, &rc);
 
     /* a probed connection's refusal is the answer, so a tag created after it fails at once. */
     if(!family && rc != PLCTAG_STATUS_OK) {

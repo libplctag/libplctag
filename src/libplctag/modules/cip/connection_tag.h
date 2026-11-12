@@ -34,33 +34,17 @@
  ***************************************************************************/
 
 /*
- * The @connection tag body shared by the CIP families.
- *
- * AB and OMRON differ only in which protocol constants they answer to and their debug
- * module ID -- public API that callers filter on -- so those are parameters rather than a
- * second copy of the function.
+ * The @connection tag body shared by the CIP families.  The connection's family supplies the
+ * debug module ID, public API that callers filter on.
  */
 
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <stdint.h>
 #include <utils/attr.h>
-#include <utils/debug.h>
 
 
-typedef struct {
-    tag_protocol_t connection_protocol; /* this family's @connection protocol */
-    debug_module_t debug_module;
-
-    /*
-     * Data-tag protocols this family will adopt a connection from.  AB accepts an OMRON
-     * tag as well as its own, since both hang a cip_conn_p off the same field; OMRON
-     * accepts only its own.  TAG_PROTOCOL_UNKNOWN pads an unused slot.
-     */
-    tag_protocol_t source_protocols[2];
-} cip_connection_tag_ops_t;
-
-
-extern plc_tag_p cip_connection_tag_create(attr attribs, const cip_connection_tag_ops_t *ops,
+/* conn is borrowed; NULL finds or creates the connection the attributes name. */
+extern plc_tag_p cip_connection_tag_create(attr attribs, cip_conn_p conn,
                                            void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                           void *userdata, plc_tag_p src_tag);
+                                           void *userdata);

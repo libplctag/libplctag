@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,8 +33,6 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_PCCC_H__
-#define __LIBPLCTAG_AB_PCCC_H__
 
 
 #include <libplctag/lib/tag.h>
@@ -57,8 +57,6 @@ extern int parse_pccc_logical_address(const char *file_address, pccc_addr_t *add
 extern int plc5_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *address);
 extern int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *address);
 
-// extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-// extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
 extern const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size);
 
 /* the library error for the same PCCC STS/EXT STS bytes pccc_decode_error() describes. */
@@ -103,19 +101,27 @@ START_PACK typedef struct {
 } END_PACK plc5_pccc_write_cmd_req;
 
 
-/* generic direct ethernet tag functions */
-extern int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size, bool is_dhp);
-
 /*
- * Write the request prefix and return the first byte after it.  is_dhp picks the DH+ routing
- * header over the Execute PCCC header; PCCC-mapped Logix is never DH+ and passes false.
+ * What sits in front of a PCCC command: the Execute PCCC service and our requester ID, or a
+ * DH+ routing header.  A PCCC family's setup picks one, so no codec asks which it is.
  */
-extern uint8_t *pccc_write_prefix(cip_tag_p tag, uint8_t *dest, bool is_dhp);
+typedef struct pccc_framing_t {
+    int32_t prefix_size;    /* request bytes before the PCCC command */
+    int32_t reply_overhead; /* reply bytes up to and including the PCCC command response */
+    void (*write_prefix)(cip_tag_p tag, uint8_t *dest);
 
-/*
- * Attach a submitted request to the tag under api_mutex, or roll the operation back and
- * release the request.  Every PCCC start function ends here.
- */
+    /* the framing's own reply checks: service, length, and who the reply is from. */
+    int (*check_route)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+} pccc_framing_t;
+
+extern const pccc_framing_t pccc_cip_framing;
+extern const pccc_framing_t pccc_dhp_framing;
+
+/* the framing's checks, then that the reply carries the TNS of the request we sent. */
+extern int pccc_check_response_header(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+
+/* the codecs' sent: draw the TNS and write it into the request going on the wire. */
+extern void pccc_sent(cip_tag_p tag, uint8_t *request);
 
 /*
  * Check that a request needing overhead + payload bytes fits what the session will carry.
@@ -148,13 +154,12 @@ START_PACK typedef struct {
 _Static_assert(sizeof(cip_pccc_full_resp) == 15, "cip_pccc_full_resp wire size changed");
 
 
-/*
- * One vtable for PLC/5, SLC and MicroLogix, plain or over a DH+ bridge.  The PLC family is
- * in tag->plc_type and the bridge in tag->session->is_dhp; the functions above read both.
- */
-extern struct tag_vtable_t pccc_vtable;
+/* PLC/5, and SLC 500 with MicroLogix, each plain or over a DH+ bridge. */
+extern struct tag_vtable_t plc5_vtable;
+extern const cip_tag_codec_t plc5_codec;
+extern struct tag_vtable_t slc_vtable;
+extern const cip_tag_codec_t slc_codec;
 
-#endif
 
 
 /*

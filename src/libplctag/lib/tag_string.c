@@ -83,30 +83,30 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
     int string_length = 0;
 
     /*
-     * The offset comes from the application and reaches tag->data[] directly below,
+     * The offset comes from the application and reaches byte_buffer_data(tag->buf)[] directly below,
      * so bounds check it here.  The count word is read first, so the buffer must hold
      * at least that many bytes at the offset.
      */
     if(!tag_range_is_valid(tag, offset, (int)tag->byte_order->str_count_word_bytes)) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "String start offset %d is out of bounds for a tag of %d bytes!",
-               offset, tag->size);
+               offset, byte_buffer_len(tag->buf));
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     if(tag->byte_order->str_is_counted) {
         switch(tag->byte_order->str_count_word_bytes) {
-            case 1: string_length = (int)(unsigned int)(tag->data[offset]); break;
+            case 1: string_length = (int)(unsigned int)(byte_buffer_data(tag->buf)[offset]); break;
 
             case 2:
-                string_length = (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0)
-                                                    + ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
+                string_length = (int16_t)(uint16_t)(((uint16_t)(byte_buffer_data(tag->buf)[offset + tag->byte_order->int16_order[0]]) << 0)
+                                                    + ((uint16_t)(byte_buffer_data(tag->buf)[offset + tag->byte_order->int16_order[1]]) << 8));
                 break;
 
             case 4:
-                string_length = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0)
-                                          + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8)
-                                          + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16)
-                                          + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24));
+                string_length = (int32_t)(((uint32_t)(byte_buffer_data(tag->buf)[offset + tag->byte_order->int32_order[0]]) << 0)
+                                          + ((uint32_t)(byte_buffer_data(tag->buf)[offset + tag->byte_order->int32_order[1]]) << 8)
+                                          + ((uint32_t)(byte_buffer_data(tag->buf)[offset + tag->byte_order->int32_order[2]]) << 16)
+                                          + ((uint32_t)(byte_buffer_data(tag->buf)[offset + tag->byte_order->int32_order[3]]) << 24));
                 break;
 
             default:
@@ -144,7 +144,7 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
         /* the tag buffer is the outer bound in every case, fixed length or not. */
         if(!tag_range_is_valid(tag, offset + (int)(tag->byte_order->str_count_word_bytes), string_length)) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id,
-                   "String count word %d at offset %d is out of bounds for a tag of %d bytes!", string_length, offset, tag->size);
+                   "String count word %d at offset %d is out of bounds for a tag of %d bytes!", string_length, offset, byte_buffer_len(tag->buf));
             return PLCTAG_ERR_OUT_OF_BOUNDS;
         }
     } else {
@@ -161,11 +161,11 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
              * PLC that omits the terminator makes us count the bytes of the next field.
              */
             int str_start = offset + (int)(tag->byte_order->str_count_word_bytes);
-            int scan_end = tag->size;
+            int scan_end = byte_buffer_len(tag->buf);
 
-            /* str_start is bounded by tag->size above, so the subtraction cannot overflow. */
+            /* str_start is bounded by byte_buffer_len(tag->buf) above, so the subtraction cannot overflow. */
             if(tag->byte_order->str_is_fixed_length
-               && tag->byte_order->str_max_capacity <= (unsigned int)(tag->size - str_start)) {
+               && tag->byte_order->str_max_capacity <= (unsigned int)(byte_buffer_len(tag->buf) - str_start)) {
                 scan_end = str_start + (int)(tag->byte_order->str_max_capacity);
             }
 
@@ -180,7 +180,7 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
                  */
                 if(char_index >= (size_t)(unsigned int)scan_end) { break; }
 
-                if(tag->data[char_index] == (uint8_t)0) {
+                if(byte_buffer_data(tag->buf)[char_index] == (uint8_t)0) {
                     /* found the end. */
                     break;
                 }
@@ -282,22 +282,14 @@ int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size) {
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Starting.");
 
-    do {
-        uint8_t *new_data = NULL;
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Changing the tag buffer size from %d to %d.", byte_buffer_len(tag->buf),
+           new_size);
 
-        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Changing the tag buffer size from %d to %d.", tag->size, new_size);
-
-        new_data = mem_realloc(tag->data, (int)new_size);
-        if(!new_data) {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to allocate new tag data buffer!");
-            rc = PLCTAG_ERR_NO_MEM;
-            tag->status = (int8_t)rc;
-            break;
-        }
-
-        tag->data = new_data;
-        tag->size = new_size;
-    } while(0);
+    rc = tag->buf_is_fixed ? PLCTAG_ERR_UNSUPPORTED : byte_buffer_set_len(&tag->buf, new_size);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Unable to resize the tag data buffer!");
+        tag->status = (int8_t)rc;
+    }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
 
@@ -315,10 +307,10 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
                new_split_index);
 
         /* double check the data. */
-        if(old_split_index < 0 || old_split_index > tag->size) {
+        if(old_split_index < 0 || old_split_index > byte_buffer_len(tag->buf)) {
             /* not good. */
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Old split index %d is outside tag data, %d bytes!",
-                   old_split_index, tag->size);
+                   old_split_index, byte_buffer_len(tag->buf));
             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
             break;
         }
@@ -342,10 +334,10 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
                    old_split_index - new_split_index);
 
             /* shrinking.  We must move the existing data down to the new end point of the string. */
-            void *old_split_ptr = tag->data + old_split_index;
-            void *new_split_ptr = tag->data + new_split_index;
-            int amount_to_move = tag->size - old_split_index;
-            int new_tag_size = tag->size - (old_split_index - new_split_index);
+            void *old_split_ptr = byte_buffer_data(tag->buf) + old_split_index;
+            void *new_split_ptr = byte_buffer_data(tag->buf) + new_split_index;
+            int amount_to_move = byte_buffer_len(tag->buf) - old_split_index;
+            int new_tag_size = byte_buffer_len(tag->buf) - (old_split_index - new_split_index);
 
             /* amount_to_move will be positive or zero because of the above if check. */
             mem_move(new_split_ptr, old_split_ptr, amount_to_move);
@@ -363,8 +355,8 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
                    new_split_index - old_split_index);
 
             /* growing.  We must move the existing data up to the new end point of the string. */
-            int amount_to_move = tag->size - old_split_index;
-            int new_tag_size = tag->size + (new_split_index - old_split_index);
+            int amount_to_move = byte_buffer_len(tag->buf) - old_split_index;
+            int new_tag_size = byte_buffer_len(tag->buf) + (new_split_index - old_split_index);
 
             /* resize the buffer now. */
             rc = resize_tag_buffer_unsafe(tag, new_tag_size);
@@ -374,8 +366,8 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
             }
 
             /* the tag data pointer may have changed, now calculate the two pointers. */
-            old_split_ptr = tag->data + old_split_index;
-            new_split_ptr = tag->data + new_split_index;
+            old_split_ptr = byte_buffer_data(tag->buf) + old_split_index;
+            new_split_ptr = byte_buffer_data(tag->buf) + new_split_index;
 
             /* amount_to_move will be positive or zero because of the above if check. */
             mem_move(new_split_ptr, old_split_ptr, amount_to_move);

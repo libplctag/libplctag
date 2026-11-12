@@ -112,3 +112,6 @@ extern void tag_driver_notify(tag_driver_t *driver);
  * between tries.
  */
 #define TAG_DRIVER_LOCK_YIELDS (100) /* MAGIC */
+
+/* release conn_mutex, yield or wait 1ms per the count in *tries, then take it back. */
+extern void tag_driver_yield_lock(mutex_p conn_mutex, int32_t *tries);

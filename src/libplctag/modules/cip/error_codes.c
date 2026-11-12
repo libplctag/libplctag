@@ -33,7 +33,9 @@
 
 #include <libplctag/api/libplctag.h>
 #include <libplctag/modules/cip/error_codes.h>
+#include <libplctag/modules/cip/services.h>
 #include <platform.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <utils/debug.h>
 
@@ -328,4 +330,32 @@ int decode_cip_error_code(uint8_t *data, size_t data_size) {
     int index = lookup_error_code(data, data_size);
 
     return error_code_table[index].translated_code;
+}
+
+
+int cip_check_reply(uint8_t *reply, int32_t reply_size, uint8_t service, bool allow_partial, debug_module_t debug_module,
+                    int32_t tag_id) {
+    /* reply service, reserved, general status, status word count: the cip_header layout. */
+    uint8_t *status = reply + 2;
+    size_t status_size = 0;
+
+    if(reply_size < 4) {
+        pdebug(debug_module, DEBUG_WARN, tag_id, "CIP reply of %" PRId32 " bytes is too short for its header!", reply_size);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(reply[0] != (uint8_t)(service | CIP_SVC_REPLY)) {
+        pdebug(debug_module, DEBUG_WARN, tag_id, "CIP reply service 0x%02x is not the reply to 0x%02x!", reply[0], service);
+        return PLCTAG_ERR_BAD_DATA;
+    }
+
+    if(*status == CIP_STATUS_OK || (allow_partial && *status == CIP_STATUS_FRAG)) { return PLCTAG_STATUS_OK; }
+
+    status_size = cip_error_data_size(status, reply + reply_size);
+
+    pdebug(debug_module, DEBUG_WARN, tag_id, "CIP request failed with status: 0x%x %s", *status,
+           decode_cip_error_short(status, status_size));
+    pdebug(debug_module, DEBUG_INFO, tag_id, "%s", decode_cip_error_long(status, status_size));
+
+    return decode_cip_error_code(status, status_size);
 }

@@ -38,58 +38,49 @@
 #include <libplctag/lib/tag.h>
 #include <libplctag/modules/cip/conn.h>
 #include <libplctag/modules/cip/connection_tag.h>
+#include <libplctag/modules/cip/cip_tag_create.h>
+#include <libplctag/modules/cip/family.h>
 #include <libplctag/modules/cip/tag.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 
 
-static bool is_source_protocol(const cip_connection_tag_ops_t *ops, tag_protocol_t protocol) {
-    for(size_t i = 0; i < (sizeof(ops->source_protocols) / sizeof(ops->source_protocols[0])); i++) {
-        if(ops->source_protocols[i] == protocol) { return true; }
-    }
-
-    return false;
-}
-
-
-plc_tag_p cip_connection_tag_create(attr attribs, const cip_connection_tag_ops_t *ops,
+plc_tag_p cip_connection_tag_create(attr attribs, cip_conn_p conn,
                                     void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                    void *userdata, plc_tag_p src_tag) {
-    connection_tag_args_t args = {
-        .protocol_type = ops->connection_protocol, .debug_module = ops->debug_module, .conn_rc = PLCTAG_STATUS_OK};
-    cip_conn_p conn = NULL;
+                                    void *userdata) {
+    connection_tag_args_t args = {.conn_rc = PLCTAG_STATUS_OK};
+    const cip_family_t *family = NULL;
+    int family_rc = PLCTAG_STATUS_OK;
 
-    pdebug(ops->debug_module, DEBUG_DETAIL, 0, "Starting.");
-
-    if(src_tag) {
-        if(is_source_protocol(ops, src_tag->protocol_type)) {
-            conn = rc_inc(((cip_tag_p)src_tag)->session);
-        } else if(src_tag->protocol_type == ops->connection_protocol) {
-            conn = rc_inc(((connection_tag_p)src_tag)->conn);
-        }
-
+    if(conn) {
+        conn = rc_inc(conn);
         args.conn_rc = (conn ? PLCTAG_STATUS_OK : PLCTAG_ERR_NOT_ALLOWED);
+        if(conn) { family = cip_conn_family(conn, &family_rc); }
     } else {
         int new_conn = 0;
 
+        family = cip_family_from_attributes(attribs);
+
         args.conn_rc = cip_conn_find_or_create(&conn, attribs, &new_conn);
-        if(args.conn_rc != PLCTAG_STATUS_OK) {
-            conn = NULL;
-        }
+        if(args.conn_rc != PLCTAG_STATUS_OK) { conn = NULL; }
 
         args.conn_is_new = (new_conn != 0);
     }
 
+    /* a connection still identifying its device reports as AB, as it always has. */
+    args.debug_module = (family ? family->connection_debug_module : DEBUG_MODULE_AB_CONNECTION);
+
+    pdebug(args.debug_module, DEBUG_DETAIL, 0, "Starting.");
+
     if(conn) {
-        args.conn = conn;
+        args.conn = &conn->base;
         args.watch = &conn->watch;
         args.conn_mutex = &conn->session_mutex;
     }
 
-    pdebug(ops->debug_module, DEBUG_DETAIL, 0, "Done.");
+    pdebug(args.debug_module, DEBUG_DETAIL, 0, "Done.");
 
     return connection_tag_create(attribs, &args, tag_callback_func, userdata);
 }

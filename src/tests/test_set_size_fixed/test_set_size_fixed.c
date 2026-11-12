@@ -1,5 +1,3 @@
-#pragma once
-
 /***************************************************************************
  *   Copyright (C) 2026 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -33,22 +31,90 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+
 /*
- * Which PLC family a tag talks to.
+ * plc_tag_set_size() on a tag whose data buffer is part of the tag allocation (Modbus, system)
+ * must fail and leave the size and the data alone.  It used to realloc a pointer into the
+ * middle of the tag allocation.
  *
- * One list covers every CIP family the library speaks, Rockwell and OMRON alike,
- * so that code shared between them can branch on the same value.  A module only
- * ever sets the members its own attribute parser accepts.
+ * Usage: test_set_size_fixed --tag=<attribs of a Modbus or system tag>
  */
-typedef enum {
-    CIP_PLC_NONE = 0,
-    CIP_PLC_PLC5 = 1,
-    CIP_PLC_SLC,
-    CIP_PLC_MLGX,
-    CIP_PLC_LGX,
-    CIP_PLC_LGX_PCCC,
-    CIP_PLC_MICRO800,
-    CIP_PLC_OMRON_NJNX,
-    CIP_PLC_GENERIC, /* Generic CIP device access (no PLC-specific protocol) */
-    CIP_PLC_TYPE_LAST,
-} cip_plc_type_t;
+
+#include <inttypes.h>
+#include <libplctag/api/libplctag.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+
+#define REQUIRED_VERSION 2, 5, 5
+#define DATA_TIMEOUT_MS (5000)
+
+
+static bool set_size_fails(int32_t tag, int32_t old_size, int32_t new_size);
+
+
+int main(int argc, char **argv) {
+    const char *tag_attribs = NULL;
+    int32_t tag = 0;
+    int32_t size = 0;
+    bool ok = true;
+
+    for(int32_t i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "--tag=", 6) == 0) { tag_attribs = &argv[i][6]; }
+    }
+
+    if(!tag_attribs) {
+        fprintf(stderr, "Usage: %s --tag=<attribs of a Modbus or system tag>\n", argv[0]);
+        return 1;
+    }
+
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
+        return 1;
+    }
+
+    tag = plc_tag_create(tag_attribs, DATA_TIMEOUT_MS);
+    if(tag < 0) {
+        fprintf(stderr, "ERROR: create failed: %s\n", plc_tag_decode_error(tag));
+        return 1;
+    }
+
+    size = plc_tag_get_size(tag);
+    fprintf(stderr, "Tag size is %" PRId32 " bytes.\n", size);
+
+    if(size <= 0) {
+        fprintf(stderr, "FAIL: tag has no data.\n");
+        ok = false;
+    }
+
+    ok = ok && set_size_fails(tag, size, size + 4096);
+    ok = ok && set_size_fails(tag, size, size - 1);
+
+    plc_tag_destroy(tag);
+    plc_tag_shutdown();
+
+    fprintf(stderr, "%s\n", ok ? "PASS" : "FAIL");
+
+    return ok ? 0 : 1;
+}
+
+
+static bool set_size_fails(int32_t tag, int32_t old_size, int32_t new_size) {
+    int32_t rc = plc_tag_set_size(tag, new_size);
+
+    fprintf(stderr, "plc_tag_set_size(%" PRId32 ") returned %s.\n", new_size, plc_tag_decode_error(rc));
+
+    if(rc >= 0) {
+        fprintf(stderr, "FAIL: setting the size to %" PRId32 " succeeded.\n", new_size);
+        return false;
+    }
+
+    if(plc_tag_get_size(tag) != old_size) {
+        fprintf(stderr, "FAIL: size changed to %" PRId32 ".\n", plc_tag_get_size(tag));
+        return false;
+    }
+
+    return true;
+}

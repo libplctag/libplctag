@@ -33,8 +33,10 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <utils/debug.h>
 
 extern const char *decode_cip_error_short(uint8_t *data, size_t data_size);
 extern const char *decode_cip_error_long(uint8_t *data, size_t data_size);
@@ -71,3 +73,12 @@ static inline uint16_t cip_extended_status_word(uint8_t *status, size_t status_b
 
     return (uint16_t)((uint16_t)status[offset] | (uint16_t)((uint16_t)status[offset + 1] << 8));
 }
+
+
+/*
+ * Check a CIP reply header: the service must answer service, and the status must be OK, or
+ * partial when allow_partial.  Returns PLCTAG_STATUS_OK, or the error the status maps to,
+ * logged under debug_module.
+ */
+extern int cip_check_reply(uint8_t *reply, int32_t reply_size, uint8_t service, bool allow_partial, debug_module_t debug_module,
+                           int32_t tag_id);

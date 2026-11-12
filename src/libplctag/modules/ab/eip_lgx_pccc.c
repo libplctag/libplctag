@@ -64,22 +64,21 @@ static int encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_pl
 static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
 
 struct tag_vtable_t lgx_pccc_vtable = {
-    .abort = (tag_vtable_func)cip_data_tag_abort,
+    .abort = cip_data_tag_abort,
     .read = cip_tag_read_start,
-    .status = (tag_vtable_func)cip_tag_status,
-    .tickler = NULL,
+    .status = cip_tag_status,
     .write = cip_tag_write_start,
     .wake_plc = cip_tag_wake_plc,
     .activate = cip_tag_activate,
     .tag_data_written = cip_tag_wake_plc,
-    .encode_read = (tag_encode_func)encode_read,
-    .decode_read = (tag_decode_func)check_read_status,
-    .encode_write = (tag_encode_func)encode_write,
-    .decode_write = (tag_decode_func)check_write_status,
-
-    /* data accessors */
-    .attribs = ab_attribs,
+    .attribs = pccc_tag_attribs,
 };
+
+const cip_tag_codec_t lgx_pccc_codec = {.encode_read = encode_read,
+                                        .decode_read = check_read_status,
+                                        .encode_write = encode_write,
+                                        .decode_write = check_write_status,
+                                        .sent = pccc_sent};
 
 
 /*
@@ -87,16 +86,12 @@ struct tag_vtable_t lgx_pccc_vtable = {
  */
 static int encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     size_t overhead = 0;
     plc5_pccc_read_cmd_req *pccc_cmd = NULL;
 
-    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
-    tag->req_pccc_seq_num = conn_seq_id;
-
     /* the whole tag has to come back in one reply: PCCC has no fragmentation. */
-    rc = pccc_check_payload_space(tag, sizeof(cip_pccc_full_resp), (size_t)(unsigned int)tag->size);
+    rc = pccc_check_payload_space(tag, sizeof(cip_pccc_full_resp), (size_t)(unsigned int)byte_buffer_len(tag->buf));
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     /*
@@ -115,13 +110,14 @@ static int encode_read(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_pl
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    data = pccc_write_prefix(tag, dest, false);
+    pccc_cip_framing.write_prefix(tag, dest);
+    data = dest + pccc_cip_framing.prefix_size;
 
     pccc_cmd = (plc5_pccc_read_cmd_req *)data;
 
     pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc_cmd->pccc_status = 0;
-    pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+    pccc_cmd->pccc_seq_num = h2le16(0); /* pccc_sent() fills it in */
     pccc_cmd->pccc_function = AB_EIP_PCCCLGX_TYPED_READ_FUNC;
     pccc_cmd->pccc_offset = h2le16(0);
     pccc_cmd->pccc_transfer_size = h2le16((uint16_t)tag->elem_count);
@@ -169,7 +165,7 @@ static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
         int pccc_res_type = 0;
         int pccc_res_length = 0;
 
-        rc = pccc_check_response_header(tag, reply, reply_size, false);
+        rc = pccc_check_response_header(tag, reply, reply_size);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         pccc = (cip_pccc_full_resp *)reply;
@@ -223,12 +219,12 @@ static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
         type_end = data;
 
         /* copy data into the tag. */
-        if((intptr_t)data > (intptr_t)data_end || (data_end - data) > (ptrdiff_t)tag->size) {
+        if((intptr_t)data > (intptr_t)data_end || (data_end - data) > (ptrdiff_t)byte_buffer_len(tag->buf)) {
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        mem_copy(tag->data, data, (int)(data_end - data));
+        mem_copy(byte_buffer_data(tag->buf), data, (int)(data_end - data));
 
         /* copy type data into tag. */
         if((intptr_t)type_start > (intptr_t)type_end) {
@@ -265,13 +261,9 @@ static int check_read_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
  */
 static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *data = NULL;
     size_t overhead = 0;
     plc5_pccc_write_cmd_req *pccc_cmd = NULL;
-
-    /* remember the TNS so pccc_check_response_header() can match the reply to this request. */
-    tag->req_pccc_seq_num = conn_seq_id;
 
     /*
      * The request is the Execute PCCC prefix, the typed write command, the symbolic name,
@@ -281,23 +273,24 @@ static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_p
                + (size_t)(unsigned int)tag->encoded_type_info_size + 1;
 
     /* the whole tag has to go out in one request: PCCC has no fragmentation. */
-    rc = pccc_check_payload_space(tag, overhead, (size_t)(unsigned int)tag->size);
+    rc = pccc_check_payload_space(tag, overhead, (size_t)(unsigned int)byte_buffer_len(tag->buf));
     if(rc != PLCTAG_STATUS_OK) { return rc; }
 
-    /* tag->size comes from the attribute string, so bound it before copying. */
-    if(overhead + (size_t)(unsigned int)tag->size > (size_t)capacity) {
+    /* byte_buffer_len(tag->buf) comes from the attribute string, so bound it before copying. */
+    if(overhead + (size_t)(unsigned int)byte_buffer_len(tag->buf) > (size_t)capacity) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN | DEBUG_RATE_LIMIT, tag->tag_id,
-               "PCCC request of %zu bytes does not fit in %d bytes!", overhead + (size_t)(unsigned int)tag->size, capacity);
+               "PCCC request of %zu bytes does not fit in %d bytes!", overhead + (size_t)(unsigned int)byte_buffer_len(tag->buf), capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    data = pccc_write_prefix(tag, dest, false);
+    pccc_cip_framing.write_prefix(tag, dest);
+    data = dest + pccc_cip_framing.prefix_size;
 
     pccc_cmd = (plc5_pccc_write_cmd_req *)data;
 
     pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc_cmd->pccc_status = 0;
-    pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+    pccc_cmd->pccc_seq_num = h2le16(0); /* pccc_sent() fills it in */
     pccc_cmd->pccc_function = AB_EIP_PCCCLGX_TYPED_WRITE_FUNC;
     pccc_cmd->pccc_offset = h2le16(0);
     pccc_cmd->pccc_transfer_size = h2le16((uint16_t)tag->elem_count);
@@ -310,8 +303,8 @@ static int encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_p
     mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
     data += tag->encoded_type_info_size;
 
-    mem_copy(data, tag->data, tag->size);
-    data += tag->size;
+    mem_copy(data, byte_buffer_data(tag->buf), byte_buffer_len(tag->buf));
+    data += byte_buffer_len(tag->buf);
 
     /* the PCCC command must end on an even boundary. */
     if((data - dest) & 0x01) {
@@ -341,7 +334,7 @@ static int check_write_status(cip_tag_p tag, uint8_t *reply, int32_t reply_size)
         cip_pccc_full_resp *pccc = NULL;
         uint8_t *data_end = NULL;
 
-        rc = pccc_check_response_header(tag, reply, reply_size, false);
+        rc = pccc_check_response_header(tag, reply, reply_size);
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         pccc = (cip_pccc_full_resp *)reply;

@@ -55,12 +55,32 @@ tag_byte_order_t cip_raw_tag_byte_order = {.is_allocated = 0,
                                            .str_is_defined = 0};
 
 
-int cip_raw_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module) {
-    return cip_setup_special_tag(tag, CIP_TYPE_TAG_RAW, &cip_raw_tag_byte_order, vtable, debug_module);
+static int raw_tag_tickler(plc_tag_p raw_tag);
+static int raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+static int raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+
+
+static struct tag_vtable_t raw_tag_vtable = {
+    .abort = cip_data_tag_abort,
+    .status = cip_tag_status,
+    .tickler = raw_tag_tickler,
+    .write = cip_tag_write_start,
+    .wake_plc = cip_tag_wake_plc, /* plc_tag_write() queues the tag with it */
+    .activate = cip_tag_activate,
+    .attribs = cip_tag_attribs,
+};
+
+static const cip_tag_codec_t raw_tag_codec = {.encode_write = raw_tag_encode_write, .decode_write = raw_tag_decode_write};
+
+
+int cip_raw_tag_setup(cip_tag_p tag, debug_module_t debug_module) {
+    return cip_setup_special_tag(tag, CIP_TYPE_TAG_RAW, &cip_raw_tag_byte_order, &raw_tag_vtable, &raw_tag_codec, debug_module);
 }
 
 
-int cip_raw_tag_tickler(cip_tag_p tag) {
+static int raw_tag_tickler(plc_tag_p raw_tag) {
+    cip_tag_p tag = (cip_tag_p)raw_tag;
+
     /* a raw tag has no target until the app writes one, so a connection that is up is its create. */
     if(tag->create_read_status == PLCTAG_STATUS_PENDING) {
         int32_t conn_status = PLCTAG_CONN_STATUS_DOWN;
@@ -82,10 +102,9 @@ int cip_raw_tag_tickler(cip_tag_p tag) {
  * stripped, so nothing here depends on whether the request went out connected or
  * unconnected.
  */
-int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
+static int raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) {
     int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
-    uint8_t *tag_data_buffer = NULL;
     debug_module_t dbg = tag->debug_module;
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Starting.");
@@ -94,22 +113,18 @@ int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
 
     if(data_size <= 0) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Response carries no CIP data!");
-        tag->size = 0;
+        byte_buffer_set_len(&tag->buf, 0);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
     /* hand the whole CIP response back to the caller. */
-    tag_data_buffer = mem_realloc(tag->data, data_size);
+    rc = byte_buffer_set_len(&tag->buf, data_size);
 
-    if(tag_data_buffer) {
-        tag->data = tag_data_buffer;
-        tag->size = data_size;
-
-        mem_copy(tag->data, reply, data_size);
+    if(rc == PLCTAG_STATUS_OK) {
+        mem_copy(byte_buffer_data(tag->buf), reply, data_size);
     } else {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
-        tag->size = 0;
-        rc = PLCTAG_ERR_NO_MEM;
+        byte_buffer_set_len(&tag->buf, 0);
     }
 
     pdebug(dbg, DEBUG_SPEW, tag->tag_id, "Done.");
@@ -124,8 +139,8 @@ int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size) 
  * the only thing that ever differed between the connected and unconnected forms of this
  * function.
  */
-int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
-    int32_t payload_size = tag->size;
+static int raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan) {
+    int32_t payload_size = byte_buffer_len(tag->buf);
     int32_t max_payload = 0;
     debug_module_t dbg = tag->debug_module;
 
@@ -136,7 +151,7 @@ int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag
         return PLCTAG_ERR_NO_DATA;
     }
 
-    max_payload = cip_conn_max_cip_payload(tag->session);
+    max_payload = cip_conn_max_cip_payload(cip_tag_conn(tag));
 
     if(payload_size > max_payload) {
         pdebug(dbg, DEBUG_WARN, tag->tag_id, "Request of %d bytes exceeds the %d bytes this connection can carry!",
@@ -150,7 +165,7 @@ int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    mem_copy(dest, tag->data, payload_size);
+    mem_copy(dest, byte_buffer_data(tag->buf), payload_size);
 
     plan->req_size = payload_size;
     plan->reply_size = 0;

@@ -88,12 +88,10 @@ tag_byte_order_t system_tag_byte_order = {.is_allocated = 0,
 
 
 int system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                      void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out) {
+                      void *userdata, plc_tag_p *tag_out) {
     int rc = PLCTAG_STATUS_OK;
     system_tag_p tag = NULL;
     const char *name = attr_get_str(attribs, "name", NULL);
-
-    (void)src_tag;
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, 0, "Starting.");
 
@@ -116,7 +114,7 @@ int system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, in
      * we have a vehicle for returning status.
      */
 
-    tag = (system_tag_p)rc_alloc(sizeof(struct system_tag_t), (rc_cleanup_func)system_tag_destroy);
+    tag = (system_tag_p)rc_alloc((int)(sizeof(struct system_tag_t) + sizeof(byte_buffer_t) + MAX_SYSTEM_TAG_SIZE), (rc_cleanup_func)system_tag_destroy);
 
     if(!tag) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_ERROR, 0, "Unable to allocate memory for system tag!");
@@ -128,7 +126,6 @@ int system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, in
      * in case we need to abort later.
      */
     tag->vtable = &system_tag_vtable;
-    tag->protocol_type = TAG_PROTOCOL_SYSTEM;
 
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
@@ -161,16 +158,18 @@ int system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, in
     tag->name[MAX_SYSTEM_TAG_NAME - 1] = '\0';
 
     /*
-     * Point data at the backing store.  The size is the size of the payload the named tag
-     * actually carries, not the size of the backing store, so that plc_tag_get_size() and the
-     * bounds checks in the data accessors both report the truth.
+     * The buffer sits just after the tag struct.  Its length is the payload the named tag
+     * actually carries, not its capacity, so that plc_tag_get_size() and the bounds checks in
+     * the data accessors both report the truth.
      */
-    tag->data = &tag->backing_data[0];
+    tag->buf = (byte_buffer_t *)(tag + 1);
+    tag->buf->capacity = MAX_SYSTEM_TAG_SIZE;
+    tag->buf_is_fixed = true;
 
     if(str_cmp_i(&tag->name[0], "version") == 0) {
-        tag->size = (int)(str_length(VERSION) + 1);
+        tag->buf->len = (int32_t)(str_length(VERSION) + 1);
     } else {
-        tag->size = (int)sizeof(int32_t);
+        tag->buf->len = (int32_t)sizeof(int32_t);
     }
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done");
@@ -218,15 +217,15 @@ static int system_tag_read(plc_tag_p ptag) {
 
     if(str_cmp_i(&tag->name[0], "version") == 0) {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, tag->tag_id, "Version is %s", VERSION);
-        str_copy((char *)(&tag->data[0]), MAX_SYSTEM_TAG_SIZE, VERSION);
-        tag->data[str_length(VERSION)] = 0;
+        str_copy((char *)(&byte_buffer_data(tag->buf)[0]), MAX_SYSTEM_TAG_SIZE, VERSION);
+        byte_buffer_data(tag->buf)[str_length(VERSION)] = 0;
         rc = PLCTAG_STATUS_OK;
     } else if(str_cmp_i(&tag->name[0], "debug") == 0) {
         int debug_level = get_debug_level();
-        tag->data[0] = (uint8_t)(debug_level & 0xFF);
-        tag->data[1] = (uint8_t)((debug_level >> 8) & 0xFF);
-        tag->data[2] = (uint8_t)((debug_level >> 16) & 0xFF);
-        tag->data[3] = (uint8_t)((debug_level >> 24) & 0xFF);
+        byte_buffer_data(tag->buf)[0] = (uint8_t)(debug_level & 0xFF);
+        byte_buffer_data(tag->buf)[1] = (uint8_t)((debug_level >> 8) & 0xFF);
+        byte_buffer_data(tag->buf)[2] = (uint8_t)((debug_level >> 16) & 0xFF);
+        byte_buffer_data(tag->buf)[3] = (uint8_t)((debug_level >> 24) & 0xFF);
         rc = PLCTAG_STATUS_OK;
     } else {
         pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, tag->tag_id, "Unsupported system tag %s!", tag->name);
@@ -254,8 +253,8 @@ static int system_tag_write(plc_tag_p ptag) {
     /* the version is static */
     if(str_cmp_i(&tag->name[0], "debug") == 0) {
         int res = 0;
-        res = (int32_t)(((uint32_t)(tag->data[0])) + ((uint32_t)(tag->data[1]) << 8) + ((uint32_t)(tag->data[2]) << 16)
-                        + ((uint32_t)(tag->data[3]) << 24));
+        res = (int32_t)(((uint32_t)(byte_buffer_data(tag->buf)[0])) + ((uint32_t)(byte_buffer_data(tag->buf)[1]) << 8) + ((uint32_t)(byte_buffer_data(tag->buf)[2]) << 16)
+                        + ((uint32_t)(byte_buffer_data(tag->buf)[3]) << 24));
         set_debug_level(res);
         rc = PLCTAG_STATUS_OK;
     } else if(str_cmp_i(&tag->name[0], "version") == 0) {

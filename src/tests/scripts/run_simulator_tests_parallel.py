@@ -300,7 +300,7 @@ def kill_stray_servers() -> None:
 
 
 REQUIRED_EXECUTABLES = [
-    "ab_server", "modbus_server", "list_tags_logix", "scan_eip_network", "get_identity", "test_create_shutdown_race",
+    "ab_server", "modbus_server", "list_tags_logix", "test_tag_listing_reread", "scan_eip_network", "get_identity", "test_create_shutdown_race",
     "string_non_standard_udt", "string_standard",
     "tag_rw2", "test_connection_stress", "test_create_from_tag", "test_connection_tag",
     "test_callback_destroy", "test_timeout_next", "test_create_fail_callback", "test_cip_ops", "test_modbus_ops", "test_modbus_split_write",
@@ -308,7 +308,7 @@ REQUIRED_EXECUTABLES = [
     "test_callback_ex", "test_callback_ex_async", "test_idle_disconnect", "test_retry_attr",
     "test_modbus_multiple", "test_omron_destroy", "test_omron_frag", "test_raw_cip", "test_reconnect_after_outage_async",
     "test_reconnect_after_outage_sync", "test_idle_peer_close", "test_shutdown", "test_shutdown_drain", "test_ab_server_framing",
-    "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
+    "test_set_size_fixed", "test_shutdown_restart", "test_special", "test_string", "test_tag_attributes",
     "test_tag_type_attribute", "thread_stress", "stress_rc_mem", "test_indexed_tags",
     "test_write_before_read", "test_lib_api_coverage", "test_attr_core", "test_attr_auto_sync_read", "test_attr_auto_sync_write",
     "test_bit_write", "test_auto_destroy", "test_find_or_create_tag", "test_many_tags",
@@ -810,6 +810,11 @@ def build_manifest() -> Manifest:
 
     ab_lgx = f"protocol=ab-eip&gateway={egw}&path=1,0&plc=ControlLogix"
 
+    # P5: the name cannot say how wide the element is, so the first read checks the bit fits.
+    bad_attr(sec, "AB bit past the element width", f"{ab_lgx}&name=TestBigArray[0].32",
+             r"Bit 32 is past the end of a 4 byte element!", elem_type="bit")
+    bad_attr(sec, "AB bit number past 255", f"{ab_lgx}&name=TestBigArray[0].256",
+             r"Bit identifier must be between 0 and 255, inclusive, was 256!", elem_type="bit")
     bad_attr(sec, "AB zero element count", f"{ab_lgx}&elem_count=0&name=TestBigArray",
              r"Element count must be at least one, was 0!")
     bad_attr(sec, "AB negative element count", f"{ab_lgx}&elem_count=-1&name=TestBigArray",
@@ -1071,6 +1076,8 @@ def build_manifest() -> Manifest:
     # The system tags: version and debug, and what they refuse (auto-destroy, other names).
     sec.test("system tags, and their refusals",
               [exe("test_special")], F, server=None, ports_needed=0)
+    sec.test("plc_tag_set_size is refused on a system tag",
+              [exe("test_set_size_fixed"), "--tag=protocol=system&name=version"], F, server=None, ports_needed=0)
     sec.test("@connection tag ERR_WAIT on unreachable host (no server running)",
               [exe("test_connection_tag"),
                "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@connection",
@@ -1218,6 +1225,11 @@ def build_manifest() -> Manifest:
                                       r'|^    Field 0: x, offset 0, .*DINT|^    Field 1: y, offset 4, .*REAL'
                                       r'|^    Field 2: z, offset 8, .*INT',
                               expected=6))
+
+    # R1 and R2: two reads of one @tags handle agree, and elem_count is the number of entries.
+    # ab_server has no Logix listing, so the Rockwell side of this runs on hardware.
+    sec.test("Omron @tags reread, elem_count is the entry count",
+              [exe("test_tag_listing_reread"), f"--tag=protocol=ab-eip&gateway={ogw}&path=18,127.0.0.1&plc=omron-njnx&name=@tags"], F)
 
     # The Omron module has its own copies of the attribute checks -- same wording, different
     # module tag in the log -- so they need their own tests rather than riding on the AB ones.
@@ -1661,6 +1673,8 @@ def build_manifest() -> Manifest:
                "--cycles=2",
                f"--data-tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10",
                "--idle-timeout-ms=5000"], T)
+    sec.test("plc_tag_set_size is refused on a Modbus tag",
+              [exe("test_set_size_fixed"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], F)
     sec.test("auto-destroy idle tags (Modbus)",
               [exe("test_auto_destroy"), f"--tag=protocol=modbus-tcp&gateway={mbgw}&path=0&elem_count=2&name=hr10"], T)
     sec.test("find_or_create_tag finds or creates a shared tag (Modbus)",

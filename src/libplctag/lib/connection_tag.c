@@ -84,10 +84,13 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
     pdebug(args->debug_module, DEBUG_DETAIL, 0, "Starting.");
 
     connection_tag_p tag = (connection_tag_p)rc_alloc(sizeof(connection_tag_t), connection_tag_destructor);
-    if(!tag) { return NULL; }
+    if(!tag) {
+        /* the tag would have owned the connection reference, so nothing else releases it. */
+        rc_dec(args->conn);
+        return NULL;
+    }
 
     tag->vtable = &connection_tag_vtable;
-    tag->protocol_type = args->protocol_type;
     tag->debug_module = args->debug_module;
     tag->last_conn_state = PLCTAG_CONN_STATUS_DOWN;
     tag->io_events = attr_get_int(attribs, "io_events", 1);
@@ -95,6 +98,7 @@ plc_tag_p connection_tag_create(attr attribs, const connection_tag_args_t *args,
     int32_t rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(args->debug_module, DEBUG_WARN, 0, "Unable to initialize generic tag parts!");
+        rc_dec(args->conn);
         rc_dec(tag);
         return (plc_tag_p)NULL;
     }
@@ -314,10 +318,7 @@ static void connection_tag_destructor(void *ptr) {
         tag->byte_order = NULL;
     }
 
-    if(tag->data) {
-        mem_free(tag->data);
-        tag->data = NULL;
-    }
+    byte_buffer_free(&tag->buf);
 
     pdebug(tag->debug_module, DEBUG_INFO, tag->tag_id, "Done.");
 }

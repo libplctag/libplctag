@@ -33,11 +33,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/modules/cip/tag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <utils/attr.h>
+#include <utils/debug.h>
 
 /*
  * A CIP PLC family: what the connection needs before any tag exists, and the function that
@@ -49,7 +49,9 @@ typedef struct cip_family_t cip_family_t;
 
 struct cip_family_t {
     const char *name;
-    cip_plc_type_t plc_type;
+
+    /* the family as the tag string spells it, for the plc attribute. */
+    const char *canonical_name;
 
     /* the same PLC reached across a DH+ bridge, NULL if it cannot be; and whether this is that one. */
     const cip_family_t *dhp;
@@ -61,10 +63,15 @@ struct cip_family_t {
      */
     int8_t use_connected_msg;
 
+    /* the @connection tag's debug module ID, public API that callers filter on. */
+    debug_module_t connection_debug_module;
+
     /*
-     * Everything about a new tag that is the family's own: protocol, vtable, byte order, ops,
-     * debug module, packing, the name and how the size is found.  Runs after the element count
-     * is known, because a symbolic name encodes it.
+     * Everything about a new tag that is the family's own: the special tags it serves, matched
+     * by name, then vtable, codec, byte order, ops, debug module, packing, the name and how the
+     * size is found.  Runs after the element count is known, because a symbolic name encodes
+     * it.  It sets up a tag already allocated, so a tag deferred while a probe identifies the
+     * device keeps its ID.
      */
     int (*setup_tag)(cip_tag_p tag, attr attribs);
 

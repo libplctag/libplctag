@@ -37,6 +37,10 @@
  * Review defect R1: a new @tags read resets the offset but not elem_count, so the second
  * read reports about twice the symbols.  The size and the bytes must match too.
  *
+ * Review defect R2: elem_count is the number of entries in the listing, in every family.  Each
+ * entry is 22 bytes -- instance (4), type (2), element size (2), three dimensions (12), name
+ * length (2) -- then the name.
+ *
  * Usage: test_tag_listing_reread --tag=<attribs with name=@tags>
  */
 
@@ -51,9 +55,12 @@
 
 #define REQUIRED_VERSION 2, 5, 5
 #define DATA_TIMEOUT_MS (20000)
+#define ENTRY_HEADER_SIZE (22)
+#define ENTRY_NAME_LEN_OFFSET (20)
 
 
 static bool read_listing(int32_t tag, int32_t *size, int32_t *elem_count, uint8_t **data);
+static int32_t count_entries(const uint8_t *data, int32_t size);
 
 
 int main(int argc, char **argv) {
@@ -107,6 +114,17 @@ int main(int argc, char **argv) {
         ok = false;
     }
 
+    if(ok) {
+        int32_t entries = count_entries(data[0], size[0]);
+
+        fprintf(stderr, "The listing holds %" PRId32 " entries.\n", entries);
+
+        if(entries != elem_count[0]) {
+            fprintf(stderr, "FAIL: elem_count is not the number of entries.\n");
+            ok = false;
+        }
+    }
+
     free(data[0]);
     free(data[1]);
     plc_tag_destroy(tag);
@@ -147,4 +165,20 @@ static bool read_listing(int32_t tag, int32_t *size, int32_t *elem_count, uint8_
     }
 
     return true;
+}
+
+
+/* the number of entries, or -1 if the last one runs past the end. */
+static int32_t count_entries(const uint8_t *data, int32_t size) {
+    int32_t offset = 0;
+    int32_t count = 0;
+
+    while(offset + ENTRY_HEADER_SIZE <= size) {
+        int32_t name_len = (int32_t)data[offset + ENTRY_NAME_LEN_OFFSET] | ((int32_t)data[offset + ENTRY_NAME_LEN_OFFSET + 1] << 8);
+
+        offset += ENTRY_HEADER_SIZE + name_len;
+        count++;
+    }
+
+    return (offset == size) ? count : -1;
 }

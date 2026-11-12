@@ -82,8 +82,7 @@ static int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn);
 static int session_list_remove(cip_conn_list_t *list, cip_conn_p conn);
 static int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn);
 static cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                                   int connection_group_id, cip_plc_type_t plc_type);
-static uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn);
+                                                   int connection_group_id, const cip_family_t *named_family);
 static int session_match_valid(const char *host, const char *path, cip_conn_p conn);
 static int session_close_socket(cip_conn_p conn);
 static int send_eip_request(cip_conn_p conn, int timeout);
@@ -153,19 +152,12 @@ uint16_t next_conn_serial_number(uint16_t current) {
     return next;
 }
 
-static uint64_t session_get_new_seq_id_unsafe(cip_conn_p conn) {
+uint16_t cip_conn_next_tns_unsafe(cip_conn_p conn) {
     /* check for rollover; zero is not a valid sequence id. */
     if((++conn->session_seq_id) == 0) { conn->session_seq_id = 1; }
 
-    return conn->session_seq_id;
-}
-
-uint64_t session_get_new_seq_id(cip_conn_p conn) {
-    uint16_t res = 0;
-
-    critical_block(&conn->session_mutex) { res = (uint16_t)session_get_new_seq_id_unsafe(conn); }
-
-    return res;
+    /* a PCCC TNS is 16 bits (P3). */
+    return (uint16_t)conn->session_seq_id;
 }
 
 static int session_match_valid(const char *host, const char *path, cip_conn_p conn) {
@@ -267,50 +259,32 @@ static int session_list_init(cip_conn_list_t *list) {
         return rc;
     }
 
-    if((list->conns = vector_create(25, 5)) == NULL) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_ERROR, 0, "Unable to create connection vector!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
     return PLCTAG_STATUS_OK;
 }
 
 
-
+/* connections are created rarely, and the wait is inside plc_tag_create*(), so a linear list is enough. */
 static int session_list_add_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
-
     if(!conn) { return PLCTAG_ERR_NULL_PTR; }
 
-    vector_set(list->conns, vector_length(list->conns), conn);
-
-    conn->on_list = 1;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done");
+    conn->next = list->head;
+    list->head = conn;
+    conn->on_list = true;
 
     return PLCTAG_STATUS_OK;
 }
 
 
+/* the destructor unlinks a connection before it is freed, so a pointer on the list is always live. */
 static int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting");
+    cip_conn_p *walker = &list->head;
 
-    if(!conn || !list->conns) { return 0; }
+    while(*walker && *walker != conn) { walker = &((*walker)->next); }
 
-    for(int i = 0; i < vector_length(list->conns); i++) {
-        cip_conn_p tmp = vector_get(list->conns, i);
+    if(*walker) { *walker = conn->next; }
 
-        /* FIXME potential ABA problem here */
-        if(tmp == conn) {
-            vector_remove(list->conns, i);
-            break;
-        }
-    }
-
-    /* no longer on the list */
-    conn->on_list = 0;
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done");
+    conn->next = NULL;
+    conn->on_list = false;
 
     return PLCTAG_STATUS_OK;
 }
@@ -319,7 +293,9 @@ static int session_list_remove_unsafe(cip_conn_list_t *list, cip_conn_p conn) {
 static int32_t session_list_count(cip_conn_list_t *list) {
     int32_t count = 0;
 
-    critical_block(&list->mutex) { count = (int32_t)vector_length(list->conns); }
+    critical_block(&list->mutex) {
+        for(cip_conn_p conn = list->head; conn; conn = conn->next) { count++; }
+    }
 
     return count;
 }
@@ -328,27 +304,22 @@ static int32_t session_list_count(cip_conn_list_t *list) {
 static int session_list_remove(cip_conn_list_t *list, cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Starting.");
-
     if(conn->on_list) {
         critical_block(&list->mutex) { rc = session_list_remove_unsafe(list, conn); }
-    } else {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Connection not on list, skipping removal.");
     }
-
-    pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Done.");
 
     return rc;
 }
 
 
 static cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const char *host, const char *path,
-                                                   int connection_group_id, cip_plc_type_t plc_type) {
-    for(int i = 0; i < vector_length(list->conns); i++) {
-        cip_conn_p conn = vector_get(list->conns, i);
+                                                   int connection_group_id, const cip_family_t *named_family) {
+    cip_conn_p next = NULL;
+
+    for(cip_conn_p conn = list->head; conn; conn = next) {
+        next = conn->next;
 
         /* is this connection in the process of destruction? */
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "rc_inc: Acquiring connection reference.");
         conn = rc_inc(conn);
         if(conn) {
             /*
@@ -358,7 +329,7 @@ static cip_conn_p session_list_find_by_host_unsafe(cip_conn_list_t *list, const 
              * payload sizing, the messaging and the tag setup the connection hands out.  The
              * path is in the key too, so the dialect the path chose matches as well.
              */
-            if(conn->connection_group_id == connection_group_id && conn->plc_type == plc_type
+            if(conn->connection_group_id == connection_group_id && conn->named_family == named_family
                && session_match_valid(host, path, conn)) {
                 return conn;
             }
@@ -798,7 +769,7 @@ static int perform_forward_close(cip_conn_p conn) {
 
 static int session_open_socket(cip_conn_p conn) {
     int rc = PLCTAG_STATUS_OK;
-    char **server_port = NULL;
+    char host[CONN_HOST_MAX];
     int port = 0;
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Starting.");
@@ -814,46 +785,17 @@ static int session_open_socket(cip_conn_p conn) {
     conn->req_seq_id = 0;
     conn->req_sent = false;
 
-    server_port = str_split(conn->host, ":");
-    if(!server_port) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to split server and port string!");
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    if(server_port[0] == NULL) {
-        pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Server string is malformed or empty!");
-        mem_free(server_port);
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    if(server_port[1] != NULL) {
-        rc = str_to_int(server_port[1], &port);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to extract port number from server string \"%s\"!",
-                   conn->host);
-            mem_free(server_port);
-            return PLCTAG_ERR_BAD_CONFIG;
-        }
-
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Using special port %d.", port);
-    } else {
-        port = CIP_EIP_DEFAULT_PORT;
-
-        pdebug(DEBUG_MODULE_CIP, DEBUG_DETAIL, 0, "Using default port %d.", port);
-    }
+    rc = conn_split_gateway(conn->host, CIP_EIP_DEFAULT_PORT, host, sizeof(host), &port, DEBUG_MODULE_CIP);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
 
     /* record the effective port, default included, so it can be read back as an attribute. */
     conn->port = port;
 
-    rc = socket_connect_tcp_start(conn->sock, server_port[0], port);
-
+    rc = socket_connect_tcp_start(conn->sock, host, port);
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0, "Unable to connect socket for session!");
-        mem_free(server_port);
         return rc;
     }
-
-    if(server_port) { mem_free(server_port); }
 
     pdebug(DEBUG_MODULE_CIP, DEBUG_INFO, 0, "Done.");
 
@@ -1462,7 +1404,8 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
         cip_tag_p tag = (cip_tag_p)next;
         tag_op_plan_t plan = {0};
         bool is_read = tag_op_is_read(tag);
-        tag_encode_func encode = is_read ? tag->vtable->encode_read : tag->vtable->encode_write;
+        int (*encode)(cip_tag_p, uint8_t *, int32_t, tag_op_plan_t *) =
+            !tag->codec ? NULL : is_read ? tag->codec->encode_read : tag->codec->encode_write;
         int32_t capacity = request_space;
         int rc = PLCTAG_STATUS_OK;
 
@@ -1489,7 +1432,7 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
         } else if(capacity <= 0) {
             rc = PLCTAG_ERR_TOO_SMALL;
         } else {
-            rc = ((cip_tag_encode_func)encode)(tag, conn->staging + used, capacity, &plan);
+            rc = encode(tag, conn->staging + used, capacity, &plan);
         }
 
         /* it may fit next time, at the front of a packet of its own. */
@@ -1519,6 +1462,8 @@ static int32_t build_exchange_unsafe(cip_conn_p conn, int64_t now, int32_t *size
             bundle = (plan.packable && conn->use_connected_msg);
             conn->exchange_unrouted = tag->unrouted;
         }
+
+        if(tag->codec->sent) { tag->codec->sent(tag, conn->staging + used); }
 
         tag->reply_index = count;
         sizes[count] = plan.req_size;
@@ -1560,9 +1505,7 @@ static int dispatch_replies_unsafe(cip_conn_p conn, int32_t request_count) {
     int64_t now = time_ms();
 
     while(dispatch_replies_pass_unsafe(conn, now, &remaining, &bad_packet_rc) > 0) {
-        mutex_unlock(&conn->session_mutex);
-        sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
-        mutex_lock(&conn->session_mutex);
+        tag_driver_yield_lock(&conn->session_mutex, &tries);
     }
 
     return bad_packet_rc;
@@ -1582,7 +1525,7 @@ static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int64_t now, int32_
 
     while(next && next->op_time <= now && seen < to_see) {
         cip_tag_p tag = (cip_tag_p)next;
-        tag_decode_func decode = NULL;
+        int (*decode)(cip_tag_p, uint8_t *, int32_t) = NULL;
         uint8_t *reply = NULL;
         int32_t reply_size = 0;
         int32_t index = 0;
@@ -1612,8 +1555,8 @@ static int32_t dispatch_replies_pass_unsafe(cip_conn_p conn, int64_t now, int32_
         if(rc != PLCTAG_STATUS_OK) {
             *bad_packet_rc = rc;
         } else {
-            decode = tag_op_is_read(tag) ? tag->vtable->decode_read : tag->vtable->decode_write;
-            rc = decode ? ((cip_tag_decode_func)decode)(tag, reply, reply_size) : PLCTAG_ERR_UNSUPPORTED;
+            decode = !tag->codec ? NULL : tag_op_is_read(tag) ? tag->codec->decode_read : tag->codec->decode_write;
+            rc = decode ? decode(tag, reply, reply_size) : PLCTAG_ERR_UNSUPPORTED;
         }
 
         if(rc == PLCTAG_STATUS_PENDING) {
@@ -1682,9 +1625,7 @@ static int32_t fail_waiting_tags_unsafe(cip_conn_p conn, int rc) {
         if(!tag_op_busy(tag)) { continue; }
 
         if(mutex_try_lock(&tag->api_mutex) != PLCTAG_STATUS_OK) {
-            mutex_unlock(&conn->session_mutex);
-            sleep_ms(++tries < TAG_DRIVER_LOCK_YIELDS ? 0 : 1);
-            mutex_lock(&conn->session_mutex);
+            tag_driver_yield_lock(&conn->session_mutex, &tries);
             next = tag_schedule_first(&conn->driver.active);
             continue;
         }
@@ -2353,6 +2294,7 @@ static THREAD_FUNC(session_handler) {
  */
 static int session_create(cip_conn_list_t *list, const cip_family_t *family, const char *host, const char *path,
                           int use_connected_msg, int connection_group_id, cip_conn_p *conn_out) {
+    const cip_family_t *named_family = family;
     const cip_family_t *dhp_family = (family ? family->dhp : NULL);
     const bool data_buffer_is_static = true;
     static volatile uint32_t connection_id = 0;
@@ -2478,6 +2420,8 @@ static int session_create(cip_conn_list_t *list, const cip_family_t *family, con
         return PLCTAG_ERR_NO_MEM;
     }
 
+    conn->base.create_tag = cip_conn_create_tag;
+
     /* fill in the interior pointers */
 
     /* fix up the data buffer. */
@@ -2539,7 +2483,7 @@ static int session_create(cip_conn_list_t *list, const cip_family_t *family, con
 
     /* fix up the rest of teh fields */
     conn->owner_list = list;
-    conn->plc_type = (family ? family->plc_type : CIP_PLC_NONE);
+    conn->named_family = named_family;
     conn->family = family;
     conn->identify_rc = PLCTAG_STATUS_OK;
 
@@ -2615,7 +2559,6 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *fam
      * the same answer.  Only Logix lets the tag string override it, and it defaults to 1.  A
      * DH+ path forces it on when the connection is created.
      */
-    cip_plc_type_t plc_type = (family ? family->plc_type : CIP_PLC_NONE);
     int use_connected_msg = (family ? cip_family_use_connected_msg(family, attribs) : 0);
     cip_conn_p session = NULL;
     int new_session = 0;
@@ -2660,17 +2603,17 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *fam
     critical_block(&list->mutex) {
         /* if we are to share connections, then look for an existing one. */
         if(shared_session) {
-            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, plc_type);
+            session = session_list_find_by_host_unsafe(list, session_gw, session_path, connection_group_id, family);
 
             /*
              * One connection cannot be both connected and unconnected.  Asked of its own family,
              * which may be DH+.  A probed connection has no request to compare: the family decides.
              */
-            if(session && session->plc_type != CIP_PLC_NONE) {
+            if(session && session->named_family) {
                 use_connected_msg = (cip_family_use_connected_msg(session->family, attribs) ? 1 : 0);
             }
 
-            if(session && session->plc_type != CIP_PLC_NONE && session->use_connected_msg != use_connected_msg) {
+            if(session && session->named_family && session->use_connected_msg != use_connected_msg) {
                 pdebug(DEBUG_MODULE_CIP, DEBUG_WARN, 0,
                        "use_connected_msg=%d conflicts with the existing connection's %d!  Use a different "
                        "connection_group_id.",
@@ -2772,18 +2715,8 @@ static int find_or_create_on_list(cip_conn_list_t *list, const cip_family_t *fam
  * wait for.
  */
 static void session_list_teardown(cip_conn_list_t *list, debug_module_t debug_module) {
-    pdebug(debug_module, DEBUG_INFO, 0, "Starting.");
+    int32_t remaining = session_list_count(list);
 
-    if(list->conns) {
-        if(vector_length(list->conns) > 0) {
-            pdebug(debug_module, DEBUG_WARN, 0, "%d connections are still referenced at teardown!", vector_length(list->conns));
-        }
-
-        vector_destroy(list->conns);
-        list->conns = NULL;
-    }
-
-    /* list->mutex stays: a late destructor still locks it (session_list_remove()). */
-
-    pdebug(debug_module, DEBUG_INFO, 0, "Done.");
+    /* the list and its mutex stay: a late destructor still unlinks itself (session_list_remove()). */
+    if(remaining > 0) { pdebug(debug_module, DEBUG_WARN, 0, "%" PRId32 " connections are still referenced at teardown!", remaining); }
 }

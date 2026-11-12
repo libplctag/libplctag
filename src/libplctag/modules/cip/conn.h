@@ -37,7 +37,7 @@
 #include <libplctag/lib/tag_driver.h>
 #include <libplctag/lib/conn_timeouts.h>
 #include <libplctag/lib/conn_watch.h>
-#include <libplctag/modules/cip/plc_type.h>
+#include <libplctag/lib/tag.h>
 #include <platform.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -278,7 +278,7 @@ struct cip_tag_t;
  */
 typedef struct {
     mutex_t mutex; /* initialized once, never destroyed: a late destructor still locks it */
-    vector_p conns;
+    struct cip_conn_t *head; /* linked through cip_conn_t.next, under mutex */
 } cip_conn_list_t;
 
 
@@ -288,6 +288,9 @@ typedef struct {
  * in what one is.
  */
 typedef struct cip_conn_t {
+    /* must be first: tags hold this pointer as their counted reference. */
+    conn_base_t base;
+
     /*
      * The handler thread's state machine position.  It lives on the object rather than on
      * the handler's stack so that something outside the handler can observe it.  Only the
@@ -295,7 +298,8 @@ typedef struct cip_conn_t {
      */
     session_state_t state;
 
-    int on_list;
+    bool on_list;
+    struct cip_conn_t *next;     /* the owner list's link, under its mutex */
     cip_conn_list_t *owner_list; /* the module list this connection belongs to */
 
     /* gateway connection related info */
@@ -342,11 +346,12 @@ typedef struct cip_conn_t {
     int connection_group_id;
 
     /*
-     * The PLC type the tag string named, CIP_PLC_NONE when it named none.  Part of the match
-     * key, and fixed for the connection's life: a probed connection stays NONE after it has
-     * identified the device, so later tags that also name no PLC still find it.
+     * The family the tag string named, NULL when it named none.  Part of the match key, and
+     * fixed for the connection's life: a probed connection stays NULL after it has identified
+     * the device, so later tags that also name no PLC still find it.  The plain family even for
+     * a DH+ path, as cip_family_from_attributes() returns it.
      */
-    cip_plc_type_t plc_type;
+    const cip_family_t *named_family;
 
     /*
      * Why the Identity probe refused the device, PLCTAG_STATUS_OK if it has not.  A refusal is
@@ -366,8 +371,8 @@ typedef struct cip_conn_t {
      * it through cip_conn_family().  Everything else that reads it runs after a tag has
      * been set up, or on the handler thread itself.
      *
-     * Shared code reads what the family implies -- min_payload_size, DH+ -- rather than
-     * plc_type, so it never has to know which family this is.  A tag asks the connection
+     * Shared code reads what the family implies -- min_payload_size, DH+ -- so it never has to
+     * know which family this is.  A tag asks the connection
      * whether it is DH+ instead of re-reading a path attribute it may not have -- a cloned
      * tag has no path of its own.
      */
@@ -455,7 +460,8 @@ typedef cip_conn_t *cip_conn_p;
 /* shared connection handling, see modules/cip/conn.c */
 
 extern uint16_t next_conn_serial_number(uint16_t current);
-extern uint64_t session_get_new_seq_id(cip_conn_p conn);
+/* the next PCCC transaction number.  Call with session_mutex held. */
+extern uint16_t cip_conn_next_tns_unsafe(cip_conn_p conn);
 extern int session_get_available_cip_payload_space(cip_conn_p conn);
 
 /*

@@ -82,4 +82,9 @@ extern const cip_family_t *cip_family_from_attributes(attr attribs);
  * connection holds.  Registered in lib/init.c's tag_type_map.
  */
 extern int cip_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                          void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
+                          void *userdata, plc_tag_p *tag_out);
+
+/* every CIP connection's create_tag; see conn_base_t. */
+extern int cip_conn_create_tag(conn_base_t *base, attr attribs,
+                               void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                               void *userdata, plc_tag_p *tag_out);

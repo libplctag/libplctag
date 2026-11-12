@@ -43,6 +43,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
 #include <utils/debug.h>
@@ -84,3 +85,15 @@ extern int32_t conn_get_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t def
  * anything, when there is no connection to set it on.
  */
 extern int32_t conn_set_retry_max_delay_ms(atomic_int32_t *delay_ms, int32_t value, int32_t tag_id, debug_module_t debug_module);
+
+
+/* room for any DNS name (253) or address, plus the terminator. */
+#define CONN_HOST_MAX (256)
+
+/*
+ * Split a "host[:port]" gateway into host and port, with default_port when there is none.  The
+ * host is copied into host_buf, so nothing is allocated.  PLCTAG_ERR_BAD_CONFIG for an empty
+ * host, a host too long for host_buf, or a port that is not a number in 1..65535.
+ */
+extern int32_t conn_split_gateway(const char *gateway, int default_port, char *host_buf, size_t host_buf_size, int *port,
+                                  debug_module_t debug_module);

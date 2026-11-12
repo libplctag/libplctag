@@ -42,6 +42,7 @@
 #include <platform.h>
 #include <utils/atomic_utils.h>
 #include <utils/attr.h>
+#include <utils/byte_buffer.h>
 #include <utils/debug.h>
 
 
@@ -58,7 +59,23 @@ typedef int (*tag_vtable_func)(plc_tag_p tag);
  */
 typedef int (*tag_create_function)(attr attributes,
                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                                   void *userdata, plc_tag_p src_tag, plc_tag_p *tag_out);
+                                   void *userdata, plc_tag_p *tag_out);
+
+/*
+ * The head of every connection object: CIP connections and Modbus PLC objects begin with it.
+ * It must be the first member, so a tag's counted reference is the pointer rc_alloc() returned.
+ *
+ * create_tag makes a tag on this connection, with the same contract as tag_create_function.
+ * It takes its own reference to the connection; the caller keeps its own.
+ * plc_tag_create_from_tag() makes a clone through the source tag's connection this way.
+ */
+typedef struct conn_base_t conn_base_t;
+
+struct conn_base_t {
+    int (*create_tag)(conn_base_t *conn, attr attributes,
+                      void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata,
+                      plc_tag_p *tag_out);
+};
 
 /*
  * What one encoded request will cost, filled in by the encoder.  A handler that bundles
@@ -69,16 +86,6 @@ typedef struct {
     int32_t reply_size; /* expected reply bytes, 0 when not known yet */
     bool packable;      /* may share an exchange with other requests */
 } tag_op_plan_t;
-
-/*
- * Write one request into dest, which holds capacity bytes, and describe it in plan.  Returns
- * PLCTAG_ERR_TOO_SMALL when it does not fit.  Encoding has no side effects on the tag's
- * progress, so a request that did not fit can be encoded again later.
- */
-typedef int (*tag_encode_func)(plc_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
-
-/* Apply one reply to the tag.  Returns OK when the operation is done, PENDING when it needs another exchange. */
-typedef int (*tag_decode_func)(plc_tag_p tag, uint8_t *reply, int32_t reply_size);
 
 /*
  * Runtime attribute descriptors.  The core and each protocol publish a NULL-name-terminated
@@ -162,32 +169,12 @@ struct tag_vtable_t {
      */
     tag_vtable_func tag_data_written;
 
-    /*
-     * The protocol's wire format, for a handler that drives the tag's operations itself.  NULL
-     * where the protocol does not use them or the tag does not support that direction.
-     */
-    tag_encode_func encode_read;
-    tag_decode_func decode_read;
-    tag_encode_func encode_write;
-    tag_decode_func decode_write;
-
     /* Runtime attributes this protocol publishes, NULL-name-terminated.  Consulted before
      * the core table, so a protocol can override or suppress a core attribute. */
     const attr_def_t *attribs;
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
-
-typedef enum {
-    TAG_PROTOCOL_UNKNOWN = 0,
-    TAG_PROTOCOL_SYSTEM = 1,
-    TAG_PROTOCOL_AB = 2,
-    TAG_PROTOCOL_AB_CONNECTION = 3,
-    TAG_PROTOCOL_MODBUS = 4,
-    TAG_PROTOCOL_OMRON = 5,
-    TAG_PROTOCOL_MB_CONNECTION = 6,
-    TAG_PROTOCOL_OMRON_CONNECTION = 7
-} tag_protocol_t;
 
 
 /* Shared connection event types — used by AB, Modbus, and Omron connection tags */
@@ -287,16 +274,23 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     /* atomic so that plc_tag_read() can test it before taking the API mutex. */       \
     atomic_int64_t read_cache_expire;                                                   \
     atomic_int64_t read_cache_ms;                                                       \
-    uint8_t *data;                                                                      \
+    byte_buffer_t *buf;                                                                 \
+    /* buf is part of the tag allocation: its size never changes and it is never freed. */ \
+    bool buf_is_fixed;                                                                  \
     tag_byte_order_t *byte_order;                                                       \
     cond_p tag_cond_wait;                                                               \
     mutex_t api_mutex;                                                                  \
     mutex_t ext_mutex;                                                                  \
-    tag_extended_callback_func callback;                                                \
+    /* one pointer: plc_tag_register_callback() stores the plain form, without a cast. */  \
+    union {                                                                             \
+        tag_extended_callback_func callback;                                            \
+        tag_callback_func plain_callback;                                               \
+    };                                                                                  \
+    bool callback_is_plain;                                                             \
     /* callback is set; written with it, read without the API mutex. */                \
     atomic_bool has_callback;                                                           \
-    /* what made this tag; a clone of it is made the same way. */                       \
-    tag_create_function create_func;                                                    \
+    /* counted reference to the tag's connection; NULL for a system tag. */              \
+    conn_base_t *conn;                                                                  \
     tag_vtable_p vtable;                                                                \
     void *userdata;                                                                     \
     int32_t auto_sync_read_ms;                                                          \
@@ -309,13 +303,11 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     bool find_or_create_tag;                                                               \
     /* the attribute string, set while the tag is in the reuse map.  Under reuse_lock. */  \
     char *reuse_key;                                                                    \
-    int32_t size;                                                                       \
     int32_t tag_id;                                                                     \
     int32_t elem_count;                                                                 \
     int32_t elem_size; /* bytes, except Modbus: bits */                                 \
     int32_t connection_group_id;                                                        \
     int32_t bit;                                                                        \
-    tag_protocol_t protocol_type;                                                       \
     atomic_bool abort_requested;                                                        \
     /* tag_op_state_t; see tag_op_state(). */                                          \
     atomic_int32_t op_state;                                                            \
@@ -364,14 +356,14 @@ extern atomic_bool lib_active;
  * offset + count.  That sum can exceed INT_MAX, and signed overflow is undefined
  * behavior -- a bounds check that overflows to a negative value happily reports
  * that a wildly out-of-range access is fine.  Instead every operand is forced
- * non-negative first, which makes tag->size - offset provably in range, and the
+ * non-negative first, which makes the length minus offset provably in range, and the
  * comparison is done against the space remaining.
  */
 static inline bool tag_range_is_valid(plc_tag_p tag, int offset, int count) {
-    if(offset < 0 || count < 0 || tag->size < 0) { return false; }
+    if(offset < 0 || count < 0 || byte_buffer_len(tag->buf) < 0) { return false; }
 
     /* both operands are now in [0, INT32_MAX], so this subtraction cannot overflow. */
-    return count <= tag->size - offset;
+    return count <= byte_buffer_len(tag->buf) - offset;
 }
 
 

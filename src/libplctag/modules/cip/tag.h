@@ -36,7 +36,6 @@
 #include <libplctag/lib/tag.h>
 #include <utils/debug.h>
 #include <libplctag/modules/cip/conn.h>
-#include <libplctag/modules/cip/plc_type.h>
 #include <libplctag/api/libplctag.h>
 #include <stdint.h>
 #include <utils/atomic_utils.h>
@@ -100,6 +99,30 @@ typedef enum {
 } pccc_file_t;
 
 
+typedef struct cip_tag_t *cip_tag_p;
+
+/*
+ * A tag kind's wire format, set with its vtable when the family sets the tag up.  The
+ * connection's handler calls these; NULL where the kind does not do that direction.
+ *
+ * encode: write one request into dest, which holds capacity bytes, and describe it in plan.
+ * PLCTAG_ERR_TOO_SMALL when it does not fit.  No side effects on the tag's progress, so a
+ * request that did not fit can be encoded again later.
+ *
+ * decode: apply one reply, the CIP message with the framing stripped.  OK when the operation
+ * is done, PENDING when it needs another exchange.
+ *
+ * sent: optional.  The handler is putting the request just encoded at request on the wire,
+ * under session_mutex.  For what can only be drawn once the request is sure to go: PCCC's TNS.
+ */
+typedef struct {
+    int (*encode_read)(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+    int (*decode_read)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+    int (*encode_write)(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
+    int (*decode_write)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
+    void (*sent)(cip_tag_p tag, uint8_t *request);
+} cip_tag_codec_t;
+
 /*
  * The one tag struct every CIP family uses.
  *
@@ -128,9 +151,12 @@ struct cip_tag_t {
 
     /*
      * What this tag's family can do, set once at creation.  The shared engines read this
-     * instead of asking what plc_type is.  See cip/standard_tag.h.
+     * instead of asking which family this is.  See cip/standard_tag.h.
      */
     const struct cip_standard_tag_ops_t *std_ops;
+
+    /* this tag kind's wire format; NULL until the family sets the tag up. */
+    const cip_tag_codec_t *codec;
 
     /*
      * The module ID this tag's work is logged under.  Callers filter on these, so a
@@ -177,11 +203,8 @@ struct cip_tag_t {
     int32_t offset;
     bool allow_packing;
 
-    /* how do we talk to this device? */
-    cip_plc_type_t plc_type;
-
-    /* pointer back to the connection */
-    cip_conn_p session;
+    /* PCCC only: the request prefix and reply checks, plain or DH+.  See ab/pccc.h. */
+    const struct pccc_framing_t *pccc_framing;
 
 
     /* PCCC only: the data file this tag addresses. */
@@ -209,7 +232,8 @@ struct cip_tag_t {
     atomic_bool activated;
 };
 
-typedef struct cip_tag_t *cip_tag_p;
+/* the tag's connection.  Every CIP tag's conn is a cip_conn_t: its base is the first member. */
+static inline cip_conn_p cip_tag_conn(cip_tag_p tag) { return (cip_conn_p)tag->conn; }
 
 
 /*
@@ -237,13 +261,13 @@ extern void cip_tag_fail_create(cip_tag_p tag, plctag_error_code_t rc);
  * The vtable's abort entry for tags with a create read: an abort while it is out fails the
  * create, and an abort after the create failed leaves that error alone.
  */
-extern int cip_data_tag_abort(cip_tag_p tag);
+extern int cip_data_tag_abort(plc_tag_p tag);
 
 /*
  * The vtable's status entry: the create error if the create failed, PENDING while an
  * operation is in flight, else tag->status.
  */
-extern int cip_tag_status(cip_tag_p tag);
+extern int cip_tag_status(plc_tag_p tag);
 
 /*
  * The vtable's abort entry: take the tag off its connection's list and out of any exchange in
@@ -271,6 +295,86 @@ extern int32_t cip_tag_get_gateway_port(plc_tag_p raw_tag, int32_t *result);
 extern int32_t cip_tag_get_path(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length);
 extern int32_t cip_tag_get_path_size(plc_tag_p raw_tag);
 extern int32_t cip_tag_get_conn_only_use_old_forward_open(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_raw_tag_type_bytes(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length);
+extern int32_t cip_tag_get_raw_tag_type_bytes_size(plc_tag_p raw_tag);
+extern int32_t cip_tag_get_raw_tag_type_bytes_length(plc_tag_p raw_tag, int32_t *result);
+extern int32_t cip_tag_get_plc(plc_tag_p raw_tag, uint8_t *buffer, int32_t buffer_length);
+extern int32_t cip_tag_get_plc_size(plc_tag_p raw_tag);
+
+/*
+ * The attribute table entries every CIP tag shares, for a family table to start with.  Only
+ * elem_type differs: a PCCC tag reports its data file type there.
+ */
+#define CIP_TAG_COMMON_ATTRIBS                                                                                          \
+    {.name = "elem_size",                                                                                               \
+     .type = ATTR_TYPE_INT,                                                                                             \
+     .description = "The size in bytes of a single element of this tag.",                                               \
+     .get_int = cip_tag_get_elem_size},                                                                                 \
+        {.name = "elem_count",                                                                                          \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "The number of elements this tag holds.",                                                       \
+         .get_int = cip_tag_get_elem_count},                                                                            \
+        {.name = "connection_status",                                                                                   \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "The state of the connection this tag uses, as a plc_tag_conn_status_t.",                       \
+         .get_int = cip_tag_get_connection_status},                                                                     \
+        {.name = "connection_inactivity_timeout_ms",                                                                    \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "Disconnect the connection after this many milliseconds without traffic.",                      \
+         .get_int = cip_tag_get_connection_inactivity_timeout_ms,                                                       \
+         .set_int = cip_tag_set_connection_inactivity_timeout_ms},                                                      \
+        {.name = "connection_retry_max_delay_ms",                                                                       \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "Longest delay between reconnect attempts after an error, in milliseconds.  Shared by every "   \
+                        "tag on this connection.  A change applies from the next retry; a wait already running is not " \
+                        "cut short.",                                                                                   \
+         .get_int = cip_tag_get_connection_retry_max_delay_ms,                                                          \
+         .set_int = cip_tag_set_connection_retry_max_delay_ms},                                                         \
+        {.name = "raw_tag_type_bytes",                                                                                  \
+         .type = ATTR_TYPE_BYTES,                                                                                       \
+         .description = "The encoded CIP type information for this tag, empty when the PLC sends none.",                \
+         .get_bytes = cip_tag_get_raw_tag_type_bytes,                                                                   \
+         .get_bytes_size = cip_tag_get_raw_tag_type_bytes_size},                                                        \
+        /* Deprecated: it predates plc_tag_get_attribute_size(). */                                                     \
+        {.name = "raw_tag_type_bytes.length",                                                                           \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "Deprecated, use plc_tag_get_attribute_size(). The size of raw_tag_type_bytes in bytes.",       \
+         .get_int = cip_tag_get_raw_tag_type_bytes_length},                                                             \
+        {.name = "plc",                                                                                                 \
+         .type = ATTR_TYPE_STRING,                                                                                      \
+         .description = "The PLC family this tag talks to, as a canonical name.",                                       \
+         .get_bytes = cip_tag_get_plc,                                                                                  \
+         .get_bytes_size = cip_tag_get_plc_size},                                                                       \
+        {.name = "use_connected_msg",                                                                                   \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "This tag uses CIP connected messaging.",                                                       \
+         .get_int = cip_tag_get_use_connected_msg},                                                                     \
+        {.name = "allow_packing",                                                                                       \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "This tag's requests may be packed with others into one CIP request.",                          \
+         .get_int = cip_tag_get_allow_packing},                                                                         \
+        {.name = "gateway",                                                                                             \
+         .type = ATTR_TYPE_STRING,                                                                                      \
+         .description = "The host name or address of the gateway this tag's connection uses.",                          \
+         .get_bytes = cip_tag_get_gateway,                                                                              \
+         .get_bytes_size = cip_tag_get_gateway_size},                                                                   \
+        {.name = "gateway_port",                                                                                        \
+         .type = ATTR_TYPE_INT,                                                                                         \
+         .description = "The TCP port this tag's connection uses.",                                                     \
+         .get_int = cip_tag_get_gateway_port},                                                                          \
+        {.name = "path",                                                                                                \
+         .type = ATTR_TYPE_BYTES,                                                                                       \
+         .description = "The encoded CIP path from the gateway to the PLC.",                                            \
+         .get_bytes = cip_tag_get_path,                                                                                 \
+         .get_bytes_size = cip_tag_get_path_size},                                                                      \
+    {                                                                                                                   \
+        .name = "conn_only_use_old_forward_open", .type = ATTR_TYPE_INT,                                                \
+        .description = "This tag's connection uses the original Forward Open only, never the large one.",               \
+        .get_int = cip_tag_get_conn_only_use_old_forward_open                                                           \
+    }
+
+/* the table for every CIP tag but PCCC data files: elem_type is the CIP element type. */
+extern const attr_def_t cip_tag_attribs[];
 
 /* true when a status code is a failure rather than OK or PENDING. */
 #define rc_is_error(rc) ((rc) < PLCTAG_STATUS_OK)
@@ -297,15 +401,9 @@ extern int cip_encode_tag_name(cip_tag_p tag, const char *name);
 extern tag_byte_order_t cip_short_string_byte_order;
 
 extern int cip_setup_special_tag(cip_tag_p tag, cip_elem_type_t elem_type, tag_byte_order_t *byte_order,
-                                 tag_vtable_p vtable, debug_module_t debug_module);
+                                 tag_vtable_p vtable, const cip_tag_codec_t *codec, debug_module_t debug_module);
 
 
-/* Write one request for the tag; the CIP form of tag_encode_func. */
-typedef int (*cip_tag_encode_func)(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
-
-
-/* Parse a reply: the CIP message the connection delivered for this tag, framing stripped. */
-typedef int (*cip_tag_decode_func)(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
 
 
 /* the vtable's activate: the library has finished the tag, so the handler may now see it. */
@@ -332,21 +430,20 @@ extern int cip_tag_write_start(plc_tag_p tag_arg);
  *
  * Every CIP constructor runs the same skeleton: allocate, initialise the generic parts,
  * resolve the element count, then size the tag either from the attributes or by leaving it
- * for the PLC to say.  Only the debug module and the protocol tag differ, so they are
- * parameters -- the default vtable among them, because each module's carries its own
- * attribute table -- and the rest lives here.  A family that skips one of these is a family whose
+ * for the PLC to say.  Only the debug module and the starting vtable differ, so they are
+ * parameters, and the rest lives here.  A family that skips one of these is a family whose
  * tags are missing a check, which is how the Rockwell side came to have no bound on the
  * element count at all.
  */
 extern cip_tag_p cip_tag_alloc(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
-                               void *userdata, tag_protocol_t protocol_type, tag_vtable_p default_vtable,
+                               void *userdata, tag_vtable_p default_vtable,
                                debug_module_t debug_module);
 extern int cip_tag_resolve_elem_count(cip_tag_p tag, attr attribs, debug_module_t debug_module);
 
 /* for a tag whose size the PLC reports on the first read. */
 extern int cip_tag_size_from_plc(cip_tag_p tag, debug_module_t debug_module);
 
-/* for a tag whose size the caller states through elem_size.  Allocates tag->data. */
+/* for a tag whose size the caller states through elem_size.  Allocates the tag data buffer. */
 extern int cip_tag_size_from_attributes(cip_tag_p tag, attr attribs, debug_module_t debug_module);
 
 

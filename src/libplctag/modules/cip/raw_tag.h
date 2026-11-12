@@ -40,8 +40,7 @@
  * the wire verbatim, adds the EIP and CPF framing, and hands the whole CIP response back.
  * Nothing in that is family-specific, so nothing here is.
  *
- * Each family still owns its vtable: the abort entry point and the attribute table are
- * its own, and so is the debug module ID callers filter on.
+ * The family names only the debug module ID callers filter on.
  */
 
 #include <libplctag/lib/tag.h>
@@ -60,10 +59,5 @@
 extern tag_byte_order_t cip_raw_tag_byte_order;
 
 
-/* the two vtable entry points; the family supplies the rest of its vtable. */
-extern int cip_raw_tag_tickler(cip_tag_p tag);
-extern int cip_raw_tag_encode_write(cip_tag_p tag, uint8_t *dest, int32_t capacity, tag_op_plan_t *plan);
-extern int cip_raw_tag_decode_write(cip_tag_p tag, uint8_t *reply, int32_t reply_size);
-
-/* set a freshly created tag up as a raw tag of this family. */
-extern int cip_raw_tag_setup(cip_tag_p tag, tag_vtable_p vtable, debug_module_t debug_module);
+/* set a freshly created tag up as a raw tag, logging under debug_module. */
+extern int cip_raw_tag_setup(cip_tag_p tag, debug_module_t debug_module);
