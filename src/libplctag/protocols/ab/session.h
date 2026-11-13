@@ -117,8 +117,12 @@ struct ab_session_t {
     /* why identify refused the device, or OK.  Under session_mutex. */
     int32_t identify_rc;
 
+    /* the Forward Open path: the route, then the Message Router when connected. */
     uint8_t *conn_path;
     uint8_t conn_path_size;
+    /* the route alone, which an Unconnected Send carries. */
+    uint8_t *route_path;
+    uint8_t route_path_size;
     uint16_t dhp_dest;
     int is_dhp;
 

@@ -157,17 +157,20 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     /*
      * Point data at the backing store.  The size is the size of the payload the named tag
      * actually carries, not the size of the backing store, so that plc_tag_get_size() and the
-     * bounds checks in the data accessors both report the truth.  An unrecognized name gets the
-     * whole buffer since read and write will refuse it anyway.
+     * bounds checks in the data accessors both report the truth.  Only version and debug exist,
+     * so any other name fails the create.
      */
     tag->data = &tag->backing_data[0];
+    tag->data_is_fixed = true;
 
     if(str_cmp_i(&tag->name[0], "version") == 0) {
         tag->size = (int)(str_length(VERSION) + 1);
     } else if(str_cmp_i(&tag->name[0], "debug") == 0) {
         tag->size = (int)sizeof(int32_t);
     } else {
-        tag->size = (int)sizeof(tag->backing_data);
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, 0, "Unsupported system tag name \"%s\"!", tag->name);
+        tag->size = 0;
+        tag->status = PLCTAG_ERR_BAD_PARAM;
     }
 
     pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, tag->tag_id, "Done");

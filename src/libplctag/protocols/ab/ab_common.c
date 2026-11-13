@@ -421,8 +421,8 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         return (plc_tag_p)tag;
     }
 
-    /* make sure that the connection requirement is forced. */
-    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
+    /* make sure that the connection requirement is forced.  Without a PLC type it is not known yet. */
+    if(plc) { attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg); }
 
 
     /*

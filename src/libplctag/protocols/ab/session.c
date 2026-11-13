@@ -317,7 +317,7 @@ int session_get_available_cip_payload_space(ab_session_p session) {
             result -= (int)sizeof(cpf_connected_data_item);
         } else {
             result -= (int)sizeof(cpf_unconnected_data_item);
-            result -= (int)(session->conn_path_size) + 2; /* encoded path size plus two bytes for length and padding */
+            result -= (int)(session->route_path_size) + 2; /* encoded route size plus two bytes for length and padding */
         }
     }
     if(result < 0) {
@@ -569,6 +569,10 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
     size_t conn_path_offset = 0;
     uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
     int tmp_conn_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
+    uint8_t tmp_route_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    int tmp_route_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
+    int route_needs_connection = 0;
+    size_t route_path_offset = 0;
     int is_dhp = 0;
     uint16_t dhp_dest = 0;
 
@@ -625,6 +629,12 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
 
     /* encode the path */
     rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+
+    /* the same path without the Message Router, for unconnected requests. */
+    if(rc == PLCTAG_STATUS_OK) {
+        rc = cip_encode_path(path, &route_needs_connection, plc_type, &tmp_route_path[0], &tmp_route_path_size, &is_dhp,
+                             &dhp_dest);
+    }
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Unable to convert path string to binary path, error %s!",
                plc_tag_decode_error(rc));
@@ -634,6 +644,9 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
     conn_path_offset = total_allocation_size;
     /* room for the Message Router that identify may add. */
     total_allocation_size += (size_t)tmp_conn_path_size + sizeof(cip_router_path);
+
+    route_path_offset = total_allocation_size;
+    total_allocation_size += (size_t)tmp_route_path_size;
 
     /* allocate the session struct and the buffer in the same allocation. */
     pdebug(
@@ -668,6 +681,10 @@ ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, c
         session->conn_path_size = (uint8_t)tmp_conn_path_size;
         mem_copy(session->conn_path, tmp_conn_path, tmp_conn_path_size);
     }
+
+    session->route_path = (uint8_t *)(session) + route_path_offset;
+    session->route_path_size = (uint8_t)tmp_route_path_size;
+    mem_copy(session->route_path, tmp_route_path, tmp_route_path_size);
 
 
     /*
@@ -2186,10 +2203,10 @@ int frame_cip_request(ab_session_p session, ab_request_p request) {
     size_t header_size = 0;
     size_t total_size = 0;
     uint8_t *cip = NULL;
-    bool wrapped = (!request->connected && session->conn_path_size > 0);
+    bool wrapped = (!request->connected && session->route_path_size > 0);
     /* an odd-length embedded request is padded to a word before the route path; the length does not count it. */
     size_t pad_size = ((wrapped && (request->request_size & 1)) ? 1 : 0);
-    size_t path_size = (wrapped ? (size_t)session->conn_path_size + 2 + pad_size : 0);
+    size_t path_size = (wrapped ? (size_t)session->route_path_size + 2 + pad_size : 0);
 
     if(request->connected) {
         header_size = sizeof(eip_cip_co_req);
@@ -2250,9 +2267,9 @@ int frame_cip_request(ab_session_p session, ab_request_p request) {
             if(pad_size) { cip[request->request_size] = 0; }
 
             /* route path: size in words, a reserved byte, then the path. */
-            path[0] = (uint8_t)(session->conn_path_size / 2);
+            path[0] = (uint8_t)(session->route_path_size / 2);
             path[1] = 0;
-            mem_copy(path + 2, session->conn_path, session->conn_path_size);
+            mem_copy(path + 2, session->route_path, session->route_path_size);
         }
     }
 
@@ -2271,7 +2288,7 @@ int get_payload_size(ab_session_p session, ab_request_p request) {
     }
 
     /* the available space already allows for the route path; the Unconnected Send wrapper is the rest. */
-    wrapped = (!request->connected && session->conn_path_size > 0);
+    wrapped = (!request->connected && session->route_path_size > 0);
 
     return request->request_size + (wrapped ? CIP_UC_SEND_WRAPPER_SIZE + (request->request_size & 1) : 0);
 }
@@ -3376,7 +3393,7 @@ int session_identify(ab_session_p session) {
 
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Device is vendor %u, \"%s\".", (unsigned int)vendor_id, product_name);
 
-        rc = ab_plc_type_from_identity(vendor_id, product_name, session->conn_path_size > 0, &plc_type);
+        rc = ab_plc_type_from_identity(vendor_id, product_name, session->route_path_size > 0, &plc_type);
     } while(0);
 
     plc = (rc == PLCTAG_STATUS_OK) ? ab_plc_type_get(plc_type) : NULL;

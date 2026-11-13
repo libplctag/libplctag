@@ -514,6 +514,7 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
 
     /* point the data just after the tag struct. */
     (*tag)->data = (uint8_t *)((*tag) + 1);
+    (*tag)->data_is_fixed = true;
 
     /* set the various size/element fields. */
     (*tag)->reg_base = (uint16_t)(unsigned int)reg_base;

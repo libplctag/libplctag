@@ -242,6 +242,8 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     int64_t read_cache_expire;               \
     int64_t read_cache_ms;                   \
     uint8_t *data;                           \
+    /* data is part of the tag's own allocation, so it cannot be resized. */ \
+    bool data_is_fixed;                      \
     tag_byte_order_t *byte_order;            \
     cond_p tag_cond_wait;                    \
     mutex_t api_mutex;                       \
@@ -257,6 +259,10 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     atomic_int32_t destroy_idle_sec;         \
     /* last read or write start, or auto-destroy change.  Under api_mutex. */ \
     int64_t last_activity_ms;                \
+    /* reads the tickler has completed, and the last one's result, so a waiting plc_tag_read() \
+     * knows its own read ended even if the next one has started.  Under api_mutex. */ \
+    uint32_t reads_done;                     \
+    int8_t last_read_rc;                     \
     /* created with find_or_create_tag=1. */ \
     bool find_or_create_tag;                 \
     /* the tag string while the tag is in the reuse table.  Under tag_lookup_mutex. */ \

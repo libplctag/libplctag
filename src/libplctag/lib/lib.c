@@ -754,6 +754,8 @@ THREAD_FUNC(tag_tickler_func) {
                 if(tag->read_complete) {
                     tag->read_complete = 0;
                     tag->read_in_flight = 0;
+                    tag->reads_done++;
+                    tag->last_read_rc = tag->status;
 
                     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Raising read complete event.");
 
@@ -2090,6 +2092,8 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
  */
 
 LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
+    uint32_t reads_done_before = 0;
+    bool own_read_done = false;
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
     int is_done = 0;
@@ -2155,6 +2159,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
 
         tag->read_in_flight = 1;
         tag->status = PLCTAG_STATUS_PENDING;
+        reads_done_before = tag->reads_done;
 
         /* clear the condition var */
         cond_clear(tag->tag_cond_wait);
@@ -2206,6 +2211,13 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
              * a bad-parameter error instead of the timeout that actually
              * happened, so stop here and report the timeout itself.
              */
+            /* this call's read has ended, even if the callback has already started the next one. */
+            critical_block(&tag->api_mutex) {
+                own_read_done = (tag->reads_done != reads_done_before);
+                if(own_read_done) { rc = tag->last_read_rc; }
+            }
+            if(own_read_done) { break; }
+
             if(timeout_left <= 0) {
                 rc = PLCTAG_ERR_TIMEOUT;
                 break;
@@ -2215,6 +2227,14 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
 
             /* wait for something to happen */
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+
+            /* a read started by the callback clears the wake-up, so check before taking a timeout. */
+            critical_block(&tag->api_mutex) {
+                own_read_done = (tag->reads_done != reads_done_before);
+                if(own_read_done) { rc = tag->last_read_rc; }
+            }
+            if(own_read_done) { break; }
+
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Error %s while waiting for tag read to complete!",
                        plc_tag_decode_error(rc));
@@ -2233,7 +2253,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
 
-        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
+        if(!own_read_done && rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Timeout expired waiting for tag read to complete!");
 
             /*
@@ -2246,8 +2266,10 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             rc = PLCTAG_ERR_TIMEOUT;
         }
 
-        /* the read is not in flight anymore. */
+        /* the read is not in flight anymore.  When the tickler ended it, the next read may be. */
         critical_block(&tag->api_mutex) {
+            if(own_read_done) { break; }
+
             tag->read_in_flight = 0;
             tag->read_complete = 0;
             /* is_done = 1; */
@@ -2795,7 +2817,10 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    critical_block(&tag->api_mutex) { rc = resize_tag_buffer_unsafe(tag, new_size); }
+    /* the I/O thread uses the buffer while an op is in flight. */
+    critical_block(&tag->api_mutex) {
+        rc = (tag->read_in_flight || tag->write_in_flight) ? PLCTAG_ERR_BUSY : resize_tag_buffer_unsafe(tag, new_size);
+    }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -5373,6 +5398,12 @@ int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size) {
 
     do {
         uint8_t *new_data = NULL;
+
+        if(tag->data_is_fixed) {
+            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "This tag's data buffer cannot be resized!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
 
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Changing the tag buffer size from %d to %d.", tag->size, new_size);
 
