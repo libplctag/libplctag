@@ -221,11 +221,10 @@ def build_manifest() -> list[Test]:
         test("auto-destroy idle tags (ControlLogix)",
              [exe("test_auto_destroy"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
-        # DISABLED until rolled-back code returns
-        # test("find_or_create_tag finds or creates a shared tag (ControlLogix)",
-        #      [exe("test_find_or_create_tag"),
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
-        #       f"--missing-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=No_Such_Tag"]),
+        test("find_or_create_tag finds or creates a shared tag (ControlLogix)",
+             [exe("test_find_or_create_tag"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
+              f"--missing-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=No_Such_Tag"]),
         test("auto-destroy does not reconnect an idle connection (ControlLogix)",
              [exe("test_auto_destroy"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
@@ -543,16 +542,13 @@ def build_manifest() -> list[Test]:
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=TestBigArray",
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1000&name=TestBigArray"]),
         # Each @connection test watches its own connection, so they run alongside anything.
-        # DISABLED until rolled-back code returns
-        # test("connection tag connection state transitions (ControlLogix)",
-        #      [exe("test_connection_tag"),
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
-        # DISABLED until rolled-back code returns
-        # test("connection tag connection state transitions (Micrologix)",
-        #      [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=Micrologix&name=@connection"]),
-        # DISABLED until rolled-back code returns
-        # test("connection tag connection state transitions (PLC5)",
-        #      [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&name=@connection"]),
+        test("connection tag connection state transitions (ControlLogix)",
+             [exe("test_connection_tag"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
+        test("connection tag connection state transitions (Micrologix)",
+             [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=Micrologix&name=@connection"]),
+        test("connection tag connection state transitions (PLC5)",
+             [exe("test_connection_tag"), f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&name=@connection"]),
         # Destroy from inside READ_COMPLETED; ASan catches userdata used after DESTROYED frees it.
         test("destroy tag from inside its own callback (ControlLogix)",
              [exe("test_callback_destroy"),
@@ -654,9 +650,8 @@ def build_logix_matrix() -> list[Test]:
         # DISABLED until rolled-back code returns
         # tests.append(test(f"{target.label}: raw cip, unconnected",
         #                   [exe("test_raw_cip"), f"--tag={base}&use_connected_msg=0&name=@raw"]))
-        # DISABLED until rolled-back code returns
-        # tests.append(test(f"{target.label}: connection tag state transitions",
-        #                   [exe("test_connection_tag"), f"--tag={base}&name=@connection"]))
+        tests.append(test(f"{target.label}: connection tag state transitions",
+                          [exe("test_connection_tag"), f"--tag={base}&name=@connection"]))
         # No plc, so each CPU is identified through its own route.  @raw names no tag.
         # DISABLED until rolled-back code returns
         # tests.append(test(f"{target.label}: no plc, raw cip",

@@ -257,6 +257,13 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     atomic_int32_t destroy_idle_sec;         \
     /* last read or write start, or auto-destroy change.  Under api_mutex. */ \
     int64_t last_activity_ms;                \
+    /* created with find_or_create_tag=1. */ \
+    bool find_or_create_tag;                 \
+    /* the tag string while the tag is in the reuse table.  Under tag_lookup_mutex. */ \
+    char *reuse_key;                         \
+    /* the create has ended, and how.  Under api_mutex. */ \
+    bool create_done;                        \
+    int8_t create_result;                    \
     int32_t size;                            \
     int32_t tag_id;                          \
     int connection_group_id;                 \

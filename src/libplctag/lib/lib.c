@@ -79,6 +79,8 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
  * (tag->instance holds one per tag). */
 struct lib_instance_t {
     hashtable_p tags;
+    /* hash64() of the tag string -> tag, for tags created with find_or_create_tag=1.  Under tag_lookup_mutex. */
+    hashtable_p reuse;
     mutex_t tag_lookup_mutex;
     cond_p tag_tickler_wait;
     thread_p tag_tickler_thread;
@@ -118,7 +120,13 @@ static int64_t tag_tickler_wait_timeout_end = 0;
 
 /* helper functions. */
 static plc_tag_p lookup_tag(int32_t id);
-static int add_tag_lookup(plc_tag_p tag);
+static int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing);
+static int64_t reuse_hash(const char *reuse_str);
+static plc_tag_p find_reusable_unsafe(lib_instance_p inst, const char *reuse_str);
+static void forget_reusable_unsafe(lib_instance_p inst, plc_tag_p tag);
+static plc_tag_p remove_tag_unsafe(lib_instance_p inst, int64_t tag_id);
+static int32_t reuse_existing(plc_tag_p tag, int timeout);
+static int32_t create_failed(plc_tag_p tag, int32_t rc);
 static void destroy_tag_common(plc_tag_p tag);
 static bool tag_idle_expired_unsafe(plc_tag_p tag, int64_t now);
 static void auto_destroy_tag(lib_instance_p inst, plc_tag_p tag);
@@ -138,6 +146,9 @@ static int check_byte_order_str(const char *byte_order, int length, int32_t tag_
  * so this cap is far above anything legitimate while keeping the sum from overflowing.
  */
 #define MAX_STR_SIZE_PARAM (65536)
+
+/* how often a create waiting on a shared tag's create checks it. */
+#define REUSE_WAIT_POLL_MS (5)
 
 static int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset);
 static int get_string_length_unsafe(plc_tag_p tag, int offset);
@@ -216,6 +227,8 @@ static void lib_instance_destructor(void *arg) {
         hashtable_destroy(inst->tags);
         pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Tag hashtable destroyed.");
     }
+
+    if(inst->reuse) { hashtable_destroy(inst->reuse); }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Done.");
 }
@@ -296,6 +309,12 @@ int lib_init(void) {
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, 0, "Creating tag hashtable.");
     if((inst->tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag hashtable!");
+        rc_dec(inst);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    if((inst->reuse = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_ERROR, 0, "Unable to create tag reuse hashtable!");
         rc_dec(inst);
         return PLCTAG_ERR_NO_MEM;
     }
@@ -1143,6 +1162,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     int32_t destroy_idle_sec = 0;
     tag_create_function tag_constructor;
     int debug_level = -1;
+    int32_t reuse = -1;
+    plc_tag_p existing = NULL;
     lib_instance_p inst = NULL;
 
     /* we are creating a tag, there is no ID yet. */
@@ -1187,6 +1208,21 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     debug_level = attr_get_int(attribs, "debug", -1);
     if(debug_level > DEBUG_NONE) { set_debug_level(debug_level); }
 
+    /* -1 tells a missing attribute from an explicit 0. */
+    reuse = attr_get_int(attribs, "find_or_create_tag", -1);
+    if(reuse < -1 || reuse > 1) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "find_or_create_tag must be 0 or 1!");
+        attr_destroy(attribs);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* a shared tag has no single owner for a callback, and a clone is a new tag by design. */
+    if(reuse == 1 && (tag_callback_func || src_tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "find_or_create_tag cannot be used with a callback or plc_tag_create_from_tag()!");
+        attr_destroy(attribs);
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     /* Acquire a reference to the running instance and transfer it into tag->instance
      * below once the tag exists. initialize_modules() above guarantees one was
      * published, but a shutdown can race in between -- lib_instance_acquire()
@@ -1196,6 +1232,16 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "Library is shutting down, cannot create tag.");
         attr_destroy(attribs);
         return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    if(reuse == 1) {
+        critical_block(&inst->tag_lookup_mutex) { existing = find_reusable_unsafe(inst, attrib_str); }
+
+        if(existing) {
+            attr_destroy(attribs);
+            rc_dec(inst);
+            return reuse_existing(existing, timeout);
+        }
     }
 
     /*
@@ -1320,6 +1366,8 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     tag->last_activity_ms = time_ms();
     atomic_set_int32(&tag->destroy_idle_sec, destroy_idle_sec);
 
+    tag->find_or_create_tag = (reuse == 1);
+
     /* See if we are allowed to resize fields */
     tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
 
@@ -1338,7 +1386,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     attr_destroy(attribs);
 
     /* map the tag to a tag ID */
-    id = add_tag_lookup(tag);
+    id = add_tag_lookup(tag, (reuse == 1 ? attrib_str : NULL), &existing);
 
     /* if the mapping failed, then punt */
     if(id < 0) {
@@ -1346,6 +1394,12 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
                plc_tag_decode_error(id));
         rc_dec(tag);
         return id;
+    }
+
+    /* another create entered the same string first; this tag was never published. */
+    if(existing) {
+        rc_dec(tag);
+        return reuse_existing(existing, timeout);
     }
 
     /* tag->tag_id is already set (add_tag_lookup() sets it under tag_lookup_mutex,
@@ -1377,15 +1431,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-        if(tag->vtable && tag->vtable->abort) {
-            critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
-        }
-
-        /* remove the tag from the hashtable. */
-        critical_block(&tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
-
-        rc_dec(tag);
-        return rc;
+        return create_failed(tag, rc);
     }
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Tag status after creation is %s.", plc_tag_decode_error(rc));
@@ -1421,15 +1467,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while waiting for tag creation to complete!",
                        plc_tag_decode_error(rc));
-                if(tag->vtable && tag->vtable->abort) {
-                    critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
-                }
-
-                /* remove the tag from the hashtable. */
-                critical_block(&tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
-
-                rc_dec(tag);
-                return rc;
+                return create_failed(tag, rc);
             }
 
             /* get the tag status. */
@@ -1446,23 +1484,15 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
         /* check to see if there was an error during tag creation. */
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-
-            /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
-            if(tag->vtable && tag->vtable->abort) {
-                critical_block(&tag->api_mutex) { tag->vtable->abort(tag); }
-            }
-
-            /* remove the tag from the hashtable. */
-            critical_block(&tag->instance->tag_lookup_mutex) { hashtable_remove(tag->instance->tags, (int64_t)tag->tag_id); }
-
-            rc_dec(tag);
-            return rc;
+            return create_failed(tag, rc);
         }
 
         /* clear up any remaining flags.  This should be refactored. */
         critical_block(&tag->api_mutex) {
             tag->read_in_flight = 0;
             tag->write_in_flight = 0;
+            tag->create_done = true;
+            tag->create_result = (int8_t)PLCTAG_STATUS_OK;
 
             /* raise create event. */
             tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
@@ -1546,7 +1576,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
              * public plc_tag_destroy(): its lib_instance_acquire() would correctly
              * (and unhelpfully) fail here, since the gate is deliberately already
              * closed by this point to stop any *new* tag creation. */
-            critical_block(&inst->tag_lookup_mutex) { hashtable_remove(inst->tags, (int64_t)tag->tag_id); }
+            critical_block(&inst->tag_lookup_mutex) { remove_tag_unsafe(inst, (int64_t)tag->tag_id); }
             destroy_tag_common(tag);
 
             pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -1963,7 +1993,7 @@ static bool tag_idle_expired_unsafe(plc_tag_p tag, int64_t now) {
 static void auto_destroy_tag(lib_instance_p inst, plc_tag_p tag) {
     plc_tag_p removed = NULL;
 
-    critical_block(&inst->tag_lookup_mutex) { removed = hashtable_remove(inst->tags, (int64_t)tag->tag_id); }
+    critical_block(&inst->tag_lookup_mutex) { removed = remove_tag_unsafe(inst, (int64_t)tag->tag_id); }
 
     if(!removed) {
         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Idle tag is already being destroyed.");
@@ -2034,7 +2064,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(&inst->tag_lookup_mutex) { tag = hashtable_remove(inst->tags, tag_id); }
+    critical_block(&inst->tag_lookup_mutex) { tag = remove_tag_unsafe(inst, tag_id); }
     rc_dec(inst);
 
     if(!tag) {
@@ -5007,14 +5037,35 @@ int tag_id_inc(int id) {
 }
 
 
-int add_tag_lookup(plc_tag_p tag) {
+/*
+ * Publish the tag.  With reuse_str, also enter it in the reuse table.  If another create already
+ * entered the same string, publish nothing: *existing gets a reference to that tag and its id is
+ * returned.
+ */
+int add_tag_lookup(plc_tag_p tag, const char *reuse_str, plc_tag_p *existing) {
     int rc = PLCTAG_ERR_NOT_FOUND;
     int new_id = 0;
+
+    *existing = NULL;
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, 0, "Starting.");
 
     critical_block(&tag->instance->tag_lookup_mutex) {
         int attempts = 0;
+
+        if(reuse_str) {
+            *existing = find_reusable_unsafe(tag->instance, reuse_str);
+
+            if(*existing) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, (*existing)->tag_id, "Lost the create race, using the existing tag.");
+                rc = PLCTAG_STATUS_OK;
+                new_id = (*existing)->tag_id;
+                break;
+            }
+
+            /* ponytail: two strings with one 64-bit hash; the second is not shared.  Never seen yet. */
+            if(hashtable_get(tag->instance->reuse, reuse_hash(reuse_str))) { reuse_str = NULL; }
+        }
 
         /* only get this when we hold the mutex. */
         new_id = next_tag_id;
@@ -5051,6 +5102,14 @@ int add_tag_lookup(plc_tag_p tag) {
              * this lock. */
             tag->tag_id = new_id;
             rc = hashtable_put(tag->instance->tags, (int64_t)new_id, tag);
+
+            /* a tag that cannot be entered is still a working tag, only not shared. */
+            if(rc == PLCTAG_STATUS_OK && reuse_str && (tag->reuse_key = str_dup(reuse_str))) {
+                if(hashtable_put(tag->instance->reuse, reuse_hash(reuse_str), tag) != PLCTAG_STATUS_OK) {
+                    mem_free(tag->reuse_key);
+                    tag->reuse_key = NULL;
+                }
+            }
         } else {
             rc = PLCTAG_ERR_NO_RESOURCES;
         }
@@ -5414,5 +5473,114 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Done with status %s.", plc_tag_decode_error(rc));
 
+    return rc;
+}
+
+
+/* The hashtable treats key 0 as an empty slot. */
+int64_t reuse_hash(const char *reuse_str) {
+    int64_t key = (int64_t)hash64((const uint8_t *)reuse_str, (size_t)(unsigned int)str_length(reuse_str));
+
+    return (key ? key : 1);
+}
+
+
+/* A new reference to the reusable tag created with exactly this string, or NULL.  Holds tag_lookup_mutex. */
+plc_tag_p find_reusable_unsafe(lib_instance_p inst, const char *reuse_str) {
+    plc_tag_p tag = hashtable_get(inst->reuse, reuse_hash(reuse_str));
+
+    return ((tag && str_cmp(tag->reuse_key, reuse_str) == 0) ? rc_inc(tag) : NULL);
+}
+
+
+/* Stop handing the tag out to creates.  Its holders keep it.  Holds tag_lookup_mutex. */
+void forget_reusable_unsafe(lib_instance_p inst, plc_tag_p tag) {
+    if(!tag->reuse_key) { return; }
+
+    hashtable_remove(inst->reuse, reuse_hash(tag->reuse_key));
+    mem_free(tag->reuse_key);
+    tag->reuse_key = NULL;
+}
+
+
+/* Unpublish a tag, from the reuse table too.  Holds tag_lookup_mutex. */
+plc_tag_p remove_tag_unsafe(lib_instance_p inst, int64_t tag_id) {
+    plc_tag_p tag = hashtable_remove(inst->tags, tag_id);
+
+    if(tag) { forget_reusable_unsafe(inst, tag); }
+
+    return tag;
+}
+
+
+/* A synchronous create failed: stop the tag, unpublish it and drop the create's reference. */
+int32_t create_failed(plc_tag_p tag, int32_t rc) {
+    critical_block(&tag->api_mutex) {
+        /* a create waiting in reuse_existing() reads this. */
+        tag->create_done = true;
+        tag->create_result = (int8_t)rc;
+
+        /* the vtable abort() expects the caller to hold api_mutex, and takes plc->mutex itself. */
+        if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+    }
+
+    critical_block(&tag->instance->tag_lookup_mutex) { remove_tag_unsafe(tag->instance, (int64_t)tag->tag_id); }
+
+    rc_dec(tag);
+    return rc;
+}
+
+
+/*
+ * Return the handle of a reusable tag to a create that found it, and drop the find's reference.
+ * A create still running is waited for, as a new one would be.  A failed create stays failed, so
+ * it leaves the reuse table and the next create makes a new tag.
+ *
+ * ponytail: shared tags have no callback, so no CREATED event marks the end of the create.  The
+ * first status that is not PENDING stands in for it.  A read that fails after an async create
+ * nobody checked is taken as a failed create; record the result in each protocol if that matters.
+ */
+int32_t reuse_existing(plc_tag_p tag, int timeout) {
+    int32_t rc = PLCTAG_STATUS_PENDING;
+    int64_t end_time = time_ms() + timeout;
+
+    do {
+        critical_block(&tag->api_mutex) {
+            if(!tag->create_done && tag->vtable && tag->vtable->status) {
+                int32_t status = tag->vtable->status(tag);
+
+                if(status != PLCTAG_STATUS_PENDING) {
+                    tag->create_done = true;
+                    tag->create_result = (int8_t)status;
+                }
+            }
+
+            rc = (tag->create_done ? tag->create_result : PLCTAG_STATUS_PENDING);
+        }
+
+        if(rc != PLCTAG_STATUS_PENDING || timeout == 0) { break; }
+
+        if(time_ms() >= end_time) {
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+
+        plc_tag_tickler_wake();
+        sleep_ms(REUSE_WAIT_POLL_MS);
+    } while(true);
+
+    /* an async create returns its handle while it is still pending. */
+    if(rc == PLCTAG_STATUS_PENDING || rc == PLCTAG_STATUS_OK) {
+        rc = tag->tag_id;
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, rc, "Reusing tag %" PRId32 ".", rc);
+    } else {
+        if(rc != PLCTAG_ERR_TIMEOUT) {
+            critical_block(&tag->instance->tag_lookup_mutex) { forget_reusable_unsafe(tag->instance, tag); }
+        }
+
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "Reused tag failed with %s.", plc_tag_decode_error(rc));
+    }
+
+    rc_dec(tag);
     return rc;
 }
