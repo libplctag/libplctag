@@ -73,6 +73,9 @@ struct ab_tag_t {
     /* how do we talk to this device? */
     plc_type_t plc_type;
 
+    /* a copy of the attributes while the tag waits for identify to name the PLC type. */
+    attr deferred_attribs;
+
     /* pointers back to session */
     ab_session_p session;
     int use_connected_msg;

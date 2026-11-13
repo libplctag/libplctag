@@ -34,6 +34,7 @@
 #pragma once
 
 #include <libplctag/lib/libplctag.h>
+#include <stdbool.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/protocols/ab/defs.h>
 #include <utils/vector.h>
@@ -95,8 +96,36 @@ extern const attr_def_t ab_attribs[];
 
 
 // int ab_tag_destroy(ab_tag_p p_tag);
+/*
+ * One entry per PLC type: what its session needs and the tag constructor that finishes a tag
+ * once the session exists.  plc= or cpu= picks the entry by one of its aliases.
+ */
+typedef struct ab_plc_type_t {
+    plc_type_t id;
+    const char *name;
+    const char *const *aliases; /* NULL terminated */
+
+    /* the session */
+    int32_t max_msg_size;
+    int32_t fo_conn_size;
+    int32_t fo_ex_conn_size;
+    bool only_use_old_forward_open;
+
+    /* tag defaults: 0 never connected, 1 always, -1 the use_connected_msg attribute, default on. */
+    int8_t connected;
+    bool allow_packing; /* the allow_packing attribute, default on; false means never. */
+    bool needs_path;
+
+    /* the PLC-specific half of creating a tag.  from_src is set by plc_tag_create_from_tag(). */
+    int (*tag_create)(ab_tag_p tag, attr attribs, bool from_src);
+} ab_plc_type_t;
+
+extern const ab_plc_type_t *ab_plc_type_find(attr attribs);
+extern const ab_plc_type_t *ab_plc_type_get(plc_type_t id);
 extern plc_type_t get_plc_type(attr attribs);
-extern int check_cpu(ab_tag_p tag, attr attribs);
+
+/* The PLC type an Identity reply names, or an error when the device is not a CPU we can use. */
+extern int ab_plc_type_from_identity(uint16_t vendor_id, const char *product_name, bool has_path, plc_type_t *plc_type);
 extern int check_tag_name(ab_tag_p tag, const char *name);
 extern int check_mutex(int debug);
 extern vector_p find_read_group_tags(ab_tag_p tag);

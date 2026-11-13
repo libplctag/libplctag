@@ -53,24 +53,11 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 
 #define MAX_REQUESTS (400)
 
+/* the Message Router, which a connected path ends at. */
+static uint8_t cip_router_path[] = {0x20, 0x02, 0x24, 0x01};
+
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
-#define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
-
-#define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4000)
-
-/* Omron is special */
-// #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
-// #define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
-
-/* maximum for PCCC embedded within CIP. */
-#define MAX_CIP_PLC5_MSG_SIZE (244)
-// #define MAX_CIP_SLC_MSG_SIZE (222)
-#define MAX_CIP_SLC_MSG_SIZE (244)
-#define MAX_CIP_MLGX_MSG_SIZE (244)
-#define MAX_CIP_LGX_PCCC_MSG_SIZE (244)
 
 /*
  * Number of milliseconds to wait to try to set up the session again
@@ -109,24 +96,9 @@ static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
 
 
 /* plc-specific session constructors */
-static ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                               int connection_group_id);
-static ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                              int connection_group_id);
-static ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                               int connection_group_id);
-static ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                              int connection_group_id);
-static ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                                   int connection_group_id);
-static ab_session_p create_micro800_session_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                                   int connection_group_id);
-// static ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int
-// connection_group_id);
 
-static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host,
+static ab_session_p session_create_unsafe(int max_payload_capacity, const char *host,
                                           const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
-// static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
 static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
@@ -135,6 +107,7 @@ static int session_match_valid(const char *host, const char *path, ab_session_p 
 static int session_open_socket(ab_session_p session);
 static void session_destroy(void *session);
 static int session_register(ab_session_p session);
+static int session_identify(ab_session_p session);
 static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
 static int64_t calc_retry_time(unsigned int retry_count);
@@ -364,7 +337,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
     // int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
-    plc_type_t plc_type = get_plc_type(attribs);
+    const ab_plc_type_t *plc = ab_plc_type_find(attribs);
     ab_session_p session = AB_SESSION_NULL;
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
@@ -404,45 +377,21 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs, int *is_new_
         if(session == AB_SESSION_NULL) {
             pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Creating new session.");
 
-            switch(plc_type) {
-                case AB_PLC_PLC5:
-                    session = create_plc5_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
+            if(plc) {
+                session = session_create_unsafe(plc->max_msg_size, session_gw, session_path, plc->id, &use_connected_msg,
+                                                connection_group_id);
+            } else {
+                /* no PLC named: identify picks it.  Unconnected until then. */
+                use_connected_msg = 0;
+                session = session_create_unsafe(MAX_CIP_LGX_MSG_SIZE_EX, session_gw, session_path, AB_PLC_NONE,
+                                                &use_connected_msg, connection_group_id);
+            }
 
-                case AB_PLC_SLC:
-                    session = create_slc_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
-
-                case AB_PLC_MLGX:
-                    session = create_mlgx_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
-
-                case AB_PLC_LGX:
-                    session = create_lgx_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
-
-                case AB_PLC_LGX_PCCC:
-                    session = create_lgx_pccc_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
-
-                case AB_PLC_MICRO800:
-                    session = create_micro800_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
-
-                case AB_PLC_GENERIC:
-                    /* Generic PLC type uses unconnected messaging for stateless operations */
-                    use_connected_msg = 0;
-                    session = create_lgx_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
-
-                    // case AB_PLC_OMRON_NJNX:
-                    //     session = create_omron_njnx_session_unsafe(session_gw, session_path, &use_connected_msg,
-                    //     connection_group_id); break;
-
-                default:
-                    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unknown PLC type %d!", plc_type);
-                    session = NULL;
-                    break;
+            if(session != AB_SESSION_NULL && plc) {
+                session->only_use_old_forward_open = plc->only_use_old_forward_open;
+                session->fo_conn_size = plc->fo_conn_size;
+                session->fo_ex_conn_size = plc->fo_ex_conn_size;
+                session->max_payload_size = (uint16_t)session->fo_conn_size;
             }
 
             if(session == AB_SESSION_NULL) {
@@ -605,160 +554,14 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int
 }
 
 
-ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
-    ab_session_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        session =
-            session_create_unsafe(MAX_CIP_PLC5_MSG_SIZE, true, host, path, AB_PLC_PLC5, use_connected_msg, connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_PLC5_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create PLC/5 session!");
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return session;
-}
-
-
-ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
-    ab_session_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        session =
-            session_create_unsafe(MAX_CIP_SLC_MSG_SIZE, true, host, path, AB_PLC_SLC, use_connected_msg, connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_SLC_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create SLC 500 session!");
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return session;
-}
-
-
-ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
-    ab_session_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        session =
-            session_create_unsafe(MAX_CIP_MLGX_MSG_SIZE, true, host, path, AB_PLC_MLGX, use_connected_msg, connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_MLGX_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create Micrologix session!");
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return session;
-}
-
-
-ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
-    ab_session_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        session =
-            session_create_unsafe(MAX_CIP_LGX_MSG_SIZE_EX, true, host, path, AB_PLC_LGX, use_connected_msg, connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = false;
-            session->fo_conn_size = MAX_CIP_LGX_MSG_SIZE;
-            session->fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create *Logix session!");
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return session;
-}
-
-
-ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
-    ab_session_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        session = session_create_unsafe(MAX_CIP_LGX_PCCC_MSG_SIZE, true, host, path, AB_PLC_LGX_PCCC, use_connected_msg,
-                                        connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_LGX_PCCC_MSG_SIZE;
-            session->fo_ex_conn_size = 0;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create Micrologix session!");
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return session;
-}
-
-
-ab_session_p create_micro800_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id) {
-    ab_session_p session = NULL;
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
-
-    do {
-        session = session_create_unsafe(MAX_CIP_MICRO800_MSG_SIZE_EX, true, host, path, AB_PLC_MICRO800, use_connected_msg,
-                                        connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = true;
-            session->fo_conn_size = MAX_CIP_MICRO800_MSG_SIZE;
-            session->fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX;
-            session->max_payload_size = (uint16_t)session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to create Micro800 session!");
-        }
-    } while(0);
-
-    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
-
-    return session;
-}
-
-
-ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path,
+ab_session_p session_create_unsafe(int max_payload_capacity, const char *host, const char *path,
                                    plc_type_t plc_type, int *use_connected_msg, int connection_group_id) {
     static volatile uint32_t connection_id = 0;
 
     int rc = PLCTAG_STATUS_OK;
     ab_session_p session = AB_SESSION_NULL;
     size_t total_allocation_size = sizeof(*session);
-    size_t data_buffer_capacity =
-        (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity + (size_t)32;  // MAGIC - FIXME this is just a bandaid.
-    size_t data_buffer_offset = 0;
+    size_t data_buffer_capacity = (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity;
     size_t host_name_offset = 0;
     size_t host_name_size = 0;
     size_t path_offset = 0;
@@ -800,12 +603,10 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
         pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "Session should not use connected messaging.");
     }
 
-    /* add in space for the data buffer. */
-    if(data_buffer_is_static) {
-        data_buffer_offset = total_allocation_size;
-        total_allocation_size += data_buffer_capacity;
-    } else {
-        data_buffer_offset = 0;
+    if(data_buffer_capacity > SESSION_DATA_CAPACITY) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_ERROR, 0, "A %zu byte packet does not fit the %d byte session buffer!",
+               data_buffer_capacity, SESSION_DATA_CAPACITY);
+        return AB_SESSION_NULL;
     }
 
     /* add in space for the host name.  + 1 for the NUL terminator. */
@@ -831,13 +632,14 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     }
 
     conn_path_offset = total_allocation_size;
-    total_allocation_size += (size_t)tmp_conn_path_size;
+    /* room for the Message Router that identify may add. */
+    total_allocation_size += (size_t)tmp_conn_path_size + sizeof(cip_router_path);
 
     /* allocate the session struct and the buffer in the same allocation. */
     pdebug(
         DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0,
-        "Allocating %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
-        total_allocation_size, (data_buffer_is_static ? data_buffer_capacity : 0), str_length(host) + 1,
+        "Allocating %d total bytes of memory with %d bytes for the data buffer, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
+        total_allocation_size, SESSION_DATA_CAPACITY, str_length(host) + 1,
         (path_offset == 0 ? 0 : str_length(path) + 1), tmp_conn_path_size);
 
     session = (ab_session_p)rc_alloc((int)total_allocation_size, session_destroy);
@@ -848,21 +650,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 
     /* fill in the interior pointers */
 
-    /* fix up the data buffer. */
-    session->data_buffer_is_static = data_buffer_is_static;
-    session->data_capacity = (uint32_t)data_buffer_capacity;
-
-    if(data_buffer_is_static) {
-        session->data = (uint8_t *)(session) + data_buffer_offset;
-        // session->data_capacity = max_buffer_size;
-    } else {
-        session->data = (uint8_t *)mem_alloc((int)data_buffer_capacity);
-        if(session->data == NULL) {
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to allocate the connection data buffer!");
-            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "rc_dec: Releasing session reference.");
-            return rc_dec(session);
-        }
-    }
+    session->data_capacity = (uint32_t)sizeof(session->data);
 
     /* point the host pointer just after the data. */
     session->host = (char *)(session) + host_name_offset;
@@ -1221,7 +1009,6 @@ void session_destroy(void *session_arg) {
         mutex_destroy(&(session->session_mutex));
     }
 
-    if(!session->data_buffer_is_static) { mem_free(session->data); }
 
     /* these are all allocated in one large block. */
 
@@ -1311,6 +1098,7 @@ typedef enum {
     SESSION_OPEN_SOCKET_START,
     SESSION_OPEN_SOCKET_WAIT,
     SESSION_REGISTER,
+    SESSION_IDENTIFY,
     SESSION_SEND_FORWARD_OPEN,
     SESSION_RECEIVE_FORWARD_OPEN,
     SESSION_IDLE,
@@ -1474,13 +1262,39 @@ THREAD_FUNC(session_handler) {
                     atomic_set_int32(&session->connection_status_reason, rc);
                     state = SESSION_CLOSE_SOCKET;
                 } else {
+                    plc_type_t plc_type = AB_PLC_NONE;
+                    int32_t identify_rc = PLCTAG_STATUS_OK;
+
                     retry_wait_ms = RETRY_WAIT_INITIAL_MS;
 
-                    if(session->use_connected_msg) {
+                    critical_block(&session->session_mutex) {
+                        plc_type = session->plc_type;
+                        identify_rc = session->identify_rc;
+                    }
+
+                    if(plc_type == AB_PLC_NONE && identify_rc == PLCTAG_STATUS_OK) {
+                        state = SESSION_IDENTIFY;
+                    } else if(session->use_connected_msg) {
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else {
                         state = SESSION_IDLE;
                     }
+                }
+                cond_signal(session->session_wait_cond);
+                break;
+
+            case SESSION_IDENTIFY:
+                pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_DETAIL, 0, "in SESSION_IDENTIFY state.");
+                session_set_connection_status(session, PLCTAG_CONN_STATUS_CONNECTING, PLCTAG_STATUS_PENDING);
+
+                /* a network failure retries; an answer, even a refusal, is final. */
+                if((rc = session_identify(session)) != PLCTAG_STATUS_OK) {
+                    atomic_set_int32(&session->connection_status_reason, rc);
+                    state = SESSION_UNREGISTER;
+                } else if(session->use_connected_msg) {
+                    state = SESSION_SEND_FORWARD_OPEN;
+                } else {
+                    state = SESSION_IDLE;
                 }
                 cond_signal(session->session_wait_cond);
                 break;
@@ -3457,6 +3271,144 @@ int recv_forward_close_resp(ab_session_p session) {
     pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Done.");
 
     return rc;
+}
+
+
+plc_type_t session_plc_type(ab_session_p session, int32_t *identify_rc) {
+    plc_type_t plc_type = AB_PLC_NONE;
+
+    critical_block(&session->session_mutex) {
+        plc_type = session->plc_type;
+        *identify_rc = session->identify_rc;
+    }
+
+    return plc_type;
+}
+
+
+/*
+ * Read the Identity object and take the PLC type from the product name.  Runs on the handler
+ * thread before any tag request, so nothing else is using the buffer.  A network failure is
+ * returned to be retried like any connect failure.  An answer is final: a CIP error or a device
+ * the classifier refuses is kept in identify_rc so the waiting tags fail with it.
+ */
+int session_identify(ab_session_p session) {
+    static uint8_t get_identity[] = {0x01, 0x02, 0x20, 0x01, 0x24, 0x01}; /* Get_Attributes_All, Identity, 1 */
+    struct ab_request_t req;
+    uint8_t *reply = NULL;
+    uint8_t *data_end = NULL;
+    uint8_t *data = NULL;
+    uint16_t vendor_id = 0;
+    char product_name[256];
+    size_t name_len = 0;
+    plc_type_t plc_type = AB_PLC_NONE;
+    const ab_plc_type_t *plc = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Starting.");
+
+    mem_set(&req, 0, (int)sizeof(req));
+    req.data = get_identity;
+    req.request_size = (int)sizeof(get_identity);
+    req.connected = false;
+
+    rc = frame_cip_request(session, &req);
+    if(rc == PLCTAG_STATUS_OK) { rc = prepare_request(session); }
+    if(rc == PLCTAG_STATUS_OK) {
+        session->data_offset = 0;
+        rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
+    }
+    if(rc == PLCTAG_STATUS_OK) { rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT); }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Unable to exchange the Identity request, %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    do {
+        if((rc = check_response_framing(session)) != PLCTAG_STATUS_OK) { break; }
+
+        reply = session->data + offsetof(eip_cip_uc_resp, reply_service);
+        data_end = session->data + session->data_size;
+
+        /* a routed request may come back inside a successful Unconnected Send reply. */
+        if(reply[0] == (AB_EIP_CMD_UNCONNECTED_SEND | AB_EIP_CMD_CIP_OK) && reply[2] == AB_CIP_STATUS_OK) {
+            reply += sizeof(cip_header);
+        }
+
+        if((data_end - reply) < (ptrdiff_t)sizeof(cip_header)) {
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        if(reply[2] != AB_CIP_STATUS_OK) {
+            size_t status_size = cip_error_data_size(reply + 2, data_end);
+
+            pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Identity request failed: %s",
+                   decode_cip_error_long(reply + 2, status_size));
+            rc = decode_cip_error_code(reply + 2, status_size);
+            break;
+        }
+
+        if(reply[0] != (0x01 | AB_EIP_CMD_CIP_OK)) {
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        /* vendor (2), device type (2), product code (2), revision (2), status (2), serial (4), name */
+        data = reply + sizeof(cip_header) + ((size_t)reply[3] * 2);
+
+        if((data_end - data) < 15) {
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        vendor_id = (uint16_t)(data[0] | (data[1] << 8));
+        name_len = data[14];
+
+        if((size_t)(data_end - (data + 15)) < name_len) {
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        mem_copy(product_name, data + 15, (int)name_len);
+        product_name[name_len] = 0;
+
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Device is vendor %u, \"%s\".", (unsigned int)vendor_id, product_name);
+
+        rc = ab_plc_type_from_identity(vendor_id, product_name, session->conn_path_size > 0, &plc_type);
+    } while(0);
+
+    plc = (rc == PLCTAG_STATUS_OK) ? ab_plc_type_get(plc_type) : NULL;
+
+    critical_block(&session->session_mutex) {
+        if(!plc) {
+            session->identify_rc = (rc != PLCTAG_STATUS_OK) ? rc : PLCTAG_ERR_BAD_DEVICE;
+        } else {
+            session->plc_type = plc_type;
+            session->only_use_old_forward_open = plc->only_use_old_forward_open;
+            session->fo_conn_size = plc->fo_conn_size;
+            session->fo_ex_conn_size = plc->fo_ex_conn_size;
+            session->max_payload_size = (uint16_t)session->fo_conn_size;
+            session->use_connected_msg = (plc->connected != 0);
+
+            /* a connected PLC's path ends at its Message Router; it could not be known before. */
+            if(session->use_connected_msg) {
+                mem_copy(session->conn_path + session->conn_path_size, cip_router_path, (int)sizeof(cip_router_path));
+                session->conn_path_size = (uint8_t)(session->conn_path_size + sizeof(cip_router_path));
+            }
+        }
+    }
+
+    if(!plc) {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_WARN, 0, "Device refused, %s!", plc_tag_decode_error(session->identify_rc));
+    } else {
+        pdebug(DEBUG_MODULE_AB_SESSION, DEBUG_INFO, 0, "Identified a %s, %s.", plc->name,
+               (session->use_connected_msg ? "connected" : "unconnected"));
+    }
+
+    /* an answer, even a refusal, ends identify. */
+    return PLCTAG_STATUS_OK;
 }
 
 

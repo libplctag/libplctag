@@ -49,6 +49,17 @@
 
 #    define MAX_PACKET_SIZE_EX (44 + 4002)
 
+/* one buffer size for every CIP PLC: wastes a little on old PLCs, none on Logix. */
+#    define SESSION_DATA_CAPACITY (4096)
+
+#    define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
+#    define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
+#    define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
+#    define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4000)
+
+/* maximum for PCCC embedded within CIP. */
+#    define MAX_CIP_PCCC_MSG_SIZE (244)
+
 #    define SESSION_MIN_REQUESTS (10)
 #    define SESSION_INC_REQUESTS (10)
 
@@ -100,7 +111,11 @@ struct ab_session_t {
     uint16_t conn_seq_num;
     uint16_t conn_serial_number;
 
+    /* AB_PLC_NONE until identify picks it when no plc= was given.  Under session_mutex. */
     plc_type_t plc_type;
+
+    /* why identify refused the device, or OK.  Under session_mutex. */
+    int32_t identify_rc;
 
     uint8_t *conn_path;
     uint8_t conn_path_size;
@@ -134,9 +149,6 @@ struct ab_session_t {
     uint32_t data_offset;
     uint32_t data_capacity;
     uint32_t data_size;
-    uint8_t *data;
-    bool data_buffer_is_static;
-    // uint8_t data[MAX_PACKET_SIZE_EX];
 
     uint64_t packet_count;
 
@@ -156,6 +168,9 @@ struct ab_session_t {
 
     /* connection inactivity timeout - readable/writable by tags via atomics */
     atomic_int32_t connection_inactivity_timeout_ms; /* milliseconds */
+
+    /* the packet being sent or received.  Big enough for the largest PLC type. */
+    uint8_t data[SESSION_DATA_CAPACITY];
 };
 
 
@@ -203,5 +218,8 @@ extern int session_get_max_payload(ab_session_p session);
 extern int session_get_available_cip_payload_space(ab_session_p session);
 extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
+
+/* The PLC type, AB_PLC_NONE while identify runs; *identify_rc is set when identify refused it. */
+extern plc_type_t session_plc_type(ab_session_p session, int32_t *identify_rc);
 
 #endif

@@ -208,8 +208,7 @@ def build_manifest() -> list[Test]:
     cip_bridge_out = "1,4,18"  # backplane to the slot 4 Ethernet module, then out its port 2/A
 
     tests = [
-        # DISABLED until rolled-back code returns
-        # test("special tags", [exe("test_special")]),
+        test("special tags", [exe("test_special")]),
         test("tag attributes", [exe("test_tag_attributes")]),
         test("tag type byte array attributes", [exe("test_tag_type_attribute")]),
         test("test tag_rw2 to get tag metadata",
@@ -481,54 +480,43 @@ def build_manifest() -> list[Test]:
              [exe("get_identity"),
               f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=generic&name=@identity&debug=3"]),
         # @identity on each family's own PLC type, so it rides that family's connection.
-        # DISABLED until rolled-back code returns
-        # test("identity, Logix, connected",
-        #      [exe("get_identity"),
-        #       f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@identity&debug=3"]),
-        # DISABLED until rolled-back code returns
-        # test("identity, Logix, unconnected",
-        #      [exe("get_identity"),
-        #       f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@identity&debug=3"]),
-        # DISABLED until rolled-back code returns
-        # test("identity, PCCC-mapped Logix",
-        #      [exe("get_identity"),
-        #       f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=lgx-pccc&name=@identity&debug=3"]),
-        # DISABLED until rolled-back code returns
-        # test("identity, PLC/5 direct",
-        #      [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={plc5_gw}&plc=plc5&name=@identity&debug=3"]),
-        # DISABLED until rolled-back code returns
-        # test("identity, MicroLogix direct",
-        #      [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mlgx_gw}&plc=micrologix&name=@identity&debug=3"]),
+        test("identity, Logix, connected",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@identity&debug=3"]),
+        test("identity, Logix, unconnected",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@identity&debug=3"]),
+        test("identity, PCCC-mapped Logix",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={logix_gw}&path={logix_path}&plc=lgx-pccc&name=@identity&debug=3"]),
+        test("identity, PLC/5 direct",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={plc5_gw}&plc=plc5&name=@identity&debug=3"]),
+        test("identity, MicroLogix direct",
+             [exe("get_identity"), f"--tag=protocol=ab_eip&gateway={mlgx_gw}&plc=micrologix&name=@identity&debug=3"]),
         # A DH+ node has no CIP Identity object; the DHRIO bridge would answer in its place.
-        # DISABLED until rolled-back code returns
-        # test("identity, PLC/5 via DH+ is refused",
-        #      [exe("get_identity"),
-        #       f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&plc=plc5&name=@identity&debug=3"],
-        #      expect_error="PLCTAG_ERR_UNSUPPORTED"),
+        test("identity, PLC/5 via DH+ is refused",
+             [exe("get_identity"),
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&plc=plc5&name=@identity&debug=3"],
+             expect_error="PLCTAG_ERR_UNSUPPORTED"),
         # No plc: the connection reads the Identity object and picks the family from the
         # product name.  Read-only, so they disturb nothing the other tests write.
-        # DISABLED until rolled-back code returns
-        # test("no plc: L81 identified, read",
-        #      [exe("tag_rw2"), "--type=sint32",
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&elem_count=10&name=TestBigArray", "--debug=4"]),
-        # DISABLED until rolled-back code returns
-        # test("no plc: PLC/5 identified, read",
-        #      [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&name=N7:0", "--debug=4"]),
-        # DISABLED until rolled-back code returns
-        # test("no plc: MicroLogix identified, read",
-        #      [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&name=N7:0", "--debug=4"]),
+        test("no plc: L81 identified, read",
+             [exe("tag_rw2"), "--type=sint32",
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&elem_count=10&name=TestBigArray", "--debug=4"]),
+        test("no plc: PLC/5 identified, read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={plc5_gw}&name=N7:0", "--debug=4"]),
+        test("no plc: MicroLogix identified, read",
+             [exe("tag_rw2"), "--type=sint16", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&name=N7:0", "--debug=4"]),
         # An ENBT answers Identity as a 1756 module that is not a CPU, so the create is refused.
-        # DISABLED until rolled-back code returns
-        # test("no plc: ENBT with no path is refused",
-        #      [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&name=TestBigArray",
-        #       "--debug=4"],
-        #      expect_error="PLCTAG_ERR_BAD_PARAM"),
+        test("no plc: ENBT with no path is refused",
+             [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&name=TestBigArray",
+              "--debug=4"],
+             expect_error="PLCTAG_ERR_BAD_PARAM"),
         # Identity cannot see past a DH+ bridge, so DH+ needs plc=.
-        # DISABLED until rolled-back code returns
-        # test("no plc: DH+ path is refused",
-        #      [exe("tag_rw2"), "--type=sint16",
-        #       f"--tag=protocol=ab-eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&name=N7:0", "--debug=4"],
-        #      expect_error="PLCTAG_ERR_BAD_PARAM"),
+        test("no plc: DH+ path is refused",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&name=N7:0", "--debug=4"],
+             expect_error="PLCTAG_ERR_BAD_PARAM"),
         # Several ordinary tags read together, so the requests are bundled into one Multiple
         # Service Packet and the reply budget decides how many fit.  The raw CIP bundling test
         # covers the assembly; this covers it for tags that carry a reply size.
@@ -557,15 +545,13 @@ def build_manifest() -> list[Test]:
         test("destroy tag from inside its own callback (PLC5)",
              [exe("test_callback_destroy"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0"]),
         # Needs a round trip of several milliseconds, which the PLC/5 has.
-        # DISABLED until rolled-back code returns
-        # test("a timed-out wait does not abort the read its callback started (PLC5)",
-        #      [exe("test_timeout_next"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0"]),
+        test("a timed-out wait does not abort the read its callback started (PLC5)",
+             [exe("test_timeout_next"), f"protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0"]),
         # The command line names no tag; it writes TestBigArray[0..19].
-        # DISABLED until rolled-back code returns
-        # test("plc_tag_set_size fails with BUSY while a read or write is in flight (ControlLogix)",
-        #      [exe("test_cip_ops"), "--mode=set-size-busy",
-        #       f"--base=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix"],
-        #      resources=frozenset({("logix", "TestBigArray", True)})),
+        test("plc_tag_set_size fails with BUSY while a read or write is in flight (ControlLogix)",
+             [exe("test_cip_ops"), "--mode=set-size-busy",
+              f"--base=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix"],
+             resources=frozenset({("logix", "TestBigArray", True)})),
     ]
 
     tests.extend(build_logix_matrix())
@@ -650,9 +636,8 @@ def build_logix_matrix() -> list[Test]:
         tests.append(test(f"{target.label}: connection tag state transitions",
                           [exe("test_connection_tag"), f"--tag={base}&name=@connection"]))
         # No plc, so each CPU is identified through its own route.  @raw names no tag.
-        # DISABLED until rolled-back code returns
-        # tests.append(test(f"{target.label}: no plc, raw cip",
-        #                   [exe("test_raw_cip"), f"--tag=protocol=ab-eip&gateway={gw}&path={path}&name=@raw"]))
+        tests.append(test(f"{target.label}: no plc, raw cip",
+                          [exe("test_raw_cip"), f"--tag=protocol=ab-eip&gateway={gw}&path={path}&name=@raw"]))
 
         if not target.has_test_tags:
             continue
