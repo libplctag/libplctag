@@ -1769,6 +1769,12 @@ def build_manifest() -> Manifest:
     sec.test("writes split over two requests reach every coil, 1963-1973 of 2000 (Modbus, #686)",
               [exe("test_modbus_split_write"), "--type=co", "--total=2000", "--first=1963", "--last=1973", mb_ops_base], F,
               server=mb_fault_server("--coils=2000"))
+    sec.test("auto-sync writes and reads split over two requests, 120-130 of 140 holding registers (Modbus)",
+              [exe("test_modbus_split_write"), "--auto", "--type=hr", "--total=140", "--first=120", "--last=130", mb_ops_base], F,
+              server=mb_fault_server("--holding-registers=140"))
+    sec.test("auto-sync writes and reads split over two requests, 1963-1973 of 2000 coils (Modbus)",
+              [exe("test_modbus_split_write"), "--auto", "--type=co", "--total=2000", "--first=1963", "--last=1973", mb_ops_base], F,
+              server=mb_fault_server("--coils=2000"))
     sec.test("data written during auto-sync reads reaches the server (Modbus)",
               [exe("test_modbus_ops"), "--mode=auto-dirty", mb_ops_base], F, server=mb_fault_server())
     sec.test("auto-sync read and write on one tag (Modbus)",

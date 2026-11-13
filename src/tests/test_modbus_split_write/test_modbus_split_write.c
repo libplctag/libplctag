@@ -50,8 +50,13 @@
  *
  * Defaults: hr --total=140 --first=120 --last=130, co --total=2000 --first=1963 --last=1973.
  *
+ * --auto: the write tag uses auto_sync_write_ms and the read tag auto_sync_read_ms, so both
+ * the auto write and the auto read are split.  The test waits for the auto write to complete
+ * and for two auto reads after it, and checks that every split operation raised exactly one
+ * STARTED and one COMPLETED event.
+ *
  * Usage: test_modbus_split_write --type=<hr|co> --base="<tag string without name or elem_count>"
- *                                [--total=N] [--first=N] [--last=N]
+ *                                [--total=N] [--first=N] [--last=N] [--auto]
  */
 
 #include "compat_utils.h"
@@ -67,18 +72,32 @@
 #define ATTR_LEN (512)
 #define MAX_TOTAL (2000)
 #define MAX_MISMATCHES_SHOWN (10)
+#define AUTO_READ_MS (50)
+#define AUTO_WRITE_MS (20)
+#define AUTO_WAIT_POLL_MS (5)
 
 typedef enum { REG_HOLDING, REG_COIL } reg_kind_t;
 
 static int32_t run_test(const char *base, reg_kind_t kind, int32_t total, int32_t first, int32_t last);
 static int32_t write_and_check(int32_t write_id, int32_t read_id, reg_kind_t kind, int32_t total, int32_t count,
                                int32_t value);
-static int32_t create_tag(const char *base, reg_kind_t kind, int32_t count);
+static int32_t create_tag(const char *base, reg_kind_t kind, int32_t count, bool is_read_tag);
 static int32_t read_all(int32_t read_id, reg_kind_t kind, int32_t total, int32_t *values);
 static int32_t check_values(reg_kind_t kind, int32_t total, int32_t count, int32_t value);
+static void tag_callback(int32_t tag_id, int event, int status, void *userdata);
+static int32_t wait_for_count(compat_atomic_int32_t *counter, int32_t target, const char *what);
+static int32_t check_balance(const char *what, compat_atomic_int32_t *started, compat_atomic_int32_t *completed,
+                             int32_t max_in_flight);
 
 static int32_t expected[MAX_TOTAL];
 static int32_t actual[MAX_TOTAL];
+
+static bool auto_mode = false;
+static int32_t read_tag_role = 0; /* its address marks the read tag's callbacks. */
+static compat_atomic_int32_t read_started;
+static compat_atomic_int32_t read_completed;
+static compat_atomic_int32_t write_started;
+static compat_atomic_int32_t write_completed;
 
 
 int main(int argc, char **argv) {
@@ -101,6 +120,8 @@ int main(int argc, char **argv) {
             first = (int32_t)atoi(argv[i] + 8);
         } else if(strncmp(argv[i], "--last=", 7) == 0) {
             last = (int32_t)atoi(argv[i] + 7);
+        } else if(strcmp(argv[i], "--auto") == 0) {
+            auto_mode = true;
         }
     }
 
@@ -120,7 +141,7 @@ int main(int argc, char **argv) {
 
     if(!type || !base || total < 1 || total > MAX_TOTAL || first < 1 || first > last || last > total) {
         printf("Usage: test_modbus_split_write --type=<hr|co> --base=\"<tag string>\" "
-               "[--total=1..%d] [--first=N] [--last=N]  (1 <= first <= last <= total)\n",
+               "[--total=1..%d] [--first=N] [--last=N] [--auto]  (1 <= first <= last <= total)\n",
                MAX_TOTAL);
         return 1;
     }
@@ -137,15 +158,15 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("SUCCESS: every write from %" PRId32 " to %" PRId32 " %s reached every register.\n", first, last,
-           (kind == REG_HOLDING ? "holding registers" : "coils"));
+    printf("SUCCESS: every %swrite from %" PRId32 " to %" PRId32 " %s reached every register.\n",
+           (auto_mode ? "auto " : ""), first, last, (kind == REG_HOLDING ? "holding registers" : "coils"));
     return 0;
 }
 
 
 static int32_t run_test(const char *base, reg_kind_t kind, int32_t total, int32_t first, int32_t last) {
     int32_t failures = 0;
-    int32_t read_id = create_tag(base, kind, total);
+    int32_t read_id = create_tag(base, kind, total, true);
 
     if(read_id < 0) { return 1; }
 
@@ -156,7 +177,7 @@ static int32_t run_test(const char *base, reg_kind_t kind, int32_t total, int32_
     }
 
     for(int32_t count = first; count <= last; count++) {
-        int32_t write_id = create_tag(base, kind, count);
+        int32_t write_id = create_tag(base, kind, count, false);
         int32_t size_failed = 0;
 
         if(write_id < 0) {
@@ -176,6 +197,13 @@ static int32_t run_test(const char *base, reg_kind_t kind, int32_t total, int32_
     }
 
     plc_tag_destroy(read_id);
+
+    /* a destroy mid-read still completes the read, so every STARTED has its COMPLETED. */
+    if(auto_mode) {
+        failures += check_balance("auto read", &read_started, &read_completed, 0);
+        failures += check_balance("auto write", &write_started, &write_completed, 0);
+    }
+
     return failures;
 }
 
@@ -184,6 +212,7 @@ static int32_t run_test(const char *base, reg_kind_t kind, int32_t total, int32_
 static int32_t write_and_check(int32_t write_id, int32_t read_id, reg_kind_t kind, int32_t total, int32_t count,
                                int32_t value) {
     int32_t rc = PLCTAG_STATUS_OK;
+    int32_t write_target = compat_atomic_load_int32(&write_completed) + 1;
 
     for(int32_t i = 0; i < count; i++) {
         if(kind == REG_HOLDING) {
@@ -199,10 +228,28 @@ static int32_t write_and_check(int32_t write_id, int32_t read_id, reg_kind_t kin
         }
     }
 
-    rc = plc_tag_write(write_id, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("ERROR: writing %" PRId32 " registers: %s\n", count, plc_tag_decode_error(rc));
-        return 1;
+    if(auto_mode) {
+        /* the sets above marked the tag dirty; the auto write goes out AUTO_WRITE_MS later. */
+        int64_t deadline = compat_time_ms() + DATA_TIMEOUT;
+
+        if(wait_for_count(&write_completed, write_target, "auto write") != PLCTAG_STATUS_OK) { return 1; }
+
+        /* sets that land after the write went out schedule one follow-up write; wait it out. */
+        while((rc = plc_tag_status(write_id)) == PLCTAG_STATUS_PENDING && compat_time_ms() < deadline) {
+            compat_sleep_ms(AUTO_WAIT_POLL_MS, NULL);
+        }
+
+        if(check_balance("auto write", &write_started, &write_completed, 0)) { return 1; }
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("ERROR: auto write of %" PRId32 " registers: %s\n", count, plc_tag_decode_error(rc));
+            return 1;
+        }
+    } else {
+        rc = plc_tag_write(write_id, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("ERROR: writing %" PRId32 " registers: %s\n", count, plc_tag_decode_error(rc));
+            return 1;
+        }
     }
 
     for(int32_t i = 0; i < count; i++) { expected[i] = value; }
@@ -213,14 +260,24 @@ static int32_t write_and_check(int32_t write_id, int32_t read_id, reg_kind_t kin
 }
 
 
-static int32_t create_tag(const char *base, reg_kind_t kind, int32_t count) {
+static int32_t create_tag(const char *base, reg_kind_t kind, int32_t count, bool is_read_tag) {
     char attrs[ATTR_LEN];
     int32_t id = 0;
 
     compat_snprintf(attrs, sizeof(attrs), "%s&elem_count=%" PRId32 "&name=%s0", base, count,
                     (kind == REG_HOLDING ? "hr" : "co"));
 
-    id = plc_tag_create(attrs, DATA_TIMEOUT);
+    if(auto_mode) {
+        size_t len = strlen(attrs);
+        if(is_read_tag) {
+            compat_snprintf(attrs + len, sizeof(attrs) - len, "&auto_sync_read_ms=%d", AUTO_READ_MS);
+        } else {
+            compat_snprintf(attrs + len, sizeof(attrs) - len, "&auto_sync_write_ms=%d", AUTO_WRITE_MS);
+        }
+        id = plc_tag_create_ex(attrs, tag_callback, (is_read_tag ? &read_tag_role : NULL), DATA_TIMEOUT);
+    } else {
+        id = plc_tag_create(attrs, DATA_TIMEOUT);
+    }
     if(id < 0) {
         printf("ERROR: creating tag \"%s\": %s\n", attrs, plc_tag_decode_error(id));
         return -1;
@@ -231,7 +288,17 @@ static int32_t create_tag(const char *base, reg_kind_t kind, int32_t count) {
 
 
 static int32_t read_all(int32_t read_id, reg_kind_t kind, int32_t total, int32_t *values) {
-    int32_t rc = plc_tag_read(read_id, DATA_TIMEOUT);
+    int32_t rc = PLCTAG_STATUS_OK;
+
+    if(auto_mode) {
+        /* the first read to complete may have started before the write landed; the second cannot. */
+        int32_t target = compat_atomic_load_int32(&read_completed) + 2;
+        rc = wait_for_count(&read_completed, target, "auto read");
+        if(rc == PLCTAG_STATUS_OK && check_balance("auto read", &read_started, &read_completed, 1)) { rc = PLCTAG_ERR_BAD_STATUS; }
+        if(rc == PLCTAG_STATUS_OK) { rc = plc_tag_lock(read_id); }
+    } else {
+        rc = plc_tag_read(read_id, DATA_TIMEOUT);
+    }
 
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: reading all %" PRId32 " registers back: %s\n", total, plc_tag_decode_error(rc));
@@ -246,7 +313,55 @@ static int32_t read_all(int32_t read_id, reg_kind_t kind, int32_t total, int32_t
         }
     }
 
+    if(auto_mode) { plc_tag_unlock(read_id); }
+
     return PLCTAG_STATUS_OK;
+}
+
+
+static void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
+    (void)tag_id;
+    (void)status;
+
+    /* auto reads come only from the read tag, auto writes only from the write tags. */
+    if(userdata == &read_tag_role) {
+        if(event == PLCTAG_EVENT_READ_STARTED) { compat_atomic_inc_int32(&read_started); }
+        if(event == PLCTAG_EVENT_READ_COMPLETED) { compat_atomic_inc_int32(&read_completed); }
+    } else {
+        if(event == PLCTAG_EVENT_WRITE_STARTED) { compat_atomic_inc_int32(&write_started); }
+        if(event == PLCTAG_EVENT_WRITE_COMPLETED) { compat_atomic_inc_int32(&write_completed); }
+    }
+}
+
+
+static int32_t wait_for_count(compat_atomic_int32_t *counter, int32_t target, const char *what) {
+    int64_t deadline = compat_time_ms() + DATA_TIMEOUT;
+
+    while(compat_atomic_load_int32(counter) < target) {
+        if(compat_time_ms() > deadline) {
+            printf("ERROR: timed out waiting for the %s to complete.\n", what);
+            return PLCTAG_ERR_TIMEOUT;
+        }
+        compat_sleep_ms(AUTO_WAIT_POLL_MS, NULL);
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+/* returns 1 when STARTED and COMPLETED events do not pair up, at most max_in_flight STARTED being open. */
+static int32_t check_balance(const char *what, compat_atomic_int32_t *started, compat_atomic_int32_t *completed,
+                             int32_t max_in_flight) {
+    int32_t c = compat_atomic_load_int32(completed);
+    int32_t s = compat_atomic_load_int32(started);
+    int32_t open = s - c;
+
+    if(open < 0 || open > max_in_flight) {
+        printf("FAIL: %s raised %" PRId32 " STARTED and %" PRId32 " COMPLETED events.\n", what, s, c);
+        return 1;
+    }
+
+    return 0;
 }
 
 
