@@ -40,7 +40,8 @@
  *   B  destroy=10, read every 5 s to 30 s: alive at 35 s, gone by 42 s.
  *   C  destroy=20, set to 10 at 8 s: alive at 15 s, gone by 20 s.
  *   D  destroy=10, set to 0 at 5 s: alive at 42 s.
- *   Refusals: auto-sync with destroy at create, 9 at create, auto-sync set at runtime.
+ *   Refusals: auto-sync with destroy at create, 9 at create, auto-sync set at runtime, destroy
+ *   set at runtime on an auto-sync tag.
  *
  * With --conn-tag=, runs test 5 instead: the connection idles out, the tag is still destroyed
  * by 12 s, and the connection never comes back up.
@@ -167,6 +168,15 @@ static int32_t run_timeline(void) {
     rc = make_tag(ATTR_NAME "=9", TAG_SCRATCH);
     expect_rc(rc, PLCTAG_ERR_OUT_OF_BOUNDS, "destroy=9");
     if(rc >= 0) { plc_tag_destroy(rc); }
+
+    /* the other order: auto-destroy set at runtime on a tag that already has auto-sync. */
+    rc = make_tag("auto_sync_read_ms=200", TAG_SCRATCH);
+    if(rc < 0) {
+        fail(plc_tag_decode_error(rc), "auto-sync tag");
+    } else {
+        expect_rc(plc_tag_set_int_attribute(rc, ATTR_NAME, 10), PLCTAG_ERR_NOT_ALLOWED, "destroy set on an auto-sync tag");
+        plc_tag_destroy(rc);
+    }
 
     wait_until(5000);
     printf("5 s: read B, set data on A, D refuses auto-sync, D set to 0.\n");

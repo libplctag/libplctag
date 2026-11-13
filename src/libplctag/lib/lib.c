@@ -120,6 +120,8 @@ static int64_t tag_tickler_wait_timeout_end = 0;
 static plc_tag_p lookup_tag(int32_t id);
 static int add_tag_lookup(plc_tag_p tag);
 static void destroy_tag_common(plc_tag_p tag);
+static bool tag_idle_expired_unsafe(plc_tag_p tag, int64_t now);
+static void auto_destroy_tag(lib_instance_p inst, plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
 static int plc_tag_abort_impl(plc_tag_p tag);
@@ -700,7 +702,9 @@ THREAD_FUNC(tag_tickler_func) {
             for(int i = 0; i < max_index; i++) {
                 plc_tag_p tag = hashtable_get_index(inst->tags, i);
 
-                if(tag && !atomic_get_bool(&tag->skip_tickler) && rc_inc(tag) != NULL) {
+                /* a tag that skips the tickler is still checked for auto-destroy. */
+                if(tag && (!atomic_get_bool(&tag->skip_tickler) || atomic_get_int32(&tag->destroy_idle_sec) > 0)
+                   && rc_inc(tag) != NULL) {
                     vector_insert(active_tags, vector_length(active_tags), tag);
                 }
             }
@@ -712,9 +716,15 @@ THREAD_FUNC(tag_tickler_func) {
 
         for(int tag_index = 0; tag_index < num_active_tags; tag_index++) {
             plc_tag_p tag = vector_get(active_tags, tag_index);
+            bool idle_expired = false;
 
-            /* try to hold the tag API mutex while all this goes on. */
-            if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
+            if(atomic_get_bool(&tag->skip_tickler)) {
+                /* here only for auto-destroy.  Locked by the application means in use. */
+                if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
+                    idle_expired = tag_idle_expired_unsafe(tag, time_ms());
+                    mutex_unlock(&tag->api_mutex);
+                }
+            } else if(mutex_try_lock(&tag->api_mutex) == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "calling generic tag tickler.");
 
                 plc_tag_generic_tickler(tag);
@@ -761,6 +771,8 @@ THREAD_FUNC(tag_tickler_func) {
                     tag_tickler_wait_timeout_end = tag->auto_sync_next_read;
                 }
 
+                idle_expired = tag_idle_expired_unsafe(tag, time_ms());
+
                 /* we are done with the tag API mutex now. */
                 mutex_unlock(&tag->api_mutex);
 
@@ -769,6 +781,8 @@ THREAD_FUNC(tag_tickler_func) {
             } else {
                 pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Skipping tag as it is already locked.");
             }
+
+            if(idle_expired) { auto_destroy_tag(inst, tag); }
 
             if(tag) { rc_dec(tag); }
         }
@@ -1126,6 +1140,7 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
     int read_cache_ms = 0;
+    int32_t destroy_idle_sec = 0;
     tag_create_function tag_constructor;
     int debug_level = -1;
     lib_instance_p inst = NULL;
@@ -1278,6 +1293,32 @@ static int32_t plc_tag_create_impl(const char *attrib_str,
     } else {
         tag->auto_sync_next_write = 0;
     }
+
+    destroy_idle_sec = attr_get_int(attribs, "destroy_tag_after_idle_sec", 0);
+    if(destroy_idle_sec < 0 || (destroy_idle_sec > 0 && destroy_idle_sec < TAG_AUTO_DESTROY_MIN_SEC)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "destroy_tag_after_idle_sec must be zero or at least %d!", TAG_AUTO_DESTROY_MIN_SEC);
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(destroy_idle_sec > 0 && (tag->auto_sync_read_ms > 0 || tag->auto_sync_write_ms > 0)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "destroy_tag_after_idle_sec cannot be used with auto-sync!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(destroy_idle_sec > 0 && !tag_can_auto_destroy(tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, 0, "destroy_tag_after_idle_sec cannot be used with this kind of tag!");
+        attr_destroy(attribs);
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* not yet in the lookup table, so the tickler cannot see it. */
+    tag->last_activity_ms = time_ms();
+    atomic_set_int32(&tag->destroy_idle_sec, destroy_idle_sec);
 
     /* See if we are allowed to resize fields */
     tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
@@ -1897,6 +1938,45 @@ LIB_EXPORT int plc_tag_abort(int32_t id) {
  */
 
 
+/*
+ * True when an auto-destroy tag has gone its idle time without a read or write.  A read, write
+ * or create still in progress is activity, so the idle time counts from when it ends.
+ */
+static bool tag_idle_expired_unsafe(plc_tag_p tag, int64_t now) {
+    int32_t idle_sec = atomic_get_int32(&tag->destroy_idle_sec);
+
+    if(idle_sec <= 0) { return false; }
+
+    if(tag->read_in_flight || tag->write_in_flight || tag->status == PLCTAG_STATUS_PENDING) {
+        tag->last_activity_ms = now;
+        return false;
+    }
+
+    return (now - tag->last_activity_ms) >= ((int64_t)idle_sec * 1000);
+}
+
+
+/*
+ * Destroy an idle tag from the tickler.  Removing it from the lookup table decides who destroys
+ * it: if the application or shutdown got there first, the remove finds nothing.
+ */
+static void auto_destroy_tag(lib_instance_p inst, plc_tag_p tag) {
+    plc_tag_p removed = NULL;
+
+    critical_block(&inst->tag_lookup_mutex) { removed = hashtable_remove(inst->tags, (int64_t)tag->tag_id); }
+
+    if(!removed) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, tag->tag_id, "Idle tag is already being destroyed.");
+        return;
+    }
+
+    pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, tag->tag_id, "Destroying tag after %" PRId32 " s idle.",
+           atomic_get_int32(&tag->destroy_idle_sec));
+
+    destroy_tag_common(removed);
+}
+
+
 /* Common tail of tag destruction, given a tag already found and already removed
  * from the tag hashtable. Factored out so plc_tag_shutdown()'s own tag-destroy
  * loop -- which already holds the instance and does its own hashtable_remove --
@@ -2000,6 +2080,8 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
 
     critical_block(&tag->api_mutex) {
         uint8_t abort_count = 0;
+
+        tag->last_activity_ms = time_ms();
 
         /* check read cache, if not expired, return existing data. */
         if(tag->read_cache_expire > time_ms()) {
@@ -2231,6 +2313,8 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
     }
 
     critical_block(&tag->api_mutex) {
+        tag->last_activity_ms = time_ms();
+
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, id, "Tag already has an operation in flight!");
             is_done = 1;

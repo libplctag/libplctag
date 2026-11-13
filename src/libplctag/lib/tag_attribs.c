@@ -40,6 +40,7 @@
 #include <platform.h>
 #include <stdint.h>
 #include <utils/debug.h>
+#include <utils/time_utils.h>
 
 
 static int32_t core_get_size(plc_tag_p tag, int32_t *result);
@@ -49,6 +50,8 @@ static int32_t core_get_auto_sync_read_ms(plc_tag_p tag, int32_t *result);
 static int32_t core_set_auto_sync_read_ms(plc_tag_p tag, int32_t value);
 static int32_t core_get_auto_sync_write_ms(plc_tag_p tag, int32_t *result);
 static int32_t core_set_auto_sync_write_ms(plc_tag_p tag, int32_t value);
+static int32_t core_get_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t *result);
+static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value);
 static int32_t core_get_bit_num(plc_tag_p tag, int32_t *result);
 static int32_t core_get_connection_group_id(plc_tag_p tag, int32_t *result);
 static int32_t core_get_allow_field_resize(plc_tag_p tag, int32_t *result);
@@ -111,6 +114,12 @@ static const attr_def_t core_attribs[] = {
      .description = "Wait this many milliseconds after a write to the tag data, then write the tag to the PLC.",
      .get_int = core_get_auto_sync_write_ms,
      .set_int = core_set_auto_sync_write_ms},
+
+    {.name = "destroy_tag_after_idle_sec",
+     .type = ATTR_TYPE_INT,
+     .description = "Destroy the tag after this many seconds with no read or write.  Zero disables it, the minimum is 10.",
+     .get_int = core_get_destroy_tag_after_idle_sec,
+     .set_int = core_set_destroy_tag_after_idle_sec},
 
     {.name = "bit_num",
      .type = ATTR_TYPE_INT,
@@ -313,6 +322,11 @@ static int32_t core_set_auto_sync_read_ms(plc_tag_p tag, int32_t value) {
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
+    if(value > 0 && atomic_get_int32(&tag->destroy_idle_sec) > 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "auto_sync_read_ms cannot be used with destroy_tag_after_idle_sec!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     tag->auto_sync_read_ms = value;
 
     return PLCTAG_STATUS_OK;
@@ -332,7 +346,45 @@ static int32_t core_set_auto_sync_write_ms(plc_tag_p tag, int32_t value) {
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
+    if(value > 0 && atomic_get_int32(&tag->destroy_idle_sec) > 0) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "auto_sync_write_ms cannot be used with destroy_tag_after_idle_sec!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
     tag->auto_sync_write_ms = value;
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_get_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t *result) {
+    *result = atomic_get_int32(&tag->destroy_idle_sec);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+static int32_t core_set_destroy_tag_after_idle_sec(plc_tag_p tag, int32_t value) {
+    if(value < 0 || (value > 0 && value < TAG_AUTO_DESTROY_MIN_SEC)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "destroy_tag_after_idle_sec must be zero or at least %d!",
+               TAG_AUTO_DESTROY_MIN_SEC);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(value > 0 && !tag_can_auto_destroy(tag)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "destroy_tag_after_idle_sec cannot be used with this kind of tag!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    if(value > 0 && (tag->auto_sync_read_ms > 0 || tag->auto_sync_write_ms > 0)) {
+        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, tag->tag_id, "destroy_tag_after_idle_sec cannot be used with auto-sync!");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    /* a new idle time counts from now. */
+    if(value > 0) { tag->last_activity_ms = time_ms(); }
+
+    atomic_set_int32(&tag->destroy_idle_sec, value);
 
     return PLCTAG_STATUS_OK;
 }

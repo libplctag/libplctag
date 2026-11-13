@@ -218,20 +218,18 @@ def build_manifest() -> list[Test]:
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray"]),
         # Reads only, so it is safe on a shared tag.  The --conn-tag run idles the connection
         # out and checks the destroy does not bring it back.
-        # DISABLED until rolled-back code returns
-        # test("auto-destroy idle tags (ControlLogix)",
-        #      [exe("test_auto_destroy"),
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
+        test("auto-destroy idle tags (ControlLogix)",
+             [exe("test_auto_destroy"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]"]),
         # DISABLED until rolled-back code returns
         # test("find_or_create_tag finds or creates a shared tag (ControlLogix)",
         #      [exe("test_find_or_create_tag"),
         #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
         #       f"--missing-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&elem_count=1&name=No_Such_Tag"]),
-        # DISABLED until rolled-back code returns
-        # test("auto-destroy does not reconnect an idle connection (ControlLogix)",
-        #      [exe("test_auto_destroy"),
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
-        #       f"--conn-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
+        test("auto-destroy does not reconnect an idle connection (ControlLogix)",
+             [exe("test_auto_destroy"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestBigArray[0]",
+              f"--conn-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@connection"]),
         test("Get INT bit",
              [exe("tag_rw2"), "--type=bit",
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestINTArray[0].13",

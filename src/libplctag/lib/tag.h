@@ -252,6 +252,11 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
     void *userdata;                          \
     int32_t auto_sync_read_ms;               \
     int32_t auto_sync_write_ms;              \
+    /* seconds without a read or write before the tickler destroys the tag; 0 = off.  Atomic: \
+     * the tickler reads it without api_mutex to pick its tags. */ \
+    atomic_int32_t destroy_idle_sec;         \
+    /* last read or write start, or auto-destroy change.  Under api_mutex. */ \
+    int64_t last_activity_ms;                \
     int32_t size;                            \
     int32_t tag_id;                          \
     int connection_group_id;                 \
@@ -317,6 +322,14 @@ extern void lib_instance_publish(void);
  * succeeded (e.g. ab_init()/mb_init()/omron_init() failing): discards the instance
  * lib_init() built without ever publishing it. */
 extern void lib_instance_discard_pending(void);
+
+/* tags that hold PLC data; system and connection tags cannot be auto-destroyed. */
+#define tag_can_auto_destroy(tag)                                                                              \
+    ((tag)->protocol_type == TAG_PROTOCOL_AB || (tag)->protocol_type == TAG_PROTOCOL_MODBUS                    \
+     || (tag)->protocol_type == TAG_PROTOCOL_OMRON)
+
+/* zero, or at least this many seconds. */
+#define TAG_AUTO_DESTROY_MIN_SEC (10)
 
 extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
