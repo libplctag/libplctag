@@ -127,7 +127,7 @@ int tag_tickler(ab_tag_p tag) {
             /* read done */
             if(tag->first_read) {
                 tag->first_read = 0;
-                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
             }
 
             tag->read_complete = 1;
@@ -301,7 +301,7 @@ static int check_read_status(ab_tag_p tag) {
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end));
             break;
         }
 
@@ -515,7 +515,7 @@ static int check_write_status(ab_tag_p tag) {
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end));
             break;
         }
 

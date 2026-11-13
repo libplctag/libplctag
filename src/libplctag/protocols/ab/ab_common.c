@@ -375,7 +375,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             tag->byte_order = &plc5_tag_byte_order;
             tag->allow_packing = 0;
-            tag->first_read = 0; /* no first read for this kind of PLC. */
+            tag->first_read = 1; /* the create read finds a missing data file. */
 
             break;
 
@@ -399,7 +399,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             tag->byte_order = &slc_tag_byte_order;
             tag->allow_packing = 0;
-            tag->first_read = 0; /* no first read for this kind of PLC. */
+            tag->first_read = 1; /* the create read finds a missing data file. */
 
             break;
 
@@ -410,7 +410,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->vtable = &lgx_pccc_vtable;
 
             tag->byte_order = &slc_tag_byte_order;
-            tag->first_read = 0; /* no first read for this kind of PLC. */
+            tag->first_read = 1; /* the create read finds a missing data file. */
 
             break;
 

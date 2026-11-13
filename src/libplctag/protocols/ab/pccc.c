@@ -539,6 +539,31 @@ uint16_t pccc_calculate_crc16(uint8_t *data, int size) {
 }
 
 
+/*
+ * The library status for a PCCC error.  Only the extended codes name a cause precisely enough to
+ * report as more than a remote error; a data file the PLC does not have is one of them.
+ */
+int pccc_status_to_rc(uint8_t *error_ptr, size_t error_size) {
+    if(error_size < 4 || error_ptr[0] != 0xF0) { return PLCTAG_ERR_REMOTE_ERR; }
+
+    switch(error_ptr[3]) {
+        case 0x04: /* symbol not found */
+        case 0x06: /* address doesn't point to something usable, such as a file that does not exist */
+            return PLCTAG_ERR_NOT_FOUND;
+
+        case 0x07: /* file is wrong size */
+        case 0x0A: /* transaction size plus word address is too large */
+            return PLCTAG_ERR_OUT_OF_BOUNDS;
+
+        case 0x0B: /* access denied */
+        case 0x0F: /* no upload or download privilege */
+            return PLCTAG_ERR_NOT_ALLOWED;
+
+        default: return PLCTAG_ERR_REMOTE_ERR;
+    }
+}
+
+
 const char *pccc_decode_error(uint8_t *error_ptr, size_t error_size) {
     uint8_t error = 0;
 
@@ -1530,7 +1555,7 @@ int pccc_tag_tickler(ab_tag_p tag) {
             /* first read done */
             if(tag->first_read) {
                 tag->first_read = 0;
-                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
             }
 
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, 0, "Read complete with status %s.", plc_tag_decode_error(tag->status));
@@ -1808,7 +1833,7 @@ int pccc_check_read_status(ab_tag_p tag) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end));
             break;
         }
 
@@ -2454,7 +2479,7 @@ int pccc_check_write_status(ab_tag_p tag) {
         if(pccc->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc->pccc_status, pccc_decode_error(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc->pccc_status, cip_error_data_size(&pccc->pccc_status, data_end));
             break;
         }
 
@@ -2779,7 +2804,7 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end));
             break;
         }
 
@@ -3396,7 +3421,7 @@ int pccc_dhp_check_write_status(ab_tag_p tag) {
             pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: %d - %s",
                    pccc_cmd->pccc_status,
                    pccc_decode_error(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end)));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            rc = pccc_status_to_rc(&pccc_cmd->pccc_status, cip_error_data_size(&pccc_cmd->pccc_status, data_end));
             break;
         }
 

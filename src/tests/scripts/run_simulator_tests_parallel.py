@@ -1458,10 +1458,11 @@ def build_manifest() -> Manifest:
                f"--bit-tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=N7:0/10", "--debug=4"], F)
     sec.test("L data file Micrologix tag read/write",
               [exe("tag_rw2"), "--type=sint32", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0", "--write=7", "--check", "--debug=4"], F)
-    # L files are read and written only as whole words, so a bit tag is refused at create.
+    # A bit in an L file reads like any other, but cannot be written: PCCC has no
+    # read-modify-write for 32-bit words.
     sec.test("L bit data file Micrologix tag read",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--check=0", "--debug=4"],
-              F, expect_failure=True)
+              F)
     sec.test("L bit data file Micrologix tag write",
               [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mgw}&plc=micrologix&name=L19:0/23", "--write=1", "--debug=4"],
               F, expect_failure=True)  # this write should NOT succeed

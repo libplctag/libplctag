@@ -117,6 +117,9 @@ CHECKING_EXES = {"test_bit_write", "test_write_before_read", "test_parallel_writ
 #: included, so only one test at a time touches B3:0.
 LINKED_FILES = {("micrologix", "N7"): "B3+N7", ("micrologix", "B3"): "B3+N7"}
 
+#: devices that run one test at a time, whatever the test reads or writes.
+EXCLUSIVE_DEVICES = {"micrologix"}
+
 #: executables that may write a tag without a --write argument, so they lock it shared.
 WRITING_EXES = {"test_callback_destroy"}
 
@@ -145,8 +148,11 @@ def resources_of(cmd: list[str], group: str) -> frozenset:
 
     if group != "functional":
         return frozenset((dev, None, True) for dev in devices)
-    return frozenset((dev, LINKED_FILES.get((dev, tag), tag), checks or (dev, tag) in LINKED_FILES)
-                     for dev in devices for tag in tags)
+    # The MicroLogix has lost an acknowledged write while another session was reading another
+    # file, so every test that touches it holds it whole, reads included.
+    whole = {(dev, None, True) for dev in devices if dev in EXCLUSIVE_DEVICES}
+    return frozenset(whole | {(dev, LINKED_FILES.get((dev, tag), tag), checks or (dev, tag) in LINKED_FILES)
+                              for dev in devices - EXCLUSIVE_DEVICES for tag in tags})
 
 
 def conflicts(a: frozenset, b: frozenset) -> bool:
@@ -193,7 +199,8 @@ def build_manifest() -> list[Test]:
     logix_gw = LOGIX_GW
     logix_path = "1,4"
     mlgx_gw = MLGX_GW
-    mlgx_b3_bit = random.randrange(16)
+    # the MicroLogix holds B3:0/0 on, so the test uses one of the other bits.
+    mlgx_b3_bit = random.randrange(1, 16)
     plc5_gw = PLC5_GW
     dhp_bridge_gw = LOGIX_GW
     cip_bridge_gw = ENBT_48_GW
@@ -273,10 +280,11 @@ def build_manifest() -> list[Test]:
               f"--bit-tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=TestLINTArray[0].43"]),
         test("test non-standard UDT strings", [exe("string_non_standard_udt")]),
         test("test non-standard string size", [exe("test_string")]),
-        # Zero the word, then set and clear one random bit, reading each step back as a bit and
-        # as a word.  The bit is in the log's command line.
+        # Stamp the word with only bit 0 on, as the PLC holds it, then set and clear one random
+        # bit from 1 to 15, reading each step back as a bit and as a word.  The bit is in the
+        # log's command line.
         test("B data file Micrologix tag read/write",
-             [exe("test_bit_write"), f"--bit={mlgx_b3_bit}", "--pattern=0", "--debug=4",
+             [exe("test_bit_write"), f"--bit={mlgx_b3_bit}", "--pattern=1", "--debug=4",
               f"--word-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=1&name=B3:0",
               f"--bit-tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=B3:0/{mlgx_b3_bit}"]),
         test("B bit data file Micrologix tag read/write",
@@ -319,12 +327,11 @@ def build_manifest() -> list[Test]:
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&elem_count=4&name=L10:0",
               "--write=0,1,2,3", "--debug=4"]),
-        # L files are read and written only as whole words, so a bit tag is refused at create.
-        # DISABLED until rolled-back code returns
-        # test("L bit data file Micrologix tag read",
-        #      [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
-        #       "--debug=4"],
-        #      expect_error="PLCTAG_ERR_UNSUPPORTED"),
+        # A bit in an L file reads like any other, but cannot be written: PCCC has no
+        # read-modify-write for 32-bit words.
+        test("L bit data file Micrologix tag read",
+             [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
+              "--debug=4"]),
         test("L bit data file Micrologix tag write",
              [exe("tag_rw2"), "--type=bit", f"--tag=protocol=ab-eip&gateway={mlgx_gw}&plc=micrologix&name=L10:0/23",
               "--write=1", "--debug=4"],
@@ -365,11 +372,10 @@ def build_manifest() -> list[Test]:
              [exe("test_bit_write"), "--bit=10", "--debug=4",
               f"--word-tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
               f"--bit-tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10"]),
-        # DISABLED until rolled-back code returns
-        # test("missing data file PLC5 tag read",
-        #      [exe("tag_rw2"), "--type=sint16",
-        #       f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N250:0", "--debug=4"],
-        #      expect_error="PLCTAG_ERR_NOT_FOUND"),  # N250 does not exist
+        test("missing data file PLC5 tag read",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={plc5_gw}&plc=plc5&elem_count=1&name=N250:0", "--debug=4"],
+             expect_error="PLCTAG_ERR_NOT_FOUND"),  # N250 does not exist
         # PCCC-mapped Logix tag (plc=lgxpccc): talks PCCC file-based addressing
         # (N7:0 etc.) to a ControlLogix CPU instead of native CIP tag names --
         # exercises eip_lgx_pccc.c, which no other test in this suite reaches.
@@ -399,12 +405,11 @@ def build_manifest() -> list[Test]:
              [exe("test_bit_write"), "--bit=10", "--debug=4",
               f"--word-tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0",
               f"--bit-tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10"]),
-        # DISABLED until rolled-back code returns
-        # test("missing data file DH+ bridged tag read",
-        #      [exe("tag_rw2"), "--type=uint8",
-        #       f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N250:0",
-        #       "--debug=4"],
-        #      expect_error="PLCTAG_ERR_NOT_FOUND"),  # N250 does not exist
+        test("missing data file DH+ bridged tag read",
+             [exe("tag_rw2"), "--type=uint8",
+              f"--tag=protocol=ab_eip&gateway={dhp_bridge_gw}&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N250:0",
+              "--debug=4"],
+             expect_error="PLCTAG_ERR_NOT_FOUND"),  # N250 does not exist
         test("basic CIP bridging",
              [exe("tag_rw2"), "--type=sint32",
               f"--tag=protocol=ab_eip&gateway={cip_bridge_gw}&path=1,4,18,{cip_bridge_target},1,0&plc=lgx&name=TestBigArray[0]",
@@ -412,26 +417,22 @@ def build_manifest() -> list[Test]:
         # A PCCC CPU reached through a ControlLogix chassis's Ethernet module instead of
         # directly.  The path holds no DH+ segment, so these are the direct rows carried
         # inside an Unconnected Send -- the PCCC request is routed, not reframed.
-        # DISABLED until rolled-back code returns
-        # test("CIP bridged MicroLogix tag read/write",
-        #      [exe("tag_rw2"), "--type=sint16",
-        #       f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&name=N7:0",
-        #       "--debug=4", "--write=42", "--check"]),
-        # DISABLED until rolled-back code returns
-        # test("CIP bridged MicroLogix bit write changes only that bit",
-        #      [exe("test_bit_write"), "--bit=10", "--debug=4",
-        #       f"--word-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0",
-        #       f"--bit-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&name=N7:0/10"]),
-        # DISABLED until rolled-back code returns
-        # test("CIP bridged PLC5 tag read/write",
-        #      [exe("tag_rw2"), "--type=sint16",
-        #       f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
-        #       "--debug=4", "--write=42", "--check"]),
-        # DISABLED until rolled-back code returns
-        # test("CIP bridged PLC5 bit write changes only that bit",
-        #      [exe("test_bit_write"), "--bit=10", "--debug=4",
-        #       f"--word-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
-        #       f"--bit-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10"]),
+        test("CIP bridged MicroLogix tag read/write",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&name=N7:0",
+              "--debug=4", "--write=42", "--check"]),
+        test("CIP bridged MicroLogix bit write changes only that bit",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{mlgx_gw}&plc=micrologix&name=N7:0/10"]),
+        test("CIP bridged PLC5 tag read/write",
+             [exe("tag_rw2"), "--type=sint16",
+              f"--tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
+              "--debug=4", "--write=42", "--check"]),
+        test("CIP bridged PLC5 bit write changes only that bit",
+             [exe("test_bit_write"), "--bit=10", "--debug=4",
+              f"--word-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0",
+              f"--bit-tag=protocol=ab-eip&gateway={cip_bridge_gw}&path={cip_bridge_out},{plc5_gw}&plc=plc5&elem_count=1&name=N7:0/10"]),
         # Raw CIP tags are the only tag type whose request is the bare CIP message, so
         # they are what exercises the library's own EIP and CPF framing. Cover every
         # combination that frames differently: connected vs unconnected, a service the
@@ -440,19 +441,17 @@ def build_manifest() -> list[Test]:
         # Packet. Packing only ever happens on a connection, so there is no unconnected
         # bundled case.
         test("raw cip tag, connected, list tag instances", [exe("test_raw_cip")]),
-        # DISABLED until rolled-back code returns
-        # test("raw cip tag, unconnected, list tag instances",
-        #      [exe("test_raw_cip"),
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@raw"]),
+        test("raw cip tag, unconnected, list tag instances",
+             [exe("test_raw_cip"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@raw"]),
         test("raw cip tag, connected, read named tag",
              [exe("test_raw_cip"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@raw",
               "--read=TestBigArray"]),
-        # DISABLED until rolled-back code returns
-        # test("raw cip tag, unconnected, read named tag",
-        #      [exe("test_raw_cip"),
-        #       f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@raw",
-        #       "--read=TestBigArray"]),
+        test("raw cip tag, unconnected, read named tag",
+             [exe("test_raw_cip"),
+              f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&use_connected_msg=0&name=@raw",
+              "--read=TestBigArray"]),
         test("raw cip tags bundled into one packet",
              [exe("test_raw_cip"),
               f"--tag=protocol=ab-eip&gateway={logix_gw}&path={logix_path}&plc=ControlLogix&name=@raw",
@@ -646,9 +645,8 @@ def build_logix_matrix() -> list[Test]:
         # the only thing that differs between them.
         tests.append(test(f"{target.label}: raw cip, connected",
                           [exe("test_raw_cip"), f"--tag={base}&name=@raw"]))
-        # DISABLED until rolled-back code returns
-        # tests.append(test(f"{target.label}: raw cip, unconnected",
-        #                   [exe("test_raw_cip"), f"--tag={base}&use_connected_msg=0&name=@raw"]))
+        tests.append(test(f"{target.label}: raw cip, unconnected",
+                          [exe("test_raw_cip"), f"--tag={base}&use_connected_msg=0&name=@raw"]))
         tests.append(test(f"{target.label}: connection tag state transitions",
                           [exe("test_connection_tag"), f"--tag={base}&name=@connection"]))
         # No plc, so each CPU is identified through its own route.  @raw names no tag.
