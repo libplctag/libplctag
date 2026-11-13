@@ -46,6 +46,8 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/udp_server.h
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.c
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/logix.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/logix.h
     ${CMAKE_CURRENT_SOURCE_DIR}/log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/log.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/random_utils.c

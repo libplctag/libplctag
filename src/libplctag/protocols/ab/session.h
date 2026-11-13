@@ -172,6 +172,12 @@ struct ab_request_t {
     /* debugging info */
     int tag_id;
 
+    /*
+     * data holds only the CIP request, and gets back only the CIP reply.  The session writes
+     * the EIP and CPF framing.  connected sends it over the CIP connection.
+     */
+    bool connected;
+
     /* allow requests to be packed in the session */
     int allow_packing;
     int packing_num;

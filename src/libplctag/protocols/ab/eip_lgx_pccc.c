@@ -182,7 +182,7 @@ int tag_read_start(ab_tag_p tag) {
         tag->read_in_progress = 1;
 
         int request_overhead =
-            (int)sizeof(eip_cip_uc_req) + (int)sizeof(embedded_pccc) + tag->encoded_name_size + (int)sizeof(uint16_le);
+            CIP_UC_SEND_WRAPPER_SIZE + (int)sizeof(embedded_pccc) + tag->encoded_name_size + (int)sizeof(uint16_le);
 
         int request_payload_space = session_payload_space - request_overhead;
 
@@ -202,8 +202,7 @@ int tag_read_start(ab_tag_p tag) {
             break;
         }
 
-        eip_cip_uc_req *lgx_pccc = (eip_cip_uc_req *)(req->data);
-        embedded_pccc *embed_pccc = (embedded_pccc *)(lgx_pccc + 1);
+        embedded_pccc *embed_pccc = (embedded_pccc *)(req->data);
         embed_start = (uint8_t *)(embed_pccc);
 
         embed_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
@@ -232,31 +231,8 @@ int tag_read_start(ab_tag_p tag) {
             data++;
         }
 
-        lgx_pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
-        lgx_pccc->router_timeout = h2le16(1);
-        lgx_pccc->cpf_item_count = h2le16(2);
-        lgx_pccc->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
-        lgx_pccc->cpf_nai_item_length = h2le16(0);
-        lgx_pccc->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
-        lgx_pccc->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND;
-        lgx_pccc->cm_req_path_size = 0x02;
-        lgx_pccc->cm_req_path[0] = 0x20;
-        lgx_pccc->cm_req_path[1] = 0x06;
-        lgx_pccc->cm_req_path[2] = 0x24;
-        lgx_pccc->cm_req_path[3] = 0x01;
-        lgx_pccc->secs_per_tick = AB_EIP_SECS_PER_TICK;
-        lgx_pccc->timeout_ticks = AB_EIP_TIMEOUT_TICKS;
-        lgx_pccc->uc_cmd_length = h2le16((uint16_t)(data - embed_start));
-        if(tag->session->conn_path_size > 0) {
-            *data = (tag->session->conn_path_size) / 2;
-            data++;
-            *data = 0;
-            data++;
-            mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-            data += tag->session->conn_path_size;
-        }
-        lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
-        req->request_size = (int)(data - (req->data));
+        req->request_size = (int)(data - embed_start);
+        req->connected = false;
         req->allow_packing = tag->allow_packing;
         rc = session_add_request(tag->session, req);
         if(rc != PLCTAG_STATUS_OK) {
@@ -311,19 +287,7 @@ static int check_read_status(ab_tag_p tag) {
 
         data_end = tag->req->data + tag->req->request_size;
 
-        if(le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "Unexpected EIP packet type received: %d!",
-                   pccc->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
 
-        if(le2h32(pccc->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "EIP command failed, response code: %d",
-                   le2h32(pccc->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
 
         if(pccc->general_status != AB_EIP_OK) {
             pdebug(DEBUG_MODULE_AB_EIP_LGX_PCCC, DEBUG_WARN, tag->tag_id, "PCCC command failed, response code: (%d) %s",
@@ -448,9 +412,8 @@ int tag_write_start(ab_tag_p tag) {
             break;
         }
 
-        int request_overhead = (int)sizeof(eip_cip_uc_req) + (int)sizeof(embedded_pccc) + tag->encoded_name_size
-                               + tag->encoded_type_info_size
-                               + (int)((tag->session->conn_path_size > 0) ? (2 + tag->session->conn_path_size) : 0);
+        int request_overhead = CIP_UC_SEND_WRAPPER_SIZE + (int)sizeof(embedded_pccc) + tag->encoded_name_size
+                               + tag->encoded_type_info_size;
 
         int request_payload_space = session_payload_space - request_overhead;
 
@@ -470,8 +433,7 @@ int tag_write_start(ab_tag_p tag) {
             break;
         }
 
-        eip_cip_uc_req *lgx_pccc = (eip_cip_uc_req *)(req->data);
-        embedded_pccc *embed_pccc = (embedded_pccc *)(lgx_pccc + 1);
+        embedded_pccc *embed_pccc = (embedded_pccc *)(req->data);
         embed_start = (uint8_t *)(embed_pccc);
 
         embed_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;
@@ -502,31 +464,8 @@ int tag_write_start(ab_tag_p tag) {
             data++;
         }
 
-        lgx_pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
-        lgx_pccc->router_timeout = h2le16(1);
-        lgx_pccc->cpf_item_count = h2le16(2);
-        lgx_pccc->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
-        lgx_pccc->cpf_nai_item_length = h2le16(0);
-        lgx_pccc->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
-        lgx_pccc->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND;
-        lgx_pccc->cm_req_path_size = 0x02;
-        lgx_pccc->cm_req_path[0] = 0x20;
-        lgx_pccc->cm_req_path[1] = 0x06;
-        lgx_pccc->cm_req_path[2] = 0x24;
-        lgx_pccc->cm_req_path[3] = 0x01;
-        lgx_pccc->secs_per_tick = AB_EIP_SECS_PER_TICK;
-        lgx_pccc->timeout_ticks = AB_EIP_TIMEOUT_TICKS;
-        lgx_pccc->uc_cmd_length = h2le16((uint16_t)(data - embed_start));
-        if(tag->session->conn_path_size > 0) {
-            *data = (tag->session->conn_path_size) / 2;
-            data++;
-            *data = 0;
-            data++;
-            mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-            data += tag->session->conn_path_size;
-        }
-        lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
-        req->request_size = (int)(data - (req->data));
+        req->request_size = (int)(data - embed_start);
+        req->connected = false;
         req->allow_packing = tag->allow_packing;
         rc = session_add_request(tag->session, req);
         if(rc != PLCTAG_STATUS_OK) {

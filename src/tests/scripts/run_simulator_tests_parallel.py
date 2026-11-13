@@ -513,6 +513,43 @@ def build_manifest() -> Manifest:
               [exe("test_raw_cip"),
                f"--tag=protocol=ab-eip&gateway={gw}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@raw",
                "--read=TestReal"], F)
+    # Rockwell tag and UDT listing.  Its own server: UDT, STRING and multi-dimension tags for the
+    # listing to describe, 40 long names so an unconnected listing needs several 0x55 requests,
+    # and a 32-member UDT whose definition needs several Read Template fragments unconnected.
+    # Point is template 1 (members 2-4), so Big is template 5.
+    big_members = ",".join(f"Member_With_A_Long_Name_Number_{i:02d}:DINT" for i in range(32))
+    listing_server = ServerSpec(
+        exe_path=exe("ab_server"),
+        args_template=["--debug", "--plc=ControlLogix", "--port={PORT}", "--path=1,0",
+                       "--udt=Point:x:DINT,y:REAL,z:INT", f"--udt=Big:{big_members}",
+                       "--tag=TestString:STRING[4]", "--tag=P:Point[1]", "--tag=Pts:Point[5]", "--tag=B:Big[1]",
+                       "--tag=Grid:INT[2,3]"]
+                      + [f"--tag=Long_Tag_Name_For_Listing_{i:02d}:DINT[1]" for i in range(40)],
+        startup_wait_s=1,
+    )
+    lgx_list = sec.test("list tags and UDTs (AB ControlLogix)",
+              [exe("list_tags_logix"), "127.0.0.1:{PORT}", "1,0"], F, server=listing_server)
+    sec.test("check: the listing decoded the Point, Big and STRING UDTs", None, F, depends_on=lgx_list.id, ports_needed=0,
+              check=CheckSpec(log_file=lgx_list.log_file, pattern=r"^ UDT (Point|Big|STRING) \(ID", expected=3))
+    sec.test("tag listing read twice, connected (AB ControlLogix)",
+              [exe("test_tag_listing_reread"),
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&name=@tags"], F,
+              server=listing_server)
+    lgx_list_uc = sec.test("tag listing read twice, unconnected (AB ControlLogix)",
+              [exe("test_tag_listing_reread"),
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@tags"], F,
+              server=listing_server)
+    sec.test("check: the unconnected listing took more than one request", None, F, depends_on=lgx_list_uc.id,
+              ports_needed=0,
+              check=CheckSpec(log_file=lgx_list_uc.server_log_file, pattern=r"Tag listing from instance \d+: \d+ tags, more 1",
+                              expected=1, at_least=True))
+    lgx_udt_uc = sec.test("UDT definition read in fragments, unconnected (AB ControlLogix)",
+              [exe("tag_rw2"), "--type=uint8",
+               "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&path=1,0&plc=ControlLogix&use_connected_msg=0&name=@udt/5"], F,
+              server=listing_server)
+    sec.test("check: the UDT definition took more than one fragment", None, F, depends_on=lgx_udt_uc.id, ports_needed=0,
+              check=CheckSpec(log_file=lgx_udt_uc.server_log_file, pattern=r"Template 5 read from [1-9]\d*:",
+                              expected=1, at_least=True))
     # Several raw tags at once so the connection bundles their CIP messages into one
     # Multiple Service Packet, which assembles and splits differently from a lone request.
     # Writing a tag the caller never read: the library has to fetch the type itself and
@@ -1126,7 +1163,8 @@ def build_manifest() -> Manifest:
     micro800_server = ServerSpec(
         exe_path=exe("ab_server"),
         args_template=["--debug", "--plc=Micro800", "--port={PORT}", "--tag=TestDINTArray:DINT[10]",
-                        "--tag=TestString:STRING[4]", "--tag=VarShort:VSHORTSTRING[4]"],
+                        "--tag=TestString:STRING[4]", "--tag=VarShort:VSHORTSTRING[4]",
+                        "--udt=Point:x:DINT,y:REAL", "--tag=P:Point[1]", "--tag=Flags:BOOL[16]", "--tag=Flag:BOOL[1]"],
         startup_wait_s=1,
     )
 
@@ -1134,6 +1172,14 @@ def build_manifest() -> Manifest:
     list_identity(sec, "Micro800", 1, 14, 200, "2080-LC50-24QWB")
     sec.test("identity, unrouted",
               [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=generic&name=@identity&debug=3"], F)
+    # A Micro800 lists its UDTs but leaves its BOOL arrays out of the listing.
+    m800_list = sec.test("list tags and UDTs (Micro800)", [exe("list_tags_micro8x0"), "127.0.0.1:{PORT}"], F)
+    sec.test("check: the Micro800 listing decoded the Point UDT", None, F, depends_on=m800_list.id, ports_needed=0,
+              check=CheckSpec(log_file=m800_list.log_file, pattern=r"^ UDT Point \(ID", expected=1))
+    sec.test("check: the Micro800 listing has the BOOL but not the BOOL array", None, F, depends_on=m800_list.id,
+              ports_needed=0, check=CheckSpec(log_file=m800_list.log_file, pattern=r'^Tag "Flags?[" \[]', expected=1))
+    sec.test("tag listing read twice (Micro800)",
+              [exe("test_tag_listing_reread"), "--tag=protocol=ab-eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=@tags"], F)
     sec.test("identity, Micro800, connected",
               [exe("get_identity"), "--tag=protocol=ab_eip&gateway=127.0.0.1:{PORT}&plc=micro800&name=@identity&debug=3"], F)
     sec.test("basic Micro800 read/write",

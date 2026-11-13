@@ -310,11 +310,14 @@ void usage(void) {
                     "                                 pccc_tns   - PCCC transaction number we never sent.\n"
                     "                                 endless_frag - never-ending fragmented read.\n"
                     "\n"
-                    "    Omron UDTs:\n"
+                    "    UDTs (Omron, ControlLogix and Micro800):\n"
                     "        --udt=<name>:<member>:<type>,<member>:<type>...\n"
                     "                               define a structure of atomic members.  A tag of\n"
                     "                               type <name> is then one, e.g. --tag=P:Point[1].\n"
-                    "                               An Omron tag with one dimension of 1 is a scalar.\n"
+                    "                               A tag with one dimension of 1 is a scalar.\n"
+                    "                               ControlLogix and Micro800 also list their tags\n"
+                    "                               (@tags) and UDTs (@udt/N).  A Micro800 does not\n"
+                    "                               list its BOOL arrays.\n"
                     "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
                     "         ab_server --plc=Omron --udt=Point:x:DINT,y:REAL --tag=P:Point[1]\n"
@@ -358,7 +361,7 @@ static const args_flag_def_t arg_flags[] = {
      ARGS_OPTIONAL,
      ARGS_MULTIPLE,
      "udt",
-     "Omron UDT definition, <name>:<member>:<type>,<member>:<type>...  May be repeated",
+     "Omron, ControlLogix or Micro800 UDT definition, <name>:<member>:<type>,<member>:<type>...  May be repeated",
      {.has_default = false}},
     {"debug", ARGS_TYPE_BOOL, ARGS_OPTIONAL, ARGS_ONCE, "debug", "Turn on debug logging", {.has_default = false}},
     {"dup-conn-id-tries",
@@ -502,9 +505,9 @@ void process_args(int32_t argc, const char **argv, plc_s *plc) {
 
         if(!udt_val.present || !udt_val.value.string_val) { continue; }
 
-        if(plc->plc_type != PLC_OMRON) {
+        if(plc->plc_type != PLC_OMRON && plc->plc_type != PLC_CONTROL_LOGIX && plc->plc_type != PLC_MICRO800) {
             /* NOLINTNEXTLINE */
-            fprintf(stderr, "--udt is only supported for Omron.\n");
+            fprintf(stderr, "--udt is only supported for Omron, ControlLogix and Micro800.\n");
             args_free(&args);
             usage();
             return;

@@ -186,6 +186,8 @@
 
 
 #define AB_EIP_SECS_PER_TICK 0x0A
+/* Unconnected Send service, CM path, ticks and embedded length, ahead of the embedded request. */
+#define CIP_UC_SEND_WRAPPER_SIZE (10)
 #define AB_EIP_TIMEOUT_TICKS 0x0E
 #define AB_EIP_VENDOR_ID 0xF33D     /*tres 1337 */
 #define AB_EIP_VENDOR_SN 0x21504345 /* the string !PCE */
@@ -1006,29 +1008,8 @@ START_PACK typedef struct {
 //
 
 
+/* The Execute PCCC reply, from the CIP reply service on. */
 START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;        /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;         /* packet size in bytes - 24 */
-    uint32_le encap_session_handle; /* from session set up */
-    uint32_le encap_status;         /* always _sent_ as 0 */
-    uint64_le encap_sender_context; /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;        /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle; /* ALWAYS 0 */
-    uint16_le router_timeout;   /* in seconds, 5 or 10 seems to be good.*/
-
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;      /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;   /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length; /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;   /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
-
     /* PCCC Reply */
     uint8_t reply_code;     /* 0xCB Execute PCCC Reply */
     uint8_t reserved;       /* 0x00 in reply */

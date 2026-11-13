@@ -639,9 +639,8 @@ def build_logix_matrix() -> list[Test]:
         tests.append(test(f"{target.label}: tag listing and UDT definitions",
                           [exe("list_tags_logix"), gw, path]))
         # Review defect R1: a second @tags read on the same handle must describe the same listing.
-        # DISABLED until rolled-back code returns
-        # tests.append(test(f"{target.label}: tag listing read twice on one handle",
-        #                   [exe("test_tag_listing_reread"), f"--tag={base}&name=@tags"]))
+        tests.append(test(f"{target.label}: tag listing read twice on one handle",
+                          [exe("test_tag_listing_reread"), f"--tag={base}&name=@tags"]))
         # Raw CIP is what exercises the library's own EIP and CPF framing.  List Tag Instances
         # names no tag, so it runs everywhere; both messaging modes, because the framing is
         # the only thing that differs between them.

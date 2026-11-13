@@ -1412,9 +1412,9 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
     }
 
     if(is_dhp) {
-        min_size = (int)(sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_cmd_resp));
+        min_size = (int)sizeof(pccc_dhp_cmd_resp);
     } else {
-        min_size = (int)(sizeof(eip_cpf_uc_header) + sizeof(cip_pccc_resp) + sizeof(pccc_cmd_resp));
+        min_size = (int)(sizeof(cip_pccc_resp) + sizeof(pccc_cmd_resp));
     }
 
     if(tag->req->request_size < min_size) {
@@ -1425,7 +1425,7 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
     }
 
     if(is_dhp) {
-        pccc_dhp_cmd_resp *dhp_resp = (pccc_dhp_cmd_resp *)((eip_cpf_co_header *)(tag->req->data) + 1);
+        pccc_dhp_cmd_resp *dhp_resp = (pccc_dhp_cmd_resp *)(tag->req->data);
 
         /* we sent this to dhp_dest from node zero, so the answer has to come back the other way. */
         if(!tag->session) {
@@ -1444,7 +1444,7 @@ int pccc_check_response_header(ab_tag_p tag, bool is_dhp) {
         /* the DH+ command response has no CIP PCCC header, so the TNS is all that is left. */
         pccc_cmd = (pccc_cmd_resp *)(&dhp_resp->pccc_command);
     } else {
-        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)((eip_cpf_uc_header *)(tag->req->data) + 1);
+        cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(tag->req->data);
 
         /*
          * The reply code is the PCCC-layer echo of the service we asked for.  Everything after
@@ -1658,8 +1658,7 @@ int pccc_tag_read_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        eip_cpf_uc_header *cip_req = (eip_cpf_uc_header *)(req->data);
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(cip_req + 1);
+        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
@@ -1720,21 +1719,12 @@ int pccc_tag_read_start(ab_tag_p tag) {
         ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request CIP data length: %td bytes.", cip_request_size);
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
-        cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
-        cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request CPF UDI item length: %u bytes.",
-               le2h16(cip_req->cpf_udi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = false;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC request size set to %d bytes.", req->request_size);
 
         /* debug: dump request data */
@@ -1797,8 +1787,7 @@ int pccc_check_read_status(ab_tag_p tag) {
     }
 
     /* get the header pointers */
-    eip_cpf_uc_header *eip_cpf = (eip_cpf_uc_header *)(tag->req->data);
-    cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(eip_cpf + 1);
+    cip_pccc_resp *cip_pccc = (cip_pccc_resp *)(tag->req->data);
     pccc_cmd_resp *pccc_cmd = (pccc_cmd_resp *)(cip_pccc + 1);
 
     uint8_t *data = (uint8_t *)(pccc_cmd + 1);
@@ -1937,8 +1926,7 @@ int pccc_tag_write_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        eip_cpf_uc_header *cip_req = (eip_cpf_uc_header *)(req->data);
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(cip_req + 1);
+        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
@@ -2002,21 +1990,12 @@ int pccc_tag_write_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CIP data length: %td bytes.",
                cip_request_size);
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
-        cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
-        cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CPF UDI item length: %u bytes.",
-               le2h16(cip_req->cpf_udi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = false;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
@@ -2127,8 +2106,7 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        eip_cpf_uc_header *cip_req = (eip_cpf_uc_header *)(req->data);
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(cip_req + 1);
+        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
         pccc_rmw_cmd_req *pccc_cmd = (pccc_rmw_cmd_req *)(cip_pccc + 1);
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
@@ -2203,21 +2181,12 @@ int plc5_tag_write_bit_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CIP data length: %td bytes.",
                cip_request_size);
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
-        cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
-        cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CPF UDI item length: %u bytes.",
-               le2h16(cip_req->cpf_udi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = false;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
@@ -2337,8 +2306,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        eip_cpf_uc_header *cip_req = (eip_cpf_uc_header *)(req->data);
-        cip_pccc_req *cip_pccc = (cip_pccc_req *)(cip_req + 1);
+        cip_pccc_req *cip_pccc = (cip_pccc_req *)(req->data);
         pccc_rmw_cmd_req *pccc_cmd = (pccc_rmw_cmd_req *)(cip_pccc + 1);
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
@@ -2406,21 +2374,12 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CIP data length: %td bytes.",
                cip_request_size);
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI);
-        cip_req->cpf_nai_item_length = h2le16(0);
-        cip_req->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);
-        cip_req->cpf_udi_item_length = h2le16((uint16_t)cip_request_size);
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request CPF UDI item length: %u bytes.",
-               le2h16(cip_req->cpf_udi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = false;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "PCCC write request size set to %d bytes.", req->request_size);
 
         /* add request to session */
@@ -2679,9 +2638,8 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
-        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(cip_req + 1);
-        embed_start = (uint8_t *)(cip_req + 1);
+        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(req->data);
+        embed_start = (uint8_t *)(req->data);
 
         /* fill in DH+ fields */
         dhp_routing->dest_link = h2le16(0);
@@ -2742,23 +2700,12 @@ int pccc_dhp_tag_read_start(ab_tag_p tag) {
         ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request CIP data length: %td bytes.", cip_request_size);
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
-        cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
-        cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
-        cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request CPF CDI item length: %u bytes.",
-               le2h16(cip_req->cpf_cdi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = true;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request size set to %d bytes.", req->request_size);
 
         /* debug: dump request data */
@@ -2821,8 +2768,7 @@ int pccc_dhp_check_read_status(ab_tag_p tag) {
     }
 
     /* get the header pointers */
-    eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
-    pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(eip_cpf + 1);
+    pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(tag->req->data);
 
     uint8_t *data = (uint8_t *)(pccc_cmd + 1);
     uint8_t *data_end = tag->req->data + tag->req->request_size;
@@ -2950,9 +2896,8 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
         }
 
         /* point the struct pointers to the buffer */
-        eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
-        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(cip_req + 1);
-        embed_start = (uint8_t *)(cip_req + 1);
+        pccc_dhp_routing_header *dhp_routing = (pccc_dhp_routing_header *)(req->data);
+        embed_start = (uint8_t *)(req->data);
 
         /* fill in DH+ fields */
         dhp_routing->dest_link = h2le16(0);
@@ -3011,26 +2956,13 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request CIP data length: %td bytes.",
                cip_request_size);
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
-        cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
-        cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
-        cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC request CPF CDI item length: %u bytes.",
-               le2h16(cip_req->cpf_cdi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request CPF UDI item length: %u bytes.",
-               le2h16(cip_req->cpf_cdi_item_length));
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = true;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC write request size set to %d bytes.",
                req->request_size);
 
@@ -3096,7 +3028,7 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         /* How much overhead? */
-        overhead = sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_rmw_cmd_req) + (size_t)tag->encoded_name_size
+        overhead = sizeof(pccc_dhp_rmw_cmd_req) + (size_t)tag->encoded_name_size
                    + (size_t)(tag->elem_size * 2); /* AND/OR masks */
 
         int session_payload_space = session_get_available_cip_payload_space(tag->session);
@@ -3139,9 +3071,8 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* stack the struct pointers as in tag_read_start */
-        eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
-        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(cip_req + 1);
-        embed_start = (uint8_t *)(cip_req + 1);
+        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(req->data);
+        embed_start = (uint8_t *)(req->data);
 
         /* point data pointer just past the fixed data fields */
         data = (uint8_t *)(pccc_cmd + 1);
@@ -3206,23 +3137,12 @@ int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
         pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
         pccc_cmd->pccc_function = AB_EIP_PLC5_RMW_FUNC;
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
-        cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
-        cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
-        cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request CPF CDI item length: %u bytes.",
-               le2h16(cip_req->cpf_cdi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = true;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request size set to %d bytes.",
                req->request_size);
 
@@ -3297,7 +3217,7 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         tag->write_in_progress = 1;
 
         /* How much overhead? */
-        overhead = sizeof(eip_cpf_co_header) + sizeof(pccc_dhp_routing_header) + sizeof(slc_pccc_write_cmd_req)
+        overhead = sizeof(pccc_dhp_routing_header) + sizeof(slc_pccc_write_cmd_req)
                    + (size_t)tag->encoded_name_size + (size_t)(tag->elem_size) + 2; /* the mask */
 
         int session_payload_space = session_get_available_cip_payload_space(tag->session);
@@ -3340,9 +3260,8 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         }
 
         /* stack the struct pointers as in tag_read_start */
-        eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
-        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(cip_req + 1);
-        embed_start = (uint8_t *)(cip_req + 1);
+        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(req->data);
+        embed_start = (uint8_t *)(req->data);
 
         /* point data pointer just past the fixed data fields */
         data = (uint8_t *)(pccc_cmd + 1);
@@ -3401,23 +3320,12 @@ int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
         pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
         pccc_cmd->pccc_function = AB_EIP_SLC_RANGE_WRITE_MASK_FUNC;
 
-        /* fill in Common Packet Format fields */
-        cip_req->cpf_item_count = h2le16(2);
-        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
-        cip_req->cpf_cai_item_length = h2le16(4);
-        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
-        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
-        cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
-        cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
 
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request CPF CDI item length: %u bytes.",
-               le2h16(cip_req->cpf_cdi_item_length));
 
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
 
         /* set request size */
-        req->request_size = (int)calculated_request_size;
+        req->request_size = (int)cip_request_size;
+        req->connected = true;
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, tag->tag_id, "DH+ PCCC bit write request size set to %d bytes.",
                req->request_size);
 
@@ -3478,8 +3386,7 @@ int pccc_dhp_check_write_status(ab_tag_p tag) {
     /* the request reference is valid. */
 
     /* get the header pointers */
-    eip_cpf_co_header *eip_cpf = (eip_cpf_co_header *)(tag->req->data);
-    pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(eip_cpf + 1);
+    pccc_dhp_cmd_resp *pccc_cmd = (pccc_dhp_cmd_resp *)(tag->req->data);
 
     uint8_t *data_end = tag->req->data + tag->req->request_size;
 

@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 #include "cip.h"
+#include "logix.h"
 #include "omron.h"
 #include "eip.h"
 #include "fault.h"
@@ -139,6 +140,21 @@ static const cip_service_t omron_symbol_services[] = {
     {CIP_SRV_WRITE_NAMED_TAG_FRAG, false, write_tag},
 };
 
+/* a Rockwell CPU also lists its tags. */
+static const cip_service_t rockwell_symbol_services[] = {
+    {CIP_SRV_READ_NAMED_TAG, false, read_tag},
+    {CIP_SRV_WRITE_NAMED_TAG, false, write_tag},
+    {CIP_SRV_RMW, false, read_modify_write},
+    {CIP_SRV_READ_NAMED_TAG_FRAG, false, read_tag},
+    {CIP_SRV_WRITE_NAMED_TAG_FRAG, false, write_tag},
+    {CIP_SRV_LIST_TAGS, false, logix_list_tags},
+};
+
+static const cip_service_t rockwell_template_services[] = {
+    {CIP_SRV_GET_ATTRIBUTE_LIST, false, logix_template_get_attribute_list},
+    {CIP_SRV_READ_NAMED_TAG, false, logix_template_read},
+};
+
 static const cip_service_t omron_tag_name_server_services[] = {
     {CIP_SRV_OMRON_GET_INSTANCE_LIST, false, omron_get_instance_list},
 };
@@ -155,6 +171,15 @@ static const cip_class_t standard_classes[] = {
     CIP_CLASS_ENTRY(CIP_CLASS_CONNECTION_MANAGER, connection_manager_services),
     CIP_CLASS_ENTRY(CIP_CLASS_PCCC, pccc_services),
     CIP_CLASS_ENTRY(CIP_CLASS_SYMBOL, symbol_services),
+};
+
+static const cip_class_t rockwell_classes[] = {
+    CIP_CLASS_ENTRY(CIP_CLASS_IDENTITY, identity_services),
+    CIP_CLASS_ENTRY(CIP_CLASS_MESSAGE_ROUTER, message_router_services),
+    CIP_CLASS_ENTRY(CIP_CLASS_CONNECTION_MANAGER, connection_manager_services),
+    CIP_CLASS_ENTRY(CIP_CLASS_PCCC, pccc_services),
+    CIP_CLASS_ENTRY(CIP_CLASS_SYMBOL, rockwell_symbol_services),
+    CIP_CLASS_ENTRY(CIP_CLASS_TEMPLATE, rockwell_template_services),
 };
 
 static const cip_class_t omron_classes[] = {
@@ -257,6 +282,10 @@ static uint8_t find_service(plc_s *plc, cip_request_t *req, const cip_service_t 
     if(plc->plc_type == PLC_OMRON) {
         classes = omron_classes;
         class_count = sizeof(omron_classes) / sizeof(omron_classes[0]);
+    } else if(plc->plc_type == PLC_CONTROL_LOGIX || plc->plc_type == PLC_MICRO800) {
+        /* tag and UDT listing only on a simulated Rockwell CIP CPU, not on the PCCC ones. */
+        classes = rockwell_classes;
+        class_count = sizeof(rockwell_classes) / sizeof(rockwell_classes[0]);
     }
 
     for(size_t i = 0; i < class_count; i++) {

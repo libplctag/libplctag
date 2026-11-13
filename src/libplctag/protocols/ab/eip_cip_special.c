@@ -57,7 +57,6 @@
  * interface_handle (one uint32_le) followed by timeout, item_count, NAI type, NAI length,
  * UDI type, and UDI length (six uint16_le fields).
  */
-#define IDENTITY_RESPONSE_HEADER_SIZE ((int)(sizeof(uint32_le) + 6 * sizeof(uint16_le)))
 
 
 /* tag listing packet format is as follows for controller tags:
@@ -144,28 +143,26 @@ START_PACK typedef struct {
 // static int raw_tag_read_start(ab_tag_p tag);
 static int raw_tag_tickler(ab_tag_p tag);
 static int raw_tag_write_start(ab_tag_p tag);
-static int raw_tag_check_write_status_connected(ab_tag_p tag);
-static int raw_tag_check_write_status_unconnected(ab_tag_p tag);
-static int raw_tag_build_write_request_connected(ab_tag_p tag);
-static int raw_tag_build_write_request_unconnected(ab_tag_p tag);
+static int raw_tag_check_write_status(ab_tag_p tag);
+static int raw_tag_build_write_request(ab_tag_p tag);
 
 
 /* listing tag functions. */
 static int listing_tag_read_start(ab_tag_p tag);
 static int listing_tag_tickler(ab_tag_p tag);
 // static int listing_tag_write_start(ab_tag_p tag);
-static int listing_tag_check_read_status_connected(ab_tag_p tag);
-static int listing_tag_build_read_request_connected(ab_tag_p tag);
+static int listing_tag_check_read_status(ab_tag_p tag);
+static int listing_tag_build_read_request(ab_tag_p tag);
 
 
 /* UDT tag functions. */
 static int udt_tag_read_start(ab_tag_p tag);
 static int udt_tag_tickler(ab_tag_p tag);
 // static int listing_tag_write_start(ab_tag_p tag);
-static int udt_tag_check_read_metadata_status_connected(ab_tag_p tag);
-static int udt_tag_build_read_metadata_request_connected(ab_tag_p tag);
-static int udt_tag_check_read_fields_status_connected(ab_tag_p tag);
-static int udt_tag_build_read_fields_request_connected(ab_tag_p tag);
+static int udt_tag_check_read_metadata_status(ab_tag_p tag);
+static int udt_tag_build_read_metadata_request(ab_tag_p tag);
+static int udt_tag_check_read_fields_status(ab_tag_p tag);
+static int udt_tag_build_read_fields_request(ab_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
@@ -289,39 +286,29 @@ int raw_tag_tickler(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     rc = check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Error %s getting request status!",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
 
     if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Something started a read on a raw tag.  This is not supported!");
-
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Something started a read on a raw tag.  This is not supported!");
         ab_tag_abort_request(tag);
 
         /* fire the event anyway */
         tag->read_complete = 1;
-
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     if(tag->write_in_progress) {
-        if(tag->use_connected_msg) {
-            rc = raw_tag_check_write_status_connected(tag);
-        } else {
-            rc = raw_tag_check_write_status_unconnected(tag);
-        }
-
+        rc = raw_tag_check_write_status(tag);
         tag->status = (int8_t)rc;
 
         /* if the operation completed, make a note so that the callback will be called. */
-        if(!tag->write_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Write complete.");
-            tag->write_complete = 1;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Write in progress.");
-        }
+        if(!tag->write_in_progress) { tag->write_complete = 1; }
 
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
-
         return rc;
     }
 
@@ -339,7 +326,6 @@ int raw_tag_tickler(ab_tag_p tag) {
  *
  * The routine starts the process of writing to a tag.
  */
-
 int raw_tag_write_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
@@ -358,16 +344,10 @@ int raw_tag_write_start(ab_tag_p tag) {
     /* the write is now in flight */
     tag->write_in_progress = 1;
 
-    if(tag->use_connected_msg) {
-        rc = raw_tag_build_write_request_connected(tag);
-    } else {
-        rc = raw_tag_build_write_request_unconnected(tag);
-    }
-
+    rc = raw_tag_build_write_request(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build write request!");
         tag->write_in_progress = 0;
-
         return rc;
     }
 
@@ -378,47 +358,23 @@ int raw_tag_write_start(ab_tag_p tag) {
 
 
 /*
- * raw_tag_check_write_status_connected
+ * raw_tag_check_write_status
  *
- * This routine must be called with the tag mutex locked.  It checks the current
- * status of a write operation.  If the write is done, it triggers the clean up.
+ * This routine must be called with the tag mutex locked.  The whole CIP reply, header
+ * included, becomes the tag's data.
  */
-
-int raw_tag_check_write_status_connected(ab_tag_p tag) {
+int raw_tag_check_write_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
-    uint8_t *data_start = NULL;
-    uint8_t *data_end = NULL;
-    int data_size = 0;
+    int data_size = tag->req->request_size;
     uint8_t *tag_data_buffer = NULL;
-
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    /* if we got here, there is a response and status is OK. */
-
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
-
-    /* copy the data into the tag. */
-    data_start = (uint8_t *)(&cip_resp->reply_service);
-    data_end = tag->req->data + (tag->req->request_size);
-
-    if((intptr_t)data_end < (intptr_t)data_start) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
-        ab_tag_abort_request(tag);
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    data_size = (int)(unsigned int)(data_end - data_start);
-
     tag_data_buffer = mem_realloc(tag->data, data_size);
-
     if(tag_data_buffer) {
         tag->data = tag_data_buffer;
         tag->size = data_size;
-
-        mem_copy(tag->data, data_start, data_size);
+        mem_copy(tag->data, tag->req->data, data_size);
     } else {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
         rc = PLCTAG_ERR_NO_MEM;
@@ -433,260 +389,29 @@ int raw_tag_check_write_status_connected(ab_tag_p tag) {
 }
 
 
-/*
- * raw_tag_check_write_status_unconnected
- *
- * This routine must be called with the tag mutex locked.  It checks the current
- * status of a write operation.  If the write is done, it triggers the clean up.
- */
-
-int raw_tag_check_write_status_unconnected(ab_tag_p tag) {
+/* The application wrote the whole CIP request into the tag; send it as it is. */
+int raw_tag_build_write_request(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_resp *cip_resp = NULL;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* if we got here, there is a response and status is OK. */
-
-    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
-
-    /* copy the data into the tag. */
-    uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
-    uint8_t *data_end = tag->req->data + tag->req->request_size;
-
-    if((intptr_t)data_end < (intptr_t)data_start) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
-        ab_tag_abort_request(tag);
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    int data_size = (int)(unsigned int)(data_end - data_start);
-    uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
-
-    if(tag_data_buffer) {
-        tag->data = tag_data_buffer;
-        tag->size = data_size;
-
-        mem_copy(tag->data, data_start, data_size);
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
-        rc = PLCTAG_ERR_NO_MEM;
-    }
-
-    /* clean up the request. */
-    ab_tag_abort_request(tag);
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-
-int raw_tag_build_write_request_connected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_req *cip = NULL;
-    uint8_t *data = NULL;
-    size_t required_space = 0;
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%s",
                plc_tag_decode_error(rc));
         return rc;
     }
 
-    /* how much space do we need? */
-    required_space = (size_t)tag->size + sizeof(*cip);
-
-    if(required_space > (size_t)tag->req->request_capacity) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, tag->req->request_capacity);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    cip = (eip_cip_co_req *)(tag->req->data);
-
-    /* point to the end of the struct */
-    data = (tag->req->data) + sizeof(eip_cip_co_req);
-
-    /*
-     * set up the embedded CIP request packet.  The user/client needs
-     * to set up the entire CIP request.   We just copy it here.
-     */
-
-    /* copy the tag data into the request */
-    mem_copy(data, tag->data, tag->size);
-    data += tag->size;
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
+    if(tag->size > tag->req->request_capacity || tag->size > session_get_available_cip_payload_space(tag->session)) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Raw request of %d bytes is too large!", tag->size);
         ab_tag_abort_request(tag);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* set the size of the request */
-    tag->req->request_size = (int)(data - (tag->req->data));
-
-    /* allow packing if the tag allows it. */
-    tag->req->allow_packing = tag->allow_packing;
-
-    /* reset the tag size so that incoming data overwrites the old. */
-    tag->size = 0;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! Error %s",
-               plc_tag_decode_error(rc));
-
-        ab_tag_abort_request(tag);
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done");
-
-    return rc;
-}
-
-
-int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_req *cip = NULL;
-    uint8_t *data = NULL;
-    uint8_t *embed_start = NULL;
-    uint8_t *embed_end = NULL;
-    size_t required_space = 0;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  Error %s!",
-               plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* how much space do we need? */
-    required_space = (size_t)tag->size + sizeof(eip_cip_uc_req) + (size_t)tag->session->conn_path_size;
-
-    if(required_space > (size_t)tag->req->request_capacity) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space, tag->req->request_capacity);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    cip = (eip_cip_uc_req *)(tag->req->data);
-
-    /* point to the end of the struct */
-    data = (tag->req->data) + sizeof(eip_cip_uc_req);
-
-    embed_start = data;
-
-    /*
-     * set up the embedded CIP read packet
-     * The format is:
-     *
-     * uint8_t cmd
-     * LLA formatted name
-     * data type to write
-     * uint16_t # of elements to write
-     * data to write
-     */
-
-    /*
-     * set up the embedded CIP request packet.  The user/client needs
-     * to set up the entire CIP request.   We just copy it here.
-     */
-
-    /* copy the tag data into the request */
-    mem_copy(data, tag->data, tag->size);
-    data += tag->size;
-
-    /* now we go back and fill in the fields of the static part */
-
-    /* mark the end of the embedded packet */
-    embed_end = data;
-
-    /*
-     * after the embedded packet, we need to tell the message router
-     * how to get to the target device.
-     */
-
-    /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
-    data++;
-    *data = 0;
-    data++; /* copy the tag name into the request */
-    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length =
-        h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
-
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
-
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = session_get_available_cip_payload_space(tag->session);
-
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size, available_payload);
-        ab_tag_abort_request(tag);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    /* set the size of the request */
-    tag->req->request_size = (int)(data - (tag->req->data));
+    mem_copy(tag->req->data, tag->data, tag->size);
+    tag->req->request_size = tag->size;
+    tag->req->connected = (tag->use_connected_msg != 0);
 
     /* allow packing if the tag allows it. */
     tag->req->allow_packing = tag->allow_packing;
@@ -716,10 +441,8 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
 /* identity tag functions */
 static int identity_tag_read_start(ab_tag_p tag);
 static int identity_tag_tickler(ab_tag_p tag);
-static int identity_tag_check_read_status_connected(ab_tag_p tag);
-static int identity_tag_check_read_status_unconnected(ab_tag_p tag);
-static int identity_tag_build_read_request_connected(ab_tag_p tag);
-static int identity_tag_build_read_request_unconnected(ab_tag_p tag);
+static int identity_tag_check_read_status(ab_tag_p tag);
+static int identity_tag_build_read_request(ab_tag_p tag);
 
 
 /* define the vtable for identity tag type. */
@@ -761,7 +484,7 @@ int identity_tag_read_start(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting");
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "A write is in progress on an identity tag!");
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity tag found with a write in flight!");
         return PLCTAG_ERR_BAD_STATUS;
     }
 
@@ -773,15 +496,9 @@ int identity_tag_read_start(ab_tag_p tag) {
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
 
-    /* build the request based on connection type */
-    if(tag->use_connected_msg) {
-        rc = identity_tag_build_read_request_connected(tag);
-    } else {
-        rc = identity_tag_build_read_request_unconnected(tag);
-    }
-
+    rc = identity_tag_build_read_request(tag);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build identity read request!");
         tag->read_in_progress = 0;
         return rc;
     }
@@ -798,319 +515,67 @@ int identity_tag_tickler(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
     rc = check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Error %s getting request status!",
+               plc_tag_decode_error(rc));
+        return rc;
+    }
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Write attempted on identity tag. Not supported!");
-
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity tags do not support writes!");
         ab_tag_abort_request(tag);
         tag->write_complete = 1;
-
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     if(tag->read_in_progress) {
-        if(tag->use_connected_msg) {
-            rc = identity_tag_check_read_status_connected(tag);
-        } else {
-            rc = identity_tag_check_read_status_unconnected(tag);
-        }
-
+        rc = identity_tag_check_read_status(tag);
         tag->status = (int8_t)rc;
 
-        if(!tag->read_in_progress) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Read complete.");
-            tag->read_complete = 1;
-        } else {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Read in progress.");
-        }
+        if(!tag->read_in_progress) { tag->read_complete = 1; }
 
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
         return rc;
     }
 
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "No operation in progress.");
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.  No operation in progress.");
 
     return tag->status;
 }
 
 
-int identity_tag_build_read_request_connected(ab_tag_p tag) {
+/* Get_Attributes_All on the Identity object, instance 1. */
+int identity_tag_build_read_request(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
-    eip_cip_co_req *cip = NULL;
-    uint8_t *data = NULL;
-    uint8_t *data_start = NULL;
+    static uint8_t get_identity[] = {
+        0x01,       /* service, Get_Attributes_All */
+        0x02,       /* path size in 16-bit words */
+        0x20, 0x01, /* class segment, Identity */
+        0x24, 0x01  /* instance segment, instance 1 */
+    };
 
     pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
 
-    /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request. Error %s!",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request.  rc=%s",
                plc_tag_decode_error(rc));
         return rc;
     }
 
-    cip = (eip_cip_co_req *)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_co_req);
-    data_start = data;
-
-    /*
-     * Build CIP Get_Attributes_All request to Identity Object
-     * Service: 0x01 (Get_Attributes_All)
-     * Class: 0x01 (Identity Object)
-     * Instance: 0x01
-     */
-
-    /* Service code: Get_Attributes_All */
-    *data = 0x01;
-    data++;
-
-    /* Request path size in words (class + instance = 2 words = 4 bytes) */
-    *data = 0x02;
-    data++;
-
-    /* Class segment: 0x20 (8-bit class) + 0x01 (Identity class) */
-    *data = 0x20;
-    data++;
-    *data = 0x01;
-    data++;
-
-    /* Instance segment: 0x24 (8-bit instance) + 0x01 (instance 1) */
-    *data = 0x24;
-    data++;
-    *data = 0x01;
-    data++;
-
-    /* now fill in the static part of the request */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout */
-
-    /* Common Packet Format fields for connected send */
-    cip->cpf_item_count = h2le16(2);
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
-    cip->cpf_cai_item_length = h2le16(4);
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
-    /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
-
+    mem_copy(req->data, get_identity, (int)sizeof(get_identity));
+    req->request_size = (int)sizeof(get_identity);
+    req->connected = (tag->use_connected_msg != 0);
     req->allow_packing = 0; /* identity requests should not be packed */
 
     /* save the request for later */
     critical_block(&tag->api_mutex) { tag->req = req; }
 
-    /* add the request to the session's list */
     rc = session_add_request(tag->session, req);
-
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
-    eip_encap *hdr = NULL;
-    uint8_t *data = NULL;
-    uint8_t *cpf_items = NULL;
-    uint8_t *data_item = NULL;
-    uint8_t *cip_request_start = NULL;
-    int need_unconnected_send = 0;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_INFO, tag->tag_id, "Starting.");
-
-    /* Determine if we need Unconnected Send (routing required) */
-    need_unconnected_send = (tag->session->conn_path_size > 0);
-
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to get new request. Error %s!",
+        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%s",
                plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    hdr = (eip_encap *)(req->data);
-    data = (req->data) + sizeof(eip_encap);
-
-    /* Set the EIP command */
-    hdr->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
-
-    /* Get the CPF items area - right after the header */
-    cpf_items = data;
-
-    /* Build CPF header (interface handle and timeout) */
-    data = cpf_items;
-    uint32_t interface_handle = 0;
-    mem_copy(data, &interface_handle, 4);
-    data += 4;
-    uint16_t timeout = 0;
-    mem_copy(data, &timeout, 2);
-    data += 2;
-
-    /* Set item count = 2 (Null Address Item + Unconnected Data Item) */
-    uint16_le item_count = h2le16(2);
-    mem_copy(data, &item_count, 2);
-    data += 2;
-
-    /* Null Address Item */
-    uint16_le nai_type = h2le16(AB_EIP_ITEM_NAI);
-    mem_copy(data, &nai_type, 2);
-    data += 2;
-    uint16_le nai_length = h2le16(0);
-    mem_copy(data, &nai_length, 2);
-    data += 2;
-
-    /* Unconnected Data Item */
-    data_item = data;
-    uint16_le udi_type = h2le16(AB_EIP_ITEM_UDI);
-    mem_copy(data, &udi_type, 2);
-    data += 2;
-    uint8_t *length_ptr = data;
-    uint16_le udi_length_placeholder = h2le16(0); /* placeholder, will update later */
-    mem_copy(data, &udi_length_placeholder, 2);
-    data += 2;
-
-    /* If routing is needed, wrap in Unconnected Send */
-    if(need_unconnected_send) {
-        /* Unconnected Send service */
-        uint8_t uc_service = AB_EIP_CMD_UNCONNECTED_SEND;
-        mem_copy(data, &uc_service, 1);
-        data++;
-
-        /* Path to Connection Manager (class 0x06, instance 0x01) */
-        uint8_t cm_path_size = 0x02;
-        mem_copy(data, &cm_path_size, 1);
-        data++;
-        uint8_t cm_class_seg = 0x20;
-        mem_copy(data, &cm_class_seg, 1);
-        data++;
-        uint8_t cm_class_id = 0x06;
-        mem_copy(data, &cm_class_id, 1);
-        data++;
-        uint8_t cm_instance_seg = 0x24;
-        mem_copy(data, &cm_instance_seg, 1);
-        data++;
-        uint8_t cm_instance_id = 0x01;
-        mem_copy(data, &cm_instance_id, 1);
-        data++;
-
-        /* Timeout */
-        uint8_t secs_per_tick = 0x01;
-        mem_copy(data, &secs_per_tick, 1);
-        data++;
-        uint8_t timeout_ticks = 0xFA;
-        mem_copy(data, &timeout_ticks, 1);
-        data++;
-
-        /* Embedded message length placeholder */
-        uint8_t *embed_length_ptr = data;
-        uint16_le embed_length_placeholder = h2le16(0);
-        mem_copy(data, &embed_length_placeholder, 2);
-        data += 2;
-
-        /* Remember start of embedded CIP request */
-        cip_request_start = data;
-
-        /* CIP request: Service (Get_Attributes_All) */
-        uint8_t service = 0x01;
-        mem_copy(data, &service, 1);
-        data++;
-
-        /* Path size in words: class + instance */
-        uint8_t path_size = 0x02;
-        mem_copy(data, &path_size, 1);
-        data++;
-
-        /* Class segment */
-        uint8_t class_seg = 0x20;
-        mem_copy(data, &class_seg, 1);
-        data++;
-        uint8_t class_id = 0x01;
-        mem_copy(data, &class_id, 1);
-        data++;
-
-        /* Instance segment */
-        uint8_t instance_seg = 0x24;
-        mem_copy(data, &instance_seg, 1);
-        data++;
-        uint8_t instance_id = 0x01;
-        mem_copy(data, &instance_id, 1);
-        data++;
-
-        /* Update embedded message length (CIP request only) */
-        uint16_t embed_length = (uint16_t)(data - cip_request_start);
-        uint16_le embed_length_le = h2le16(embed_length);
-        mem_copy(embed_length_ptr, &embed_length_le, 2);
-
-        /* Add routing information for the Unconnected Send (after the CIP request) */
-        uint8_t conn_path_size_words = (uint8_t)((tag->session->conn_path_size) / 2);
-        mem_copy(data, &conn_path_size_words, 1);
-        data++;
-        uint8_t conn_path_reserved = 0;
-        mem_copy(data, &conn_path_reserved, 1);
-        data++;
-        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-        data += tag->session->conn_path_size;
-    } else {
-        /* Direct CIP request without Unconnected Send wrapper */
-        uint8_t service = 0x01;
-        mem_copy(data, &service, 1);
-        data++;
-        uint8_t path_size = 0x02;
-        mem_copy(data, &path_size, 1);
-        data++;
-        uint8_t class_seg = 0x20;
-        mem_copy(data, &class_seg, 1);
-        data++;
-        uint8_t class_id = 0x01;
-        mem_copy(data, &class_id, 1);
-        data++;
-        uint8_t instance_seg = 0x24;
-        mem_copy(data, &instance_seg, 1);
-        data++;
-        uint8_t instance_id = 0x01;
-        mem_copy(data, &instance_id, 1);
-        data++;
-    }
-
-    /* Update the UDI length */
-    uint16_t udi_data_length = (uint16_t)(data - (data_item + 4));
-    uint16_le udi_data_length_le = h2le16(udi_data_length);
-    mem_copy(length_ptr, &udi_data_length_le, 2);
-
-    /* Set the EIP header length */
-    uint16_t cpf_length = (uint16_t)(data - cpf_items);
-    hdr->encap_length = h2le16(cpf_length);
-
-    /* Set the total request size */
-    req->request_size = (int)(sizeof(eip_encap) + cpf_length);
-
-    req->allow_packing = 0;
-
-    /* save the request for later */
-    critical_block(&tag->api_mutex) { tag->req = req; }
-
-    /* add the request to the session's list */
-    rc = session_add_request(tag->session, req);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_ERROR, tag->tag_id, "Unable to add request to session! rc=%d", rc);
         ab_tag_abort_request(tag);
         return rc;
     }
@@ -1121,280 +586,62 @@ int identity_tag_build_read_request_unconnected(ab_tag_p tag) {
 }
 
 
-int identity_tag_check_read_status_connected(ab_tag_p tag) {
+/* The tag's data is the Identity attributes, after the CIP reply header and its status words. */
+int identity_tag_check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
-    uint8_t *data_start = NULL;
-    uint8_t *data_end = NULL;
-    int data_size = 0;
-    uint8_t *tag_data_buffer = NULL;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* if we got here, there is a response and status is OK */
-
-    /* point to the response */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
-
-    /* check the CIP response service code */
-    if(cip_resp->reply_service != (0x01 | AB_EIP_CMD_CIP_OK)) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP response service unexpected: 0x%02x",
-               cip_resp->reply_service);
-        rc = PLCTAG_ERR_BAD_DATA;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* check the status */
-    if(cip_resp->status != AB_CIP_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_resp->status);
-        rc = PLCTAG_ERR_REMOTE_ERR;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* copy the response data into the tag buffer, including the CIP response header */
-    data_start = (uint8_t *)(&cip_resp->reply_service);
-    data_end = tag->req->data + (tag->req->request_size);
-
-    if((intptr_t)data_end < (intptr_t)data_start) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Response is shorter than the CIP response header!");
-        ab_tag_abort_request(tag);
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    data_size = (int)(unsigned int)(data_end - data_start);
-
-    /* allocate/reallocate the tag data buffer */
-    tag_data_buffer = mem_realloc(tag->data, data_size);
-
-    if(tag_data_buffer) {
-        tag->data = tag_data_buffer;
-        tag->size = data_size;
-        mem_copy(tag->data, data_start, data_size);
-
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Copied %d bytes of identity data.", data_size);
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
-        rc = PLCTAG_ERR_NO_MEM;
-    }
-
-    /* clean up the request */
-    ab_tag_abort_request(tag);
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Done.");
-
-    return rc;
-}
-
-
-int identity_tag_check_read_status_unconnected(ab_tag_p tag) {
-    int rc = PLCTAG_STATUS_OK;
-    eip_encap *hdr = NULL;
-    uint8_t *data = NULL;
-    // uint8_t *cpf_items = NULL;
-    // uint8_t *udi_data = NULL;
-    uint16_t cpf_item_count = 0;
-    uint16_t item_type = 0;
-    uint16_t item_length = 0;
-    uint8_t *cip_response = NULL;
-    uint8_t reply_service = 0;
-    uint8_t cip_status = 0;
-    int data_size = 0;
-    uint8_t *tag_data_buffer = NULL;
-
-    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
-
-    /* point to the response */
-    hdr = (eip_encap *)(tag->req->data);
-    data = (uint8_t *)(hdr + 1);
-
+    uint8_t *reply = tag->req->data;
     uint8_t *data_end = tag->req->data + tag->req->request_size;
+    uint8_t *data = NULL;
+    int data_size = 0;
+    uint8_t *tag_data_buffer = NULL;
 
-    /* Parse the response:
-     * EIP header (28 bytes)
-     * CPF header: interface_handle (4) + timeout (2) + item_count (2)
-     * Item 1: Null Address Item (type + length = 4 bytes, no data)
-     * Item 2: UDI (type + length + CIP response data)
-     */
+    pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_SPEW, tag->tag_id, "Starting.");
 
-    if((data_end - data) < IDENTITY_RESPONSE_HEADER_SIZE) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "Identity response is too short for the CPF and item headers!");
-        rc = PLCTAG_ERR_TOO_SMALL;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
+    do {
+        /* a successful Unconnected Send may come back wrapped; step into the embedded reply. */
+        if(reply[0] == (AB_EIP_CMD_UNCONNECTED_SEND | AB_EIP_CMD_CIP_OK) && reply[2] == AB_CIP_STATUS_OK) {
+            reply += sizeof(cip_header);
 
-    // cpf_items = data;
-    data += 4; /* skip interface handle */
-    data += 2; /* skip timeout */
-
-    uint16_le cpf_item_count_le;
-    mem_copy(&cpf_item_count_le, data, 2);
-    cpf_item_count = le2h16(cpf_item_count_le);
-    data += 2;
-
-    if(cpf_item_count != 2) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unexpected CPF item count: %d", cpf_item_count);
-        rc = PLCTAG_ERR_BAD_DATA;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* Skip Null Address Item (type + length only, no data) */
-    uint16_le item_type_le;
-    mem_copy(&item_type_le, data, 2);
-    item_type = le2h16(item_type_le);
-    data += 2;
-    uint16_le item_length_le;
-    mem_copy(&item_length_le, data, 2);
-    item_length = le2h16(item_length_le);
-    data += 2;
-
-    if(item_type != AB_EIP_ITEM_NAI || item_length != 0) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Invalid Null Address Item: type=0x%04x, length=%d",
-               item_type, item_length);
-        rc = PLCTAG_ERR_BAD_DATA;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* Parse UDI (Unconnected Data Item) */
-    uint16_le udi_type_le;
-    mem_copy(&udi_type_le, data, 2);
-    item_type = le2h16(udi_type_le);
-    data += 2;
-    uint16_le udi_length_le;
-    mem_copy(&udi_length_le, data, 2);
-    item_length = le2h16(udi_length_le);
-    data += 2;
-
-    if(item_type != AB_EIP_ITEM_UDI) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Invalid UDI item type: 0x%04x", item_type);
-        rc = PLCTAG_ERR_BAD_DATA;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* UDI data starts here - this is the CIP response */
-    cip_response = data;
-
-    if((intptr_t)cip_response >= (intptr_t)data_end) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP reply service byte!");
-        rc = PLCTAG_ERR_TOO_SMALL;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* Extract CIP response fields */
-    reply_service = *cip_response;
-    cip_response++;
-
-    /* Check if this is an Unconnected Send response (0x52 | 0x80 = 0xD2) */
-    if(reply_service == (AB_EIP_CMD_UNCONNECTED_SEND | AB_EIP_CMD_CIP_OK)) {
-        /* Skip reserved byte */
-        cip_response++;
-
-        if((intptr_t)cip_response >= (intptr_t)data_end) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-                   "Identity response is too short for the Unconnected Send status byte!");
-            rc = PLCTAG_ERR_TOO_SMALL;
-            ab_tag_abort_request(tag);
-            return rc;
+            if((data_end - reply) < (ptrdiff_t)sizeof(cip_header)) {
+                rc = PLCTAG_ERR_TOO_SMALL;
+                break;
+            }
         }
 
-        /* Extract Unconnected Send status */
-        cip_status = *cip_response;
-        cip_response++;
+        if(reply[0] != (0x01 | AB_EIP_CMD_CIP_OK)) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unexpected CIP reply service 0x%02x!",
+                   (unsigned int)reply[0]);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
 
-        if(cip_status != AB_CIP_STATUS_OK) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unconnected Send CIP status is not OK: 0x%02x",
-                   cip_status);
+        if(reply[2] != AB_CIP_STATUS_OK) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x",
+                   (unsigned int)reply[2]);
             rc = PLCTAG_ERR_REMOTE_ERR;
-            ab_tag_abort_request(tag);
-            return rc;
+            break;
         }
 
-        /* Skip extended status size (1 byte) */
-        cip_response++;
+        data = reply + sizeof(cip_header) + ((size_t)reply[3] * 2);
 
-        if((intptr_t)cip_response >= (intptr_t)data_end) {
-            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-                   "Identity response is too short for the embedded CIP reply service byte!");
+        if((intptr_t)data > (intptr_t)data_end) {
             rc = PLCTAG_ERR_TOO_SMALL;
-            ab_tag_abort_request(tag);
-            return rc;
+            break;
         }
 
-        /* Now we should have the actual Get_Attributes_All response embedded */
-        reply_service = *cip_response;
-        cip_response++;
-    }
+        data_size = (int)(data_end - data);
 
-    /* Check for Get_Attributes_All response (0x01 service with success bit 0x80) */
-    if(reply_service != (0x01 | AB_EIP_CMD_CIP_OK)) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id,
-               "CIP response service unexpected: 0x%02x (expected 0x%02x)", reply_service, (0x01 | AB_EIP_CMD_CIP_OK));
-        rc = PLCTAG_ERR_BAD_DATA;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
+        tag_data_buffer = mem_realloc(tag->data, data_size);
+        if(!tag_data_buffer) {
+            pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
 
-    /* Skip reserved byte */
-    cip_response++;
-
-    if((intptr_t)cip_response >= (intptr_t)data_end) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is too short for the CIP status byte!");
-        rc = PLCTAG_ERR_TOO_SMALL;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* Extract CIP status */
-    cip_status = *cip_response;
-    cip_response++;
-
-    if(cip_status != AB_CIP_STATUS_OK) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "CIP status is not OK: 0x%02x", cip_status);
-        rc = PLCTAG_ERR_REMOTE_ERR;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* Skip extended status size (1 byte) */
-    cip_response++;
-
-    if((intptr_t)cip_response > (intptr_t)data_end) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Identity response is truncated!");
-        rc = PLCTAG_ERR_TOO_SMALL;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* Calculate data size: remaining bytes after all CIP headers */
-    data_size = item_length - (int)(cip_response - data);
-
-    if(data_size < 0 || data_size > (int)(data_end - cip_response)) {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Invalid response data size: %d", data_size);
-        rc = PLCTAG_ERR_BAD_DATA;
-        ab_tag_abort_request(tag);
-        return rc;
-    }
-
-    /* allocate/reallocate the tag data buffer */
-    tag_data_buffer = mem_realloc(tag->data, data_size);
-
-    if(tag_data_buffer) {
         tag->data = tag_data_buffer;
         tag->size = data_size;
-        mem_copy(tag->data, cip_response, data_size);
-
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id, "Copied %d bytes of identity data.", data_size);
-    } else {
-        pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to reallocate tag data buffer!");
-        rc = PLCTAG_ERR_NO_MEM;
-    }
+        mem_copy(tag->data, data, data_size);
+    } while(0);
 
     /* clean up the request */
     ab_tag_abort_request(tag);
@@ -1538,8 +785,14 @@ int listing_tag_read_start(ab_tag_p tag) {
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
 
+    /* a new read lists from the first tag: elem_count is the entries in this listing alone. */
+    tag->elem_count = 0;
+    tag->size = 0;
+    tag->offset = 0;
+    tag->next_id = 0;
+
     /* build the new request */
-    rc = listing_tag_build_read_request_connected(tag);
+    rc = listing_tag_build_read_request(tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
@@ -1577,7 +830,7 @@ int listing_tag_tickler(ab_tag_p tag) {
 
     if(tag->read_in_progress) {
 
-        rc = listing_tag_check_read_status_connected(tag);
+        rc = listing_tag_check_read_status(tag);
 
         tag->status = (int8_t)rc;
 
@@ -1599,7 +852,7 @@ int listing_tag_tickler(ab_tag_p tag) {
 
 
 /*
- * listing_tag_check_read_status_connected
+ * listing_tag_check_read_status
  *
  * This routine checks for any outstanding tag list requests.  It will
  * terminate when there is no data in the response and the error is not "more data".
@@ -1608,9 +861,9 @@ int listing_tag_tickler(ab_tag_p tag) {
  * locked!
  */
 
-int listing_tag_check_read_status_connected(ab_tag_p tag) {
+int listing_tag_check_read_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -1620,10 +873,10 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
     /* if we got here then we have a request and it was processed correctly. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(cip_header);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -1771,8 +1024,8 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         } else if(partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "calling listing_tag_build_read_request_connected() to get the next chunk.");
-            rc = listing_tag_build_read_request_connected(tag);
+                   "calling listing_tag_build_read_request() to get the next chunk.");
+            rc = listing_tag_build_read_request(tag);
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -1810,8 +1063,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
 }
 
 
-int listing_tag_build_read_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
+int listing_tag_build_read_request(ab_tag_p tag) {
     // tag_list_req *list_req = NULL;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
@@ -1829,10 +1081,9 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     }
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(req->data);
 
     /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
+    data_start = data = req->data;
 
     /*
      * set up the embedded CIP tag list request packet
@@ -1906,23 +1157,8 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
     /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
+    int packet_payload_size = (int)(data - data_start);
     int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
@@ -1933,7 +1169,8 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     }
 
     /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
+    req->request_size = (int)(data - data_start);
+    req->connected = (tag->use_connected_msg != 0);
 
     req->allow_packing = tag->allow_packing;
 
@@ -2034,7 +1271,7 @@ int udt_tag_read_start(ab_tag_p tag) {
     tag->offset = 0;
 
     /* build the new request */
-    rc = udt_tag_build_read_metadata_request_connected(tag);
+    rc = udt_tag_build_read_metadata_request(tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_WARN, tag->tag_id, "Unable to build read request!");
 
@@ -2071,9 +1308,9 @@ int udt_tag_tickler(ab_tag_p tag) {
 
     if(tag->read_in_progress) {
         if(tag->udt_get_fields) {
-            rc = udt_tag_check_read_fields_status_connected(tag);
+            rc = udt_tag_check_read_fields_status(tag);
         } else {
-            rc = udt_tag_check_read_metadata_status_connected(tag);
+            rc = udt_tag_check_read_metadata_status(tag);
         }
 
         tag->status = (int8_t)rc;
@@ -2096,7 +1333,7 @@ int udt_tag_tickler(ab_tag_p tag) {
 
 
 /*
- * udt_tag_check_read_metadata_status_connected
+ * udt_tag_check_read_metadata_status
  *
  * This routine checks for any outstanding tag udt requests.  It will
  * terminate when there is no data in the response and the error is not "more data".
@@ -2105,9 +1342,9 @@ int udt_tag_tickler(ab_tag_p tag) {
  * locked!
  */
 
-int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
+int udt_tag_check_read_metadata_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -2117,10 +1354,10 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     /* if we got here then we have a response and it is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(cip_header);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -2250,8 +1487,8 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
         } else if(partial_data) {
             /* call read start again to try again.  The data returned might be zero bytes if this is a packed result */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "calling udt_tag_build_read_metadata_request_connected() to try again.");
-            rc = udt_tag_build_read_metadata_request_connected(tag);
+                   "calling udt_tag_build_read_metadata_request() to try again.");
+            rc = udt_tag_build_read_metadata_request(tag);
         } else {
             /* done!  Start the next transfer with a clean progress counter. */
             tag->fragment_retry_count = 0;
@@ -2263,8 +1500,8 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
             tag->udt_get_fields = 1;
 
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "calling udt_tag_build_read_fields_request_connected() to get field data.");
-            rc = udt_tag_build_read_fields_request_connected(tag);
+                   "calling udt_tag_build_read_fields_request() to get field data.");
+            rc = udt_tag_build_read_fields_request(tag);
 
             /* an OK from the builder means that we need to return PENDING because we just queued the new request*/
             if(rc == PLCTAG_STATUS_OK) { rc = PLCTAG_STATUS_PENDING; }
@@ -2289,8 +1526,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
 }
 
 
-int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
+int udt_tag_build_read_metadata_request(ab_tag_p tag) {
     // tag_list_req *list_req = NULL;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
@@ -2308,10 +1544,9 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     }
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(req->data);
 
     /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
+    data_start = data = req->data;
 
     /*
      * set up the embedded CIP UDT metadata request packet
@@ -2379,23 +1614,8 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
     data += (int)sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
     /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
+    int packet_payload_size = (int)(data - data_start);
     int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
@@ -2406,7 +1626,8 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     }
 
     /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
+    req->request_size = (int)(data - data_start);
+    req->connected = (tag->use_connected_msg != 0);
 
     req->allow_packing = tag->allow_packing;
 
@@ -2430,7 +1651,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
 
 
 /*
- * udt_tag_check_read_fields_status_connected
+ * udt_tag_check_read_fields_status
  *
  * This routine checks for any outstanding tag udt field data requests.  It will
  * terminate when there is no data in the response and the error is not "more data".
@@ -2439,9 +1660,9 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
  * locked!
  */
 
-int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
+int udt_tag_check_read_fields_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *cip_resp;
+    cip_header *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int partial_data = 0;
@@ -2451,10 +1672,10 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     /* the request is there and valid */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(tag->req->data);
+    cip_resp = (cip_header *)(tag->req->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(cip_header);
 
     /* point the end of the data */
     data_end = tag->req->data + tag->req->request_size;
@@ -2547,8 +1768,8 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
         } else if(partial_data) {
             /* call read start again to try again.  The data returned might be zero bytes if this is a packed result */
             pdebug(DEBUG_MODULE_AB_EIP_CIP_SPECIAL, DEBUG_DETAIL, tag->tag_id,
-                   "calling udt_tag_build_read_metadata_request_connected() to try again.");
-            rc = udt_tag_build_read_fields_request_connected(tag);
+                   "calling udt_tag_build_read_metadata_request() to try again.");
+            rc = udt_tag_build_read_fields_request(tag);
 
             /* if we get OK, we need to return PENDING for the new request. */
             if(rc == PLCTAG_STATUS_OK) { rc = PLCTAG_STATUS_PENDING; }
@@ -2587,8 +1808,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
 }
 
 
-int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
-    eip_cip_co_req *cip = NULL;
+int udt_tag_build_read_fields_request(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
@@ -2618,10 +1838,9 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     total_size = (total_size + 3) & (uint32_t)neg_4;
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_co_req *)(tag->req->data);
 
     /* point to the end of the struct */
-    data_start = data = (uint8_t *)(cip + 1);
+    data_start = data = tag->req->data;
 
     /*
      * set up the embedded CIP UDT metadata request packet
@@ -2671,23 +1890,8 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     mem_copy(data, &tmp_u16, (int)(unsigned int)sizeof(tmp_u16));
     data += sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
-
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
-
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
-
     /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
+    int packet_payload_size = (int)(data - data_start);
     int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
@@ -2698,7 +1902,8 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     }
 
     /* set the size of the request */
-    tag->req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
+    tag->req->request_size = (int)(data - data_start);
+    tag->req->connected = (tag->use_connected_msg != 0);
 
     tag->req->allow_packing = tag->allow_packing;
 
